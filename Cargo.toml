@@ -6,6 +6,7 @@ members = [
   "payjoin-directory",
   "payjoin-test-utils",
   "payjoin-ffi",
+  "payjoin-service",
 ]
 resolver = "2"
 
@@ -13,6 +14,7 @@ resolver = "2"
 ohttp-relay = { path = "ohttp-relay" }
 payjoin = { path = "payjoin" }
 payjoin-directory = { path = "payjoin-directory" }
+payjoin-service = { path = "payjoin-service" }
 payjoin-test-utils = { path = "payjoin-test-utils" }
 
 [profile.crane]

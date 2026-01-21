@@ -1,9 +1,9 @@
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::result::Result;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum_server::tls_rustls::RustlsConfig;
 use bitcoin::{Amount, Psbt};
 pub use corepc_node; // re-export for convenience
 use corepc_node::AddressType;
@@ -18,7 +18,6 @@ use reqwest::{Client, ClientBuilder};
 use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
 use tempfile::tempdir;
-use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -61,11 +60,9 @@ impl TestServices {
         let mut root_store = RootCertStore::empty();
         root_store.add(CertificateDer::from(cert.cert.der().to_vec())).unwrap();
 
-        let directory = init_directory(cert_key).await?;
+        let directory = init_directory(cert_key, root_store.clone()).await?;
+        let ohttp_relay = init_ohttp_relay(root_store).await?;
 
-        let gateway_origin =
-            ohttp_relay::GatewayUri::from_str(&format!("https://localhost:{}", directory.0))?;
-        let ohttp_relay = ohttp_relay::listen_tcp_on_free_port(gateway_origin, root_store).await?;
         let http_agent: Arc<Client> = Arc::new(http_agent(cert_der)?);
 
         Ok(Self {
@@ -114,33 +111,55 @@ impl TestServices {
 
 pub async fn init_directory(
     local_cert_key: (Vec<u8>, Vec<u8>),
+    root_store: RootCertStore,
 ) -> std::result::Result<
     (u16, tokio::task::JoinHandle<std::result::Result<(), BoxSendSyncError>>),
     BoxSendSyncError,
 > {
-    let timeout = Duration::from_secs(2);
-    let ohttp_server = payjoin_directory::gen_ohttp_server_config()?;
-
-    let metrics = payjoin_directory::metrics::Metrics::new();
     let tempdir = tempdir()?;
-    let db = payjoin_directory::FilesDb::init(timeout, tempdir.path().to_path_buf()).await?;
+    let config = payjoin_service::config::Config {
+        listener: "[::]:0".parse().expect("valid listener address"), // let OS assign a free port
+        storage_dir: tempdir.path().to_path_buf(),
+        timeout: Duration::from_secs(2),
+    };
 
-    let service = payjoin_directory::Service::new(db, ohttp_server.into(), metrics);
+    let tls_config = RustlsConfig::from_der(vec![local_cert_key.0], local_cert_key.1).await?;
 
-    let listener = bind_free_port().await?;
-    let port = listener.local_addr()?.port();
+    let (port, handle) = payjoin_service::serve_manual_tls(config, Some(tls_config), root_store)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let handle = tokio::spawn(async move {
         let _tempdir = tempdir; // keep the tempdir until the directory shuts down
-        service.serve_tls(listener, local_cert_key).await
+        handle.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string().into())
     });
 
     Ok((port, handle))
 }
 
-async fn bind_free_port() -> Result<tokio::net::TcpListener, std::io::Error> {
-    let bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0);
-    TcpListener::bind(bind_addr).await
+async fn init_ohttp_relay(
+    root_store: RootCertStore,
+) -> std::result::Result<
+    (u16, tokio::task::JoinHandle<std::result::Result<(), BoxSendSyncError>>),
+    BoxSendSyncError,
+> {
+    let tempdir = tempdir()?;
+    let config = payjoin_service::config::Config {
+        listener: "[::]:0".parse().expect("valid listener address"), // let OS assign a free port
+        storage_dir: tempdir.path().to_path_buf(),
+        timeout: Duration::from_secs(2),
+    };
+
+    let (port, handle) = payjoin_service::serve_manual_tls(config, None, root_store)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let handle = tokio::spawn(async move {
+        let _tempdir = tempdir; // keep the tempdir until the relay shuts down
+        handle.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string().into())
+    });
+
+    Ok((port, handle))
 }
 
 /// generate or get a DER encoded localhost cert and key.

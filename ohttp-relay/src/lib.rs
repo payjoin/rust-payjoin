@@ -1,6 +1,9 @@
+use std::fmt::Debug;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 pub(crate) use gateway_prober::Prober;
 pub use gateway_uri::GatewayUri;
@@ -13,13 +16,13 @@ use hyper::header::{
     ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_LENGTH, CONTENT_TYPE,
 };
 use hyper::server::conn::http1;
-use hyper::service::service_fn;
 use hyper::{Method, Request, Response};
 use hyper_rustls::builderstates::WantsSchemes;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::service::TowerToHyperService;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, UnixListener};
 use tokio_util::net::Listener;
@@ -31,6 +34,9 @@ mod gateway_prober;
 #[cfg(feature = "_test-util")]
 pub mod gateway_prober;
 mod gateway_uri;
+pub mod sentinel;
+pub use sentinel::SentinelTag;
+
 use crate::error::{BoxError, Error};
 
 #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
@@ -39,6 +45,7 @@ pub mod bootstrap;
 pub const DEFAULT_PORT: u16 = 3000;
 pub const OHTTP_RELAY_HOST: HeaderValue = HeaderValue::from_static("0.0.0.0");
 pub const EXPECTED_MEDIA_TYPE: HeaderValue = HeaderValue::from_static("message/ohttp-req");
+pub const DEFAULT_GATEWAY: &str = "https://payjo.in";
 
 #[instrument]
 pub async fn listen_tcp(
@@ -48,7 +55,8 @@ pub async fn listen_tcp(
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await?;
     println!("OHTTP relay listening on tcp://{}", addr);
-    ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin)).await
+    let sentinel_tag = SentinelTag::new([0u8; 32]);
+    ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin, sentinel_tag)).await
 }
 
 #[instrument]
@@ -58,7 +66,8 @@ pub async fn listen_socket(
 ) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
     let listener = UnixListener::bind(socket_path)?;
     info!("OHTTP relay listening on socket: {}", socket_path);
-    ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin)).await
+    let sentinel_tag = SentinelTag::new([0u8; 32]);
+    ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin, sentinel_tag)).await
 }
 
 #[cfg(feature = "_test-util")]
@@ -69,7 +78,8 @@ pub async fn listen_tcp_on_free_port(
     let listener = tokio::net::TcpListener::bind("[::]:0").await?;
     let port = listener.local_addr()?.port();
     println!("OHTTP relay binding to port {}", listener.local_addr()?);
-    let config = RelayConfig::new(default_gateway, root_store);
+    let sentinel_tag = SentinelTag::new([0u8; 32]);
+    let config = RelayConfig::new(default_gateway, root_store, sentinel_tag);
     let handle = ohttp_relay(listener, config).await?;
     Ok((port, handle))
 }
@@ -79,17 +89,73 @@ struct RelayConfig {
     default_gateway: GatewayUri,
     client: HttpClient,
     prober: Prober,
+    sentinel_tag: SentinelTag,
 }
 
 impl RelayConfig {
-    fn new_with_default_client(default_gateway: GatewayUri) -> Self {
-        Self::new(default_gateway, HttpClient::default())
+    fn new_with_default_client(default_gateway: GatewayUri, sentinel_tag: SentinelTag) -> Self {
+        Self::new(default_gateway, HttpClient::default(), sentinel_tag)
     }
 
-    fn new(default_gateway: GatewayUri, into_client: impl Into<HttpClient>) -> Self {
+    fn new(
+        default_gateway: GatewayUri,
+        into_client: impl Into<HttpClient>,
+        sentinel_tag: SentinelTag,
+    ) -> Self {
         let client = into_client.into();
         let prober = Prober::new_with_client(client.clone());
-        RelayConfig { default_gateway, client, prober }
+        RelayConfig { default_gateway, client, prober, sentinel_tag }
+    }
+}
+
+#[derive(Clone)]
+pub struct Service {
+    config: Arc<RelayConfig>,
+}
+
+impl Service {
+    fn from_config(config: Arc<RelayConfig>) -> Self { Self { config } }
+
+    pub async fn new(sentinel_tag: SentinelTag) -> Self {
+        // The default gateway is hardcoded because it is obsolete and required only for backwards
+        // compatibility.
+        // The new mechanism for specifying a custom gateway is via RFC 9540 using
+        // `/.well-known/ohttp-gateway` request paths.
+        let gateway_origin = GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri");
+        let config = RelayConfig::new_with_default_client(gateway_origin, sentinel_tag);
+        config.prober.assert_opt_in(&config.default_gateway).await;
+        Self { config: Arc::new(config) }
+    }
+
+    #[cfg(feature = "_test-util")]
+    pub async fn new_with_roots(
+        root_store: rustls::RootCertStore,
+        sentinel_tag: SentinelTag,
+    ) -> Self {
+        let gateway_origin = GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri");
+        let config = RelayConfig::new(gateway_origin, root_store, sentinel_tag);
+        config.prober.assert_opt_in(&config.default_gateway).await;
+        Self { config: Arc::new(config) }
+    }
+}
+
+impl<B> tower::Service<Request<B>> for Service
+where
+    B: hyper::body::Body<Data = Bytes> + Send + Debug + 'static,
+    B::Error: Into<BoxError>,
+{
+    type Response = Response<BoxBody<Bytes, hyper::Error>>;
+    type Error = hyper::Error;
+    type Future =
+        Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        let config = self.config.clone();
+        Box::pin(async move { serve_ohttp_relay(req, &config).await })
     }
 }
 
@@ -144,13 +210,12 @@ where
 
     let handle = tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
-            let config = config.clone();
+            let service = Service::from_config(config.clone());
             let io = TokioIo::new(stream);
             tokio::spawn(async move {
-                if let Err(err) = http1::Builder::new()
-                    .serve_connection(io, service_fn(|req| serve_ohttp_relay(req, &config)))
-                    .with_upgrades()
-                    .await
+                let hyper_service = TowerToHyperService::new(service);
+                if let Err(err) =
+                    http1::Builder::new().serve_connection(io, hyper_service).with_upgrades().await
                 {
                     error!("Error serving connection: {:?}", err);
                 }
@@ -163,22 +228,32 @@ where
 }
 
 #[instrument]
-async fn serve_ohttp_relay(
-    req: Request<Incoming>,
+async fn serve_ohttp_relay<B>(
+    req: Request<B>,
     config: &RelayConfig,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
-    let mut res = match (req.method(), req.uri().path()) {
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error>
+where
+    B: hyper::body::Body<Data = Bytes> + Send + Debug + 'static,
+    B::Error: Into<BoxError>,
+{
+    let method = req.method().clone();
+    let path = req.uri().path();
+    let authority = req.uri().authority().cloned();
+
+    let mut res = match (&method, path) {
         (&Method::OPTIONS, _) => Ok(handle_preflight()),
         (&Method::GET, "/health") => Ok(health_check().await),
-        (&Method::POST, _) => match parse_gateway_uri(&req, config).await {
+        (&Method::POST, _) => match parse_gateway_uri(&method, path, authority, config).await {
             Ok(gateway_uri) => handle_ohttp_relay(req, config, gateway_uri).await,
             Err(e) => Err(e),
         },
         #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
-        (&Method::GET, _) | (&Method::CONNECT, _) => match parse_gateway_uri(&req, config).await {
-            Ok(gateway_uri) => crate::bootstrap::handle_ohttp_keys(req, gateway_uri).await,
-            Err(e) => Err(e),
-        },
+        (&Method::GET, _) | (&Method::CONNECT, _) => {
+            match parse_gateway_uri(&method, path, authority, config).await {
+                Ok(gateway_uri) => crate::bootstrap::handle_ohttp_keys(req, gateway_uri).await,
+                Err(e) => Err(e),
+            }
+        }
         _ => Err(Error::NotFound),
     }
     .unwrap_or_else(|e| e.to_response());
@@ -187,14 +262,16 @@ async fn serve_ohttp_relay(
 }
 
 async fn parse_gateway_uri(
-    req: &Request<Incoming>,
+    method: &Method,
+    path: &str,
+    authority: Option<Authority>,
     config: &RelayConfig,
 ) -> Result<GatewayUri, Error> {
     // for POST and GET (websockets), the gateway URI is provided in the path
     // for CONNECT requests, just an authority is provided, and we assume HTTPS
-    let gateway_uri = match req.method() {
-        &Method::CONNECT => req.uri().authority().cloned().map(GatewayUri::from),
-        _ => parse_gateway_uri_from_path(req.uri().path(), &config.default_gateway).ok(),
+    let gateway_uri = match method {
+        &Method::CONNECT => authority.map(GatewayUri::from),
+        _ => parse_gateway_uri_from_path(path, &config.default_gateway).ok(),
     }
     .ok_or_else(|| Error::BadRequest("Invalid gateway".to_string()))?;
 
@@ -247,12 +324,17 @@ fn handle_preflight() -> Response<BoxBody<Bytes, hyper::Error>> {
 async fn health_check() -> Response<BoxBody<Bytes, hyper::Error>> { Response::new(empty()) }
 
 #[instrument]
-async fn handle_ohttp_relay(
-    req: Request<Incoming>,
+async fn handle_ohttp_relay<B>(
+    req: Request<B>,
     config: &RelayConfig,
     gateway: GatewayUri,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error> {
-    let fwd_req = into_forward_req(req, gateway)?;
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error>
+where
+    B: hyper::body::Body<Data = Bytes> + Send + Debug + 'static,
+    B::Error: Into<BoxError>,
+{
+    let fwd_req = into_forward_req(req, gateway, &config.sentinel_tag).await?;
+
     forward_request(fwd_req, config).await.map(|res| {
         let (parts, body) = res.into_parts();
         let boxed_body = BoxBody::new(body);
@@ -262,10 +344,15 @@ async fn handle_ohttp_relay(
 
 /// Convert an incoming request into a request to forward to the target gateway server.
 #[instrument]
-fn into_forward_req(
-    req: Request<Incoming>,
+async fn into_forward_req<B>(
+    req: Request<B>,
     gateway_origin: GatewayUri,
-) -> Result<Request<BoxBody<Bytes, hyper::Error>>, Error> {
+    sentinel_tag: &SentinelTag,
+) -> Result<Request<BoxBody<Bytes, hyper::Error>>, Error>
+where
+    B: hyper::body::Body<Data = Bytes> + Send + Debug + 'static,
+    B::Error: Into<BoxError>,
+{
     let (head, body) = req.into_parts();
 
     if head.method != hyper::Method::POST {
@@ -285,7 +372,12 @@ fn into_forward_req(
         builder = builder.header(CONTENT_LENGTH, content_length);
     }
 
-    builder.body(BoxBody::new(body)).map_err(|e| Error::InternalServerError(Box::new(e)))
+    let bytes =
+        body.collect().await.map_err(|e| Error::BadRequest(e.into().to_string()))?.to_bytes();
+
+    builder = builder.header(sentinel::HEADER_NAME, sentinel_tag.to_header_value());
+
+    builder.body(full(bytes)).map_err(|e| Error::InternalServerError(Box::new(e)))
 }
 
 #[instrument]

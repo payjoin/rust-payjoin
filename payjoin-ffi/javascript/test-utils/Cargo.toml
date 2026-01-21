@@ -18,11 +18,17 @@ path = "../../../payjoin-test-utils"
 [build-dependencies]
 napi-build = "=2.2.4"
 
+[patch.crates-io.ohttp-relay]
+path = "../../../ohttp-relay"
+
 [patch.crates-io.payjoin]
 path = "../../../payjoin"
 
 [patch.crates-io.payjoin-directory]
 path = "../../../payjoin-directory"
+
+[patch.crates-io.payjoin-service]
+path = "../../../payjoin-service"
 
 [patch.crates-io.payjoin-test-utils]
 path = "../../../payjoin-test-utils"

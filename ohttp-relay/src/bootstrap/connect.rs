@@ -1,7 +1,8 @@
+use std::fmt::Debug;
 use std::net::SocketAddr;
 
 use http_body_util::combinators::BoxBody;
-use hyper::body::{Bytes, Incoming};
+use hyper::body::Bytes;
 use hyper::upgrade::Upgraded;
 use hyper::{Method, Request, Response};
 use hyper_util::rt::TokioIo;
@@ -11,15 +12,16 @@ use tracing::{error, instrument};
 use crate::error::Error;
 use crate::{empty, GatewayUri};
 
-pub(crate) fn is_connect_request(req: &Request<Incoming>) -> bool {
-    Method::CONNECT == req.method()
-}
+pub(crate) fn is_connect_request<B>(req: &Request<B>) -> bool { Method::CONNECT == req.method() }
 
 #[instrument]
-pub(crate) async fn try_upgrade(
-    req: Request<Incoming>,
+pub(crate) async fn try_upgrade<B>(
+    req: Request<B>,
     gateway_origin: GatewayUri,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error> {
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error>
+where
+    B: Send + Debug + 'static,
+{
     let addr = gateway_origin
         .to_socket_addr()
         .await

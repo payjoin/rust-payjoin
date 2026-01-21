@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use ohttp_relay::{GatewayUri, DEFAULT_PORT};
+use ohttp_relay::{GatewayUri, DEFAULT_GATEWAY, DEFAULT_PORT};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
@@ -12,11 +12,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .expect("Failed to install default crypto provider");
 
     init_tracing();
+
+    // If GATEWAY_URI is set, it must be payjo.in
+    if let Ok(gateway_uri) = std::env::var("GATEWAY_URI") {
+        if gateway_uri != DEFAULT_GATEWAY {
+            panic!(
+                "GATEWAY_URI is set to '{}' but only '{}' is supported. This environment variable is being deprecated in favor of gateway opt-in via RFC 9540.",
+                gateway_uri, DEFAULT_GATEWAY
+            );
+        }
+    }
+
     let port_env = std::env::var("PORT");
     let unix_socket_env = std::env::var("UNIX_SOCKET");
-    let gateway_origin_str = std::env::var("GATEWAY_ORIGIN").expect("GATEWAY_ORIGIN is required");
-    let gateway_origin =
-        GatewayUri::from_str(&gateway_origin_str).expect("Invalid GATEWAY_ORIGIN URI");
+    let gateway_origin = GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri");
 
     match (port_env, unix_socket_env) {
         (Ok(_), Ok(_)) => panic!(

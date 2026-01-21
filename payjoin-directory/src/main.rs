@@ -1,4 +1,5 @@
 use clap::Parser;
+use ohttp_relay::SentinelTag;
 use payjoin_directory::metrics::Metrics;
 use payjoin_directory::*;
 use tokio::net::TcpListener;
@@ -30,7 +31,7 @@ async fn main() -> Result<(), BoxError> {
         .await
         .expect("Failed to initialize persistent storage");
 
-    let service = Service::new(db, ohttp.into(), metrics);
+    let service = Service::new(db, ohttp.into(), metrics, SentinelTag::new([0u8; 32]));
 
     // Start metrics server in the background
     if let Some(addr) = config.metrics_listen_addr {

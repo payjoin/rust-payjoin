@@ -27,8 +27,9 @@ config = "0.15.14"
 futures = "0.3.31"
 http-body-util = "0.1.3"
 hyper = { version = "1.6.0", features = ["http1", "server"] }
-hyper-util = { version = "0.1.16", features = ["tokio"] }
+hyper-util = { version = "0.1.16", features = ["tokio", "service"] }
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
+ohttp-relay = { path = "../ohttp-relay" }
 payjoin = { version = "1.0.0-rc.1", features = [
   "directory",
 ], default-features = false }
@@ -41,6 +42,7 @@ tokio-rustls = { version = "0.26.2", features = [
 ], default-features = false, optional = true }
 tokio-rustls-acme = { version = "0.7.1", optional = true }
 tokio-stream = { version = "0.1.17", features = ["net"] }
+tower = "0.5"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 

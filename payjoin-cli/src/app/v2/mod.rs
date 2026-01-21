@@ -507,6 +507,7 @@ impl App {
                         return Ok(());
                     }
                     Err(e) => {
+                        // Check if it's a PersistedError with an API error
                         if let Some(persisted_error) = e.downcast_ref::<PersistedError<
                             EncapsulationError,
                             db_error::Error,
@@ -521,6 +522,12 @@ impl App {
                                 ));
                             }
                         }
+                        // Also handle HTTP/network errors (e.g., invalid directory URL)
+                        // These indicate the payjoin cannot proceed, so broadcast fallback
+                        println!("Error posting original proposal: {e}");
+                        let txid = self.wallet().broadcast_tx(fallback_tx)?;
+                        println!("Fallback transaction broadcasted. TXID: {txid}");
+                        return Err(anyhow!("Fallback transaction broadcasted due to: {e}"));
                     }
                 }
             }
@@ -531,6 +538,7 @@ impl App {
                         return Ok(());
                     }
                     Err(e) => {
+                        // Check if it's a PersistedError with an API error
                         if let Some(persisted_error) = e.downcast_ref::<PersistedError<
                             EncapsulationError,
                             db_error::Error,
@@ -545,6 +553,11 @@ impl App {
                                 ));
                             }
                         }
+                        // Also handle HTTP/network errors
+                        println!("Error getting proposed payjoin psbt: {e}");
+                        let txid = self.wallet().broadcast_tx(fallback_tx)?;
+                        println!("Fallback transaction broadcasted. TXID: {txid}");
+                        return Err(anyhow!("Fallback transaction broadcasted due to: {e}"));
                     }
                 }
             }
@@ -554,7 +567,6 @@ impl App {
             }
             _ => return Err(anyhow!("Unexpected sender state")),
         }
-        Ok(())
     }
 
     async fn post_original_proposal(

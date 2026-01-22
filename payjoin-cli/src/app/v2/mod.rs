@@ -503,9 +503,7 @@ impl App {
             SendSession::WithReplyKey(context) => {
                 let response = self.post_original_proposal(context, persister).await;
                 match response {
-                    Ok(_) => {
-                        Ok(())
-                    }
+                    Ok(_) => Ok(()),
                     Err(e) => {
                         // Check if it's a PersistedError with an API error
                         if let Some(persisted_error) = e.downcast_ref::<PersistedError<
@@ -527,18 +525,14 @@ impl App {
                         println!("Error posting original proposal: {e}");
                         let txid = self.wallet().broadcast_tx(fallback_tx)?;
                         println!("Fallback transaction broadcasted. TXID: {txid}");
-                        Err(anyhow!(
-                            "Fallback transaction broadcasted due to: {e}"
-                        ))
+                        Err(anyhow!("Fallback transaction broadcasted due to: {e}"))
                     }
                 }
             }
             SendSession::PollingForProposal(context) => {
                 let response = self.get_proposed_payjoin_psbt(context, persister).await;
                 match response {
-                    Ok(_) => {
-                        Ok(())
-                    }
+                    Ok(_) => Ok(()),
                     Err(e) => {
                         // Check if it's a PersistedError with an API error
                         if let Some(persisted_error) = e.downcast_ref::<PersistedError<
@@ -559,9 +553,7 @@ impl App {
                         println!("Error getting proposed payjoin psbt: {e}");
                         let txid = self.wallet().broadcast_tx(fallback_tx)?;
                         println!("Fallback transaction broadcasted. TXID: {txid}");
-                         Err(anyhow!(
-                            "Fallback transaction broadcasted due to: {e}"
-                        ))
+                        Err(anyhow!("Fallback transaction broadcasted due to: {e}"))
                     }
                 }
             }
@@ -569,7 +561,7 @@ impl App {
                 self.process_pj_response(proposal)?;
                 Ok(())
             }
-            _ => Err(anyhow!("Unexpected sender state"))
+            _ => Err(anyhow!("Unexpected sender state")),
         }
     }
 

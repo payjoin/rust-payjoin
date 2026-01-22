@@ -3,6 +3,7 @@ target
 !example.config.toml
 *.sqlite
 Cargo.lock
+
 .vscode
 mutants.out*
 *.ikm

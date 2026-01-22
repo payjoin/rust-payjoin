@@ -13,6 +13,9 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    nix2container = {
+      url = "github:nlewo/nix2container";
+    };
   };
 
   outputs =
@@ -23,6 +26,7 @@
       rust-overlay,
       crane,
       treefmt-nix,
+      nix2container,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -158,7 +162,38 @@
               "payjoin-cli" = "--features v1,v2";
               "payjoin-directory" = "";
               "ohttp-relay" = "";
+              "payjoin-service" = "";
             };
+
+        # nix2container for building OCI/Docker images
+        nix2containerPkgs = nix2container.packages.${system};
+
+        # Helper to create a container image for a package
+        mkContainerImage =
+          name: pkg: tag:
+          let
+            releasePkg = pkg.overrideAttrs (final: prev: { CARGO_PROFILE = "release"; });
+          in
+          nix2containerPkgs.nix2container.buildImage {
+            inherit name tag;
+            copyToRoot = pkgs.buildEnv {
+              name = "root";
+              paths = [ releasePkg ];
+              pathsToLink = [ "/bin" ];
+            };
+            config = {
+              entrypoint = [ (pkgs.lib.getExe' releasePkg name) ];
+            };
+            maxLayers = 50;
+          };
+
+        containerImages =
+          let
+            tag = self.shortRev or "dirty";
+          in
+          {
+            "payjoin-service-image" = mkContainerImage "payjoin-service" packages.payjoin-service tag;
+          };
 
         devShells = builtins.mapAttrs (
           _name: craneLib:
@@ -199,9 +234,12 @@
           };
       in
       {
-        packages = packages // {
-          nginx-with-stream = nginxWithStream;
-        };
+        packages =
+          packages
+          // containerImages
+          // {
+            nginx-with-stream = nginxWithStream;
+          };
         devShells = devShells // {
           default = devShells.nightly;
         };

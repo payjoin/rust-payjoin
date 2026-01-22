@@ -39,14 +39,21 @@ if [[ $ENGINE == "hfuzz" ]]; then
 elif [[ $ENGINE == "afl" ]]; then
     export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
     export AFL_SKIP_CPUFREQ=1
+    export AFL_AUTORESUME=1
     while :; do
         for targetFile in $(listTargetFiles); do
             targetName=$(targetFileToName "$targetFile")
             echo "Fuzzing target $targetName ($targetFile)"
+            cargo afl config --build --force
+            cargo afl build --bin "$targetName" --features afl_fuzz
             # fuzz for one hour
             afl-fuzz -i corpus/"$targetName"/ -o afl_target -V 30 target/debug/"$targetName" --features afl_fuzz
             # minimize the corpus
-            afl-cmin -i corpus/"$targetName"/ -o corpus/minimized/ -- target/debug/"$targetName" --features afl_fuzz
+            afl-cmin -i afl_target/default/queue/ -o corpus/minimized/"$targetName"/ -- target/debug/"$targetName" --features afl_fuzz
+            # overwrite the old corpus
+            rm -rf corpus/"$targetName"/*
+            mv corpus/minimized/"$targetName"/id:* corpus/"$targetName"/
+            rm -rf corpus/minimized/"$targetName"/* corpus/minimized/"$targetName"/.[!.]* corpus/minimized/"$targetName"/..?*
         done
     done
 else

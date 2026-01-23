@@ -33,7 +33,6 @@ ohttp-relay = { path = "../ohttp-relay" }
 payjoin = { version = "1.0.0-rc.1", features = [
   "directory",
 ], default-features = false }
-prometheus = "0.13.4"
 rand = "0.8"
 serde = { version = "1.0.219", features = ["derive"] }
 tokio = { version = "1.47.1", features = ["full"] }

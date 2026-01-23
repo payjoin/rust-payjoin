@@ -1,16 +1,25 @@
+use std::net::SocketAddr;
+
 use axum::extract::State;
+use axum::http::header::CONTENT_TYPE;
 use axum::http::Method;
 use axum::response::{IntoResponse, Response};
+use axum::routing::get;
 use axum::Router;
 use config::Config;
 use ohttp_relay::SentinelTag;
 use rand::Rng;
 use tokio_listener::{Listener, SystemOptions, UserOptions};
-use tower::Service;
+use tower::{Service, ServiceBuilder};
 use tracing::info;
 
 pub mod cli;
 pub mod config;
+pub mod metrics;
+pub mod middleware;
+
+use crate::metrics::MetricsService;
+use crate::middleware::{track_connections, track_metrics};
 
 #[derive(Clone)]
 struct Services {
@@ -20,12 +29,15 @@ struct Services {
 
 pub async fn serve(config: Config) -> anyhow::Result<()> {
     let sentinel_tag = generate_sentinel_tag();
+    let metrics = MetricsService::new()?;
 
     let services = Services {
         directory: init_directory(&config, sentinel_tag).await?,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
     };
-    let app = Router::new().fallback(route_request).with_state(services);
+
+    let app = build_app(services, metrics.clone());
+    let _ = spawn_metrics_server(config.metrics.listener.clone(), metrics).await?;
 
     let listener =
         Listener::bind(&config.listener, &SystemOptions::default(), &UserOptions::default())
@@ -39,7 +51,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
 /// Serves payjoin-service with manual TLS configuration.
 ///
 /// Binds to `config.listener` (use port 0 to let the OS assign a free port) and returns
-/// the actual bound port along with a task handle.
+/// the actual bound port, the metrics port, and a task handle.
 ///
 /// If `tls_config` is provided, the server will use TLS for incoming connections.
 /// The `root_store` is used for outgoing relay connections to the gateway.
@@ -48,16 +60,18 @@ pub async fn serve_manual_tls(
     config: Config,
     tls_config: Option<axum_server::tls_rustls::RustlsConfig>,
     root_store: rustls::RootCertStore,
-) -> anyhow::Result<(u16, tokio::task::JoinHandle<anyhow::Result<()>>)> {
+) -> anyhow::Result<(u16, u16, tokio::task::JoinHandle<anyhow::Result<()>>)> {
     use std::net::SocketAddr;
 
     let sentinel_tag = generate_sentinel_tag();
+    let metrics = MetricsService::new()?;
 
     let services = Services {
         directory: init_directory(&config, sentinel_tag).await?,
         relay: ohttp_relay::Service::new_with_roots(root_store, sentinel_tag).await,
     };
-    let app = Router::new().fallback(route_request).with_state(services);
+    let app = build_app(services, metrics.clone());
+    let metrics_port = spawn_metrics_server(config.metrics.listener.clone(), metrics).await?;
 
     let addr: SocketAddr = config
         .listener
@@ -83,7 +97,7 @@ pub async fn serve_manual_tls(
         }
     };
 
-    Ok((port, handle))
+    Ok((port, metrics_port, handle))
 }
 
 /// Generate random sentinel tag at startup.
@@ -100,9 +114,8 @@ async fn init_directory(
 
     let ohttp_keys_dir = config.storage_dir.join("ohttp-keys");
     let ohttp_config = init_ohttp_config(&ohttp_keys_dir)?;
-    let metrics = payjoin_directory::metrics::Metrics::new();
 
-    Ok(payjoin_directory::Service::new(db, ohttp_config.into(), metrics, sentinel_tag))
+    Ok(payjoin_directory::Service::new(db, ohttp_config.into(), sentinel_tag))
 }
 
 fn init_ohttp_config(
@@ -117,6 +130,56 @@ fn init_ohttp_config(
             Ok(config)
         }
     }
+}
+
+fn build_app(services: Services, metrics: MetricsService) -> Router {
+    Router::new()
+        .fallback(route_request)
+        .layer(
+            ServiceBuilder::new()
+                .layer(axum::middleware::from_fn_with_state(metrics.clone(), track_metrics))
+                .layer(axum::middleware::from_fn_with_state(metrics, track_connections)),
+        )
+        .with_state(services)
+}
+
+fn build_metrics_app(metrics: MetricsService) -> Router {
+    Router::new().route("/metrics", get(metrics_handler)).with_state(metrics)
+}
+
+async fn metrics_handler(State(metrics): State<MetricsService>) -> impl IntoResponse {
+    match metrics.encode_metrics() {
+        Ok(body) => (
+            axum::http::StatusCode::OK,
+            [(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+            body,
+        )
+            .into_response(),
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to encode metrics: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+async fn spawn_metrics_server(
+    metrics_listener: tokio_listener::ListenerAddress,
+    metrics: MetricsService,
+) -> anyhow::Result<u16> {
+    let addr: SocketAddr = metrics_listener.to_string().parse().map_err(|_| {
+        anyhow::anyhow!("Metrics listener must be a TCP address (e.g., '[::]:9090')")
+    })?;
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let actual_port = listener.local_addr()?.port();
+    info!("Metrics server listening on [::]:{actual_port}");
+    tokio::spawn(async move {
+        let app = build_metrics_app(metrics);
+        if let Err(e) = axum::serve(listener, app).await {
+            tracing::error!("Metrics server error: {e}");
+        }
+    });
+    Ok(actual_port)
 }
 
 async fn route_request(
@@ -175,20 +238,24 @@ mod tests {
     async fn start_service(
         cert_der: Vec<u8>,
         key_der: Vec<u8>,
-    ) -> (u16, tokio::task::JoinHandle<anyhow::Result<()>>, tempfile::TempDir) {
+    ) -> (u16, u16, tokio::task::JoinHandle<anyhow::Result<()>>, tempfile::TempDir) {
         let tempdir = tempdir().unwrap();
         let config = Config {
             listener: "[::]:0".parse().expect("valid listener address"),
             storage_dir: tempdir.path().to_path_buf(),
             timeout: Duration::from_secs(2),
+            metrics: config::MetricsConfig {
+                listener: "[::]:0".parse().expect("valid metrics listener address"),
+            },
         };
 
         let mut root_store = RootCertStore::empty();
         root_store.add(CertificateDer::from(cert_der.clone())).unwrap();
         let tls_config = RustlsConfig::from_der(vec![cert_der], key_der).await.unwrap();
 
-        let (port, handle) = serve_manual_tls(config, Some(tls_config), root_store).await.unwrap();
-        (port, handle, tempdir)
+        let (port, metrics_port, handle) =
+            serve_manual_tls(config, Some(tls_config), root_store).await.unwrap();
+        (port, metrics_port, handle, tempdir)
     }
 
     #[tokio::test]
@@ -197,7 +264,8 @@ mod tests {
         let cert_der = cert.cert.der().to_vec();
         let key_der = cert.signing_key.serialize_der();
 
-        let (port, _handle, _tempdir) = start_service(cert_der.clone(), key_der).await;
+        let (port, _metrics_port, _handle, _tempdir) =
+            start_service(cert_der.clone(), key_der).await;
 
         let client = Arc::new(http_agent(cert_der.clone()).unwrap());
         let base_url = format!("https://localhost:{}", port);
@@ -228,9 +296,9 @@ mod tests {
         let cert_der = cert.cert.der().to_vec();
         let key_der = cert.signing_key.serialize_der();
 
-        let (relay_port, _relay_handle, _relay_tempdir) =
+        let (relay_port, _relay_metrics, _relay_handle, _relay_tempdir) =
             start_service(cert_der.clone(), key_der.clone()).await;
-        let (directory_port, _directory_handle, _directory_tempdir) =
+        let (directory_port, _directory_metrics, _directory_handle, _directory_tempdir) =
             start_service(cert_der.clone(), key_der).await;
 
         let client = Arc::new(http_agent(cert_der).unwrap());
@@ -258,5 +326,29 @@ mod tests {
             axum::http::StatusCode::FORBIDDEN,
             "cross-instance request should not be rejected as forbidden"
         );
+    }
+
+    #[tokio::test]
+    async fn metrics_endpoint_works() {
+        let cert = local_cert_key();
+        let cert_der = cert.cert.der().to_vec();
+        let key_der = cert.signing_key.serialize_der();
+
+        let (port, metrics_port, _handle, _tempdir) =
+            start_service(cert_der.clone(), key_der).await;
+
+        let client = Arc::new(http_agent(cert_der).unwrap());
+        let base_url = format!("https://localhost:{}", port);
+        wait_for_service_ready(&base_url, client.clone()).await.unwrap();
+
+        let metrics_url = format!("http://localhost:{}/metrics", metrics_port);
+        let http_client = reqwest::Client::new();
+        let response =
+            http_client.get(&metrics_url).send().await.expect("metrics request should work");
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = response.text().await.unwrap();
+        assert!(body.contains("http_request_total"));
+        assert!(body.contains("active_connections"));
     }
 }

@@ -321,7 +321,10 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
                 .set_override_option("v1.pj_endpoint", pj_endpoint.as_ref().map(|s| s.as_str()))?;
             #[cfg(feature = "v2")]
             let config = config
-                .set_override_option("v2.pj_directories", pj_directory.as_ref().map(|s| vec![s.as_str()]))?
+                .set_override_option(
+                    "v2.pj_directories",
+                    pj_directory.as_ref().map(|s| vec![s.as_str()]),
+                )?
                 .set_override_option(
                     "v2.ohttp_keys",
                     ohttp_keys.as_ref().map(|s| s.to_string_lossy().into_owned()),

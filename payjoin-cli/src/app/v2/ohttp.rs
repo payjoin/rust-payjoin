@@ -54,17 +54,14 @@ async fn fetch_ohttp_keys(
     relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<ValidatedOhttpKeys> {
     use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
-    let payjoin_directories = if let Some(dir) = directory {
-        vec![dir]
-    } else {
-        config.v2()?.pj_directories.clone()
-    };
+    let payjoin_directories =
+        if let Some(dir) = directory { vec![dir] } else { config.v2()?.pj_directories.clone() };
     let relays = config.v2()?.ohttp_relays.clone();
 
     // Try each directory in order until one succeeds
     for payjoin_directory in &payjoin_directories {
         tracing::debug!("Trying directory: {}", payjoin_directory);
-        
+
         loop {
             let failed_relays =
                 relay_manager.lock().expect("Lock should not be poisoned").get_failed_relays();
@@ -108,20 +105,34 @@ async fn fetch_ohttp_keys(
                     }
                 }
                 #[cfg(not(feature = "_manual-tls"))]
-                payjoin::io::fetch_ohttp_keys(selected_relay.as_str(), payjoin_directory.as_str()).await
+                payjoin::io::fetch_ohttp_keys(selected_relay.as_str(), payjoin_directory.as_str())
+                    .await
             };
 
             match ohttp_keys {
                 Ok(keys) => {
-                    tracing::debug!("Successfully fetched keys from directory: {} via relay: {}", payjoin_directory, selected_relay);
+                    tracing::debug!(
+                        "Successfully fetched keys from directory: {} via relay: {}",
+                        payjoin_directory,
+                        selected_relay
+                    );
                     return Ok(ValidatedOhttpKeys { ohttp_keys: keys, relay_url: selected_relay });
                 }
                 Err(payjoin::io::Error::UnexpectedStatusCode(e)) => {
-                    tracing::debug!("Unexpected status code from directory: {}, error: {}", payjoin_directory, e);
+                    tracing::debug!(
+                        "Unexpected status code from directory: {}, error: {}",
+                        payjoin_directory,
+                        e
+                    );
                     break; // Try next directory
                 }
                 Err(e) => {
-                    tracing::debug!("Failed to connect to relay: {} for directory: {}, error: {:?}", selected_relay, payjoin_directory, e);
+                    tracing::debug!(
+                        "Failed to connect to relay: {} for directory: {}, error: {:?}",
+                        selected_relay,
+                        payjoin_directory,
+                        e
+                    );
                     relay_manager
                         .lock()
                         .expect("Lock should not be poisoned")
@@ -130,7 +141,7 @@ async fn fetch_ohttp_keys(
                 }
             }
         }
-        
+
         // Reset failed relays for next directory attempt
         relay_manager.lock().expect("Lock should not be poisoned").clear_failed_relays();
     }

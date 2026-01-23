@@ -20,6 +20,8 @@ impl RelayManager {
     pub fn add_failed_relay(&mut self, relay: url::Url) { self.failed_relays.push(relay); }
 
     pub fn get_failed_relays(&self) -> Vec<url::Url> { self.failed_relays.clone() }
+
+    pub fn clear_failed_relays(&mut self) { self.failed_relays.clear(); }
 }
 
 pub(crate) struct ValidatedOhttpKeys {
@@ -52,67 +54,86 @@ async fn fetch_ohttp_keys(
     relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<ValidatedOhttpKeys> {
     use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
-    let payjoin_directory = directory.unwrap_or(config.v2()?.pj_directory.clone());
+    let payjoin_directories = if let Some(dir) = directory {
+        vec![dir]
+    } else {
+        config.v2()?.pj_directories.clone()
+    };
     let relays = config.v2()?.ohttp_relays.clone();
 
-    loop {
-        let failed_relays =
-            relay_manager.lock().expect("Lock should not be poisoned").get_failed_relays();
+    // Try each directory in order until one succeeds
+    for payjoin_directory in &payjoin_directories {
+        tracing::debug!("Trying directory: {}", payjoin_directory);
+        
+        loop {
+            let failed_relays =
+                relay_manager.lock().expect("Lock should not be poisoned").get_failed_relays();
 
-        let remaining_relays: Vec<_> =
-            relays.iter().filter(|r| !failed_relays.contains(r)).cloned().collect();
+            let remaining_relays: Vec<_> =
+                relays.iter().filter(|r| !failed_relays.contains(r)).cloned().collect();
 
-        if remaining_relays.is_empty() {
-            return Err(anyhow!("No valid relays available"));
-        }
+            if remaining_relays.is_empty() {
+                tracing::debug!("No remaining relays for directory: {}", payjoin_directory);
+                break; // Try next directory
+            }
 
-        let selected_relay =
-            match remaining_relays.choose(&mut payjoin::bitcoin::key::rand::thread_rng()) {
-                Some(relay) => relay.clone(),
-                None => return Err(anyhow!("Failed to select from remaining relays")),
+            let selected_relay =
+                match remaining_relays.choose(&mut payjoin::bitcoin::key::rand::thread_rng()) {
+                    Some(relay) => relay.clone(),
+                    None => break, // Try next directory
+                };
+
+            relay_manager
+                .lock()
+                .expect("Lock should not be poisoned")
+                .set_selected_relay(selected_relay.clone());
+
+            let ohttp_keys = {
+                #[cfg(feature = "_manual-tls")]
+                {
+                    if let Some(cert_path) = config.root_certificate.as_ref() {
+                        let cert_der = std::fs::read(cert_path)?;
+                        payjoin::io::fetch_ohttp_keys_with_cert(
+                            selected_relay.as_str(),
+                            payjoin_directory.as_str(),
+                            cert_der,
+                        )
+                        .await
+                    } else {
+                        payjoin::io::fetch_ohttp_keys(
+                            selected_relay.as_str(),
+                            payjoin_directory.as_str(),
+                        )
+                        .await
+                    }
+                }
+                #[cfg(not(feature = "_manual-tls"))]
+                payjoin::io::fetch_ohttp_keys(selected_relay.as_str(), payjoin_directory.as_str()).await
             };
 
-        relay_manager
-            .lock()
-            .expect("Lock should not be poisoned")
-            .set_selected_relay(selected_relay.clone());
-
-        let ohttp_keys = {
-            #[cfg(feature = "_manual-tls")]
-            {
-                if let Some(cert_path) = config.root_certificate.as_ref() {
-                    let cert_der = std::fs::read(cert_path)?;
-                    payjoin::io::fetch_ohttp_keys_with_cert(
-                        selected_relay.as_str(),
-                        payjoin_directory.as_str(),
-                        cert_der,
-                    )
-                    .await
-                } else {
-                    payjoin::io::fetch_ohttp_keys(
-                        selected_relay.as_str(),
-                        payjoin_directory.as_str(),
-                    )
-                    .await
+            match ohttp_keys {
+                Ok(keys) => {
+                    tracing::debug!("Successfully fetched keys from directory: {} via relay: {}", payjoin_directory, selected_relay);
+                    return Ok(ValidatedOhttpKeys { ohttp_keys: keys, relay_url: selected_relay });
+                }
+                Err(payjoin::io::Error::UnexpectedStatusCode(e)) => {
+                    tracing::debug!("Unexpected status code from directory: {}, error: {}", payjoin_directory, e);
+                    break; // Try next directory
+                }
+                Err(e) => {
+                    tracing::debug!("Failed to connect to relay: {} for directory: {}, error: {:?}", selected_relay, payjoin_directory, e);
+                    relay_manager
+                        .lock()
+                        .expect("Lock should not be poisoned")
+                        .add_failed_relay(selected_relay);
+                    // Continue to next relay for this directory
                 }
             }
-            #[cfg(not(feature = "_manual-tls"))]
-            payjoin::io::fetch_ohttp_keys(selected_relay.as_str(), payjoin_directory.as_str()).await
-        };
-
-        match ohttp_keys {
-            Ok(keys) =>
-                return Ok(ValidatedOhttpKeys { ohttp_keys: keys, relay_url: selected_relay }),
-            Err(payjoin::io::Error::UnexpectedStatusCode(e)) => {
-                return Err(payjoin::io::Error::UnexpectedStatusCode(e).into());
-            }
-            Err(e) => {
-                tracing::debug!("Failed to connect to relay: {selected_relay}, {e:?}");
-                relay_manager
-                    .lock()
-                    .expect("Lock should not be poisoned")
-                    .add_failed_relay(selected_relay);
-            }
         }
+        
+        // Reset failed relays for next directory attempt
+        relay_manager.lock().expect("Lock should not be poisoned").clear_failed_relays();
     }
+
+    Err(anyhow!("Failed to fetch OHTTP keys from all directories"))
 }

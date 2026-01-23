@@ -260,7 +260,7 @@ impl AppTrait for App {
                 .ohttp_keys;
         let persister = ReceiverPersister::new(self.db.clone())?;
         let session =
-            ReceiverBuilder::new(address, self.config.v2()?.pj_directory.as_str(), ohttp_keys)?
+            ReceiverBuilder::new(address, self.config.v2()?.pj_directories[0].as_str(), ohttp_keys)?
                 .with_amount(amount)
                 .with_max_fee_rate(self.config.max_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN))
                 .build()

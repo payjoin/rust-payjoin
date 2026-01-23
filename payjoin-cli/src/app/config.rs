@@ -36,7 +36,8 @@ pub struct V2Config {
     #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
     pub ohttp_relays: Vec<Url>,
-    pub pj_directory: Url,
+    #[serde(alias = "pj_directory")]
+    pub pj_directories: Vec<Url>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -270,11 +271,11 @@ fn add_v1_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
 fn add_v2_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     // Set default values
     let config = config
-        .set_default("v2.pj_directory", "https://payjo.in")?
+        .set_default("v2.pj_directories", vec!["https://payjo.in"])?
         .set_default("v2.ohttp_keys", None::<String>)?;
 
     // Override config values with command line arguments if applicable
-    let pj_directory = cli.pj_directory.as_ref().map(|s| s.as_str());
+    let pj_directories = cli.pj_directory.as_ref().map(|s| vec![s.as_str()]);
     let ohttp_keys = cli.ohttp_keys.as_ref().map(|p| p.to_string_lossy().into_owned());
     let ohttp_relays = cli
         .ohttp_relays
@@ -282,7 +283,7 @@ fn add_v2_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
         .map(|urls| urls.iter().map(|url| url.as_str()).collect::<Vec<_>>());
 
     config
-        .set_override_option("v2.pj_directory", pj_directory)?
+        .set_override_option("v2.pj_directories", pj_directories)?
         .set_override_option("v2.ohttp_keys", ohttp_keys)?
         .set_override_option("v2.ohttp_relays", ohttp_relays)
 }
@@ -320,7 +321,7 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
                 .set_override_option("v1.pj_endpoint", pj_endpoint.as_ref().map(|s| s.as_str()))?;
             #[cfg(feature = "v2")]
             let config = config
-                .set_override_option("v2.pj_directory", pj_directory.as_ref().map(|s| s.as_str()))?
+                .set_override_option("v2.pj_directories", pj_directory.as_ref().map(|s| vec![s.as_str()]))?
                 .set_override_option(
                     "v2.ohttp_keys",
                     ohttp_keys.as_ref().map(|s| s.to_string_lossy().into_owned()),

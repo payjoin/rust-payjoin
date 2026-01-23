@@ -16,3 +16,4 @@ bash ./scripts/generate_bindings.sh
 # Run all tests
 dart test
 ```
+

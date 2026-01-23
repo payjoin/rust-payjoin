@@ -121,6 +121,7 @@ pub async fn init_directory(
         listener: "[::]:0".parse().expect("valid listener address"), // let OS assign a free port
         storage_dir: tempdir.path().to_path_buf(),
         timeout: Duration::from_secs(2),
+        metrics_port: 0,
     };
 
     let tls_config = RustlsConfig::from_der(vec![local_cert_key.0], local_cert_key.1).await?;
@@ -148,6 +149,7 @@ async fn init_ohttp_relay(
         listener: "[::]:0".parse().expect("valid listener address"), // let OS assign a free port
         storage_dir: tempdir.path().to_path_buf(),
         timeout: Duration::from_secs(2),
+        metrics_port: 0,
     };
 
     let (port, handle) = payjoin_service::serve_manual_tls(config, None, root_store)

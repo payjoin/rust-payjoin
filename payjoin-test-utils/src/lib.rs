@@ -121,13 +121,15 @@ pub async fn init_directory(
         listener: "[::]:0".parse().expect("valid listener address"), // let OS assign a free port
         storage_dir: tempdir.path().to_path_buf(),
         timeout: Duration::from_secs(2),
+        metrics_port: 0,
     };
 
     let tls_config = RustlsConfig::from_der(vec![local_cert_key.0], local_cert_key.1).await?;
 
-    let (port, handle) = payjoin_service::serve_manual_tls(config, Some(tls_config), root_store)
-        .await
-        .map_err(|e| e.to_string())?;
+    let (port, _metrics_port, handle) =
+        payjoin_service::serve_manual_tls(config, Some(tls_config), root_store)
+            .await
+            .map_err(|e| e.to_string())?;
 
     let handle = tokio::spawn(async move {
         let _tempdir = tempdir; // keep the tempdir until the directory shuts down
@@ -148,9 +150,10 @@ async fn init_ohttp_relay(
         listener: "[::]:0".parse().expect("valid listener address"), // let OS assign a free port
         storage_dir: tempdir.path().to_path_buf(),
         timeout: Duration::from_secs(2),
+        metrics_port: 0,
     };
 
-    let (port, handle) = payjoin_service::serve_manual_tls(config, None, root_store)
+    let (port, _metrics_port, handle) = payjoin_service::serve_manual_tls(config, None, root_store)
         .await
         .map_err(|e| e.to_string())?;
 

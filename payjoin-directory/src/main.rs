@@ -1,6 +1,5 @@
 use clap::Parser;
 use ohttp_relay::SentinelTag;
-use payjoin_directory::metrics::Metrics;
 use payjoin_directory::*;
 use tokio::net::TcpListener;
 use tracing_subscriber::filter::LevelFilter;
@@ -26,25 +25,11 @@ async fn main() -> Result<(), BoxError> {
         }
     };
 
-    let metrics = Metrics::new();
     let db = payjoin_directory::FilesDb::init(config.timeout, config.storage_dir)
         .await
         .expect("Failed to initialize persistent storage");
 
-    let service = Service::new(db, ohttp.into(), metrics, SentinelTag::new([0u8; 32]));
-
-    // Start metrics server in the background
-    if let Some(addr) = config.metrics_listen_addr {
-        let metrics_listener = TcpListener::bind(addr.clone()).await?;
-        let service_clone = service.clone();
-
-        tokio::spawn(async move {
-            if let Err(e) = service_clone.serve_metrics_tcp(metrics_listener).await {
-                eprintln!("Metrics server error: {e}");
-            }
-            println!("Metrics server started on {}", addr);
-        });
-    }
+    let service = Service::new(db, ohttp.into(), SentinelTag::new([0u8; 32]));
 
     let listener = TcpListener::bind(config.listen_addr).await?;
 

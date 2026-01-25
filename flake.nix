@@ -210,6 +210,8 @@
               ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
                 cargo-llvm-cov
               ];
+            BITCOIND_EXE = pkgs.lib.getExe' pkgs.bitcoind "bitcoind";
+            BITCOIND_SKIP_DOWNLOAD = 1;
           }
         ) craneLibVersions;
 

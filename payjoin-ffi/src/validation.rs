@@ -92,14 +92,10 @@ pub(crate) fn validate_weight_units(weight_units: u64) -> Result<Weight, Primiti
 }
 
 pub(crate) fn validate_fee_rate_sat_per_vb(value: u64) -> Result<FeeRate, PrimitiveError> {
-    let fee_rate = FeeRate::from_sat_per_vb(value).ok_or_else(|| {
-        PrimitiveError::FeeRateOutOfRange { value, unit: "sat/vB".to_string() }
-    })?;
+    let fee_rate = FeeRate::from_sat_per_vb(value)
+        .ok_or_else(|| PrimitiveError::FeeRateOutOfRange { value, unit: "sat/vB".to_string() })?;
     if fee_rate.checked_mul_by_weight(Weight::MAX_BLOCK).is_none() {
-        return Err(PrimitiveError::FeeRateOutOfRange {
-            value,
-            unit: "sat/vB".to_string(),
-        });
+        return Err(PrimitiveError::FeeRateOutOfRange { value, unit: "sat/vB".to_string() });
     }
     Ok(fee_rate)
 }
@@ -107,10 +103,7 @@ pub(crate) fn validate_fee_rate_sat_per_vb(value: u64) -> Result<FeeRate, Primit
 pub(crate) fn validate_fee_rate_sat_per_kwu(value: u64) -> Result<FeeRate, PrimitiveError> {
     let fee_rate = FeeRate::from_sat_per_kwu(value);
     if fee_rate.checked_mul_by_weight(Weight::MAX_BLOCK).is_none() {
-        return Err(PrimitiveError::FeeRateOutOfRange {
-            value,
-            unit: "sat/kwu".to_string(),
-        });
+        return Err(PrimitiveError::FeeRateOutOfRange { value, unit: "sat/kwu".to_string() });
     }
     Ok(fee_rate)
 }

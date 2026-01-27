@@ -362,6 +362,7 @@ pub(crate) enum AddressTypeError {
     PrevTxOut(PrevTxOutError),
     InvalidScript(FromScriptError),
     UnknownAddressType,
+    FeeRateOverflow,
 }
 
 impl fmt::Display for AddressTypeError {
@@ -370,6 +371,7 @@ impl fmt::Display for AddressTypeError {
             Self::PrevTxOut(_) => write!(f, "invalid previous transaction output"),
             Self::InvalidScript(_) => write!(f, "invalid script"),
             Self::UnknownAddressType => write!(f, "unknown address type"),
+            Self::FeeRateOverflow => write!(f, "fee rate overflow"),
         }
     }
 }
@@ -380,6 +382,7 @@ impl std::error::Error for AddressTypeError {
             Self::PrevTxOut(error) => Some(error),
             Self::InvalidScript(error) => Some(error),
             Self::UnknownAddressType => None,
+            Self::FeeRateOverflow => None,
         }
     }
 }

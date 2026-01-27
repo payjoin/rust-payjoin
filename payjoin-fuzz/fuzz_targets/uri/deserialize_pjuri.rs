@@ -1,12 +1,12 @@
-#![cfg_attr(feature = "libfuzzer_fuzz", no_main)]
+#![cfg_attr(any(feature = "libfuzzer_fuzz", feature = "_no-lint"), no_main)]
 
 use std::any::{Any, TypeId};
 
-#[cfg(feature = "afl_fuzz")]
-use afl;
+#[cfg(all(feature = "afl_fuzz", not(feature = "_no-lint")))]
+use afl::fuzz;
 use bitcoin::Amount;
 use bitcoin_uri::Param;
-#[cfg(feature = "honggfuzz_fuzz")]
+#[cfg(all(feature = "honggfuzz_fuzz", not(feature = "_no-lint")))]
 use honggfuzz::fuzz;
 #[cfg(feature = "libfuzzer_fuzz")]
 use libfuzzer_sys::fuzz_target;
@@ -49,14 +49,17 @@ fn do_test(data: &[u8]) {
     }
 }
 
-#[cfg(feature = "afl_fuzz")]
+#[cfg(not(any(feature = "afl_fuzz", feature = "honggfuzz_fuzz", feature = "libfuzzer_fuzz")))]
+fn main() { do_test(&[00]); }
+
+#[cfg(all(feature = "afl_fuzz", not(feature = "_no-lint")))]
 fn main() {
-    afl::fuzz!(|data| {
+    fuzz!(|data| {
         do_test(data);
     });
 }
 
-#[cfg(feature = "honggfuzz_fuzz")]
+#[cfg(all(feature = "honggfuzz_fuzz", not(feature = "_no-lint")))]
 fn main() {
     loop {
         fuzz!(|data| {

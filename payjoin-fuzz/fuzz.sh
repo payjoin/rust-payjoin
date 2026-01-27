@@ -21,7 +21,7 @@ REPO_DIR=$(git rev-parse --show-toplevel)
 
 # can't find the file because of the ENV var
 # shellcheck source=/dev/null
-source "$REPO_DIR/fuzz/fuzz-util.sh"
+source "$REPO_DIR/payjoin-fuzz/fuzz-util.sh"
 
 if [[ -z ${TARGET:-} ]]; then
     targetFiles="$(listTargetFiles)"
@@ -34,16 +34,10 @@ if [[ $ENGINE == "hfuzz" ]]; then
     for targetFile in $targetFiles; do
         targetName=$(targetFileToName "$targetFile")
         echo "Fuzzing target $targetName ($targetFile)"
-        if [ -d "hfuzz_input/$targetName" ]; then
-            HFUZZ_INPUT_ARGS="-f hfuzz_input/$targetName/input"
-        else
-            HFUZZ_INPUT_ARGS=""
-        fi
+        HFUZZ_INPUT_ARGS="-f corpus/$targetName/"
         export HFUZZ_RUN_ARGS="--run_time 30 --exit_upon_crash -v $HFUZZ_INPUT_ARGS"
         env -u RUSTC_WRAPPER CC=clang RUSTFLAGS="--cfg tokio_unstable" \
             cargo hfuzz run "$targetName"
-
-        checkhfuzzReport "$targetName"
     done
 elif [[ $ENGINE == "afl" ]]; then
     export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
@@ -52,14 +46,14 @@ elif [[ $ENGINE == "afl" ]]; then
     for targetFile in $targetFiles; do
         targetName=$(targetFileToName "$targetFile")
         echo "Fuzzing target $targetName ($targetFile)"
-        afl-fuzz -i corpus/"$targetName"/ -o afl_target -V 30 target/debug/"$targetName" --features afl_fuzz
+        cargo afl config --build --force
+        cargo afl build --bin "$targetName" --features afl_fuzz
+        afl-fuzz -i corpus/"$targetName"/ -o afl_target -V 30 ../target/debug/"$targetName" --features afl_fuzz
     done
 else
     for targetFile in $targetFiles; do
         targetName=$(targetFileToName "$targetFile")
         echo "Fuzzing target $targetName ($targetFile)"
-        cargo fuzz run "$targetName" --features libfuzzer_fuzz -- -max_total_time=30
-
-        checkReport "$targetName"
+        cargo fuzz run "$targetName" --fuzz-dir "$REPO_DIR"/payjoin-fuzz/ --features libfuzzer_fuzz -- -max_total_time=30
     done
 fi

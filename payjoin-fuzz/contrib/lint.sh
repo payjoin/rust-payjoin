@@ -2,7 +2,7 @@
 set -e
 
 # Individual features with no defaults.
-features=("libfuzzer_sys" "afl_fuzz" "honggfuzz_fuzz")
+features=("libfuzzer_fuzz" "afl_fuzz" "honggfuzz_fuzz")
 
 for feature in "${features[@]}"; do
     # Don't duplicate --all-targets clippy. Clippy end-user code, not tests.

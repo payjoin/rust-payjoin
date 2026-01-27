@@ -17,7 +17,7 @@ fi
 REPO_DIR=$(git rev-parse --show-toplevel)
 # can't find the file because of the ENV var
 # shellcheck source=/dev/null
-source "$REPO_DIR/fuzz/fuzz-util.sh"
+source "$REPO_DIR/payjoin-fuzz/fuzz-util.sh"
 
 if [[ $ENGINE == "hfuzz" ]]; then
     export HFUZZ_BUILD_ARGS="--features honggfuzz_fuzz"
@@ -25,11 +25,7 @@ if [[ $ENGINE == "hfuzz" ]]; then
         for targetFile in $(listTargetFiles); do
             targetName=$(targetFileToName "$targetFile")
             echo "Fuzzing target $targetName ($targetFile)"
-            if [ -d "hfuzz_input/$targetName" ]; then
-                HFUZZ_INPUT_ARGS="-f hfuzz_input/$targetName/input"
-            else
-                HFUZZ_INPUT_ARGS=""
-            fi
+            HFUZZ_INPUT_ARGS="-f corpus/$targetName/"
             # fuzz for one hour
             HFUZZ_RUN_ARGS="--run_time 3600 --exit_upon_crash -v $HFUZZ_INPUT_ARGS" cargo hfuzz run "$targetName"
             # minimize the corpus
@@ -47,9 +43,9 @@ elif [[ $ENGINE == "afl" ]]; then
             cargo afl config --build --force
             cargo afl build --bin "$targetName" --features afl_fuzz
             # fuzz for one hour
-            afl-fuzz -i corpus/"$targetName"/ -o afl_target -V 30 target/debug/"$targetName" --features afl_fuzz
+            afl-fuzz -i corpus/"$targetName"/ -o afl_target -V 30 ../target/debug/"$targetName" --features afl_fuzz
             # minimize the corpus
-            afl-cmin -i afl_target/default/queue/ -o corpus/minimized/"$targetName"/ -- target/debug/"$targetName" --features afl_fuzz
+            afl-cmin -i afl_target/default/queue/ -o corpus/minimized/"$targetName"/ -- ../target/debug/"$targetName" --features afl_fuzz
             # overwrite the old corpus
             rm -rf corpus/"$targetName"/*
             mv corpus/minimized/"$targetName"/id:* corpus/"$targetName"/
@@ -62,9 +58,9 @@ else
             targetName=$(targetFileToName "$targetFile")
             echo "Fuzzing target $targetName ($targetFile)"
             # fuzz for one hour
-            cargo +nightly fuzz run "$targetName" --features libfuzzer_fuzz -- -max_total_time=3600
+            cargo +nightly fuzz run "$targetName" --fuzz-dir "$REPO_DIR"/payjoin-fuzz/ --features libfuzzer_fuzz -- -max_total_time=30
             # minimize the corpus
-            cargo +nightly fuzz cmin "$targetName" --features libfuzzer_fuzz
+            cargo +nightly fuzz cmin "$targetName" --fuzz-dir "$REPO_DIR"/payjoin-fuzz/ --features libfuzzer_fuzz
         done
     done
 fi

@@ -27,6 +27,8 @@ reqwest = { version = "0.12.23", default-features = false, features = [
 ] }
 rustls = { version = "0.23.31", default-features = false, features = ["ring"] }
 tempfile = "3.20.0"
+# Pin to 0.3.45 (last version to support our MSRV 1.85)
+time = "=0.3.45"
 tokio = { version = "1.47.1", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

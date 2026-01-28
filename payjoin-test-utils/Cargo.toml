@@ -32,3 +32,7 @@ time = "=0.3.45"
 tokio = { version = "1.47.1", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
+# time is a transient dependency, but needs to be specified explicitly to pin the version for MSRV
+[package.metadata.cargo-machete]
+ignored = ["time"]

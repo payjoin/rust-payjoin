@@ -28,6 +28,11 @@
       treefmt-nix,
       nix2container,
     }:
+    let
+      overlayAll = nixpkgs.lib.composeManyExtensions [
+        (import ./nix/overlays/cargo-honggfuzz.nix)
+      ];
+    in
     flake-utils.lib.eachDefaultSystem (
       system:
       let
@@ -42,6 +47,7 @@
                 nightly = prev.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
               };
             })
+            (import ./nix/overlays/cargo-honggfuzz.nix)
           ];
         };
 
@@ -206,10 +212,27 @@
                 cargo-watch
                 rust-analyzer
                 dart
+                cargo-fuzz
+                cargo-honggfuzz
+                aflplusplus
+                lldb
+                clang
               ]
               ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
                 cargo-llvm-cov
               ];
+
+            buildInputs = with pkgs; [
+              libbfd_2_38
+              libunwind.dev
+              libopcodes_2_38
+              pkgsStatic.libblocksruntime
+            ];
+
+            shellHook = ''
+              export UNSCREW_WERROR_ORIG=$(which clang)
+              export PATH="$(pwd)/scripts/dev/unscrew-werror/:$PATH"
+            '';
           }
         ) craneLibVersions;
 
@@ -257,7 +280,7 @@
                   cargoArtifacts = cargoArtifacts.${name};
                   partitions = 1;
                   partitionType = "count";
-                  cargoExtraArgs = "--locked --all-features";
+                  cargoExtraArgs = "--locked --workspace --all-features --exclude payjoin-fuzz";
                   NEXTEST_SHOW_PROGRESS = "none";
                   BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
                   NGINX_EXE = nixpkgs.lib.getExe' nginxWithStream "nginx";

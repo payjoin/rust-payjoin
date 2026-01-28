@@ -6,7 +6,7 @@ echo "Running workspace lint..."
 cargo clippy --all-targets --keep-going --all-features -- -D warnings
 
 # Lint independent feature sets
-FEATURE_CRATES="payjoin payjoin-cli"
+FEATURE_CRATES="payjoin payjoin-cli payjoin-fuzz"
 
 for crate in $FEATURE_CRATES; do
     echo "Running independent feature lints for $crate crate..."

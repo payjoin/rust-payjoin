@@ -1,4 +1,8 @@
-# Fuzzing
+<h1 align="center">
+  <img src="https://github.com/benalleng/rust-payjoin/blob/fuzzing/static/monad-fuzz.gif" alt="payjoin-fuzz logo" width="150" />
+  <br>
+  Payjoin-fuzz
+</h1>
 
 Fuzz tests work by generating a ton of random noise that is morhped into parameter arguments for tests to run and validate that none of it causes it to have unhandled crashes.
 

@@ -13,9 +13,6 @@ pub struct Cli {
     #[arg(long, short = 'p', env = "PJ_DIR_PORT", help = "The port to bind [default: 8080]")]
     pub port: Option<u16>, // TODO tokio_listener::ListenerAddressLFlag
 
-    #[arg(long, env = "PJ_METRIC_PORT", help = "The port to bind for prometheus metrics export")]
-    pub metrics_port: Option<u16>, // TODO tokio_listener::ListenerAddressLFlag
-
     #[cfg(feature = "acme")]
     #[clap(flatten)]
     pub acme: AcmeCli,

@@ -490,6 +490,35 @@ function testInvalidPrimitives(): void {
         new payjoin.InputPair(amountOverflowTxIn, psbtIn, undefined);
     }, /(Amount out of range|AmountOutOfRange)/);
 
+    // Oversized script_pubkey should fail.
+    const hugeScript = new Uint8Array(10_001).fill(0x51).buffer;
+    const oversizedTxOut = payjoin.PlainTxOut.create({
+        valueSat: 1n,
+        scriptPubkey: hugeScript,
+    });
+    const oversizedPsbtIn = payjoin.PlainPsbtInput.create({
+        witnessUtxo: oversizedTxOut,
+        redeemScript: undefined,
+        witnessScript: undefined,
+    });
+    assert.throws(() => {
+        new payjoin.InputPair(amountOverflowTxIn, oversizedPsbtIn, undefined);
+    }, /(ScriptTooLarge|script too large|InvalidPrimitive)/);
+
+    // Weight must be positive and <= block weight.
+    const smallTxOut = payjoin.PlainTxOut.create({
+        valueSat: 1n,
+        scriptPubkey: new Uint8Array([0x6a]).buffer,
+    });
+    const smallPsbtIn = payjoin.PlainPsbtInput.create({
+        witnessUtxo: smallTxOut,
+        redeemScript: undefined,
+        witnessScript: undefined,
+    });
+    assert.throws(() => {
+        new payjoin.InputPair(amountOverflowTxIn, smallPsbtIn, payjoin.PlainWeight.create({ weightUnits: 0n }));
+    }, /(WeightOutOfRange|Weight out of range|InvalidPsbtInput)/);
+
     const pjUri = payjoin.Uri.parse(
         "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com",
     ).checkPjSupported();

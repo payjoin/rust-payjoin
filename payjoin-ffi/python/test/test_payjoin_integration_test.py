@@ -103,6 +103,28 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             or "AmountOutOfRange" in str(ctx.exception)
         )
 
+        # Oversized script_pubkey should fail.
+        huge_script = bytes([0x51] * 10_001)
+        oversized_psbt_in = PlainPsbtInput(
+            witness_utxo=PlainTxOut(value_sat=1, script_pubkey=huge_script),
+            redeem_script=None,
+            witness_script=None,
+        )
+        with self.assertRaises(InputPairError) as ctx:
+            InputPair(txin=txin, psbtin=oversized_psbt_in, expected_weight=None)
+        self.assertTrue("ScriptTooLarge" in str(ctx.exception) or "script too large" in str(ctx.exception))
+
+        # Weight must be positive and <= block weight.
+        small_psbt_in = PlainPsbtInput(
+            witness_utxo=PlainTxOut(value_sat=1, script_pubkey=bytes([0x6A])),
+            redeem_script=None,
+            witness_script=None,
+        )
+        with self.assertRaises(InputPairError) as ctx:
+            InputPair(txin=txin, psbtin=small_psbt_in, expected_weight=PlainWeight(weight_units=0))
+        # Python binding surfaces a wrapped PsbtInputError here; variant name isn’t exposed,
+        # so we only assert that it raises InputPairError.
+
         # Use a real v2 payjoin URI from the receiver harness to avoid the v1 panic path.
         receiver_address = json.loads(self.receiver.call("getnewaddress", []))
         services = TestServices.initialize()

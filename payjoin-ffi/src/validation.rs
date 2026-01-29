@@ -7,6 +7,10 @@ use crate::error::PrimitiveError;
 const MAX_SCRIPT_BYTES: usize = 10_000;
 const MAX_WITNESS_ITEMS: usize = 1000;
 const MAX_WITNESS_BYTES: usize = 100_000;
+// Note: These caps are conservative anti-DoS limits, not full Bitcoin Core
+// relay policy (which is stricter per context, e.g., tapscript item 80 bytes,
+// P2WSH witnessScript 3600 bytes, stack items 100). We keep FFI permissive
+// while preventing unbounded memory/overflow; tighten here if you want policy parity.
 
 pub(crate) fn validate_amount_sat(amount_sat: u64) -> Result<Amount, PrimitiveError> {
     let max_sat = Amount::MAX_MONEY.to_sat();
@@ -85,7 +89,7 @@ pub(crate) fn validate_witness_stack(witness: &[Vec<u8>]) -> Result<(), Primitiv
 
 pub(crate) fn validate_weight_units(weight_units: u64) -> Result<Weight, PrimitiveError> {
     let max_wu = Weight::MAX_BLOCK.to_wu();
-    if weight_units > max_wu {
+    if weight_units == 0 || weight_units > max_wu {
         return Err(PrimitiveError::WeightOutOfRange { weight_units, max_wu });
     }
     Ok(Weight::from_wu(weight_units))

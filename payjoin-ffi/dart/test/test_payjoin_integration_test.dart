@@ -409,6 +409,24 @@ void main() {
         throwsA(isA<payjoin.InputPairException>()),
       );
 
+      // Oversized script_pubkey should fail.
+      final hugeScript = Uint8List.fromList(List<int>.filled(10001, 0x51));
+      final oversizedPsbtIn = payjoin.PlainPsbtInput(
+        payjoin.PlainTxOut(1, hugeScript),
+        null,
+        null,
+      );
+      expect(
+        () => payjoin.InputPair(txin, oversizedPsbtIn, null),
+        throwsA(isA<payjoin.InputPairException>()),
+      );
+
+      // Weight must be positive and within block limit.
+      expect(
+        () => payjoin.InputPair(txin, psbtIn, payjoin.PlainWeight(0)),
+        throwsA(isA<payjoin.InputPairException>()),
+      );
+
       // Use a real v2 payjoin URI from the test harness to avoid v1 panics.
       final envLocal = payjoin.initBitcoindSenderReceiver();
       final receiverRpc = envLocal.getReceiver();

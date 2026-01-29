@@ -1,16 +1,25 @@
+use std::net::SocketAddr;
+
 use axum::extract::State;
+use axum::http::header::CONTENT_TYPE;
 use axum::http::Method;
 use axum::response::{IntoResponse, Response};
+use axum::routing::get;
 use axum::Router;
 use config::Config;
 use ohttp_relay::SentinelTag;
 use rand::Rng;
 use tokio_listener::{Listener, SystemOptions, UserOptions};
-use tower::Service;
+use tower::{Service, ServiceBuilder};
 use tracing::info;
 
 pub mod cli;
 pub mod config;
+pub mod metrics;
+pub mod middleware;
+
+use crate::metrics::MetricsService;
+use crate::middleware::{track_connections, track_metrics};
 
 #[derive(Clone)]
 struct Services {
@@ -20,12 +29,15 @@ struct Services {
 
 pub async fn serve(config: Config) -> anyhow::Result<()> {
     let sentinel_tag = generate_sentinel_tag();
+    let metrics = MetricsService::new()?;
 
     let services = Services {
         directory: init_directory(&config, sentinel_tag).await?,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
     };
-    let app = Router::new().fallback(route_request).with_state(services);
+
+    let app = build_app(services, metrics.clone());
+    spawn_metrics_server(config.metrics_port, metrics);
 
     let listener =
         Listener::bind(&config.listener, &SystemOptions::default(), &UserOptions::default())
@@ -52,12 +64,14 @@ pub async fn serve_manual_tls(
     use std::net::SocketAddr;
 
     let sentinel_tag = generate_sentinel_tag();
+    let metrics = MetricsService::new()?;
 
     let services = Services {
         directory: init_directory(&config, sentinel_tag).await?,
         relay: ohttp_relay::Service::new_with_roots(root_store, sentinel_tag).await,
     };
-    let app = Router::new().fallback(route_request).with_state(services);
+    let app = build_app(services, metrics.clone());
+    spawn_metrics_server(config.metrics_port, metrics);
 
     let addr: SocketAddr = config
         .listener
@@ -100,9 +114,8 @@ async fn init_directory(
 
     let ohttp_keys_dir = config.storage_dir.join("ohttp-keys");
     let ohttp_config = init_ohttp_config(&ohttp_keys_dir)?;
-    let metrics = payjoin_directory::metrics::Metrics::new();
 
-    Ok(payjoin_directory::Service::new(db, ohttp_config.into(), metrics, sentinel_tag))
+    Ok(payjoin_directory::Service::new(db, ohttp_config.into(), sentinel_tag))
 }
 
 fn init_ohttp_config(
@@ -117,6 +130,57 @@ fn init_ohttp_config(
             Ok(config)
         }
     }
+}
+
+fn build_app(services: Services, metrics: MetricsService) -> Router {
+    Router::new()
+        .fallback(route_request)
+        .layer(
+            ServiceBuilder::new()
+                .layer(axum::middleware::from_fn_with_state(metrics.clone(), track_metrics))
+                .layer(axum::middleware::from_fn_with_state(metrics, track_connections)),
+        )
+        .with_state(services)
+}
+
+fn build_metrics_app(metrics: MetricsService) -> Router {
+    Router::new().route("/metrics", get(metrics_handler)).with_state(metrics)
+}
+
+async fn metrics_handler(State(metrics): State<MetricsService>) -> impl IntoResponse {
+    match metrics.encode_metrics() {
+        Ok(body) => (
+            axum::http::StatusCode::OK,
+            [(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+            body,
+        )
+            .into_response(),
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to encode metrics: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+fn spawn_metrics_server(metrics_port: u16, metrics: MetricsService) {
+    let addr: SocketAddr =
+        format!("[::]:{metrics_port}").parse().expect("metrics bind address is valid");
+    tokio::spawn(async move {
+        let listener = match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::error!("Failed to bind metrics server on {addr}: {e}");
+                return;
+            }
+        };
+        let actual = listener.local_addr().expect("bound listener has local_addr");
+        info!("Metrics server listening on {actual}");
+        let app = build_metrics_app(metrics);
+        if let Err(e) = axum::serve(listener, app).await {
+            tracing::error!("Metrics server error: {e}");
+        }
+    });
 }
 
 async fn route_request(
@@ -181,6 +245,7 @@ mod tests {
             listener: "[::]:0".parse().expect("valid listener address"),
             storage_dir: tempdir.path().to_path_buf(),
             timeout: Duration::from_secs(2),
+            metrics_port: 0,
         };
 
         let mut root_store = RootCertStore::empty();
@@ -258,5 +323,26 @@ mod tests {
             axum::http::StatusCode::FORBIDDEN,
             "cross-instance request should not be rejected as forbidden"
         );
+    }
+
+    #[tokio::test]
+    async fn metrics_endpoint_works() {
+        let cert = local_cert_key();
+        let cert_der = cert.cert.der().to_vec();
+        let key_der = cert.signing_key.serialize_der();
+
+        let (port, _handle, _tempdir) = start_service(cert_der.clone(), key_der).await;
+
+        let client = Arc::new(http_agent(cert_der).unwrap());
+        let base_url = format!("https://localhost:{}", port);
+        wait_for_service_ready(&base_url, client.clone()).await.unwrap();
+
+        let metrics_url = format!("{}/metrics", base_url);
+        let response = client.get(&metrics_url).send().await.expect("metrics request should work");
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = response.text().await.unwrap();
+        assert!(body.contains("http_requests_total"));
+        assert!(body.contains("active_connections"));
     }
 }

@@ -12,6 +12,7 @@ pub struct Config {
     pub storage_dir: PathBuf,
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub timeout: Duration,
+    pub metrics_port: u16,
 }
 
 impl Default for Config {
@@ -20,6 +21,7 @@ impl Default for Config {
             listener: "[::]:8080".parse().expect("valid default listener address"),
             storage_dir: PathBuf::from("./data"),
             timeout: Duration::from_secs(30),
+            metrics_port: 9090,
         }
     }
 }

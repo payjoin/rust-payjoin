@@ -13,7 +13,6 @@ use crate::cli::Cli;
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub listen_addr: String, // TODO tokio_listener::ListenerAddressLFlag
-    pub metrics_listen_addr: Option<String>, // TODO tokio_listener::ListenerAddressLFlag
     pub timeout: Duration,
     pub storage_dir: PathBuf,
     pub ohttp_keys: PathBuf, // TODO OhttpConfig struct with rotation params, etc
@@ -52,7 +51,6 @@ impl Config {
 
         Ok(Config {
             listen_addr: built_config.get("listen_addr")?,
-            metrics_listen_addr: built_config.get("metrics_listen_addr").ok(),
             timeout: Duration::from_secs(built_config.get("timeout")?),
             storage_dir: built_config.get("storage_dir")?,
             ohttp_keys: built_config.get("ohttp_keys")?,
@@ -75,11 +73,6 @@ fn add_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     let config = config
         .set_default("listen_addr", "[::]:8080")?
         .set_override_option("listen_addr", cli.port.map(|port| format!("[::]:{}", port)))?
-        .set_default("metrics_listen_addr", Option::<String>::None)?
-        .set_override_option(
-            "metrics_listen_addr",
-            cli.metrics_port.map(|port| format!("localhost:{}", port)),
-        )?
         .set_default("timeout", Some(30))?
         .set_override_option("timeout", cli.timeout)?
         .set_default("ohttp_keys", "ohttp_keys")?

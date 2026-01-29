@@ -277,6 +277,7 @@ pub enum HpkeError {
     InvalidKeyLength,
     PayloadTooLarge { actual: usize, max: usize },
     PayloadTooShort,
+    Other(String),
 }
 
 impl From<hpke::HpkeError> for HpkeError {
@@ -286,10 +287,11 @@ impl From<hpke::HpkeError> for HpkeError {
 impl From<secp256k1::Error> for HpkeError {
     fn from(value: secp256k1::Error) -> Self {
         match value {
-            // As of writing, this is the only relevant variant that could arise here.
-            // This may need to be updated if relevant variants are added to secp256k1
+            // As of writing, this is the only relevant variant that could arise here. The other variant has
+            // been added due to new secp256k1::Error variants that may be added in the future. update this
+            // match statement if relevant error variants that are needed are added to secp256k1
             secp256k1::Error::InvalidPublicKey => Self::InvalidPublicKey,
-            _ => panic!("Unsupported variant of secp256k1::Error"),
+            other => Self::Other(format!("secp256k1 error: {}", other)),
         }
     }
 }
@@ -309,6 +311,7 @@ impl fmt::Display for HpkeError {
             }
             PayloadTooShort => write!(f, "Payload too small"),
             InvalidPublicKey => write!(f, "Invalid public key"),
+            Other(msg) => write!(f, "Unknown error: {msg}"),
         }
     }
 }
@@ -322,6 +325,7 @@ impl error::Error for HpkeError {
             PayloadTooLarge { .. } => None,
             InvalidKeyLength | PayloadTooShort => None,
             InvalidPublicKey => None,
+            Other(_) => None,
         }
     }
 }
@@ -329,6 +333,30 @@ impl error::Error for HpkeError {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn secp256k1_error_conversion_no_panic() {
+        // Test the known variant that maps to InvalidPublicKey(update if new variants are added)
+        let err = secp256k1::Error::InvalidPublicKey;
+        let hpke_err: HpkeError = err.into();
+        assert_eq!(hpke_err, HpkeError::InvalidPublicKey);
+        // Test other variants that may arise
+        let other_variants = [
+            secp256k1::Error::InvalidSecretKey,
+            secp256k1::Error::InvalidRecoveryId,
+            secp256k1::Error::InvalidTweak,
+            secp256k1::Error::NotEnoughMemory,
+        ];
+        for err in other_variants {
+            let hpke_err: HpkeError = err.into();
+            match hpke_err {
+                HpkeError::Other(msg) => {
+                    assert!(msg.contains("secp256k1 error:"));
+                }
+                _ => panic!("Expected Other variant for {:?}", err),
+            }
+        }
+    }
 
     #[test]
     fn message_a_round_trip() {

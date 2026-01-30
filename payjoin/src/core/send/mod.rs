@@ -123,7 +123,9 @@ impl PsbtContextBuilder {
                 }
             }
 
-            let recommended_additional_fee = min_fee_rate * input_weight;
+            let recommended_additional_fee = min_fee_rate
+                .checked_mul_by_weight(input_weight)
+                .ok_or(InternalBuildSenderError::AddressType(AddressTypeError::FeeRateOverflow))?;
             if fee_available < recommended_additional_fee {
                 tracing::warn!("Insufficient funds to maintain specified minimum feerate.");
                 return self.build_with_additional_fee(
@@ -1531,3 +1533,4 @@ mod test {
         }
     }
 }
+use crate::psbt::AddressTypeError;

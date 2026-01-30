@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use payjoin::receive;
 
-use crate::error::ImplementationError;
+use crate::error::{ImplementationError, PsbtInputsError};
 use crate::uri::error::IntoUrlError;
 
 /// The top-level error type for the payjoin receiver
@@ -20,9 +20,18 @@ pub enum ReceiverError {
     /// Error that may occur when converting a some type to a URL
     #[error("IntoUrl error: {0}")]
     IntoUrl(Arc<IntoUrlError>),
+
+    #[error("PSBT input validation failed")]
+    InvalidInput(Arc<PsbtInputsError>),
     /// Catch-all for unhandled error variants
     #[error("An unexpected error occurred")]
     Unexpected,
+}
+
+impl From<payjoin::psbt::PsbtInputsError> for ReceiverError {
+    fn from(value: payjoin::psbt::PsbtInputsError) -> Self {
+        ReceiverError::InvalidInput(Arc::new(value.into()))
+    }
 }
 
 impl From<receive::Error> for ReceiverError {

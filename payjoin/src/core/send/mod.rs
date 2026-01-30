@@ -23,7 +23,7 @@ pub(crate) use error::{InternalBuildSenderError, InternalProposalError, Internal
 use url::Url;
 
 use crate::output_substitution::OutputSubstitution;
-use crate::psbt::{PsbtExt, NON_WITNESS_INPUT_WEIGHT};
+use crate::psbt::{AddressTypeError, PsbtExt, NON_WITNESS_INPUT_WEIGHT};
 use crate::Version;
 
 // See usize casts
@@ -123,7 +123,9 @@ impl PsbtContextBuilder {
                 }
             }
 
-            let recommended_additional_fee = min_fee_rate * input_weight;
+            let recommended_additional_fee = min_fee_rate
+                .checked_mul_by_weight(input_weight)
+                .ok_or(InternalBuildSenderError::AddressType(AddressTypeError::FeeRateOverflow))?;
             if fee_available < recommended_additional_fee {
                 tracing::warn!("Insufficient funds to maintain specified minimum feerate.");
                 return self.build_with_additional_fee(

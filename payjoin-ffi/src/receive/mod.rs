@@ -1,6 +1,5 @@
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 
 pub use error::{
     AddressParseError, InputContributionError, InputPairError, JsonReply, OutputSubstitutionError,
@@ -9,14 +8,19 @@ pub use error::{
 };
 use payjoin::bitcoin::consensus::Decodable;
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::{Amount, FeeRate};
+use payjoin::bitcoin::FeeRate;
 use payjoin::persist::{MaybeFatalTransition, NextStateTransition};
 
 use crate::error::ForeignError;
-pub use crate::error::{ImplementationError, SerdeJsonError};
+pub use crate::error::{ImplementationError, PrimitiveError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
 use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
 use crate::uri::error::FeeRateError;
+use crate::validation::{
+    validate_amount_sat, validate_expiration_secs, validate_fee_rate_sat_per_kwu_opt,
+    validate_fee_rate_sat_per_vb_opt, validate_optional_script, validate_script_bytes,
+    validate_script_vec, validate_weight_units, validate_witness_stack,
+};
 use crate::{ClientResponse, OutputSubstitution, Request};
 
 pub mod error;
@@ -270,12 +274,11 @@ pub struct PlainTxOut {
     pub script_pubkey: Vec<u8>,
 }
 
-impl From<PlainTxOut> for payjoin::bitcoin::TxOut {
-    fn from(value: PlainTxOut) -> Self {
-        payjoin::bitcoin::TxOut {
-            value: Amount::from_sat(value.value_sat),
-            script_pubkey: payjoin::bitcoin::ScriptBuf::from_bytes(value.script_pubkey),
-        }
+impl PlainTxOut {
+    fn into_core(self) -> Result<payjoin::bitcoin::TxOut, PrimitiveError> {
+        let value = validate_amount_sat(self.value_sat)?;
+        let script_pubkey = validate_script_vec("script_pubkey", self.script_pubkey, false)?;
+        Ok(payjoin::bitcoin::TxOut { value, script_pubkey })
     }
 }
 
@@ -299,6 +302,8 @@ pub struct PlainTxIn {
 
 impl PlainTxIn {
     fn into_core(self) -> Result<payjoin::bitcoin::TxIn, InputPairError> {
+        validate_script_bytes("script_sig", &self.script_sig, true)?;
+        validate_witness_stack(&self.witness)?;
         let previous_output = self.previous_output.into_core()?;
         Ok(payjoin::bitcoin::TxIn {
             previous_output,
@@ -341,13 +346,20 @@ pub struct PlainPsbtInput {
 }
 
 impl PlainPsbtInput {
-    fn into_core(self) -> payjoin::bitcoin::psbt::Input {
-        payjoin::bitcoin::psbt::Input {
-            witness_utxo: self.witness_utxo.map(Into::into),
-            redeem_script: self.redeem_script.map(payjoin::bitcoin::ScriptBuf::from_bytes),
-            witness_script: self.witness_script.map(payjoin::bitcoin::ScriptBuf::from_bytes),
+    fn into_core(self) -> Result<payjoin::bitcoin::psbt::Input, InputPairError> {
+        let witness_utxo = self
+            .witness_utxo
+            .map(|utxo| utxo.into_core())
+            .transpose()
+            .map_err(InputPairError::from)?;
+        let redeem_script = validate_optional_script("redeem_script", self.redeem_script)?;
+        let witness_script = validate_optional_script("witness_script", self.witness_script)?;
+        Ok(payjoin::bitcoin::psbt::Input {
+            witness_utxo,
+            redeem_script,
+            witness_script,
             ..Default::default()
-        }
+        })
     }
 }
 
@@ -357,8 +369,10 @@ pub struct PlainWeight {
     pub weight_units: u64,
 }
 
-impl From<PlainWeight> for payjoin::bitcoin::Weight {
-    fn from(value: PlainWeight) -> Self { payjoin::bitcoin::Weight::from_wu(value.weight_units) }
+impl PlainWeight {
+    fn into_core(self) -> Result<payjoin::bitcoin::Weight, PrimitiveError> {
+        validate_weight_units(self.weight_units)
+    }
 }
 
 impl From<payjoin::bitcoin::Weight> for PlainWeight {
@@ -395,12 +409,14 @@ impl ReceiverBuilder {
         ))
     }
 
-    pub fn with_amount(&self, amount_sats: u64) -> Self {
-        Self(self.0.clone().with_amount(Amount::from_sat(amount_sats)))
+    pub fn with_amount(&self, amount_sats: u64) -> Result<Self, PrimitiveError> {
+        let amount = validate_amount_sat(amount_sats)?;
+        Ok(Self(self.0.clone().with_amount(amount)))
     }
 
-    pub fn with_expiration(&self, expiration: u64) -> Self {
-        Self(self.0.clone().with_expiration(Duration::from_secs(expiration)))
+    pub fn with_expiration(&self, expiration: u64) -> Result<Self, PrimitiveError> {
+        let expiration = validate_expiration_secs(expiration)?;
+        Ok(Self(self.0.clone().with_expiration(expiration)))
     }
 
     /// Set the maximum effective fee rate the receiver is willing to pay for their own input/output contributions
@@ -622,17 +638,15 @@ impl UncheckedOriginalPayload {
         &self,
         min_fee_rate: Option<u64>,
         can_broadcast: Arc<dyn CanBroadcast>,
-    ) -> UncheckedOriginalPayloadTransition {
-        UncheckedOriginalPayloadTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().check_broadcast_suitability(
-                min_fee_rate.map(FeeRate::from_sat_per_kwu),
-                |transaction| {
-                    can_broadcast
-                        .callback(payjoin::bitcoin::consensus::encode::serialize(transaction))
-                        .map_err(|e| ImplementationError::new(e).into())
-                },
-            ),
-        ))))
+    ) -> Result<UncheckedOriginalPayloadTransition, PrimitiveError> {
+        let min_fee_rate = validate_fee_rate_sat_per_kwu_opt(min_fee_rate)?;
+        Ok(UncheckedOriginalPayloadTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().check_broadcast_suitability(min_fee_rate, |transaction| {
+                can_broadcast
+                    .callback(payjoin::bitcoin::consensus::encode::serialize(transaction))
+                    .map_err(|e| ImplementationError::new(e).into())
+            }),
+        )))))
     }
 
     /// Call this method if the only way to initiate a Payjoin with this receiver
@@ -837,9 +851,11 @@ impl WantsOutputs {
         replacement_outputs: Vec<PlainTxOut>,
         drain_script_pubkey: Vec<u8>,
     ) -> Result<WantsOutputs, OutputSubstitutionError> {
-        let replacement_outputs: Vec<payjoin::bitcoin::TxOut> =
-            replacement_outputs.into_iter().map(Into::into).collect();
-        let drain_script = payjoin::bitcoin::ScriptBuf::from_bytes(drain_script_pubkey);
+        let replacement_outputs = replacement_outputs
+            .into_iter()
+            .map(|output| output.into_core())
+            .collect::<Result<Vec<_>, _>>()?;
+        let drain_script = validate_script_vec("drain_script_pubkey", drain_script_pubkey, false)?;
         self.0
             .clone()
             .replace_receiver_outputs(replacement_outputs, &drain_script)
@@ -851,7 +867,8 @@ impl WantsOutputs {
         &self,
         output_script_pubkey: Vec<u8>,
     ) -> Result<WantsOutputs, OutputSubstitutionError> {
-        let output_script = payjoin::bitcoin::ScriptBuf::from_bytes(output_script_pubkey);
+        let output_script =
+            validate_script_vec("output_script_pubkey", output_script_pubkey, false)?;
         self.0
             .clone()
             .substitute_receiver_script(&output_script)
@@ -945,8 +962,8 @@ impl InputPair {
         expected_weight: Option<PlainWeight>,
     ) -> Result<Self, InputPairError> {
         let txin = txin.into_core()?;
-        let psbtin = psbtin.into_core();
-        let expected_weight = expected_weight.map(Into::into);
+        let psbtin = psbtin.into_core()?;
+        let expected_weight = expected_weight.map(|weight| weight.into_core()).transpose()?;
         payjoin::receive::InputPair::new(txin, psbtin, expected_weight)
             .map(Self)
             .map_err(|err| InputPairError::InvalidPsbtInput(Arc::new(err.into())))
@@ -1014,10 +1031,14 @@ impl WantsFeeRange {
         &self,
         min_fee_rate_sat_per_vb: Option<u64>,
         max_effective_fee_rate_sat_per_vb: Option<u64>,
-    ) -> WantsFeeRangeTransition {
-        WantsFeeRangeTransition(Arc::new(RwLock::new(Some(self.0.clone().apply_fee_range(
-            min_fee_rate_sat_per_vb.and_then(FeeRate::from_sat_per_vb),
-            max_effective_fee_rate_sat_per_vb.and_then(FeeRate::from_sat_per_vb),
+    ) -> Result<WantsFeeRangeTransition, PrimitiveError> {
+        let min_fee_rate_sat_per_vb = validate_fee_rate_sat_per_vb_opt(min_fee_rate_sat_per_vb)?;
+        let max_effective_fee_rate_sat_per_vb =
+            validate_fee_rate_sat_per_vb_opt(max_effective_fee_rate_sat_per_vb)?;
+        Ok(WantsFeeRangeTransition(Arc::new(RwLock::new(Some(
+            self.0
+                .clone()
+                .apply_fee_range(min_fee_rate_sat_per_vb, max_effective_fee_rate_sat_per_vb),
         )))))
     }
 }

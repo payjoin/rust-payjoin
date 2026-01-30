@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use payjoin::receive;
 
-use crate::error::ImplementationError;
+use crate::error::{ImplementationError, PrimitiveError};
 use crate::uri::error::IntoUrlError;
 
 /// The top-level error type for the payjoin receiver
@@ -168,10 +168,29 @@ impl From<ProtocolError> for JsonReply {
 #[error(transparent)]
 pub struct SessionError(#[from] receive::v2::SessionError);
 
-/// Error that may occur when output substitution fails.
+/// Protocol error raised during output substitution.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-pub struct OutputSubstitutionError(#[from] receive::OutputSubstitutionError);
+pub struct OutputSubstitutionProtocolError(#[from] receive::OutputSubstitutionError);
+
+/// Error that may occur when output substitution fails.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum OutputSubstitutionError {
+    #[error(transparent)]
+    Protocol(Arc<OutputSubstitutionProtocolError>),
+    #[error(transparent)]
+    Primitive(PrimitiveError),
+}
+
+impl From<receive::OutputSubstitutionError> for OutputSubstitutionError {
+    fn from(value: receive::OutputSubstitutionError) -> Self {
+        OutputSubstitutionError::Protocol(Arc::new(value.into()))
+    }
+}
+
+impl From<PrimitiveError> for OutputSubstitutionError {
+    fn from(value: PrimitiveError) -> Self { OutputSubstitutionError::Primitive(value) }
+}
 
 /// Error that may occur when coin selection fails.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
@@ -194,14 +213,35 @@ pub enum InputPairError {
     /// Provided outpoint could not be parsed.
     #[error("Invalid outpoint (txid={txid}, vout={vout})")]
     InvalidOutPoint { txid: String, vout: u32 },
+    /// Amount exceeds allowed maximum.
+    #[error("Amount out of range: {amount_sat} sats (max {max_sat})")]
+    AmountOutOfRange { amount_sat: u64, max_sat: u64 },
+    /// Weight must be positive and no more than a block.
+    #[error("Weight out of range: {weight_units} wu (max {max_wu})")]
+    WeightOutOfRange { weight_units: u64, max_wu: u64 },
     /// PSBT input failed validation in the core library.
     #[error("Invalid PSBT input: {0}")]
     InvalidPsbtInput(Arc<PsbtInputError>),
+    /// Primitive input failed validation in the FFI layer.
+    #[error("Invalid primitive input: {0}")]
+    InvalidPrimitive(PrimitiveError),
 }
 
 impl InputPairError {
     pub fn invalid_outpoint(txid: String, vout: u32) -> Self {
         InputPairError::InvalidOutPoint { txid, vout }
+    }
+}
+
+impl From<PrimitiveError> for InputPairError {
+    fn from(value: PrimitiveError) -> Self {
+        match value {
+            PrimitiveError::AmountOutOfRange { amount_sat, max_sat } =>
+                InputPairError::AmountOutOfRange { amount_sat, max_sat },
+            PrimitiveError::WeightOutOfRange { weight_units, max_wu } =>
+                InputPairError::WeightOutOfRange { weight_units, max_wu },
+            other => InputPairError::InvalidPrimitive(other),
+        }
     }
 }
 

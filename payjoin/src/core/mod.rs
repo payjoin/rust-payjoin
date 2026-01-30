@@ -9,7 +9,7 @@ pub mod error;
 pub use error::ImplementationError;
 pub mod version;
 pub use version::Version;
-pub(crate) mod psbt;
+pub mod psbt;
 pub mod receive;
 mod request;
 pub mod send;

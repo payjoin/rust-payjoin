@@ -255,7 +255,7 @@ impl InternalInputPair<'_> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum PrevTxOutError {
+pub enum PrevTxOutError {
     MissingUtxoInformation,
     IndexOutOfBounds { output_count: usize, index: u32 },
 }
@@ -274,7 +274,7 @@ impl fmt::Display for PrevTxOutError {
 impl std::error::Error for PrevTxOutError {}
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum InternalPsbtInputError {
+pub enum InternalPsbtInputError {
     PrevTxOut(PrevTxOutError),
     UnequalTxid,
     /// TxOut provided in `segwit_utxo` doesn't match the one in `non_segwit_utxo`
@@ -347,6 +347,12 @@ pub struct PsbtInputsError {
     error: InternalPsbtInputError,
 }
 
+impl PsbtInputsError {
+    pub fn index(&self) -> usize { self.index }
+
+    pub fn error(&self) -> &InternalPsbtInputError { &self.error }
+}
+
 impl fmt::Display for PsbtInputsError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "invalid PSBT input #{}", self.index)
@@ -358,7 +364,7 @@ impl std::error::Error for PsbtInputsError {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum AddressTypeError {
+pub enum AddressTypeError {
     PrevTxOut(PrevTxOutError),
     InvalidScript(FromScriptError),
     UnknownAddressType,
@@ -393,7 +399,7 @@ impl From<FromScriptError> for AddressTypeError {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum InputWeightError {
+pub enum InputWeightError {
     AddressType(AddressTypeError),
     NoRedeemScript,
     NotSupported,

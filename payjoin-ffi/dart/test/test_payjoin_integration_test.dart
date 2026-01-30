@@ -373,6 +373,41 @@ Future<payjoin.ReceiveSession?> process_receiver_proposal(
 
 void main() {
   group('Test integration', () {
+    test('Invalid primitives', () async {
+      final tooLargeAmount = 21000000 * 100000000 + 1;
+      final txin = payjoin.PlainTxIn(
+        payjoin.PlainOutPoint("00" * 64, 0),
+        Uint8List(0),
+        0,
+        <Uint8List>[],
+      );
+      final txout = payjoin.PlainTxOut(
+        tooLargeAmount,
+        Uint8List.fromList([0x6a]),
+      );
+      final psbtIn = payjoin.PlainPsbtInput(txout, null, null);
+      expect(
+        () => payjoin.InputPair(txin, psbtIn, null),
+        throwsA(isA<payjoin.InputPairException>()),
+      );
+
+      final pjUri = payjoin.Uri.parse(
+        "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com",
+      ).checkPjSupported();
+      final psbt =
+          "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+      final maxU64 = int.parse("18446744073709551615");
+      expect(
+        () => payjoin.SenderBuilder(psbt, pjUri).buildRecommended(maxU64),
+        throwsA(isA<payjoin.SenderInputException>()),
+      );
+
+      expect(
+        () => pjUri.setAmountSats(tooLargeAmount),
+        throwsA(isA<payjoin.PrimitiveException>()),
+      );
+    });
+
     test('Test integration v2 to v2', () async {
       env = payjoin.initBitcoindSenderReceiver();
       bitcoind = env.getBitcoind();

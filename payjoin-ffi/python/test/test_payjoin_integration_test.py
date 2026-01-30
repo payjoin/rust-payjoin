@@ -62,6 +62,37 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         cls.receiver = cls.env.get_receiver()
         cls.sender = cls.env.get_sender()
 
+    async def test_invalid_primitives(self):
+        too_large_amount = 21_000_000 * 100_000_000 + 1
+        txin = PlainTxIn(
+            previous_output=PlainOutPoint(txid="00" * 64, vout=0),
+            script_sig=b"",
+            sequence=0,
+            witness=[],
+        )
+        psbt_in = PlainPsbtInput(
+            witness_utxo=PlainTxOut(
+                value_sat=too_large_amount,
+                script_pubkey=bytes([0x6A]),
+            ),
+            redeem_script=None,
+            witness_script=None,
+        )
+        with self.assertRaises(InputPairError) as ctx:
+            InputPair(txin=txin, psbtin=psbt_in, expected_weight=None)
+        self.assertIn("Amount out of range", str(ctx.exception))
+
+        pj_uri = Uri.parse(
+            "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com"
+        ).check_pj_supported()
+        with self.assertRaises(SenderInputError) as ctx:
+            SenderBuilder(original_psbt(), pj_uri).build_recommended(2**64 - 1)
+        self.assertIn("Fee rate out of range", str(ctx.exception))
+
+        with self.assertRaises(PrimitiveError) as ctx:
+            pj_uri.set_amount_sats(too_large_amount)
+        self.assertIn("Amount out of range", str(ctx.exception))
+
     async def process_receiver_proposal(
         self,
         receiver: ReceiveSession,

@@ -11,7 +11,7 @@ use ohttp_relay::SentinelTag;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use rand::Rng;
 use tokio_listener::{Listener, SystemOptions, UserOptions};
-use tower::{Service, ServiceBuilder};
+use tower::{Service, ServiceBuilder, ServiceExt};
 use tracing::info;
 
 #[cfg(feature = "access-control")]
@@ -20,14 +20,17 @@ pub mod cli;
 pub mod config;
 pub mod metrics;
 pub mod middleware;
+pub mod ohttp;
 
 use crate::metrics::MetricsService;
 use crate::middleware::{track_connections, track_metrics};
+use crate::ohttp::OhttpGatewayConfig;
 
 #[derive(Clone)]
 struct Services {
     directory: payjoin_directory::Service<payjoin_directory::FilesDb>,
     relay: ohttp_relay::Service,
+    ohttp_config: OhttpGatewayConfig,
     metrics: MetricsService,
     #[cfg(feature = "access-control")]
     geoip: Option<std::sync::Arc<access_control::IpFilter>>,
@@ -40,10 +43,12 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
     let geoip = init_geoip(&config).await?;
 
     let directory = init_directory(&config, sentinel_tag).await?;
+    let ohttp_config = OhttpGatewayConfig::new(directory.ohttp.clone(), sentinel_tag);
 
     let services = Services {
         directory,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
+        ohttp_config,
         metrics: MetricsService::new(meter_provider),
         #[cfg(feature = "access-control")]
         geoip,
@@ -83,10 +88,12 @@ pub async fn serve_manual_tls(
     let geoip = init_geoip(&config).await?;
 
     let directory = init_directory(&config, sentinel_tag).await?;
+    let ohttp_config = OhttpGatewayConfig::new(directory.ohttp.clone(), sentinel_tag);
 
     let services = Services {
         directory,
         relay: ohttp_relay::Service::new_with_roots(root_store, sentinel_tag).await,
+        ohttp_config,
         metrics: MetricsService::new(None),
         #[cfg(feature = "access-control")]
         geoip,
@@ -147,10 +154,12 @@ pub async fn serve_acme(
     let geoip = init_geoip(&config).await?;
 
     let directory = init_directory(&config, sentinel_tag).await?;
+    let ohttp_config = OhttpGatewayConfig::new(directory.ohttp.clone(), sentinel_tag);
 
     let services = Services {
         directory,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
+        ohttp_config,
         metrics: MetricsService::new(meter_provider),
         #[cfg(feature = "access-control")]
         geoip,
@@ -362,22 +371,54 @@ fn build_app(services: Services) -> Router {
     router
 }
 
-async fn route_request(
-    State(mut services): State<Services>,
-    req: axum::extract::Request,
-) -> Response {
+async fn route_request(State(services): State<Services>, req: axum::extract::Request) -> Response {
     if is_relay_request(&req) {
-        match services.relay.call(req).await {
+        let mut relay = services.relay.clone();
+        match relay.call(req).await {
             Ok(res) => res.into_response(),
             Err(e) => (axum::http::StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
         }
     } else {
         // The directory service handles all other requests (including 404)
-        match services.directory.call(req).await {
-            Ok(res) => res.into_response(),
+        handle_directory_request(services, req).await
+    }
+}
+
+async fn handle_directory_request(services: Services, req: axum::extract::Request) -> Response {
+    let is_ohttp_request = matches!(
+        (req.method(), req.uri().path()),
+        (&Method::POST, "/.well-known/ohttp-gateway") | (&Method::POST, "/")
+    );
+
+    if is_ohttp_request {
+        let app = Router::new()
+            .fallback(directory_handler)
+            .layer(axum::middleware::from_fn_with_state(
+                services.ohttp_config.clone(),
+                crate::ohttp::ohttp_gateway,
+            ))
+            .with_state(services.directory.clone());
+
+        match app.oneshot(req).await {
+            Ok(response) => response,
             Err(e) =>
                 (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }
+    } else {
+        directory_handler(State(services.directory), req).await
+    }
+}
+
+async fn directory_handler(
+    State(directory): State<payjoin_directory::Service<payjoin_directory::FilesDb>>,
+    req: axum::extract::Request,
+) -> Response {
+    let mut dir = directory.clone();
+    match dir.call(req).await {
+        Ok(response) => response.into_response(),
+        Err(e) =>
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Directory error: {}", e))
+                .into_response(),
     }
 }
 
@@ -525,9 +566,11 @@ mod tests {
         );
 
         let sentinel_tag = generate_sentinel_tag();
+        let directory = init_directory(&config, sentinel_tag).await.unwrap();
         let services = Services {
-            directory: init_directory(&config, sentinel_tag).await.unwrap(),
+            directory: directory.clone(),
             relay: ohttp_relay::Service::new(sentinel_tag).await,
+            ohttp_config: OhttpGatewayConfig::new(directory.ohttp.clone(), sentinel_tag),
             metrics: MetricsService::new(Some(provider.clone())),
             #[cfg(feature = "access-control")]
             geoip: None,

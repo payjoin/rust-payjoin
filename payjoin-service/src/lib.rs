@@ -12,6 +12,13 @@ use rand::Rng;
 use tokio_listener::{Listener, SystemOptions, UserOptions};
 use tower::{Service, ServiceBuilder};
 use tracing::info;
+pub mod ohttp;
+
+use http_body_util::combinators::BoxBody;
+use hyper::body::Bytes;
+use hyper::{Request, StatusCode};
+use ohttp::{OhttpGatewayConfig, OhttpGatewayLayer};
+use tower::ServiceExt;
 
 pub mod cli;
 pub mod config;
@@ -25,6 +32,7 @@ use crate::middleware::{track_connections, track_metrics};
 struct Services {
     directory: payjoin_directory::Service<payjoin_directory::FilesDb>,
     relay: ohttp_relay::Service,
+    sentinel_tag: SentinelTag,
 }
 
 pub async fn serve(config: Config) -> anyhow::Result<()> {
@@ -34,6 +42,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     let services = Services {
         directory: init_directory(&config, sentinel_tag).await?,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
+        sentinel_tag,
     };
 
     let app = build_app(services, metrics.clone());
@@ -69,6 +78,7 @@ pub async fn serve_manual_tls(
     let services = Services {
         directory: init_directory(&config, sentinel_tag).await?,
         relay: ohttp_relay::Service::new_with_roots(root_store, sentinel_tag).await,
+        sentinel_tag,
     };
     let app = build_app(services, metrics.clone());
     let metrics_port = spawn_metrics_server(config.metrics.listener.clone(), metrics).await?;
@@ -237,21 +247,70 @@ async fn spawn_metrics_server(
 }
 
 async fn route_request(
-    State(mut services): State<Services>,
+    State(services): State<Services>,
     req: axum::extract::Request,
 ) -> Response {
     if is_relay_request(&req) {
-        match services.relay.call(req).await {
+        let mut relay = services.relay.clone();
+        match relay.call(req).await {
             Ok(res) => res.into_response(),
-            Err(e) => (axum::http::StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+            Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
         }
     } else {
-        // The directory service handles all other requests (including 404)
-        match services.directory.call(req).await {
-            Ok(res) => res.into_response(),
-            Err(e) =>
-                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        handle_directory_request(services, req).await
+    }
+}
+
+async fn handle_directory_request(services: Services, req: axum::extract::Request) -> Response {
+    let ohttp_server = services.directory.ohttp.clone();
+
+    let ohttp_config = OhttpGatewayConfig::new(ohttp_server, services.sentinel_tag);
+
+    let (parts, body) = req.into_parts();
+
+    use http_body_util::BodyExt as _;
+
+    let body_bytes = body
+        .collect()
+        .await
+        .map_err(|_| "Failed to collect body")
+        .expect("Failed to collect body")
+        .to_bytes();
+
+    let boxed_body = BoxBody::new(http_body_util::Full::new(body_bytes));
+
+    let hyper_req = Request::from_parts(parts, boxed_body);
+
+    let directory_service = tower::service_fn({
+        let directory = services.directory.clone();
+        move |req: Request<BoxBody<Bytes, hyper::Error>>| {
+            let mut dir = directory.clone();
+            async move {
+                dir.call(req).await.map_err(|e| {
+                    Box::new(std::io::Error::other(e.to_string()))
+                        as Box<dyn std::error::Error + Send + Sync>
+                })
+            }
         }
+    });
+
+    let mut service_with_ohttp = ServiceBuilder::new()
+        .layer(OhttpGatewayLayer::new(ohttp_config))
+        .service(directory_service)
+        .boxed_clone();
+
+    match service_with_ohttp.ready().await {
+        Ok(ready_service) => match ready_service.call(hyper_req).await {
+            Ok(response) => {
+                let (parts, body) = response.into_parts();
+                let axum_body = axum::body::Body::new(body);
+                Response::from_parts(parts, axum_body).into_response()
+            }
+            Err(e) =>
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("Service error: {}", e)).into_response(),
+        },
+        Err(e) =>
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Service not ready: {}", e)).into_response(),
     }
 }
 

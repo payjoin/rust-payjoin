@@ -66,7 +66,7 @@ fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAc
 #[derive(Clone)]
 pub struct Service<D: Db> {
     db: D,
-    ohttp: ohttp::Server,
+    pub ohttp: ohttp::Server,
     sentinel_tag: SentinelTag,
 }
 

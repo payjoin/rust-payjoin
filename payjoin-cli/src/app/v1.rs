@@ -70,14 +70,7 @@ impl AppTrait for App {
             .create_v1_post_request();
         let http = http_agent(&self.config)?;
         let body = String::from_utf8(req.body.clone()).unwrap();
-        println!("Sending fallback request to {}", &req.url);
-        let response = http
-            .post(req.url)
-            .header("Content-Type", req.content_type)
-            .body(body.clone())
-            .send()
-            .await
-            .with_context(|| "HTTP request failed")?;
+
         let fallback_tx = Psbt::from_str(&body)
             .map_err(|e| anyhow!("Failed to load PSBT from base64: {}", e))?
             .extract_tx()?;
@@ -86,13 +79,41 @@ impl AppTrait for App {
             "Sent fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
-        let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
-            tracing::debug!("Error processing response: {e:?}");
-            anyhow!("Failed to process response {e}")
-        })?;
+        println!("Sending fallback request to {}", &req.url);
 
-        self.process_pj_response(psbt)?;
-        Ok(())
+        let response = match http
+            .post(req.url)
+            .header("Content-Type", req.content_type)
+            .body(body.clone())
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                tracing::debug!("HTTP request failed: {e:?}");
+                println!("Payjoin request failed: {e}. Broadcasting fallback transaction.");
+                let txid = self.wallet().broadcast_tx(&fallback_tx)?;
+                println!("Fallback transaction broadcasted. TXID: {txid}");
+                return Ok(());
+            }
+        };
+
+        // Try to process the payjoin response
+        match ctx.process_response(&response.bytes().await?) {
+            Ok(psbt) => {
+                self.process_pj_response(psbt)?;
+                Ok(())
+            }
+            Err(e) => {
+                tracing::debug!("Error processing response: {e:?}");
+                println!("Payjoin failed: {e}. Broadcasting fallback transaction.");
+
+                // Broadcast the fallback transaction
+                let txid = self.wallet().broadcast_tx(&fallback_tx)?;
+                println!("Fallback transaction broadcasted. TXID: {txid}");
+                Ok(())
+            }
+        }
     }
 
     #[allow(clippy::incompatible_msrv)]

@@ -206,6 +206,7 @@
                 cargo-watch
                 rust-analyzer
                 dart
+                cargo-fuzz
               ]
               ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
                 cargo-llvm-cov
@@ -257,7 +258,7 @@
                   cargoArtifacts = cargoArtifacts.${name};
                   partitions = 1;
                   partitionType = "count";
-                  cargoExtraArgs = "--locked --all-features";
+                  cargoExtraArgs = "--locked --workspace --all-features --exclude payjoin-fuzz";
                   NEXTEST_SHOW_PROGRESS = "none";
                   BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
                   NGINX_EXE = nixpkgs.lib.getExe' nginxWithStream "nginx";

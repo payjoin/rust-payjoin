@@ -11,6 +11,11 @@ async fn main() -> anyhow::Result<()> {
     let config_path = args.config.unwrap_or_else(|| "config.toml".into());
     let config = config::Config::from_file(&config_path)?;
 
+    #[cfg(feature = "acme")]
+    if config.acme.is_some() {
+        return payjoin_service::serve_acme(config).await;
+    }
+
     payjoin_service::serve(config).await
 }
 

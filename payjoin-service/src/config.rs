@@ -12,6 +12,31 @@ pub struct Config {
     pub storage_dir: PathBuf,
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub timeout: Duration,
+    #[cfg(feature = "acme")]
+    pub acme: Option<AcmeConfig>,
+}
+
+#[cfg(feature = "acme")]
+#[derive(Debug, Clone, Deserialize)]
+pub struct AcmeConfig {
+    pub domains: Vec<String>,
+    pub contact: Vec<String>,
+    pub cache_dir: PathBuf,
+    #[serde(default)]
+    pub directory_url: Option<String>,
+}
+
+#[cfg(feature = "acme")]
+impl From<AcmeConfig> for tokio_rustls_acme::AcmeConfig<std::io::Error, std::io::Error> {
+    fn from(acme_config: AcmeConfig) -> Self {
+        let config = tokio_rustls_acme::AcmeConfig::new(acme_config.domains)
+            .contact(acme_config.contact)
+            .cache(tokio_rustls_acme::caches::DirCache::new(acme_config.cache_dir));
+        match acme_config.directory_url {
+            Some(url) => config.directory(url),
+            None => config.directory_lets_encrypt(true),
+        }
+    }
 }
 
 impl Default for Config {
@@ -20,6 +45,8 @@ impl Default for Config {
             listener: "[::]:8080".parse().expect("valid default listener address"),
             storage_dir: PathBuf::from("./data"),
             timeout: Duration::from_secs(30),
+            #[cfg(feature = "acme")]
+            acme: None,
         }
     }
 }
@@ -39,7 +66,7 @@ impl Config {
             .add_source(File::from(path).required(false))
             // Add from the environment (with a prefix of PJ)
             // e.g. `PJ_PORT=9090` would set the `port`.
-            .add_source(config::Environment::with_prefix("PJ"))
+            .add_source(config::Environment::with_prefix("PJ").separator("_"))
             .build()?
             .try_deserialize()
     }

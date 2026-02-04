@@ -11,6 +11,9 @@ This assumes you already have Rust and Node.js installed.
 git clone https://github.com/payjoin/rust-payjoin.git
 cd rust-payjoin/payjoin-ffi/javascript
 
+# Clean out stale dependencies
+npm run clean
+rm -rf node_modules
 # Install dependencies
 cargo install wasm-bindgen-cli
 npm install

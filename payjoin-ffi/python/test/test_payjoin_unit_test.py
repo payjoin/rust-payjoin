@@ -106,5 +106,39 @@ class TestSenderPersistence(unittest.TestCase):
         )
 
 
+class TestValidation(unittest.TestCase):
+    def test_receiver_builder_rejects_bad_address(self):
+        with self.assertRaises(payjoin.ReceiverBuilderError):
+            payjoin.ReceiverBuilder(
+                "not-an-address",
+                "https://example.com",
+                payjoin.OhttpKeys.decode(
+                    bytes.fromhex(
+                        "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"
+                    )
+                ),
+            )
+
+    def test_input_pair_rejects_invalid_outpoint(self):
+        with self.assertRaises(payjoin.InputPairError):
+            txin = payjoin.PlainTxIn(
+                previous_output=payjoin.PlainOutPoint(txid="deadbeef", vout=0),
+                script_sig=bytes(),
+                sequence=0,
+                witness=[],
+            )
+            psbtin = payjoin.PlainPsbtInput(
+                witness_utxo=None, redeem_script=None, witness_script=None
+            )
+            payjoin.InputPair(txin, psbtin, None)
+
+    def test_sender_builder_rejects_bad_psbt(self):
+        uri = payjoin.Uri.parse(
+            "bitcoin:tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4?pj=https://example.com/pj"
+        ).check_pj_supported()
+        with self.assertRaises(payjoin.SenderInputError):
+            payjoin.SenderBuilder("not-a-psbt", uri)
+
+
 if __name__ == "__main__":
     unittest.main()

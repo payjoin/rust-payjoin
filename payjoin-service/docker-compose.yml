@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/logs:/var/log/nginx
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/certs:/etc/letsencrypt
+      - ./nginx/html:/var/www/html
+    networks:
+      - payjoin-network
+    depends_on:
+      - payjoin-directory
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./nginx/certs:/etc/letsencrypt
+      - ./nginx/html:/var/www/html
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/html --deploy-hook "nginx -s reload"; sleep 12h & wait $${!}; done;'
+    depends_on:
+      - nginx
+    networks:
+      - payjoin-network
+
+  payjoin-directory:
+    image: benalleng/payjoin-service:0.0.1
+    environment:
+      RUST_LOG: "info"
+      PJ_LISTENER: "0.0.0.0:8080"
+      PJ_STORAGE_DIR: "/data"
+      PJ_TIMEOUT: "30"
+    volumes:
+      - ./data:/data
+        #- ./ohttp_keys:/ohttp_keys
+    ports:
+      - "8080:8080"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500m"
+        max-file: "10"
+    depends_on:
+      - redis
+    networks:
+      - payjoin-network
+
+  redis:
+    image: redis:latest
+    volumes:
+      - redis-data:/data
+    networks:
+      - payjoin-network
+
+networks:
+  payjoin-network:
+
+volumes:
+  redis-data:

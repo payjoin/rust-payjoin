@@ -71,7 +71,7 @@ pub async fn serve_manual_tls(
         Some(tls) => {
             info!("Payjoin service listening on port {} with TLS", port);
             tokio::spawn(async move {
-                axum_server::from_tcp_rustls(listener.into_std()?, tls)
+                axum_server::from_tcp_rustls(listener.into_std()?, tls)?
                     .serve(app.into_make_service())
                     .await
                     .map_err(Into::into)

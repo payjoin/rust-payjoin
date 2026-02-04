@@ -20,7 +20,7 @@ _manual-tls = ["dep:axum-server", "dep:rustls", "ohttp-relay/_test-util"]
 [dependencies]
 anyhow = "1.0"
 axum = "0.8"
-axum-server = { version = "0.7", features = [
+axum-server = { version = "0.8", features = [
   "tls-rustls-no-provider",
 ], optional = true }
 clap = { version = "4.5", features = ["derive", "env"] }

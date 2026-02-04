@@ -256,5 +256,15 @@ void main() {
         reason: "sender should be in WithReplyKey state",
       );
     });
+
+    test("Validation sender builder rejects bad psbt", () {
+      final uri = payjoin.Uri.parse(
+        "bitcoin:tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4?pj=https://example.com/pj",
+      ).checkPjSupported();
+      expect(
+        () => payjoin.SenderBuilder("not-a-psbt", uri),
+        throwsA(isA<payjoin.SenderInputException>()),
+      );
+    });
   });
 }

@@ -332,4 +332,13 @@ describe("Validation", () => {
             new payjoin.InputPair(txin, psbtIn, undefined);
         });
     });
+
+    test("sender builder rejects bad psbt", () => {
+        assert.throws(() => {
+            new payjoin.SenderBuilder(
+                "not-a-psbt",
+                "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX",
+            );
+        });
+    });
 });

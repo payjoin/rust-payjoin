@@ -450,6 +450,95 @@ async function processReceiverProposal(
     throw new Error(`Unknown receiver state`);
 }
 
+function testInvalidPrimitives(): void {
+    const tooLargeAmount = 21000000n * 100000000n + 1n;
+
+    // Invalid outpoint (txid too long) should fail before amount checks.
+    const invalidOutpointTxIn = payjoin.PlainTxIn.create({
+        previousOutput: payjoin.PlainOutPoint.create({
+            txid: "00".repeat(64), // 64 bytes -> invalid
+            vout: 0,
+        }),
+        scriptSig: new Uint8Array([]).buffer,
+        sequence: 0,
+        witness: [],
+    });
+    const txout = payjoin.PlainTxOut.create({
+        valueSat: tooLargeAmount,
+        scriptPubkey: new Uint8Array([0x6a]).buffer,
+    });
+    const psbtIn = payjoin.PlainPsbtInput.create({
+        witnessUtxo: txout,
+        redeemScript: undefined,
+        witnessScript: undefined,
+    });
+    assert.throws(() => {
+        new payjoin.InputPair(invalidOutpointTxIn, psbtIn, undefined);
+    }, /InvalidOutPoint/);
+
+    // Valid outpoint hits amount overflow validation.
+    const amountOverflowTxIn = payjoin.PlainTxIn.create({
+        previousOutput: payjoin.PlainOutPoint.create({
+            txid: "00".repeat(32), // valid 32-byte txid
+            vout: 0,
+        }),
+        scriptSig: new Uint8Array([]).buffer,
+        sequence: 0,
+        witness: [],
+    });
+    assert.throws(() => {
+        new payjoin.InputPair(amountOverflowTxIn, psbtIn, undefined);
+    }, /(Amount out of range|AmountOutOfRange)/);
+
+    // Oversized script_pubkey should fail.
+    const hugeScript = new Uint8Array(10_001).fill(0x51).buffer;
+    const oversizedTxOut = payjoin.PlainTxOut.create({
+        valueSat: 1n,
+        scriptPubkey: hugeScript,
+    });
+    const oversizedPsbtIn = payjoin.PlainPsbtInput.create({
+        witnessUtxo: oversizedTxOut,
+        redeemScript: undefined,
+        witnessScript: undefined,
+    });
+    assert.throws(() => {
+        new payjoin.InputPair(amountOverflowTxIn, oversizedPsbtIn, undefined);
+    }, /(ScriptTooLarge|script too large|InvalidPrimitive)/);
+
+    // Weight must be positive and <= block weight.
+    const smallTxOut = payjoin.PlainTxOut.create({
+        valueSat: 1n,
+        scriptPubkey: new Uint8Array([0x6a]).buffer,
+    });
+    const smallPsbtIn = payjoin.PlainPsbtInput.create({
+        witnessUtxo: smallTxOut,
+        redeemScript: undefined,
+        witnessScript: undefined,
+    });
+    assert.throws(() => {
+        new payjoin.InputPair(
+            amountOverflowTxIn,
+            smallPsbtIn,
+            payjoin.PlainWeight.create({ weightUnits: 0n }),
+        );
+    }, /(WeightOutOfRange|Weight out of range|InvalidPsbtInput|InvalidPrimitive)/);
+
+    const pjUri = payjoin.Uri.parse(
+        "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com",
+    ).checkPjSupported();
+    const psbt =
+        "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+    assert.throws(() => {
+        new payjoin.SenderBuilder(psbt, pjUri).buildRecommended(
+            18446744073709551615n,
+        );
+    }, /(Fee rate out of range|RuntimeError)/);
+
+    assert.throws(() => {
+        pjUri.setAmountSats(tooLargeAmount);
+    }, /(Amount out of range|AmountOutOfRange)/);
+}
+
 async function testIntegrationV2ToV2(): Promise<void> {
     const env = testUtils.initBitcoindSenderReceiver();
     const bitcoind = env.getBitcoind();
@@ -589,6 +678,7 @@ async function testIntegrationV2ToV2(): Promise<void> {
 
 async function runTests(): Promise<void> {
     await uniffiInitAsync();
+    testInvalidPrimitives();
     await testIntegrationV2ToV2();
 }
 

@@ -13,10 +13,10 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "acme")]
     if config.acme.is_some() {
-        return payjoin_service::serve_acme(config).await;
+        return payjoin_service::serve_http_and_acme_tls(config).await;
     }
 
-    payjoin_service::serve(config).await
+    payjoin_service::serve_http_only(config).await
 }
 
 fn init_tracing() {

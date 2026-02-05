@@ -1,8 +1,11 @@
 //! Unified Payjoin Directory and OHTTP Relay service.
 //!
-//! This crate exposes helpers for running the service with plain HTTP only,
-//! or with HTTPS backed by ACME-managed certificates (recommended for production
-//! when running without a reverse proxy).
+//! ## Deployment modes
+//!
+//! - Recommended: HTTPS with ACME-managed certificates (no reverse proxy)
+//!   - Use `serve_http_and_acme_tls` and configure `http_listener`, `https_listener`, and `acme`.
+//! - Behind a reverse proxy (TLS termination outside the service)
+//!   - Use `serve_http_only` and expose only `http_listener`.
 
 use axum::extract::State;
 use axum::http::Method;
@@ -24,7 +27,8 @@ struct Services {
     relay: ohttp_relay::Service,
 }
 
-pub async fn serve(config: Config) -> anyhow::Result<()> {
+/// Serve HTTP only on `config.http_listener`.
+pub async fn serve_http_only(config: Config) -> anyhow::Result<()> {
     let sentinel_tag = generate_sentinel_tag();
 
     let services = Services {
@@ -33,7 +37,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     };
     let app = Router::new().fallback(route_request).with_state(services);
 
-    serve_http(config.http_listener, app).await
+    serve_http_listener(config.http_listener, app).await
 }
 
 /// Serves payjoin-service with manual TLS configuration.
@@ -86,12 +90,12 @@ pub async fn serve_manual_tls(
     Ok((port, handle))
 }
 
+/// Serve HTTP on `config.http_listener` and HTTPS (ACME) on `config.https_listener`.
 #[cfg(feature = "acme")]
-pub async fn serve_acme(config: Config) -> anyhow::Result<()> {
-    let acme_config = config
-        .acme
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("ACME configuration is required for serve_acme"))?;
+pub async fn serve_http_and_acme_tls(config: Config) -> anyhow::Result<()> {
+    let acme_config = config.acme.clone().ok_or_else(|| {
+        anyhow::anyhow!("ACME configuration is required for serve_http_and_acme_tls")
+    })?;
 
     let sentinel_tag = generate_sentinel_tag();
 
@@ -104,13 +108,13 @@ pub async fn serve_acme(config: Config) -> anyhow::Result<()> {
     let http_listener = config.http_listener.clone();
     let https_listener = config.https_listener.clone();
 
-    let https_future = serve_acme_https(https_listener, app.clone(), acme_config);
-    let http_future = serve_http(http_listener, app);
+    let https_future = serve_acme_tls_listener(https_listener, app.clone(), acme_config);
+    let http_future = serve_http_listener(http_listener, app);
 
     tokio::try_join!(https_future, http_future).map(|_| ())
 }
 
-async fn serve_http(listener_addr: ListenerAddress, app: Router) -> anyhow::Result<()> {
+async fn serve_http_listener(listener_addr: ListenerAddress, app: Router) -> anyhow::Result<()> {
     let listener =
         Listener::bind(&listener_addr, &SystemOptions::default(), &UserOptions::default()).await?;
     info!("Payjoin service listening on {:?}", listener.local_addr());
@@ -119,7 +123,7 @@ async fn serve_http(listener_addr: ListenerAddress, app: Router) -> anyhow::Resu
 }
 
 #[cfg(feature = "acme")]
-async fn serve_acme_https(
+async fn serve_acme_tls_listener(
     listener_addr: ListenerAddress,
     app: Router,
     acme_config: config::AcmeConfig,

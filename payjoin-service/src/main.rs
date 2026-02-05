@@ -11,7 +11,12 @@ async fn main() -> anyhow::Result<()> {
     let config_path = args.config.unwrap_or_else(|| "config.toml".into());
     let config = config::Config::from_file(&config_path)?;
 
-    payjoin_service::serve(config).await
+    #[cfg(feature = "acme")]
+    if config.acme.is_some() {
+        return payjoin_service::serve_http_and_acme_tls(config).await;
+    }
+
+    payjoin_service::serve_http_only(config).await
 }
 
 fn init_tracing() {

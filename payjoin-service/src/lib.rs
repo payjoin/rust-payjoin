@@ -1,3 +1,12 @@
+//! Unified Payjoin Directory and OHTTP Relay service.
+//!
+//! ## Deployment modes
+//!
+//! - Recommended: HTTPS with ACME-managed certificates (no reverse proxy)
+//!   - Use `serve_http_and_acme_tls` and configure `http_listener`, `https_listener`, and `acme`.
+//! - Behind a reverse proxy (TLS termination outside the service)
+//!   - Use `serve_http_only` and expose only `http_listener`.
+
 use axum::extract::State;
 use axum::http::Method;
 use axum::response::{IntoResponse, Response};
@@ -5,7 +14,7 @@ use axum::Router;
 use config::Config;
 use ohttp_relay::SentinelTag;
 use rand::Rng;
-use tokio_listener::{Listener, SystemOptions, UserOptions};
+use tokio_listener::{Listener, ListenerAddress, SystemOptions, UserOptions};
 use tower::Service;
 use tracing::info;
 
@@ -18,7 +27,8 @@ struct Services {
     relay: ohttp_relay::Service,
 }
 
-pub async fn serve(config: Config) -> anyhow::Result<()> {
+/// Serve HTTP only on `config.http_listener`.
+pub async fn serve_http_only(config: Config) -> anyhow::Result<()> {
     let sentinel_tag = generate_sentinel_tag();
 
     let services = Services {
@@ -27,18 +37,12 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     };
     let app = Router::new().fallback(route_request).with_state(services);
 
-    let listener =
-        Listener::bind(&config.listener, &SystemOptions::default(), &UserOptions::default())
-            .await?;
-    info!("Payjoin service listening on {:?}", listener.local_addr());
-    axum::serve(listener, app).await?;
-
-    Ok(())
+    serve_http_listener(config.http_listener, app).await
 }
 
 /// Serves payjoin-service with manual TLS configuration.
 ///
-/// Binds to `config.listener` (use port 0 to let the OS assign a free port) and returns
+/// Binds to `config.https_listener` (use port 0 to let the OS assign a free port) and returns
 /// the actual bound port along with a task handle.
 ///
 /// If `tls_config` is provided, the server will use TLS for incoming connections.
@@ -60,7 +64,7 @@ pub async fn serve_manual_tls(
     let app = Router::new().fallback(route_request).with_state(services);
 
     let addr: SocketAddr = config
-        .listener
+        .https_listener
         .to_string()
         .parse()
         .map_err(|_| anyhow::anyhow!("TLS mode requires a TCP address (e.g., '[::]:8080')"))?;
@@ -71,7 +75,7 @@ pub async fn serve_manual_tls(
         Some(tls) => {
             info!("Payjoin service listening on port {} with TLS", port);
             tokio::spawn(async move {
-                axum_server::from_tcp_rustls(listener.into_std()?, tls)
+                axum_server::from_tcp_rustls(listener.into_std()?, tls)?
                     .serve(app.into_make_service())
                     .await
                     .map_err(Into::into)
@@ -84,6 +88,75 @@ pub async fn serve_manual_tls(
     };
 
     Ok((port, handle))
+}
+
+/// Serve HTTP on `config.http_listener` and HTTPS (ACME) on `config.https_listener`.
+#[cfg(feature = "acme")]
+pub async fn serve_http_and_acme_tls(config: Config) -> anyhow::Result<()> {
+    let acme_config = config.acme.clone().ok_or_else(|| {
+        anyhow::anyhow!("ACME configuration is required for serve_http_and_acme_tls")
+    })?;
+
+    let sentinel_tag = generate_sentinel_tag();
+
+    let services = Services {
+        directory: init_directory(&config, sentinel_tag).await?,
+        relay: ohttp_relay::Service::new(sentinel_tag).await,
+    };
+    let app = Router::new().fallback(route_request).with_state(services);
+
+    let http_listener = config.http_listener.clone();
+    let https_listener = config.https_listener.clone();
+
+    let https_future = serve_acme_tls_listener(https_listener, app.clone(), acme_config);
+    let http_future = serve_http_listener(http_listener, app);
+
+    tokio::try_join!(https_future, http_future).map(|_| ())
+}
+
+async fn serve_http_listener(listener_addr: ListenerAddress, app: Router) -> anyhow::Result<()> {
+    let listener =
+        Listener::bind(&listener_addr, &SystemOptions::default(), &UserOptions::default()).await?;
+    info!("Payjoin service listening on {:?}", listener.local_addr());
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+#[cfg(feature = "acme")]
+async fn serve_acme_tls_listener(
+    listener_addr: ListenerAddress,
+    app: Router,
+    acme_config: config::AcmeConfig,
+) -> anyhow::Result<()> {
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+
+    let addr: SocketAddr = listener_addr
+        .to_string()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("ACME mode requires a TCP address (e.g., '[::]:443')"))?;
+
+    let acme: tokio_rustls_acme::AcmeConfig<_, _> = acme_config.into();
+    let mut state = acme.state();
+    let rustls_config = Arc::new(
+        rustls::ServerConfig::builder().with_no_client_auth().with_cert_resolver(state.resolver()),
+    );
+    let acceptor = state.axum_acceptor(rustls_config);
+
+    tokio::spawn(async move {
+        use tokio_stream::StreamExt;
+        loop {
+            match state.next().await {
+                Some(Ok(ok)) => info!("ACME event: {:?}", ok),
+                Some(Err(err)) => tracing::error!("ACME error: {:?}", err),
+                None => break,
+            }
+        }
+    });
+
+    info!("Payjoin service listening on {} with ACME TLS", addr);
+    axum_server::bind(addr).acceptor(acceptor).serve(app.into_make_service()).await?;
+    Ok(())
 }
 
 /// Generate random sentinel tag at startup.
@@ -162,7 +235,6 @@ fn is_relay_request(req: &axum::extract::Request) -> bool {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::time::Duration;
 
     use axum_server::tls_rustls::RustlsConfig;
     use payjoin_test_utils::{http_agent, local_cert_key, wait_for_service_ready};
@@ -178,9 +250,10 @@ mod tests {
     ) -> (u16, tokio::task::JoinHandle<anyhow::Result<()>>, tempfile::TempDir) {
         let tempdir = tempdir().unwrap();
         let config = Config {
-            listener: "[::]:0".parse().expect("valid listener address"),
+            http_listener: "[::]:0".parse().expect("valid listener address"),
+            https_listener: "[::]:0".parse().expect("valid listener address"),
             storage_dir: tempdir.path().to_path_buf(),
-            timeout: Duration::from_secs(2),
+            ..Default::default()
         };
 
         let mut root_store = RootCertStore::empty();

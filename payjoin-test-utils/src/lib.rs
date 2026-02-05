@@ -118,7 +118,8 @@ pub async fn init_directory(
 > {
     let tempdir = tempdir()?;
     let config = payjoin_service::config::Config {
-        listener: "[::]:0".parse().expect("valid listener address"), // let OS assign a free port
+        http_listener: "[::]:0".parse().expect("valid listener address"),
+        https_listener: "[::]:0".parse().expect("valid listener address"),
         storage_dir: tempdir.path().to_path_buf(),
         ..Default::default()
     };
@@ -145,7 +146,8 @@ async fn init_ohttp_relay(
 > {
     let tempdir = tempdir()?;
     let config = payjoin_service::config::Config {
-        listener: "[::]:0".parse().expect("valid listener address"), // let OS assign a free port
+        http_listener: "[::]:0".parse().expect("valid listener address"),
+        https_listener: "[::]:0".parse().expect("valid listener address"),
         storage_dir: tempdir.path().to_path_buf(),
         ..Default::default()
     };

@@ -1,3 +1,9 @@
+//! Unified Payjoin Directory and OHTTP Relay service.
+//!
+//! This crate exposes helpers for running the service with plain HTTP only,
+//! or with HTTPS backed by ACME-managed certificates (recommended for production
+//! when running without a reverse proxy).
+
 use axum::extract::State;
 use axum::http::Method;
 use axum::response::{IntoResponse, Response};
@@ -5,7 +11,7 @@ use axum::Router;
 use config::Config;
 use ohttp_relay::SentinelTag;
 use rand::Rng;
-use tokio_listener::{Listener, SystemOptions, UserOptions};
+use tokio_listener::{Listener, ListenerAddress, SystemOptions, UserOptions};
 use tower::Service;
 use tracing::info;
 
@@ -27,18 +33,12 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     };
     let app = Router::new().fallback(route_request).with_state(services);
 
-    let listener =
-        Listener::bind(&config.listener, &SystemOptions::default(), &UserOptions::default())
-            .await?;
-    info!("Payjoin service listening on {:?}", listener.local_addr());
-    axum::serve(listener, app).await?;
-
-    Ok(())
+    serve_http(config.http_listener, app).await
 }
 
 /// Serves payjoin-service with manual TLS configuration.
 ///
-/// Binds to `config.listener` (use port 0 to let the OS assign a free port) and returns
+/// Binds to `config.https_listener` (use port 0 to let the OS assign a free port) and returns
 /// the actual bound port along with a task handle.
 ///
 /// If `tls_config` is provided, the server will use TLS for incoming connections.
@@ -60,7 +60,7 @@ pub async fn serve_manual_tls(
     let app = Router::new().fallback(route_request).with_state(services);
 
     let addr: SocketAddr = config
-        .listener
+        .https_listener
         .to_string()
         .parse()
         .map_err(|_| anyhow::anyhow!("TLS mode requires a TCP address (e.g., '[::]:8080')"))?;
@@ -86,20 +86,12 @@ pub async fn serve_manual_tls(
     Ok((port, handle))
 }
 
-/// Serves payjoin-service with ACME-managed TLS certificates.
-///
-/// Uses `tokio-rustls-acme` to automatically obtain and renew TLS
-/// certificates from Let's Encrypt via the TLS-ALPN-01 challenge.
 #[cfg(feature = "acme")]
 pub async fn serve_acme(config: Config) -> anyhow::Result<()> {
-    use std::net::SocketAddr;
-    use std::sync::Arc;
-
     let acme_config = config
         .acme
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("ACME configuration is required for serve_acme"))?
-        .clone();
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("ACME configuration is required for serve_acme"))?;
 
     let sentinel_tag = generate_sentinel_tag();
 
@@ -109,8 +101,33 @@ pub async fn serve_acme(config: Config) -> anyhow::Result<()> {
     };
     let app = Router::new().fallback(route_request).with_state(services);
 
-    let addr: SocketAddr = config
-        .listener
+    let http_listener = config.http_listener.clone();
+    let https_listener = config.https_listener.clone();
+
+    let https_future = serve_acme_https(https_listener, app.clone(), acme_config);
+    let http_future = serve_http(http_listener, app);
+
+    tokio::try_join!(https_future, http_future).map(|_| ())
+}
+
+async fn serve_http(listener_addr: ListenerAddress, app: Router) -> anyhow::Result<()> {
+    let listener =
+        Listener::bind(&listener_addr, &SystemOptions::default(), &UserOptions::default()).await?;
+    info!("Payjoin service listening on {:?}", listener.local_addr());
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+#[cfg(feature = "acme")]
+async fn serve_acme_https(
+    listener_addr: ListenerAddress,
+    app: Router,
+    acme_config: config::AcmeConfig,
+) -> anyhow::Result<()> {
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+
+    let addr: SocketAddr = listener_addr
         .to_string()
         .parse()
         .map_err(|_| anyhow::anyhow!("ACME mode requires a TCP address (e.g., '[::]:443')"))?;
@@ -122,7 +139,6 @@ pub async fn serve_acme(config: Config) -> anyhow::Result<()> {
     );
     let acceptor = state.axum_acceptor(rustls_config);
 
-    // Drive ACME cert renewal in background
     tokio::spawn(async move {
         use tokio_stream::StreamExt;
         loop {
@@ -230,7 +246,8 @@ mod tests {
     ) -> (u16, tokio::task::JoinHandle<anyhow::Result<()>>, tempfile::TempDir) {
         let tempdir = tempdir().unwrap();
         let config = Config {
-            listener: "[::]:0".parse().expect("valid listener address"),
+            http_listener: "[::]:0".parse().expect("valid listener address"),
+            https_listener: "[::]:0".parse().expect("valid listener address"),
             storage_dir: tempdir.path().to_path_buf(),
             ..Default::default()
         };

@@ -8,7 +8,8 @@ use tokio_listener::ListenerAddress;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub listener: ListenerAddress,
+    pub http_listener: ListenerAddress,
+    pub https_listener: ListenerAddress,
     pub storage_dir: PathBuf,
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub timeout: Duration,
@@ -42,7 +43,8 @@ impl From<AcmeConfig> for tokio_rustls_acme::AcmeConfig<std::io::Error, std::io:
 impl Default for Config {
     fn default() -> Self {
         Self {
-            listener: "[::]:8080".parse().expect("valid default listener address"),
+            http_listener: "[::]:8080".parse().expect("valid default listener address"),
+            https_listener: "[::]:4433".parse().expect("valid default listener address"),
             storage_dir: PathBuf::from("./data"),
             timeout: Duration::from_secs(30),
             #[cfg(feature = "acme")]

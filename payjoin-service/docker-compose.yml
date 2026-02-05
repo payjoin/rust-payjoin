@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 version: '3.8'
 
 services:
@@ -61,3 +62,31 @@ networks:
 
 volumes:
   redis-data:
+||||||| Stash base
+=======
+version: "3.8"
+
+services:
+  payjoin-directory:
+    image: benalleng/payjoin-service:e060a78
+    command: ["--config", "/config/config.toml"]
+    environment:
+      RUST_LOG: "info"
+    volumes:
+      - ./config.toml:/config/config.toml:ro
+      - ./data:/data
+      - ./acme:/acme
+    ports:
+      - "443:443"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500m"
+        max-file: "10"
+    networks:
+      - payjoin-network
+
+networks:
+  payjoin-network:
+
+>>>>>>> Stashed changes

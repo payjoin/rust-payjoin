@@ -115,12 +115,14 @@ pub async fn serve_acme(config: Config) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("ACME configuration is required for serve_acme"))?;
 
     let sentinel_tag = generate_sentinel_tag();
+    let metrics = MetricsService::new()?;
 
     let services = Services {
         directory: init_directory(&config, sentinel_tag).await?,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
     };
-    let app = Router::new().fallback(route_request).with_state(services);
+    let app = build_app(services, metrics.clone());
+    let _ = spawn_metrics_server(config.metrics.listener.clone(), metrics).await?;
 
     let addr: SocketAddr = config
         .listener

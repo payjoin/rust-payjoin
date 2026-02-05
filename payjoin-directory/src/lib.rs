@@ -7,7 +7,7 @@ use anyhow::Result;
 use futures::StreamExt;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full};
-use hyper::body::{Body, Bytes, Incoming};
+use hyper::body::{Body, Bytes};
 use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use hyper::server::conn::http1;
 use hyper::{Method, Request, Response, StatusCode, Uri};
@@ -27,7 +27,6 @@ pub mod key_config;
 use ohttp_relay::SentinelTag;
 
 pub use crate::key_config::*;
-use crate::metrics::Metrics;
 
 const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
 const POLY1305_TAG_SIZE: usize = 16;
@@ -43,7 +42,6 @@ pub(crate) mod db;
 
 pub mod cli;
 pub mod config;
-pub mod metrics;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -69,7 +67,6 @@ fn init_tls_acceptor(cert_key: (Vec<u8>, Vec<u8>)) -> Result<tokio_rustls::TlsAc
 pub struct Service<D: Db> {
     db: D,
     ohttp: ohttp::Server,
-    metrics: Metrics,
     sentinel_tag: SentinelTag,
 }
 
@@ -94,8 +91,8 @@ where
 }
 
 impl<D: Db> Service<D> {
-    pub fn new(db: D, ohttp: ohttp::Server, metrics: Metrics, sentinel_tag: SentinelTag) -> Self {
-        Self { db, ohttp, metrics, sentinel_tag }
+    pub fn new(db: D, ohttp: ohttp::Server, sentinel_tag: SentinelTag) -> Self {
+        Self { db, ohttp, sentinel_tag }
     }
 
     #[cfg(feature = "_manual-tls")]
@@ -111,7 +108,6 @@ impl<D: Db> Service<D> {
             let tls_acceptor = tls_acceptor.clone();
             let service = self.clone();
             tokio::spawn(async move {
-                service.metrics.record_connection();
                 let tls_stream = match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => tls_stream,
                     Err(e) => {
@@ -172,7 +168,6 @@ impl<D: Db> Service<D> {
     where
         I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
     {
-        self.metrics.record_connection();
         let hyper_service = TowerToHyperService::new(self.clone());
         if let Err(err) = http1::Builder::new()
             .serve_connection(TokioIo::new(stream), hyper_service)
@@ -440,63 +435,6 @@ impl<D: Db> Service<D> {
             .insert(CONTENT_TYPE, HeaderValue::from_static("application/x-ohttp-allowed-purposes"));
 
         res
-    }
-    async fn handle_metrics(&self) -> Response<BoxBody<Bytes, hyper::Error>> {
-        match self.metrics.generate_metrics() {
-            Ok(metrics_data) => {
-                let mut response = Response::new(full(metrics_data));
-                response.headers_mut().insert(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static("text/plain; version=0.0.4; charset=utf-8"),
-                );
-                response
-            }
-            Err(e) => {
-                error!("failed to generate metrics: {}", e);
-                let mut response = Response::new(full("Error generating metrics"));
-                *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                response
-            }
-        }
-    }
-
-    pub async fn serve_metrics_tcp(
-        &self,
-        listener: tokio::net::TcpListener,
-    ) -> Result<(), BoxError> {
-        while let Ok((stream, _)) = listener.accept().await {
-            let io = TokioIo::new(stream);
-            let service = self.clone();
-            tokio::spawn(async move {
-                let service = hyper::service::service_fn(move |req| {
-                    let this = service.clone();
-                    async move { this.serve_metrics_request(req).await }
-                });
-                if let Err(err) =
-                    http1::Builder::new().serve_connection(io, service).with_upgrades().await
-                {
-                    error!("Error serving connection: {:?}", err);
-                }
-            });
-        }
-
-        Ok(())
-    }
-
-    async fn serve_metrics_request(
-        &self,
-        req: Request<Incoming>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, anyhow::Error> {
-        let path = req.uri().path().to_string();
-        let (parts, _body) = req.into_parts();
-
-        let path_segments: Vec<&str> = path.split('/').collect();
-        let response = match (parts.method, path_segments.as_slice()) {
-            (Method::GET, ["", ""]) => self.handle_metrics().await,
-            _ => not_found(),
-        };
-
-        Ok(response)
     }
 }
 

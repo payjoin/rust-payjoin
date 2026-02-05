@@ -85,7 +85,7 @@ pub async fn serve_manual_tls(
         Some(tls) => {
             info!("Payjoin service listening on port {} with TLS", port);
             tokio::spawn(async move {
-                axum_server::from_tcp_rustls(listener.into_std()?, tls)
+                axum_server::from_tcp_rustls(listener.into_std()?, tls)?
                     .serve(app.into_make_service())
                     .await
                     .map_err(Into::into)
@@ -98,6 +98,58 @@ pub async fn serve_manual_tls(
     };
 
     Ok((port, metrics_port, handle))
+}
+
+/// Serves payjoin-service with ACME-managed TLS certificates.
+///
+/// Uses `tokio-rustls-acme` to automatically obtain and renew TLS
+/// certificates from Let's Encrypt via the TLS-ALPN-01 challenge.
+#[cfg(feature = "acme")]
+pub async fn serve_acme(config: Config) -> anyhow::Result<()> {
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+
+    let acme_config = config
+        .acme
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("ACME configuration is required for serve_acme"))?;
+
+    let sentinel_tag = generate_sentinel_tag();
+
+    let services = Services {
+        directory: init_directory(&config, sentinel_tag).await?,
+        relay: ohttp_relay::Service::new(sentinel_tag).await,
+    };
+    let app = Router::new().fallback(route_request).with_state(services);
+
+    let addr: SocketAddr = config
+        .listener
+        .to_string()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("ACME mode requires a TCP address (e.g., '[::]:443')"))?;
+
+    let acme = acme_config.into_rustls_config(&config.storage_dir);
+    let mut state = acme.state();
+    let rustls_config = Arc::new(
+        rustls::ServerConfig::builder().with_no_client_auth().with_cert_resolver(state.resolver()),
+    );
+    let acceptor = state.axum_acceptor(rustls_config);
+
+    // Drive ACME cert renewal in background
+    tokio::spawn(async move {
+        use tokio_stream::StreamExt;
+        loop {
+            match state.next().await {
+                Some(Ok(ok)) => info!("ACME event: {:?}", ok),
+                Some(Err(err)) => tracing::error!("ACME error: {:?}", err),
+                None => break,
+            }
+        }
+    });
+
+    info!("Payjoin service listening on {} with ACME TLS", addr);
+    axum_server::bind(addr).acceptor(acceptor).serve(app.into_make_service()).await?;
+    Ok(())
 }
 
 /// Generate random sentinel tag at startup.
@@ -240,14 +292,12 @@ mod tests {
         key_der: Vec<u8>,
     ) -> (u16, u16, tokio::task::JoinHandle<anyhow::Result<()>>, tempfile::TempDir) {
         let tempdir = tempdir().unwrap();
-        let config = Config {
-            listener: "[::]:0".parse().expect("valid listener address"),
-            storage_dir: tempdir.path().to_path_buf(),
-            timeout: Duration::from_secs(2),
-            metrics: config::MetricsConfig {
-                listener: "[::]:0".parse().expect("valid metrics listener address"),
-            },
-        };
+        let config = Config::new(
+            "[::]:0".parse().expect("valid listener address"),
+            tempdir.path().to_path_buf(),
+            Duration::from_secs(2),
+            "[::]:0".parse().expect("valid metrics listener address"),
+        );
 
         let mut root_store = RootCertStore::empty();
         root_store.add(CertificateDer::from(cert_der.clone())).unwrap();

@@ -13,6 +13,8 @@ pub struct Config {
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub timeout: Duration,
     pub metrics: MetricsConfig,
+    #[cfg(feature = "acme")]
+    pub acme: Option<AcmeConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -27,6 +29,32 @@ impl Default for MetricsConfig {
     }
 }
 
+#[cfg(feature = "acme")]
+#[derive(Debug, Clone, Deserialize)]
+pub struct AcmeConfig {
+    pub domains: Vec<String>,
+    pub contact: Vec<String>,
+    #[serde(default)]
+    pub directory_url: Option<String>,
+}
+
+#[cfg(feature = "acme")]
+impl AcmeConfig {
+    pub fn into_rustls_config(
+        self,
+        storage_dir: &Path,
+    ) -> tokio_rustls_acme::AcmeConfig<std::io::Error, std::io::Error> {
+        let cache_dir = storage_dir.join("acme");
+        let config = tokio_rustls_acme::AcmeConfig::new(self.domains)
+            .contact(self.contact)
+            .cache(tokio_rustls_acme::caches::DirCache::new(cache_dir));
+        match self.directory_url {
+            Some(url) => config.directory(url),
+            None => config.directory_lets_encrypt(true),
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -34,6 +62,8 @@ impl Default for Config {
             storage_dir: PathBuf::from("./data"),
             timeout: Duration::from_secs(30),
             metrics: MetricsConfig::default(),
+            #[cfg(feature = "acme")]
+            acme: None,
         }
     }
 }
@@ -47,13 +77,38 @@ where
 }
 
 impl Config {
+    pub fn new(
+        listener: ListenerAddress,
+        storage_dir: PathBuf,
+        timeout: Duration,
+        metrics_listener: ListenerAddress,
+    ) -> Self {
+        Self {
+            listener,
+            storage_dir,
+            timeout,
+            metrics: MetricsConfig { listener: metrics_listener },
+            #[cfg(feature = "acme")]
+            acme: None,
+        }
+    }
+
     pub fn from_file(path: &Path) -> Result<Self, ConfigError> {
         config::Config::builder()
             // Add from optional config file
             .add_source(File::from(path).required(false))
             // Add from the environment (with a prefix of PJ)
-            // e.g. `PJ_PORT=9090` would set the `port`.
-            .add_source(config::Environment::with_prefix("PJ"))
+            // Nested values are separated with a double underscore,
+            // e.g. `PJ_ACME__DOMAINS=payjo.in`
+            .add_source(
+                config::Environment::with_prefix("PJ")
+                    .separator("__")
+                    .prefix_separator("_")
+                    .list_separator(",")
+                    .with_list_parse_key("acme.domains")
+                    .with_list_parse_key("acme.contact")
+                    .try_parsing(true),
+            )
             .build()?
             .try_deserialize()
     }

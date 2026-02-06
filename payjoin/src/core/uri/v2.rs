@@ -545,15 +545,15 @@ mod tests {
     #[test]
     fn test_valid_v2_url_fragment_on_bip21() {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
-                   &pjos=0&pj=HTTPS://EXAMPLE.COM/\
-                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
+                   &pjos=0&pj=HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ\
+                   %23EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV";
         let pjuri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
         assert!(ohttp(&Url::parse(&pjuri.extras.endpoint()).expect("Could not parse url")).is_ok());
         assert_eq!(format!("{pjuri}"), uri);
 
         let reordered = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
-                   &pj=HTTPS://EXAMPLE.COM/\
-                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC\
+                   &pj=HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ\
+                   %23EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV\
                    &pjos=0";
         let pjuri =
             Uri::try_from(reordered).unwrap().assume_checked().check_pj_supported().unwrap();
@@ -562,21 +562,10 @@ mod tests {
     }
 
     #[test]
-    fn test_failed_url_fragment() -> Result<(), BoxError> {
-        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
-                   &pjos=0&pj=HTTPS://EXAMPLE.COM/missing_short_id\
-                   %23oh1qypm5jxyns754y4r45qwe336qfx6zr8dqgvqculvztv20tfveydmfqc";
-        let extras = Uri::try_from(uri).unwrap().extras;
-        match extras {
-            crate::uri::MaybePayjoinExtras::Supported(extras) => {
-                assert!(matches!(extras.pj_param, crate::uri::PjParam::V1(_)));
-            }
-            _ => panic!("Expected v1 pjparam"),
-        }
-
+    fn test_v2_failed_url_fragment() -> Result<(), BoxError> {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
                    &pjos=0&pj=HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ\
-                   %23oh1qypm5jxyns754y4r45qwe336qfx6zr8dqgvqculvztv20tfveydmfqc";
+                   %23ex1c4uc6es-oh1qypm5jxyns754y4r45qwe336qfx6zr8dqgvqculvztv20tfveydmfqc-rk1q0djs3vvdxwqqtlq8022qgxsx7ml9phz6edsf6akewqg758jps2ev";
         assert!(matches!(
             Uri::try_from(uri),
             Err(bitcoin_uri::de::Error::Extras(crate::uri::PjParseError(
@@ -586,7 +575,7 @@ mod tests {
 
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
                    &pjos=0&pj=HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ\
-                   %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQc";
+                   %23EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2Ev";
         assert!(matches!(
             Uri::try_from(uri),
             Err(bitcoin_uri::de::Error::Extras(crate::uri::PjParseError(

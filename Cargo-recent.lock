@@ -2658,6 +2658,7 @@ dependencies = [
 name = "payjoin-ffi"
 version = "0.24.0"
 dependencies = [
+ "async-trait",
  "bdk",
  "bitcoin-ohttp",
  "getrandom 0.2.15",
@@ -4432,7 +4433,7 @@ dependencies = [
 [[package]]
 name = "uniffi-dart"
 version = "0.1.0"
-source = "git+https://github.com/Uniffi-Dart/uniffi-dart.git?rev=5bdcc79#5bdcc790c3fc99845e7b4a61d7a4f6e1460896e9"
+source = "git+https://github.com/Uniffi-Dart/uniffi-dart.git?rev=f830323#f830323646fb6fbca89f9798dcf425f339f166ca"
 dependencies = [
  "anyhow",
  "camino",
@@ -4502,7 +4503,7 @@ dependencies = [
 [[package]]
 name = "uniffi_dart_macro"
 version = "0.1.0"
-source = "git+https://github.com/Uniffi-Dart/uniffi-dart.git?rev=5bdcc79#5bdcc790c3fc99845e7b4a61d7a4f6e1460896e9"
+source = "git+https://github.com/Uniffi-Dart/uniffi-dart.git?rev=f830323#f830323646fb6fbca89f9798dcf425f339f166ca"
 dependencies = [
  "futures",
  "proc-macro2",

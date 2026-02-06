@@ -47,6 +47,8 @@ tokio-util = { version = "0.7.16", features = ["net", "codec"] }
 tower = "0.5"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+ohttp = { package = "bitcoin-ohttp", version = "0.6" }
+bhttp = { version = "0.6.1", features = ["http"] }
 
 [dev-dependencies]
 mockito = "1.7.0"

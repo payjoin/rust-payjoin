@@ -1,5 +1,3 @@
 pub mod middleware;
 
-pub use middleware::{
-    OhttpGatewayConfig, OhttpGatewayError, OhttpGatewayLayer, OhttpGatewayMiddleware,
-};
+pub use middleware::{ohttp_gateway, OhttpGatewayConfig};

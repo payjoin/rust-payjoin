@@ -2441,6 +2441,8 @@ dependencies = [
 name = "ohttp-relay"
 version = "0.0.11"
 dependencies = [
+ "bhttp",
+ "bitcoin-ohttp",
  "byteorder",
  "bytes",
  "futures",
@@ -2695,8 +2697,6 @@ dependencies = [
  "bitcoin-ohttp",
  "clap",
  "config",
- "http-body-util",
- "hyper",
  "ohttp-relay",
  "payjoin-directory",
  "payjoin-test-utils",

@@ -46,8 +46,6 @@ tokio-stream = { version = "0.1.17", optional = true }
 tower = "0.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-http-body-util = "0.1"
-hyper = "1.8.1"
 ohttp = { package = "bitcoin-ohttp", version = "0.6" }
 bhttp = { version = "0.6.1", features = ["http"] }
 

@@ -4,6 +4,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Router;
 use config::Config;
 use ohttp_relay::SentinelTag;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use rand::Rng;
 use tokio_listener::{Listener, SystemOptions, UserOptions};
 use tower::{Service, ServiceBuilder};
@@ -24,13 +25,13 @@ struct Services {
     metrics: MetricsService,
 }
 
-pub async fn serve(config: Config) -> anyhow::Result<()> {
+pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> anyhow::Result<()> {
     let sentinel_tag = generate_sentinel_tag();
 
     let services = Services {
         directory: init_directory(&config, sentinel_tag).await?,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
-        metrics: MetricsService::new(None),
+        metrics: MetricsService::new(meter_provider),
     };
 
     let app = build_app(services);
@@ -100,7 +101,10 @@ pub async fn serve_manual_tls(
 /// Uses `tokio-rustls-acme` to automatically obtain and renew TLS
 /// certificates from Let's Encrypt via the TLS-ALPN-01 challenge.
 #[cfg(feature = "acme")]
-pub async fn serve_acme(config: Config) -> anyhow::Result<()> {
+pub async fn serve_acme(
+    config: Config,
+    meter_provider: Option<SdkMeterProvider>,
+) -> anyhow::Result<()> {
     use std::net::SocketAddr;
     use std::sync::Arc;
 
@@ -114,7 +118,7 @@ pub async fn serve_acme(config: Config) -> anyhow::Result<()> {
     let services = Services {
         directory: init_directory(&config, sentinel_tag).await?,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
-        metrics: MetricsService::new(None),
+        metrics: MetricsService::new(meter_provider),
     };
     let app = build_app(services);
 

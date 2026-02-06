@@ -1,0 +1,39 @@
+services:
+  payjoin-service:
+    image: payjoin/payjoin-service:latest
+    command: ["--config", "/config/config.toml"]
+    environment:
+      RUST_LOG: "info"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+    volumes:
+      - ./config.toml:/config/config.toml:ro
+      - ./data:/data
+    ports:
+      - "443:443"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500m"
+        max-file: "10"
+    networks:
+      - payjoin-network
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    profiles:
+      - telemetry
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    environment:
+      OPERATOR_DOMAIN: "${OPERATOR_DOMAIN}"
+      GRAFANA_OTEL_EXPORTER_OTLP_ENDPOINT: "${GRAFANA_OTEL_EXPORTER_OTLP_ENDPOINT}"
+      GRAFANA_OTEL_EXPORTER_OTLP_TOKEN: "${GRAFANA_OTEL_EXPORTER_OTLP_TOKEN}"
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    restart: unless-stopped
+    networks:
+      - payjoin-network
+
+networks:
+  payjoin-network:

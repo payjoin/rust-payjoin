@@ -1,0 +1,55 @@
+receivers:
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: "payjoin-service"
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["${PAYJOIN_SERVICE_METRICS_TARGET}"]
+
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  resource:
+    attributes:
+      - key: operator.domain
+        value: "${OPERATOR_DOMAIN}"
+        action: upsert
+      - key: service.name
+        value: "payjoin-service"
+        action: upsert
+
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+exporters:
+  otlphttp:
+    endpoint: "${GRAFANA_OTEL_EXPORTER_OTLP_ENDPOINT}"
+    headers:
+      Authorization: "Basic ${GRAFANA_OTEL_EXPORTER_OTLP_TOKEN}"
+
+service:
+  pipelines:
+    metrics:
+      receivers: [prometheus]
+      processors: [resource, memory_limiter, batch]
+      exporters: [otlphttp]
+    traces:
+      receivers: [otlp]
+      processors: [resource, memory_limiter, batch]
+      exporters: [otlphttp]
+    logs:
+      receivers: [otlp]
+      processors: [resource, memory_limiter, batch]
+      exporters: [otlphttp]

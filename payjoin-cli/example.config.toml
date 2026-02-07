@@ -48,7 +48,10 @@ rpcpassword = "password"
 
 # Version 2 Configuration
 # [v2]
-# pj_directory = "https://payjo.in"
+# # Multiple payjoin directories for fallback resilience
+# pj_directories = ["https://payjo.in", "https://testnet.payjo.in"]
+# # Legacy single directory format is also supported:
+# # pj_directory = "https://payjo.in"
 # ohttp_relays = ["https://pj.benalleng.com", "https://pj.bobspacebkk.com", "https://ohttp.achow101.com", "https://example.com"]
 # # Optional: The HPKE keys which need to be fetched ahead of time from the pj_endpoint
 # # for the payjoin packets to be encrypted.

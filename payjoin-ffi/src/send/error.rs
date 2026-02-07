@@ -3,23 +3,35 @@ use std::sync::Arc;
 use payjoin::bitcoin::psbt::PsbtParseError;
 use payjoin::send;
 
-use crate::error::ImplementationError;
+use crate::error::{ImplementationError, PsbtInputsError};
 
 /// Error building a Sender from a SenderBuilder.
 ///
 /// This error is unrecoverable.
-#[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
-#[error("Error initializing the sender: {msg}")]
-pub struct BuildSenderError {
-    msg: String,
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum BuildSenderError {
+    #[error("Error initializing the sender: {0}")]
+    Generic(String),
+
+    #[error("PSBT input validation failed")]
+    InvalidInput(Arc<PsbtInputsError>),
+
+    #[error("PSBT parse error: {0}")]
+    PsbtParse(String),
+}
+
+impl From<payjoin::psbt::PsbtInputsError> for BuildSenderError {
+    fn from(value: payjoin::psbt::PsbtInputsError) -> Self {
+        BuildSenderError::InvalidInput(Arc::new(value.into()))
+    }
 }
 
 impl From<PsbtParseError> for BuildSenderError {
-    fn from(value: PsbtParseError) -> Self { BuildSenderError { msg: value.to_string() } }
+    fn from(value: PsbtParseError) -> Self { BuildSenderError::PsbtParse(value.to_string()) }
 }
 
 impl From<send::BuildSenderError> for BuildSenderError {
-    fn from(value: send::BuildSenderError) -> Self { BuildSenderError { msg: value.to_string() } }
+    fn from(value: send::BuildSenderError) -> Self { BuildSenderError::Generic(value.to_string()) }
 }
 
 /// Error returned when request could not be created.
@@ -101,13 +113,17 @@ pub enum SenderPersistedError {
     ResponseError(ResponseError),
     /// Sender Build error
     #[error(transparent)]
-    BuildSenderError(Arc<BuildSenderError>),
+    BuildSenderError(BuildSenderError),
     /// Storage error that could occur at application storage layer
     #[error(transparent)]
     Storage(Arc<ImplementationError>),
     /// Unexpected error
     #[error("An unexpected error occurred")]
     Unexpected,
+}
+
+impl From<BuildSenderError> for SenderPersistedError {
+    fn from(value: BuildSenderError) -> Self { SenderPersistedError::BuildSenderError(value) }
 }
 
 impl From<ImplementationError> for SenderPersistedError {
@@ -163,8 +179,45 @@ where
             return SenderPersistedError::Unexpected;
         }
         if let Some(api_err) = err.api_error() {
-            return SenderPersistedError::BuildSenderError(Arc::new(api_err.into()));
+            return SenderPersistedError::BuildSenderError(api_err.into());
         }
         SenderPersistedError::Unexpected
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::error::PsbtInputsError;
+
+    #[test]
+    fn test_build_sender_error_invalid_input_preserves_index() {
+        let psbt_error = PsbtInputsError::new(3, "Missing witness UTXO".to_string());
+        let build_error = BuildSenderError::InvalidInput(Arc::new(psbt_error));
+
+        match build_error {
+            BuildSenderError::InvalidInput(err) => {
+                assert_eq!(err.input_index(), 3);
+                assert!(err.error_message().contains("Missing witness UTXO"));
+            }
+            _ => panic!("Expected InvalidInput variant"),
+        }
+    }
+
+    #[test]
+    fn test_sender_persisted_error_preserves_index() {
+        let psbt_error = PsbtInputsError::new(2, "Invalid script".to_string());
+        let build_error = BuildSenderError::InvalidInput(Arc::new(psbt_error));
+        let persisted_error = SenderPersistedError::BuildSenderError(build_error);
+
+        match persisted_error {
+            SenderPersistedError::BuildSenderError(BuildSenderError::InvalidInput(err)) => {
+                assert_eq!(err.input_index(), 2);
+                assert!(err.error_message().contains("Invalid script"));
+            }
+            _ => panic!("Expected BuildSenderError with InvalidInput"),
+        }
     }
 }

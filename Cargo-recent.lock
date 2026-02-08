@@ -2633,7 +2633,6 @@ name = "payjoin-directory"
 version = "0.0.3"
 dependencies = [
  "anyhow",
- "bhttp",
  "bitcoin 0.32.8",
  "bitcoin-ohttp",
  "clap",
@@ -2693,7 +2692,6 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-server",
- "bhttp",
  "bitcoin-ohttp",
  "clap",
  "config",

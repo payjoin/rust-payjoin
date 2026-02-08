@@ -2,9 +2,9 @@ use std::io::Cursor;
 
 pub const CHACHA20_POLY1305_NONCE_LEN: usize = 32;
 pub const POLY1305_TAG_SIZE: usize = 16;
-pub const ENCAPSULATED_MESSAGE_BYTES: usize = 65536;
-pub const BHTTP_REQ_BYTES: usize =
-    ENCAPSULATED_MESSAGE_BYTES - (CHACHA20_POLY1305_NONCE_LEN + POLY1305_TAG_SIZE);
+pub const OHTTP_OVERHEAD: usize = CHACHA20_POLY1305_NONCE_LEN + POLY1305_TAG_SIZE;
+pub const ENCAPSULATED_MESSAGE_BYTES: usize = 8192;
+pub const BHTTP_REQ_BYTES: usize = ENCAPSULATED_MESSAGE_BYTES - OHTTP_OVERHEAD;
 
 #[derive(Debug)]
 pub enum GatewayError {
@@ -25,7 +25,6 @@ impl std::fmt::Display for GatewayError {
 
 impl std::error::Error for GatewayError {}
 
-/// Represents the decapsulated HTTP request extracted from OHTTP
 pub struct DecapsulatedRequest {
     pub method: String,
     pub uri: String,
@@ -90,18 +89,27 @@ pub fn encapsulate_ohttp_response(
         GatewayError::InternalServerError(format!("BHTTP serialization failed: {}", e))
     })?;
 
+    if bhttp_bytes.len() > BHTTP_REQ_BYTES {
+        return Err(GatewayError::InternalServerError(format!(
+            "BHTTP response too large: {} > {}",
+            bhttp_bytes.len(),
+            BHTTP_REQ_BYTES
+        )));
+    }
+
     bhttp_bytes.resize(BHTTP_REQ_BYTES, 0);
 
     let ohttp_res = res_ctx.encapsulate(&bhttp_bytes).map_err(|e| {
         GatewayError::InternalServerError(format!("OHTTP encapsulation failed: {}", e))
     })?;
 
-    assert!(
-        ohttp_res.len() == ENCAPSULATED_MESSAGE_BYTES,
-        "Unexpected OHTTP response size: {} != {}",
-        ohttp_res.len(),
-        ENCAPSULATED_MESSAGE_BYTES
-    );
+    if ohttp_res.len() != ENCAPSULATED_MESSAGE_BYTES {
+        return Err(GatewayError::InternalServerError(format!(
+            "Unexpected OHTTP response size: {} != {}",
+            ohttp_res.len(),
+            ENCAPSULATED_MESSAGE_BYTES
+        )));
+    }
 
     Ok(ohttp_res)
 }

@@ -31,6 +31,7 @@ axum-server = { version = "0.8", features = [
 ], optional = true }
 clap = { version = "4.5", features = ["derive", "env"] }
 config = "0.15"
+ohttp = { package = "bitcoin-ohttp", version = "0.6" }
 ohttp-relay = { path = "../ohttp-relay", features = ["bootstrap"] }
 payjoin-directory = { path = "../payjoin-directory" }
 prometheus = "0.14.0"
@@ -46,8 +47,6 @@ tokio-stream = { version = "0.1.17", optional = true }
 tower = "0.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-ohttp = { package = "bitcoin-ohttp", version = "0.6" }
-bhttp = { version = "0.6.1", features = ["http"] }
 
 [dev-dependencies]
 payjoin-test-utils = { version = "0.0.1" }

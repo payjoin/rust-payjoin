@@ -10,16 +10,16 @@ use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::{Body, Bytes};
 use hyper::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use hyper::server::conn::http1;
-use hyper::{Method, Request, Response, StatusCode, Uri};
+use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use hyper_util::service::TowerToHyperService;
-use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
+use payjoin::directory::{ShortId, ShortIdError};
 use tokio::net::TcpListener;
 #[cfg(feature = "acme")]
 use tokio_rustls_acme::AcmeConfig;
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_stream::Stream;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, warn};
 
 pub use crate::db::files::Db as FilesDb;
 use crate::db::Db;
@@ -28,14 +28,8 @@ use ohttp_relay::SentinelTag;
 
 pub use crate::key_config::*;
 
-const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
-const POLY1305_TAG_SIZE: usize = 16;
-pub const BHTTP_REQ_BYTES: usize =
-    ENCAPSULATED_MESSAGE_BYTES - (CHACHA20_POLY1305_NONCE_LEN + POLY1305_TAG_SIZE);
 const V1_MAX_BUFFER_SIZE: usize = 65536;
 
-const V1_REJECT_RES_JSON: &str =
-    r#"{{"errorCode": "original-psbt-rejected ", "message": "Body is not a string"}}"#;
 const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message": "V2 receiver offline. V1 sends require synchronous communications."}}"#;
 
 pub(crate) mod db;
@@ -208,15 +202,14 @@ impl<D: Db> Service<D> {
         }
 
         let mut response = match (parts.method, path_segments.as_slice()) {
-            (Method::POST, ["", ".well-known", "ohttp-gateway"]) =>
-                self.handle_ohttp_gateway(body).await,
             (Method::GET, ["", ".well-known", "ohttp-gateway"]) =>
                 self.handle_ohttp_gateway_get(&query).await,
-            (Method::POST, ["", ""]) => self.handle_ohttp_gateway(body).await,
             (Method::GET, ["", "ohttp-keys"]) => self.get_ohttp_keys().await,
-            (Method::POST, ["", id]) => self.post_fallback_v1(id, query, body).await,
             (Method::GET, ["", "health"]) => health_check().await,
             (Method::GET, ["", ""]) => handle_directory_home_path().await,
+            (Method::POST, ["", id]) => self.post_mailbox_or_v1(id, query, body).await,
+            (Method::GET, ["", id]) => self.get_mailbox(id).await,
+            (Method::PUT, ["", id]) => self.put_payjoin_v1(id, body).await,
             _ => Ok(not_found()),
         }
         .unwrap_or_else(|e| e.to_response());
@@ -227,144 +220,7 @@ impl<D: Db> Service<D> {
         Ok(response)
     }
 
-    async fn handle_ohttp_gateway<B>(
-        &self,
-        body: B,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError>
-    where
-        B: Body<Data = Bytes> + Send + 'static,
-        B::Error: Into<BoxError>,
-    {
-        let ohttp_body = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::BadRequest(anyhow::anyhow!(e.into())))?
-            .to_bytes();
-
-        let (bhttp_req, res_ctx) = self
-            .ohttp
-            .decapsulate(&ohttp_body)
-            .map_err(|e| HandlerError::OhttpKeyRejection(e.into()))?;
-        let mut cursor = std::io::Cursor::new(bhttp_req);
-        let req = bhttp::Message::read_bhttp(&mut cursor)
-            .map_err(|e| HandlerError::BadRequest(e.into()))?;
-        let uri = Uri::builder()
-            .scheme(req.control().scheme().unwrap_or_default())
-            .authority(req.control().authority().unwrap_or_default())
-            .path_and_query(req.control().path().unwrap_or_default())
-            .build()?;
-        let body = req.content().to_vec();
-        let mut http_req =
-            Request::builder().uri(uri).method(req.control().method().unwrap_or_default());
-        for header in req.header().fields() {
-            http_req = http_req.header(header.name(), header.value())
-        }
-        let request = http_req.body(full(body))?;
-
-        let response = self.handle_v2(request).await?;
-
-        let (parts, body) = response.into_parts();
-        let mut bhttp_res = bhttp::Message::response(
-            bhttp::StatusCode::try_from(parts.status.as_u16())
-                .map_err(|e| HandlerError::InternalServerError(e.into()))?,
-        );
-        for (name, value) in parts.headers.iter() {
-            bhttp_res.put_header(name.as_str(), value.to_str().unwrap_or_default());
-        }
-        let full_body = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?
-            .to_bytes();
-        bhttp_res.write_content(&full_body);
-        let mut bhttp_bytes = Vec::new();
-        bhttp_res
-            .write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_bytes)
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?;
-        bhttp_bytes.resize(BHTTP_REQ_BYTES, 0);
-        let ohttp_res = res_ctx
-            .encapsulate(&bhttp_bytes)
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?;
-        assert!(ohttp_res.len() == ENCAPSULATED_MESSAGE_BYTES, "Unexpected OHTTP response size");
-        Ok(Response::new(full(ohttp_res)))
-    }
-
-    async fn handle_v2(
-        &self,
-        req: Request<BoxBody<Bytes, hyper::Error>>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-        let path = req.uri().path().to_string();
-        let (parts, body) = req.into_parts();
-
-        let path_segments: Vec<&str> = path.split('/').collect();
-        debug!("handle_v2: {:?}", &path_segments);
-        match (parts.method, path_segments.as_slice()) {
-            (Method::POST, &["", id]) => self.post_mailbox(id, body).await,
-            (Method::GET, &["", id]) => self.get_mailbox(id).await,
-            (Method::PUT, &["", id]) => self.put_payjoin_v1(id, body).await,
-            _ => Ok(not_found()),
-        }
-    }
-
-    async fn post_mailbox(
-        &self,
-        id: &str,
-        body: BoxBody<Bytes, hyper::Error>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-        let none_response = Response::builder().status(StatusCode::OK).body(empty())?;
-        trace!("post_mailbox");
-
-        let id = ShortId::from_str(id)?;
-
-        let req = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?
-            .to_bytes();
-        if req.len() > V1_MAX_BUFFER_SIZE {
-            return Err(HandlerError::PayloadTooLarge);
-        }
-
-        match self.db.post_v2_payload(&id, req.into()).await {
-            Ok(_) => Ok(none_response),
-            Err(e) => Err(HandlerError::InternalServerError(e.into())),
-        }
-    }
-
-    async fn get_mailbox(
-        &self,
-        id: &str,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-        trace!("get_mailbox");
-        let id = ShortId::from_str(id)?;
-        let timeout_response = Response::builder().status(StatusCode::ACCEPTED).body(empty())?;
-        handle_peek(self.db.wait_for_v2_payload(&id).await, timeout_response)
-    }
-    async fn put_payjoin_v1(
-        &self,
-        id: &str,
-        body: BoxBody<Bytes, hyper::Error>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-        trace!("Put_payjoin_v1");
-        let ok_response = Response::builder().status(StatusCode::OK).body(empty())?;
-
-        let id = ShortId::from_str(id)?;
-        let req = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?
-            .to_bytes();
-        if req.len() > V1_MAX_BUFFER_SIZE {
-            return Err(HandlerError::PayloadTooLarge);
-        }
-
-        match self.db.post_v1_response(&id, req.into()).await {
-            Ok(_) => Ok(ok_response),
-            Err(e) => Err(HandlerError::BadRequest(e.into())),
-        }
-    }
-
-    async fn post_fallback_v1<B>(
+    async fn post_mailbox_or_v1<B>(
         &self,
         id: &str,
         query: String,
@@ -374,29 +230,75 @@ impl<D: Db> Service<D> {
         B: Body<Data = Bytes> + Send + 'static,
         B::Error: Into<BoxError>,
     {
-        trace!("Post fallback v1");
-        let none_response = Response::builder()
-            .status(StatusCode::SERVICE_UNAVAILABLE)
-            .body(full(V1_UNAVAILABLE_RES_JSON))?;
-        let bad_request_body_res =
-            Response::builder().status(StatusCode::BAD_REQUEST).body(full(V1_REJECT_RES_JSON))?;
+        let body_bytes = body
+            .collect()
+            .await
+            .map_err(|e| HandlerError::BadRequest(anyhow::anyhow!(e.into())))?
+            .to_bytes();
 
-        let body_bytes = match body.collect().await {
-            Ok(bytes) => bytes.to_bytes(),
-            Err(_) => return Ok(bad_request_body_res),
-        };
+        if body_bytes.len() > V1_MAX_BUFFER_SIZE {
+            return Err(HandlerError::PayloadTooLarge);
+        }
 
-        let body_str = match String::from_utf8(body_bytes.to_vec()) {
-            Ok(body_str) => body_str,
-            Err(_) => return Ok(bad_request_body_res),
-        };
-
-        let v2_compat_body = format!("{body_str}\n{query}");
         let id = ShortId::from_str(id)?;
-        handle_peek(
-            self.db.post_v1_request_and_wait_for_response(&id, v2_compat_body.into()).await,
-            none_response,
-        )
+
+        if let Ok(body_str) = String::from_utf8(body_bytes.to_vec()) {
+            let v2_compat_body = format!("{body_str}\n{query}");
+            let none_response = Response::builder()
+                .status(StatusCode::SERVICE_UNAVAILABLE)
+                .body(full(V1_UNAVAILABLE_RES_JSON))?;
+            handle_peek(
+                self.db.post_v1_request_and_wait_for_response(&id, v2_compat_body.into()).await,
+                none_response,
+            )
+        } else {
+            let none_response = Response::builder().status(StatusCode::OK).body(empty())?;
+            match self.db.post_v2_payload(&id, body_bytes.into()).await {
+                Ok(_) => Ok(none_response),
+                Err(e) => Err(HandlerError::InternalServerError(e.into())),
+            }
+        }
+    }
+
+    async fn get_mailbox(
+        &self,
+        id: &str,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
+        let id = ShortId::from_str(id)?;
+        let timeout_response = Response::builder().status(StatusCode::ACCEPTED).body(empty())?;
+        handle_peek(self.db.wait_for_v2_payload(&id).await, timeout_response)
+    }
+
+    async fn put_payjoin_v1<B>(
+        &self,
+        id: &str,
+        body: B,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError>
+    where
+        B: Body<Data = Bytes> + Send + 'static,
+        B::Error: Into<BoxError>,
+    {
+        let ok_response = Response::builder().status(StatusCode::OK).body(empty())?;
+
+        let id = ShortId::from_str(id)?;
+        let req = body
+            .collect()
+            .await
+            .map_err(|e| {
+                HandlerError::InternalServerError(anyhow::anyhow!(
+                    "Failed to read body: {}",
+                    e.into()
+                ))
+            })?
+            .to_bytes();
+        if req.len() > V1_MAX_BUFFER_SIZE {
+            return Err(HandlerError::PayloadTooLarge);
+        }
+
+        match self.db.post_v1_response(&id, req.into()).await {
+            Ok(_) => Ok(ok_response),
+            Err(e) => Err(HandlerError::BadRequest(e.into())),
+        }
     }
 
     async fn handle_ohttp_gateway_get(
@@ -466,10 +368,6 @@ async fn health_check() -> Result<Response<BoxBody<Bytes, hyper::Error>>, Handle
 
 async fn handle_directory_home_path() -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError>
 {
-    let mut res = Response::new(empty());
-    *res.status_mut() = StatusCode::OK;
-    res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/html"));
-
     let html = r#"
 <!DOCTYPE html>
 <html lang="en">
@@ -521,7 +419,9 @@ async fn handle_directory_home_path() -> Result<Response<BoxBody<Bytes, hyper::E
 </html>
 "#;
 
-    *res.body_mut() = full(html);
+    let mut res = Response::new(full(html));
+    *res.status_mut() = StatusCode::OK;
+    res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/html"));
     Ok(res)
 }
 
@@ -531,7 +431,6 @@ enum HandlerError {
     InternalServerError(anyhow::Error),
     ServiceUnavailable(anyhow::Error),
     SenderGone(anyhow::Error),
-    OhttpKeyRejection(anyhow::Error),
     BadRequest(anyhow::Error),
     Forbidden(anyhow::Error),
 }
@@ -552,15 +451,6 @@ impl HandlerError {
             HandlerError::SenderGone(e) => {
                 error!("Sender gone: {}", e);
                 *res.status_mut() = StatusCode::GONE
-            }
-            HandlerError::OhttpKeyRejection(e) => {
-                const OHTTP_KEY_REJECTION_RES_JSON: &str = r#"{"type":"https://iana.org/assignments/http-problem-types#ohttp-key", "title": "key identifier unknown"}"#;
-
-                warn!("Bad request: Key configuration rejected: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST;
-                res.headers_mut()
-                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                *res.body_mut() = full(OHTTP_KEY_REJECTION_RES_JSON);
             }
             HandlerError::BadRequest(e) => {
                 warn!("Bad request: {}", e);

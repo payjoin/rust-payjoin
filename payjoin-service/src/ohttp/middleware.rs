@@ -1,11 +1,12 @@
 use axum::body::Body;
 use axum::extract::{Request, State};
+use axum::http::header::CONTENT_TYPE;
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use ohttp_relay::gateway_helpers::{decapsulate_ohttp_request, encapsulate_ohttp_response};
 use ohttp_relay::sentinel::{self, SentinelTag};
-use tracing::{debug, warn};
+use tracing::{error, warn};
 
 /// Configuration for the OHTTP gateway middleware
 #[derive(Clone)]
@@ -50,7 +51,7 @@ pub async fn ohttp_gateway(
         match decapsulate_ohttp_request(&body_bytes, &config.ohttp_server) {
             Ok(result) => result,
             Err(e) => {
-                debug!("OHTTP decapsulation failed: {}", e);
+                error!("OHTTP decapsulation failed: {}", e);
                 return match e {
                     ohttp_relay::gateway_helpers::GatewayError::OhttpKeyRejection(_) =>
                         ohttp_key_rejection_response(),
@@ -65,7 +66,7 @@ pub async fn ohttp_gateway(
     let uri = match decapsulated_req.uri.parse::<axum::http::Uri>() {
         Ok(uri) => uri,
         Err(e) => {
-            debug!("Invalid URI in BHTTP: {}", e);
+            error!("Invalid URI in BHTTP: {}", e);
             return (StatusCode::BAD_REQUEST, "Invalid URI").into_response();
         }
     };
@@ -110,7 +111,7 @@ pub async fn ohttp_gateway(
         match encapsulate_ohttp_response(parts.status.as_u16(), headers, response_bytes, res_ctx) {
             Ok(bytes) => bytes,
             Err(e) => {
-                debug!("OHTTP encapsulation failed: {}", e);
+                error!("OHTTP encapsulation failed: {}", e);
                 return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to encapsulate response")
                     .into_response();
             }
@@ -124,7 +125,7 @@ fn ohttp_key_rejection_response() -> Response {
 
     (
         StatusCode::BAD_REQUEST,
-        [("content-type", "application/problem+json")],
+        [(CONTENT_TYPE, "application/problem+json")],
         OHTTP_KEY_REJECTION_JSON,
     )
         .into_response()
@@ -150,16 +151,5 @@ mod tests {
 
         let config = OhttpGatewayConfig::new(server, sentinel_tag);
         assert!(std::mem::size_of_val(&config) > 0);
-    }
-
-    #[test]
-    fn test_config_clone() {
-        let server = create_test_ohttp_server();
-        let sentinel_tag = SentinelTag::new([0u8; 32]);
-
-        let config1 = OhttpGatewayConfig::new(server, sentinel_tag);
-        let config2 = config1.clone();
-
-        assert!(std::mem::size_of_val(&config2) > 0);
     }
 }

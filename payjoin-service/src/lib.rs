@@ -10,31 +10,34 @@ use config::Config;
 use ohttp_relay::SentinelTag;
 use rand::Rng;
 use tokio_listener::{Listener, SystemOptions, UserOptions};
-use tower::{Service, ServiceBuilder};
+use tower::{Service, ServiceBuilder, ServiceExt};
 use tracing::info;
 
 pub mod cli;
 pub mod config;
 pub mod metrics;
 pub mod middleware;
+pub mod ohttp;
 
 use crate::metrics::MetricsService;
 use crate::middleware::{track_connections, track_metrics};
+use crate::ohttp::OhttpGatewayConfig;
 
 #[derive(Clone)]
 struct Services {
     directory: payjoin_directory::Service<payjoin_directory::FilesDb>,
     relay: ohttp_relay::Service,
+    ohttp_config: OhttpGatewayConfig,
 }
 
 pub async fn serve(config: Config) -> anyhow::Result<()> {
     let sentinel_tag = generate_sentinel_tag();
     let metrics = MetricsService::new()?;
+    let directory = init_directory(&config, sentinel_tag).await?;
+    let ohttp_config = OhttpGatewayConfig::new(directory.ohttp.clone(), sentinel_tag);
 
-    let services = Services {
-        directory: init_directory(&config, sentinel_tag).await?,
-        relay: ohttp_relay::Service::new(sentinel_tag).await,
-    };
+    let services =
+        Services { directory, relay: ohttp_relay::Service::new(sentinel_tag).await, ohttp_config };
 
     let app = build_app(services, metrics.clone());
     let _ = spawn_metrics_server(config.metrics.listener.clone(), metrics).await?;
@@ -61,15 +64,17 @@ pub async fn serve_manual_tls(
     tls_config: Option<axum_server::tls_rustls::RustlsConfig>,
     root_store: rustls::RootCertStore,
 ) -> anyhow::Result<(u16, u16, tokio::task::JoinHandle<anyhow::Result<()>>)> {
-    use std::net::SocketAddr;
-
     let sentinel_tag = generate_sentinel_tag();
     let metrics = MetricsService::new()?;
+    let directory = init_directory(&config, sentinel_tag).await?;
+    let ohttp_config = OhttpGatewayConfig::new(directory.ohttp.clone(), sentinel_tag);
 
     let services = Services {
-        directory: init_directory(&config, sentinel_tag).await?,
+        directory,
         relay: ohttp_relay::Service::new_with_roots(root_store, sentinel_tag).await,
+        ohttp_config,
     };
+
     let app = build_app(services, metrics.clone());
     let metrics_port = spawn_metrics_server(config.metrics.listener.clone(), metrics).await?;
 
@@ -116,11 +121,12 @@ pub async fn serve_acme(config: Config) -> anyhow::Result<()> {
 
     let sentinel_tag = generate_sentinel_tag();
     let metrics = MetricsService::new()?;
+    let directory = init_directory(&config, sentinel_tag).await?;
+    let ohttp_config = OhttpGatewayConfig::new(directory.ohttp.clone(), sentinel_tag);
 
-    let services = Services {
-        directory: init_directory(&config, sentinel_tag).await?,
-        relay: ohttp_relay::Service::new(sentinel_tag).await,
-    };
+    let services =
+        Services { directory, relay: ohttp_relay::Service::new(sentinel_tag).await, ohttp_config };
+
     let app = build_app(services, metrics.clone());
     let _ = spawn_metrics_server(config.metrics.listener.clone(), metrics).await?;
 
@@ -236,22 +242,54 @@ async fn spawn_metrics_server(
     Ok(actual_port)
 }
 
-async fn route_request(
-    State(mut services): State<Services>,
-    req: axum::extract::Request,
-) -> Response {
+async fn route_request(State(services): State<Services>, req: axum::extract::Request) -> Response {
     if is_relay_request(&req) {
-        match services.relay.call(req).await {
+        let mut relay = services.relay.clone();
+        match relay.call(req).await {
             Ok(res) => res.into_response(),
             Err(e) => (axum::http::StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
         }
     } else {
         // The directory service handles all other requests (including 404)
-        match services.directory.call(req).await {
-            Ok(res) => res.into_response(),
+        handle_directory_request(services, req).await
+    }
+}
+
+async fn handle_directory_request(services: Services, req: axum::extract::Request) -> Response {
+    let is_ohttp_request = matches!(
+        (req.method(), req.uri().path()),
+        (&Method::POST, "/.well-known/ohttp-gateway") | (&Method::POST, "/")
+    );
+
+    if is_ohttp_request {
+        let app = Router::new()
+            .fallback(directory_handler)
+            .layer(axum::middleware::from_fn_with_state(
+                services.ohttp_config.clone(),
+                crate::ohttp::ohttp_gateway,
+            ))
+            .with_state(services.directory.clone());
+
+        match app.oneshot(req).await {
+            Ok(response) => response,
             Err(e) =>
                 (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }
+    } else {
+        directory_handler(State(services.directory), req).await
+    }
+}
+
+async fn directory_handler(
+    State(directory): State<payjoin_directory::Service<payjoin_directory::FilesDb>>,
+    req: axum::extract::Request,
+) -> Response {
+    let mut dir = directory.clone();
+    match dir.call(req).await {
+        Ok(response) => response.into_response(),
+        Err(e) =>
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Directory error: {}", e))
+                .into_response(),
     }
 }
 

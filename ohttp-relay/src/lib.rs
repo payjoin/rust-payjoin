@@ -36,6 +36,9 @@ pub mod gateway_prober;
 mod gateway_uri;
 pub mod sentinel;
 pub use sentinel::SentinelTag;
+pub mod gateway_helpers;
+
+pub use gateway_helpers::{decapsulate_ohttp_request, encapsulate_ohttp_response};
 
 use crate::error::{BoxError, Error};
 

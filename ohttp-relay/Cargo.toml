@@ -20,6 +20,7 @@ ws-bootstrap = ["futures", "rustls", "tokio-tungstenite"]
 _test-util = []
 
 [dependencies]
+bhttp = { version = "0.6.1", features = ["http"] }
 byteorder = "1.5.0"
 bytes = "1.10.1"
 futures = { version = "0.3.31", optional = true }
@@ -33,6 +34,7 @@ hyper-rustls = { version = "0.27.7", default-features = false, features = [
   "ring",
 ] }
 hyper-util = { version = "0.1.16", features = ["client-legacy", "service"] }
+ohttp = { package = "bitcoin-ohttp", version = "0.6" }
 rustls = { version = "0.23.31", optional = true, default-features = false, features = [
   "ring",
 ] }
@@ -47,8 +49,6 @@ tokio-util = { version = "0.7.16", features = ["net", "codec"] }
 tower = "0.5"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
-ohttp = { package = "bitcoin-ohttp", version = "0.6" }
-bhttp = { version = "0.6.1", features = ["http"] }
 
 [dev-dependencies]
 mockito = "1.7.0"

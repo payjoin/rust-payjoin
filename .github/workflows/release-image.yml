@@ -1,0 +1,32 @@
+name: "Build and publish Docker image"
+
+on:
+  push:
+    tags:
+      - payjoin-service-**
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: "Build and publish Docker image"
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.PAYJOIN_DOCKER_RW }}
+
+      - name: Build and release image
+        run: nix run .#packages.x86_64-linux.payjoin-service-image.copyToRegistry

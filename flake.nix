@@ -175,7 +175,8 @@
             releasePkg = pkg.overrideAttrs (final: prev: { CARGO_PROFILE = "release"; });
           in
           nix2containerPkgs.nix2container.buildImage {
-            inherit name tag;
+            inherit tag;
+            name = "docker.io/payjoin/${name}";
             copyToRoot = pkgs.buildEnv {
               name = "root";
               paths = [ releasePkg ];

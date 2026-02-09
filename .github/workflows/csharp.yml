@@ -1,0 +1,42 @@
+name: Build and Test C#
+on:
+  pull_request:
+    paths:
+      - payjoin-ffi/**
+env:
+  # Override the value from the rust-toolchain file
+  # This is necessary because even though the correct toolchain
+  # is explicitly specified for the rust-toolchain action,
+  # rustup honors the rust-toolchain file over the default
+  RUSTUP_TOOLCHAIN: 1.85
+
+jobs:
+  build-csharp-and-test:
+    name: "Build and test csharp"
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: payjoin-ffi/csharp
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v4
+
+      - name: "Install Rust 1.85.0"
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: "Generate C# bindings and native binaries"
+        run: bash ./scripts/generate_bindings.sh
+
+      - name: "Build C# tests"
+        run: dotnet build --configuration Release Tests

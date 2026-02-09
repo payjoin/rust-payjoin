@@ -8,3 +8,7 @@ mutants.out*
 *.ikm
 *payjoin.sqlite
 data
+/.vs
+/payjoin-ffi/csharp/test/.vs
+/payjoin-ffi/csharp/test/bin
+/payjoin-ffi/csharp/test/obj

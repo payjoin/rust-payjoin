@@ -144,3 +144,16 @@ jobs:
         with:
           name: mutants-incremental-cargo.out
           path: mutants.out
+
+  Fuzz:
+    name: Fuzz build
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v4
+      - name: "Install nightly toolchain"
+        uses: dtolnay/rust-toolchain@nightly
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - name: "Build fuzz targets"
+        run: cd fuzz && cargo build

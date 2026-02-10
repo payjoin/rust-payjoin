@@ -64,6 +64,15 @@ mod e2e {
         res
     }
 
+    fn clear_payjoin_cache() -> std::io::Result<()> {
+        let cache_dir = dirs::cache_dir().unwrap().join("payjoin-cli");
+
+        if cache_dir.exists() {
+            std::fs::remove_dir_all(cache_dir)?;
+        }
+        Ok(())
+    }
+
     #[cfg(feature = "v1")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin_v1() -> Result<(), BoxError> {
@@ -202,6 +211,8 @@ mod e2e {
         use payjoin_test_utils::{init_tracing, TestServices};
         use tempfile::TempDir;
         use tokio::process::Child;
+
+        clear_payjoin_cache()?;
 
         type Result<T> = std::result::Result<T, BoxError>;
 

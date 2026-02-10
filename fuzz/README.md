@@ -4,13 +4,11 @@
   Payjoin-fuzz
 </h1>
 
-Fuzz tests work by generating a ton of random noise that is morhped into parameter arguments for tests to run and validate that none of it causes it to have unhandled crashes.
+Fuzz tests work by generating a ton of random noise that is morphed into parameter arguments for tests to run and validate that none of it causes unhandled crashes.
 
 ### Bootstrapping
 
-#### cargo-fuzz / libFuzzer
-
-To use simply start a nix dev shell
+This fuzzer uses [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) (libFuzzer). To get started, enter the nix dev shell and run the fuzzer:
 
 ```shell
 nix develop
@@ -20,21 +18,19 @@ cd fuzz/
 
 ### Running fuzzers
 
-Note for some users the fuzz engine optionality is limited as there may not be any active maintenance for a fuzzer on that system. Namely MacOS and NixOS users should prefer `libfuzzer` as `honggfuzz` is not actively maintained for those systems.
-
-The `fuzz.sh` and `cycle.sh` shell scripts allow for single pass fuzzing and continuous long term fuzzing resepctively.
+The `fuzz.sh` and `cycle.sh` shell scripts allow for single pass fuzzing and continuous long term fuzzing respectively.
 
 #### Using `fuzz.sh`
 
-This scripts accepts an optional fuzz target. It run all available targets when this option is omitted.
+This script accepts an optional fuzz target. It runs all available targets when this option is omitted.
 
-`./fuzz.sh <fuzz-target>`
+`./fuzz.sh [fuzz-target]`
 
-for example the command `.fuzz.sh afl uri_deserialize_pjuri` selects the afl engine and runs only the `uri_deserialize_pjuri` for 30 seconds.
+For example, `./fuzz.sh uri_deserialize_pjuri` runs only the `uri_deserialize_pjuri` target for 30 seconds.
 
 #### Using `cycle.sh`
 
-This command will run over all targets continuously changing targets every hour.
+This command will run over all targets continuously, changing targets every hour.
 
 `./cycle.sh`
 

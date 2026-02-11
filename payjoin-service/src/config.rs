@@ -12,21 +12,8 @@ pub struct Config {
     pub storage_dir: PathBuf,
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub timeout: Duration,
-    pub metrics: MetricsConfig,
     #[cfg(feature = "acme")]
     pub acme: Option<AcmeConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct MetricsConfig {
-    pub listener: ListenerAddress,
-}
-
-impl Default for MetricsConfig {
-    fn default() -> Self {
-        Self { listener: "[::]:9090".parse().expect("valid default metrics listener address") }
-    }
 }
 
 #[cfg(feature = "acme")]
@@ -61,7 +48,6 @@ impl Default for Config {
             listener: "[::]:8080".parse().expect("valid default listener address"),
             storage_dir: PathBuf::from("./data"),
             timeout: Duration::from_secs(30),
-            metrics: MetricsConfig::default(),
             #[cfg(feature = "acme")]
             acme: None,
         }
@@ -77,17 +63,11 @@ where
 }
 
 impl Config {
-    pub fn new(
-        listener: ListenerAddress,
-        storage_dir: PathBuf,
-        timeout: Duration,
-        metrics_listener: ListenerAddress,
-    ) -> Self {
+    pub fn new(listener: ListenerAddress, storage_dir: PathBuf, timeout: Duration) -> Self {
         Self {
             listener,
             storage_dir,
             timeout,
-            metrics: MetricsConfig { listener: metrics_listener },
             #[cfg(feature = "acme")]
             acme: None,
         }

@@ -1,14 +1,18 @@
 name: "Build and publish Docker image"
 
 on:
+  pull_request:
+    paths:
+      - payjoin-service/**
   push:
     tags:
       - payjoin-service-**
   workflow_dispatch:
 
 jobs:
-  build:
+  publish:
     name: "Build and publish Docker image"
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
     runs-on: ubuntu-latest
@@ -30,3 +34,38 @@ jobs:
 
       - name: Build and release image
         run: nix run .#packages.x86_64-linux.payjoin-service-image.copyToRegistry
+
+  build-pr:
+    name: "Build and upload image artifact"
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Build and save image artifact
+        run: |
+          TAG=$(git rev-parse --short HEAD)
+
+          nix build .#packages.x86_64-linux.payjoin-service-image.copyToDockerDaemon
+          result/bin/copy-to-docker-daemon
+            
+          docker save docker.io/payjoin/payjoin-service:${TAG} -o payjoin-service-${TAG}.tar
+
+          echo "Image saved: payjoin-service-${TAG}.tar"
+          ls -lh payjoin-service-${TAG}.tar
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: payjoin-service-image-${{ github.sha }}
+          path: payjoin-service-*.tar
+          retention-days: 7

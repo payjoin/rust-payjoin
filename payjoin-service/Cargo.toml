@@ -22,11 +22,7 @@ acme = [
   "dep:rustls",
   "dep:tokio-stream",
 ]
-telemetry = [
-  "dep:opentelemetry-otlp",
-  "dep:tracing-opentelemetry",
-  "dep:opentelemetry-appender-tracing",
-]
+telemetry = ["dep:opentelemetry-otlp"]
 
 [dependencies]
 anyhow = "1.0"
@@ -38,7 +34,6 @@ clap = { version = "4.5", features = ["derive", "env"] }
 config = "0.15"
 ohttp-relay = { path = "../ohttp-relay", features = ["bootstrap"] }
 opentelemetry = "0.31"
-opentelemetry-appender-tracing = { version = "0.31", optional = true }
 opentelemetry-otlp = { version = "0.31", optional = true }
 opentelemetry_sdk = "0.31"
 payjoin-directory = { path = "../payjoin-directory" }
@@ -53,7 +48,6 @@ tokio-rustls-acme = { version = "0.9.0", features = ["axum"], optional = true }
 tokio-stream = { version = "0.1.17", optional = true }
 tower = "0.5"
 tracing = "0.1"
-tracing-opentelemetry = { version = "0.32", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [dev-dependencies]

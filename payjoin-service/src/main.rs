@@ -36,8 +36,6 @@ fn init_tracing() -> Option<SdkMeterProvider> {
     use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
     use opentelemetry_otlp::WithHttpConfig;
     use opentelemetry_sdk::Resource;
-    use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::util::SubscriberInitExt;
 
     let mut resource_builder = Resource::builder().with_service_name("payjoin-service");
     if let Ok(domain) = std::env::var("OPERATOR_DOMAIN") {
@@ -51,28 +49,6 @@ fn init_tracing() -> Option<SdkMeterProvider> {
             .ok()
             .map(|token| [("Authorization".to_string(), format!("Basic {}", token))].into())
             .unwrap_or_default();
-
-    // Initialize trace exporter and provider
-    let span_exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_http()
-        .with_headers(headers.clone())
-        .build()
-        .expect("Failed to build OTLP span exporter");
-    let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-        .with_batch_exporter(span_exporter)
-        .with_resource(resource.clone())
-        .build();
-
-    // Initialize log exporter and provider
-    let log_exporter = opentelemetry_otlp::LogExporter::builder()
-        .with_http()
-        .with_headers(headers.clone())
-        .build()
-        .expect("Failed to build OTLP log exporter");
-    let logger_provider = opentelemetry_sdk::logs::SdkLoggerProvider::builder()
-        .with_batch_exporter(log_exporter)
-        .with_resource(resource.clone())
-        .build();
 
     // Initialize metric exporter and provider
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
@@ -88,14 +64,8 @@ fn init_tracing() -> Option<SdkMeterProvider> {
     let env_filter =
         EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy();
 
-    tracing_subscriber::registry()
-        .with(env_filter)
-        .with(tracing_subscriber::fmt::layer().json().with_target(true))
-        .with(tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("payjoin-service")))
-        .with(OpenTelemetryTracingBridge::new(&logger_provider))
-        .init();
+    tracing_subscriber::fmt().json().with_target(true).with_env_filter(env_filter).init();
 
-    opentelemetry::global::set_tracer_provider(tracer_provider);
     opentelemetry::global::set_meter_provider(meter_provider.clone());
 
     Some(meter_provider)

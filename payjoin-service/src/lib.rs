@@ -242,12 +242,14 @@ mod tests {
     use std::time::Duration;
 
     use axum_server::tls_rustls::RustlsConfig;
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
     use payjoin_test_utils::{http_agent, local_cert_key, wait_for_service_ready};
     use rustls::pki_types::CertificateDer;
     use rustls::RootCertStore;
     use tempfile::tempdir;
 
     use super::*;
+    use crate::metrics::{ACTIVE_CONNECTIONS, HTTP_REQUESTS, TOTAL_CONNECTIONS};
 
     async fn start_service(
         cert_der: Vec<u8>,
@@ -335,5 +337,49 @@ mod tests {
             axum::http::StatusCode::FORBIDDEN,
             "cross-instance request should not be rejected as forbidden"
         );
+    }
+
+    #[tokio::test]
+    async fn middleware_records_metrics() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone()).build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+
+        let tempdir = tempdir().unwrap();
+        let config = Config::new(
+            "[::]:0".parse().expect("valid listener address"),
+            tempdir.path().to_path_buf(),
+            Duration::from_secs(2),
+        );
+
+        let sentinel_tag = generate_sentinel_tag();
+        let services = Services {
+            directory: init_directory(&config, sentinel_tag).await.unwrap(),
+            relay: ohttp_relay::Service::new(sentinel_tag).await,
+            metrics: MetricsService::new(Some(provider.clone())),
+        };
+
+        let app = build_app(services);
+
+        let request = Request::builder().method("GET").uri("/health").body(Body::empty()).unwrap();
+        let response = ServiceExt::<Request<Body>>::oneshot(app, request).await.unwrap();
+        assert_eq!(response.status(), 200);
+
+        provider.force_flush().expect("flush failed");
+
+        let finished = exporter.get_finished_metrics().expect("metrics");
+        let metric_names: Vec<&str> = finished
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .map(|m| m.name())
+            .collect();
+        assert!(metric_names.contains(&HTTP_REQUESTS), "missing http_request_total");
+        assert!(metric_names.contains(&TOTAL_CONNECTIONS), "missing total_connections");
+        assert!(metric_names.contains(&ACTIVE_CONNECTIONS), "missing active_connections");
     }
 }

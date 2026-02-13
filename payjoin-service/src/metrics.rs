@@ -2,9 +2,9 @@ use opentelemetry::metrics::{Counter, MeterProvider, UpDownCounter};
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 
-const TOTAL_CONNECTIONS: &str = "total_connections";
-const ACTIVE_CONNECTIONS: &str = "active_connections";
-const HTTP_REQUESTS: &str = "http_request_total";
+pub(crate) const TOTAL_CONNECTIONS: &str = "total_connections";
+pub(crate) const ACTIVE_CONNECTIONS: &str = "active_connections";
+pub(crate) const HTTP_REQUESTS: &str = "http_request_total";
 
 #[derive(Clone)]
 pub struct MetricsService {

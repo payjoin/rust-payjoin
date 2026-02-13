@@ -6,11 +6,17 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let meter_provider = init_tracing();
-
     let args = cli::Args::parse();
     let config_path = args.config.unwrap_or_else(|| "config.toml".into());
     let config = config::Config::from_file(&config_path)?;
+
+    #[cfg(feature = "telemetry")]
+    let meter_provider = match &config.telemetry {
+        Some(telemetry) => Some(init_tracing_with_telemetry(telemetry)),
+        None => init_tracing(),
+    };
+    #[cfg(not(feature = "telemetry"))]
+    let meter_provider = init_tracing();
 
     #[cfg(feature = "acme")]
     if config.acme.is_some() {
@@ -20,7 +26,6 @@ async fn main() -> anyhow::Result<()> {
     payjoin_service::serve(config, meter_provider).await
 }
 
-#[cfg(not(feature = "telemetry"))]
 fn init_tracing() -> Option<SdkMeterProvider> {
     let env_filter =
         EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy();
@@ -30,29 +35,23 @@ fn init_tracing() -> Option<SdkMeterProvider> {
 }
 
 #[cfg(feature = "telemetry")]
-fn init_tracing() -> Option<SdkMeterProvider> {
-    use opentelemetry::trace::TracerProvider;
+fn init_tracing_with_telemetry(telemetry: &config::TelemetryConfig) -> SdkMeterProvider {
     use opentelemetry::KeyValue;
-    use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-    use opentelemetry_otlp::WithHttpConfig;
+    use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
     use opentelemetry_sdk::Resource;
 
-    let mut resource_builder = Resource::builder().with_service_name("payjoin-service");
-    if let Ok(domain) = std::env::var("OPERATOR_DOMAIN") {
-        resource_builder =
-            resource_builder.with_attribute(KeyValue::new("operator.domain", domain));
-    }
-    let resource = resource_builder.build();
+    let resource = Resource::builder()
+        .with_service_name("payjoin-service")
+        .with_attribute(KeyValue::new("operator.domain", telemetry.operator_domain.clone()))
+        .build();
 
     let headers: std::collections::HashMap<String, String> =
-        std::env::var("OTEL_EXPORTER_OTLP_TOKEN")
-            .ok()
-            .map(|token| [("Authorization".to_string(), format!("Basic {}", token))].into())
-            .unwrap_or_default();
+        [("Authorization".to_string(), format!("Basic {}", telemetry.auth_token))].into();
 
     // Initialize metric exporter and provider
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_http()
+        .with_endpoint(format!("{}/v1/metrics", &telemetry.endpoint))
         .with_headers(headers)
         .build()
         .expect("Failed to build OTLP metric exporter");
@@ -68,5 +67,5 @@ fn init_tracing() -> Option<SdkMeterProvider> {
 
     opentelemetry::global::set_meter_provider(meter_provider.clone());
 
-    Some(meter_provider)
+    meter_provider
 }

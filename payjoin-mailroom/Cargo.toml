@@ -1,7 +1,7 @@
 [package]
 name = "payjoin-mailroom"
 version = "0.0.1"
-description = "Unified Payjoin Directory and OHTTP Relay service"
+description = "Combined Payjoin Directory and OHTTP Relay"
 repository = "https://github.com/payjoin/rust-payjoin/tree/master/payjoin-mailroom"
 keywords = ["bip77", "bitcoin", "ohttp", "payjoin", "privacy"]
 categories = [

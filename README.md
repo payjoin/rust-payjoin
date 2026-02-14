@@ -37,15 +37,9 @@ The main Payjoin Dev Kit library which provides tools for implementing both Asyn
 
 A CLI tool which performs no-frills Payjoin. It is a reference implementation of the Payjoin Dev Kit which uses a Bitcoin Core wallet.
 
-### [`ohttp-relay`](https://github.com/payjoin/rust-payjoin/tree/master/ohttp-relay)
+### [`payjoin-mailroom`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-mailroom)
 
-A Rust implementation of an Oblivious HTTP (OHTTP) relay resource.
-
-**Disclaimer: Both this crate and the [IETF paper](https://ietf-wg-ohai.github.io/oblivious-http/draft-ietf-ohai-ohttp.html) are undergoing active revision. Use at your own risk.**
-
-### [`payjoin-directory`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-directory)
-
-A reference implementation for a Payjoin Directory which stores and forwards HTTP client messages between the sender and the receiver to allow for Async Payjoin transactions. Async Payjoin clients make requests to the directory using [Oblivious HTTP (OHTTP)](https://www.ietf.org/rfc/rfc9458.html) which prevents the directory from being able to link payjoins to specific client IP addresses.
+An [Oblivious HTTP (OHTTP) Relay](https://github.com/payjoin/rust-payjoin/tree/master/ohttp-relay) and a BIP77 [Payjoin Directory](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-directory) combined in one binary.
 
 ### [`payjoin-test-utils`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-test-utils)
 

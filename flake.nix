@@ -162,7 +162,7 @@
               "payjoin-cli" = "--features v1,v2";
               "payjoin-directory" = "";
               "ohttp-relay" = "";
-              "payjoin-service" = "--features acme";
+              "payjoin-service" = "--features acme,telemetry";
             };
 
         # nix2container for building OCI/Docker images

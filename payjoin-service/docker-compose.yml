@@ -1,0 +1,16 @@
+services:
+  payjoin-service:
+    image: payjoin/payjoin-service:latest
+    command: ["--config", "/config/config.toml"]
+    environment:
+      RUST_LOG: "info"
+    volumes:
+      - ./config.toml:/config/config.toml:ro
+      - ./data:/data
+    ports:
+      - "443:443"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500m"
+        max-file: "10"

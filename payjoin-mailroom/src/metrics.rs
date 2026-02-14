@@ -19,7 +19,7 @@ pub struct MetricsService {
 impl MetricsService {
     pub fn new(provider: Option<SdkMeterProvider>) -> Self {
         let provider = provider.unwrap_or_default();
-        let meter = provider.meter("payjoin-service");
+        let meter = provider.meter("payjoin-mailroom");
 
         let http_requests_total = meter
             .u64_counter(HTTP_REQUESTS)

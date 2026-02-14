@@ -194,7 +194,7 @@ impl<D: Db> Service<D> {
         debug!("Service::serve_request: {:?}", &path_segments);
 
         // Best-effort validation that the relay and gateway aren't on the same
-        // payjoin-service instance
+        // payjoin-mailroom instance
         if let Some(header_value) =
             parts.headers.get(ohttp_relay::sentinel::HEADER_NAME).and_then(|v| v.to_str().ok())
         {

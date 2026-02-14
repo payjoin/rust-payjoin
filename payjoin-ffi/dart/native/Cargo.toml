@@ -27,5 +27,5 @@ payjoin-ffi = { path = "../.." }
 ohttp-relay = { path = "../../../ohttp-relay" }
 payjoin = { path = "../../../payjoin" }
 payjoin-directory = { path = "../../../payjoin-directory" }
-payjoin-service = { path = "../../../payjoin-service" }
+payjoin-mailroom = { path = "../../../payjoin-mailroom" }
 payjoin-test-utils = { path = "../../../payjoin-test-utils" }

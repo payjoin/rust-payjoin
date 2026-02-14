@@ -1,6 +1,6 @@
 use clap::Parser;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use payjoin_service::{cli, config};
+use payjoin_mailroom::{cli, config};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
@@ -20,10 +20,10 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "acme")]
     if config.acme.is_some() {
-        return payjoin_service::serve_acme(config, meter_provider).await;
+        return payjoin_mailroom::serve_acme(config, meter_provider).await;
     }
 
-    payjoin_service::serve(config, meter_provider).await
+    payjoin_mailroom::serve(config, meter_provider).await
 }
 
 fn init_tracing() -> Option<SdkMeterProvider> {
@@ -41,7 +41,7 @@ fn init_tracing_with_telemetry(telemetry: &config::TelemetryConfig) -> SdkMeterP
     use opentelemetry_sdk::Resource;
 
     let resource = Resource::builder()
-        .with_service_name("payjoin-service")
+        .with_service_name("payjoin-mailroom")
         .with_attribute(KeyValue::new("operator.domain", telemetry.operator_domain.clone()))
         .build();
 

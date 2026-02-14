@@ -27,8 +27,8 @@ path = "../../../payjoin"
 [patch.crates-io.payjoin-directory]
 path = "../../../payjoin-directory"
 
-[patch.crates-io.payjoin-service]
-path = "../../../payjoin-service"
+[patch.crates-io.payjoin-mailroom]
+path = "../../../payjoin-mailroom"
 
 [patch.crates-io.payjoin-test-utils]
 path = "../../../payjoin-test-utils"

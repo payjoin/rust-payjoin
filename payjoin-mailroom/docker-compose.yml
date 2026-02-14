@@ -1,6 +1,6 @@
 services:
-  payjoin-service:
-    image: payjoin/payjoin-service:latest
+  payjoin-mailroom:
+    image: payjoin/payjoin-mailroom:latest
     command: ["--config", "/config/config.toml"]
     environment:
       RUST_LOG: "info"

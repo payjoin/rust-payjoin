@@ -2769,7 +2769,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "payjoin-service"
+name = "payjoin-mailroom"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -2808,7 +2808,7 @@ dependencies = [
  "http",
  "once_cell",
  "payjoin",
- "payjoin-service",
+ "payjoin-mailroom",
  "rcgen 0.14.3",
  "reqwest",
  "rustls 0.23.31",

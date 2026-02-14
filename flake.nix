@@ -162,7 +162,7 @@
               "payjoin-cli" = "--features v1,v2";
               "payjoin-directory" = "";
               "ohttp-relay" = "";
-              "payjoin-service" = "--features acme,telemetry";
+              "payjoin-mailroom" = "--features acme,telemetry";
             };
 
         # nix2container for building OCI/Docker images
@@ -193,7 +193,7 @@
             tag = self.shortRev or "dirty";
           in
           {
-            "payjoin-service-image" = mkContainerImage "payjoin-service" packages.payjoin-service tag;
+            "payjoin-mailroom-image" = mkContainerImage "payjoin-mailroom" packages.payjoin-mailroom tag;
           };
 
         devShells = builtins.mapAttrs (

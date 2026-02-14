@@ -3,10 +3,10 @@ name: "Build and publish Docker image"
 on:
   pull_request:
     paths:
-      - payjoin-service/**
+      - payjoin-mailroom/**
   push:
     tags:
-      - payjoin-service-**
+      - payjoin-mailroom-**
   workflow_dispatch:
 
 jobs:
@@ -33,7 +33,7 @@ jobs:
           password: ${{ secrets.PAYJOIN_DOCKER_RW }}
 
       - name: Build and release image
-        run: nix run .#packages.x86_64-linux.payjoin-service-image.copyToRegistry
+        run: nix run .#packages.x86_64-linux.payjoin-mailroom-image.copyToRegistry
 
   build-pr:
     name: "Build and upload image artifact"
@@ -55,17 +55,17 @@ jobs:
         run: |
           TAG=$(git rev-parse --short HEAD)
 
-          nix build .#packages.x86_64-linux.payjoin-service-image.copyToDockerDaemon
+          nix build .#packages.x86_64-linux.payjoin-mailroom-image.copyToDockerDaemon
           result/bin/copy-to-docker-daemon
             
-          docker save docker.io/payjoin/payjoin-service:${TAG} -o payjoin-service-${TAG}.tar
+          docker save docker.io/payjoin/payjoin-mailroom:${TAG} -o payjoin-mailroom-${TAG}.tar
 
-          echo "Image saved: payjoin-service-${TAG}.tar"
-          ls -lh payjoin-service-${TAG}.tar
+          echo "Image saved: payjoin-mailroom-${TAG}.tar"
+          ls -lh payjoin-mailroom-${TAG}.tar
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: payjoin-service-image-${{ github.sha }}
-          path: payjoin-service-*.tar
+          name: payjoin-mailroom-image-${{ github.sha }}
+          path: payjoin-mailroom-*.tar
           retention-days: 7

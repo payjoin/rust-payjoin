@@ -45,7 +45,7 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
     Ok(())
 }
 
-/// Serves payjoin-service with manual TLS configuration.
+/// Serves payjoin-mailroom with manual TLS configuration.
 ///
 /// Binds to `config.listener` (use port 0 to let the OS assign a free port) and returns
 /// the actual bound port and a task handle.
@@ -96,7 +96,7 @@ pub async fn serve_manual_tls(
     Ok((port, handle))
 }
 
-/// Serves payjoin-service with ACME-managed TLS certificates.
+/// Serves payjoin-mailroom with ACME-managed TLS certificates.
 ///
 /// Uses `tokio-rustls-acme` to automatically obtain and renew TLS
 /// certificates from Let's Encrypt via the TLS-ALPN-01 challenge.

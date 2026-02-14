@@ -20,7 +20,7 @@ payjoin = { version = "1.0.0-rc.1", features = [
   "_manual-tls",
   "_test-utils",
 ] }
-payjoin-service = { path = "../payjoin-service", features = ["_manual-tls"] }
+payjoin-mailroom = { path = "../payjoin-mailroom", features = ["_manual-tls"] }
 rcgen = "0.14.3"
 reqwest = { version = "0.12.23", default-features = false, features = [
   "rustls-tls",

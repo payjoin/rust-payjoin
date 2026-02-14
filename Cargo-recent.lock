@@ -2441,6 +2441,8 @@ dependencies = [
 name = "ohttp-relay"
 version = "0.0.11"
 dependencies = [
+ "bhttp",
+ "bitcoin-ohttp",
  "byteorder",
  "bytes",
  "futures",
@@ -2631,7 +2633,6 @@ name = "payjoin-directory"
 version = "0.0.3"
 dependencies = [
  "anyhow",
- "bhttp",
  "bitcoin 0.32.8",
  "bitcoin-ohttp",
  "clap",
@@ -2692,6 +2693,7 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-server",
+ "bitcoin-ohttp",
  "clap",
  "config",
  "ohttp-relay",

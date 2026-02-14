@@ -31,6 +31,7 @@ axum-server = { version = "0.8", features = [
 ], optional = true }
 clap = { version = "4.5", features = ["derive", "env"] }
 config = "0.15"
+ohttp = { package = "bitcoin-ohttp", version = "0.6" }
 ohttp-relay = { path = "../ohttp-relay", features = ["bootstrap"] }
 payjoin-directory = { path = "../payjoin-directory" }
 prometheus = "0.14.0"

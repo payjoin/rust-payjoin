@@ -39,7 +39,7 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
     #[cfg(feature = "access-control")]
     let access_control = init_access_control(&config).await?;
     #[cfg(feature = "access-control")]
-    let blocked_addresses = init_blocked_addresses(&config)?;
+    let blocked_addresses = init_blocked_addresses(&config).await?;
     #[cfg(not(feature = "access-control"))]
     let blocked_addresses = None;
 
@@ -82,7 +82,7 @@ pub async fn serve_manual_tls(
     let sentinel_tag = generate_sentinel_tag();
 
     #[cfg(feature = "access-control")]
-    let blocked_addresses = init_blocked_addresses(&config)?;
+    let blocked_addresses = init_blocked_addresses(&config).await?;
     #[cfg(not(feature = "access-control"))]
     let blocked_addresses = None;
 
@@ -146,7 +146,7 @@ pub async fn serve_acme(
     let sentinel_tag = generate_sentinel_tag();
 
     #[cfg(feature = "access-control")]
-    let blocked_addresses = init_blocked_addresses(&config)?;
+    let blocked_addresses = init_blocked_addresses(&config).await?;
     #[cfg(not(feature = "access-control"))]
     let blocked_addresses = None;
 
@@ -247,18 +247,94 @@ async fn init_access_control(
 }
 
 #[cfg(feature = "access-control")]
-fn init_blocked_addresses(
+async fn init_blocked_addresses(
     config: &Config,
 ) -> anyhow::Result<Option<std::sync::Arc<tokio::sync::RwLock<std::collections::HashSet<String>>>>>
 {
-    if let Some(ac_config) = &config.access_control {
-        if let Some(path) = &ac_config.blocked_addresses_path {
-            let addresses = access_control::load_blocked_addresses(path)?;
-            info!("Loaded {} blocked addresses from {}", addresses.len(), path.display());
-            return Ok(Some(std::sync::Arc::new(tokio::sync::RwLock::new(addresses))));
+    let ac_config = match &config.access_control {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+
+    // Neither file nor URL configured
+    if ac_config.blocked_addresses_path.is_none() && ac_config.blocked_addresses_url.is_none() {
+        return Ok(None);
+    }
+
+    // Load initial addresses from file if available
+    let mut addresses = std::collections::HashSet::new();
+    if let Some(path) = &ac_config.blocked_addresses_path {
+        addresses = access_control::load_blocked_addresses(path)?;
+        info!("Loaded {} blocked addresses from {}", addresses.len(), path.display());
+    }
+
+    let blocked = std::sync::Arc::new(tokio::sync::RwLock::new(addresses));
+
+    // If URL configured, try initial fetch and spawn background updater
+    if let Some(url) = &ac_config.blocked_addresses_url {
+        let cache_path = config.storage_dir.join("blocked_addresses_cache.txt");
+        let refresh = std::time::Duration::from_secs(
+            ac_config.blocked_addresses_refresh_secs.unwrap_or(86400),
+        );
+
+        // Try initial fetch; fall back to cache on failure
+        match reqwest::get(url).await {
+            Ok(resp) if resp.status().is_success() => match resp.text().await {
+                Ok(body) => {
+                    let fetched: std::collections::HashSet<String> = body
+                        .lines()
+                        .map(|l| access_control::normalize_blocked_address(l.trim()))
+                        .filter(|l| !l.is_empty())
+                        .collect();
+                    if let Err(e) = std::fs::write(
+                        &cache_path,
+                        fetched.iter().cloned().collect::<Vec<_>>().join("\n"),
+                    ) {
+                        tracing::warn!("Failed to write address cache: {e}");
+                    }
+                    info!("Fetched {} blocked addresses from URL", fetched.len());
+                    *blocked.write().await = fetched;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to read address list response: {e}");
+                    try_load_cache(&cache_path, &blocked).await;
+                }
+            },
+            Ok(resp) => {
+                tracing::warn!("Failed to fetch address list: HTTP {}", resp.status());
+                try_load_cache(&cache_path, &blocked).await;
+            }
+            Err(e) => {
+                tracing::warn!("Failed to fetch address list: {e}");
+                try_load_cache(&cache_path, &blocked).await;
+            }
+        }
+
+        access_control::spawn_address_list_updater(
+            url.clone(),
+            refresh,
+            cache_path,
+            blocked.clone(),
+        );
+    }
+
+    Ok(Some(blocked))
+}
+
+#[cfg(feature = "access-control")]
+async fn try_load_cache(
+    cache_path: &std::path::Path,
+    blocked: &std::sync::Arc<tokio::sync::RwLock<std::collections::HashSet<String>>>,
+) {
+    if cache_path.exists() {
+        match access_control::load_blocked_addresses(cache_path) {
+            Ok(cached) => {
+                info!("Loaded {} blocked addresses from cache", cached.len());
+                *blocked.write().await = cached;
+            }
+            Err(e) => tracing::warn!("Failed to load address cache: {e}"),
         }
     }
-    Ok(None)
 }
 
 fn init_ohttp_config(

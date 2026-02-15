@@ -61,6 +61,8 @@ pub struct AccessControlConfig {
     pub geo_db_path: Option<PathBuf>,
     pub blocked_regions: Vec<String>,
     pub blocked_addresses_path: Option<PathBuf>,
+    pub blocked_addresses_url: Option<String>,
+    pub blocked_addresses_refresh_secs: Option<u64>,
 }
 impl Default for Config {
     fn default() -> Self {

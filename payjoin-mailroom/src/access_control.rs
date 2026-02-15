@@ -93,6 +93,43 @@ fn is_bech32_address(addr: &str) -> bool {
     lower.starts_with("bc1") || lower.starts_with("tb1") || lower.starts_with("bcrt1")
 }
 
+pub fn spawn_address_list_updater(
+    url: String,
+    refresh: std::time::Duration,
+    cache_path: std::path::PathBuf,
+    blocked: std::sync::Arc<tokio::sync::RwLock<HashSet<String>>>,
+) {
+    tokio::spawn(async move {
+        loop {
+            match fetch_address_list(&url).await {
+                Ok(addresses) => {
+                    if let Err(e) = std::fs::write(
+                        &cache_path,
+                        addresses.iter().cloned().collect::<Vec<_>>().join("\n"),
+                    ) {
+                        tracing::warn!("Failed to write address cache: {e}");
+                    }
+                    let count = addresses.len();
+                    let mut guard = blocked.write().await;
+                    *guard = addresses;
+                    tracing::info!("Updated blocked address list ({count} entries)");
+                }
+                Err(e) => tracing::warn!("Failed to fetch address list: {e}"),
+            }
+            tokio::time::sleep(refresh).await;
+        }
+    });
+}
+
+async fn fetch_address_list(url: &str) -> anyhow::Result<HashSet<String>> {
+    let body = reqwest::get(url).await?.error_for_status()?.text().await?;
+    Ok(body
+        .lines()
+        .map(|l| normalize_blocked_address(l.trim()))
+        .filter(|l| !l.is_empty())
+        .collect())
+}
+
 async fn fetch_geoip_db(dest: &Path) -> anyhow::Result<()> {
     use std::io::Read;
 

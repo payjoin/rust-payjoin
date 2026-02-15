@@ -567,6 +567,7 @@ fn handle_peek<Error: db::SendableError>(
             db::Error::OverCapacity => Err(HandlerError::ServiceUnavailable(anyhow::Error::msg(
                 "mailbox storage at capacity",
             ))),
+            db::Error::AlreadyRead => Ok(timeout_response),
             db::Error::V1SenderUnavailable => Err(HandlerError::SenderGone(anyhow::Error::msg(
                 "Sender is unavailable try a new request",
             ))),
@@ -720,10 +721,8 @@ mod screen_tests {
 
     fn make_test_psbt_base64(output_address: &str) -> String {
         use bitcoin::base64::prelude::{Engine, BASE64_STANDARD};
-        use bitcoin::blockdata::opcodes;
-        use bitcoin::blockdata::script::Builder;
         use bitcoin::psbt::Psbt;
-        use bitcoin::{Address, Amount, Network, Transaction, TxIn, TxOut};
+        use bitcoin::{Address, Amount, Transaction, TxIn, TxOut};
 
         let addr: Address<bitcoin::address::NetworkUnchecked> =
             output_address.parse().expect("valid address");

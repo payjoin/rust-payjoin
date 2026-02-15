@@ -16,6 +16,7 @@ pub enum Error<OperationalError: SendableError> {
     Operational(OperationalError),
     Timeout(tokio::time::error::Elapsed),
     OverCapacity,
+    AlreadyRead,
     V1SenderUnavailable,
 }
 
@@ -33,6 +34,7 @@ impl<E: SendableError> std::fmt::Display for Error<E> {
             Operational(error) => write!(f, "Db error: {error}"),
             Timeout(timeout) => write!(f, "Timeout: {timeout}"),
             OverCapacity => "Database over capacity".fmt(f),
+            AlreadyRead => "Mailbox payload already read".fmt(f),
             V1SenderUnavailable => "Sender no longer connected".fmt(f),
         }
     }

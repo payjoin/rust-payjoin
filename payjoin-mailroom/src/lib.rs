@@ -38,9 +38,13 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
 
     #[cfg(feature = "access-control")]
     let access_control = init_access_control(&config).await?;
+    #[cfg(feature = "access-control")]
+    let blocked_addresses = init_blocked_addresses(&config)?;
+    #[cfg(not(feature = "access-control"))]
+    let blocked_addresses = None;
 
     let services = Services {
-        directory: init_directory(&config, sentinel_tag).await?,
+        directory: init_directory(&config, sentinel_tag, blocked_addresses, false).await?,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
         metrics: MetricsService::new(meter_provider),
         #[cfg(feature = "access-control")]
@@ -77,8 +81,13 @@ pub async fn serve_manual_tls(
 
     let sentinel_tag = generate_sentinel_tag();
 
+    #[cfg(feature = "access-control")]
+    let blocked_addresses = init_blocked_addresses(&config)?;
+    #[cfg(not(feature = "access-control"))]
+    let blocked_addresses = None;
+
     let services = Services {
-        directory: init_directory(&config, sentinel_tag).await?,
+        directory: init_directory(&config, sentinel_tag, blocked_addresses, false).await?,
         relay: ohttp_relay::Service::new_with_roots(root_store, sentinel_tag).await,
         metrics: MetricsService::new(None),
         #[cfg(feature = "access-control")]
@@ -136,8 +145,13 @@ pub async fn serve_acme(
 
     let sentinel_tag = generate_sentinel_tag();
 
+    #[cfg(feature = "access-control")]
+    let blocked_addresses = init_blocked_addresses(&config)?;
+    #[cfg(not(feature = "access-control"))]
+    let blocked_addresses = None;
+
     let services = Services {
-        directory: init_directory(&config, sentinel_tag).await?,
+        directory: init_directory(&config, sentinel_tag, blocked_addresses, false).await?,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
         metrics: MetricsService::new(meter_provider),
         #[cfg(feature = "access-control")]
@@ -197,6 +211,10 @@ impl Connected<IncomingStream<'_, Listener>> for middleware::MaybePeerIp {
 async fn init_directory(
     config: &Config,
     sentinel_tag: SentinelTag,
+    blocked_addresses: Option<
+        std::sync::Arc<tokio::sync::RwLock<std::collections::HashSet<String>>>,
+    >,
+    v1_disabled: bool,
 ) -> anyhow::Result<payjoin_directory::Service<payjoin_directory::FilesDb>> {
     let db = payjoin_directory::FilesDb::init(config.timeout, config.storage_dir.clone()).await?;
     db.spawn_background_prune().await;
@@ -204,7 +222,13 @@ async fn init_directory(
     let ohttp_keys_dir = config.storage_dir.join("ohttp-keys");
     let ohttp_config = init_ohttp_config(&ohttp_keys_dir)?;
 
-    Ok(payjoin_directory::Service::new(db, ohttp_config.into(), sentinel_tag))
+    Ok(payjoin_directory::Service::new(
+        db,
+        ohttp_config.into(),
+        sentinel_tag,
+        blocked_addresses,
+        v1_disabled,
+    ))
 }
 
 #[cfg(feature = "access-control")]
@@ -220,6 +244,21 @@ async fn init_access_control(
         }
         None => Ok(None),
     }
+}
+
+#[cfg(feature = "access-control")]
+fn init_blocked_addresses(
+    config: &Config,
+) -> anyhow::Result<Option<std::sync::Arc<tokio::sync::RwLock<std::collections::HashSet<String>>>>>
+{
+    if let Some(ac_config) = &config.access_control {
+        if let Some(path) = &ac_config.blocked_addresses_path {
+            let addresses = access_control::load_blocked_addresses(path)?;
+            info!("Loaded {} blocked addresses from {}", addresses.len(), path.display());
+            return Ok(Some(std::sync::Arc::new(tokio::sync::RwLock::new(addresses))));
+        }
+    }
+    Ok(None)
 }
 
 fn init_ohttp_config(
@@ -423,7 +462,7 @@ mod tests {
 
         let sentinel_tag = generate_sentinel_tag();
         let services = Services {
-            directory: init_directory(&config, sentinel_tag).await.unwrap(),
+            directory: init_directory(&config, sentinel_tag, None, false).await.unwrap(),
             relay: ohttp_relay::Service::new(sentinel_tag).await,
             metrics: MetricsService::new(Some(provider.clone())),
             #[cfg(feature = "access-control")]

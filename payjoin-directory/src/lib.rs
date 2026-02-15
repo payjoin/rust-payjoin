@@ -68,6 +68,8 @@ pub struct Service<D: Db> {
     db: D,
     ohttp: ohttp::Server,
     sentinel_tag: SentinelTag,
+    blocked_addresses: Option<Arc<tokio::sync::RwLock<std::collections::HashSet<String>>>>,
+    v1_disabled: bool,
 }
 
 impl<D: Db, B> tower::Service<Request<B>> for Service<D>
@@ -91,8 +93,14 @@ where
 }
 
 impl<D: Db> Service<D> {
-    pub fn new(db: D, ohttp: ohttp::Server, sentinel_tag: SentinelTag) -> Self {
-        Self { db, ohttp, sentinel_tag }
+    pub fn new(
+        db: D,
+        ohttp: ohttp::Server,
+        sentinel_tag: SentinelTag,
+        blocked_addresses: Option<Arc<tokio::sync::RwLock<std::collections::HashSet<String>>>>,
+        v1_disabled: bool,
+    ) -> Self {
+        Self { db, ohttp, sentinel_tag, blocked_addresses, v1_disabled }
     }
 
     #[cfg(feature = "_manual-tls")]
@@ -375,6 +383,16 @@ impl<D: Db> Service<D> {
         B::Error: Into<BoxError>,
     {
         trace!("Post fallback v1");
+
+        if self.v1_disabled {
+            return Ok(Response::builder()
+                .status(StatusCode::FORBIDDEN)
+                .header(CONTENT_TYPE, "application/json")
+                .body(full(
+                    r#"{"errorCode": "v1-disabled", "message": "V1 is disabled on this server"}"#,
+                ))?);
+        }
+
         let none_response = Response::builder()
             .status(StatusCode::SERVICE_UNAVAILABLE)
             .body(full(V1_UNAVAILABLE_RES_JSON))?;
@@ -390,6 +408,24 @@ impl<D: Db> Service<D> {
             Ok(body_str) => body_str,
             Err(_) => return Ok(bad_request_body_res),
         };
+
+        if let Some(blocked) = &self.blocked_addresses {
+            let blocked = blocked.read().await;
+            if !blocked.is_empty() {
+                match screen_v1_addresses(&body_str, &blocked) {
+                    ScreenResult::Blocked => {
+                        return Ok(Response::builder()
+                            .status(StatusCode::FORBIDDEN)
+                            .body(empty())?);
+                    }
+                    ScreenResult::Clean => {}
+                    ScreenResult::ParseError(e) => {
+                        warn!("Could not screen V1 payload: {e}");
+                        // fail-open: unparsable PSBTs can't complete transactions
+                    }
+                }
+            }
+        }
 
         let v2_compat_body = format!("{body_str}\n{query}");
         let id = ShortId::from_str(id)?;
@@ -436,6 +472,84 @@ impl<D: Db> Service<D> {
 
         res
     }
+}
+
+enum ScreenResult {
+    Blocked,
+    Clean,
+    ParseError(String),
+}
+
+fn screen_v1_addresses(body: &str, blocked: &std::collections::HashSet<String>) -> ScreenResult {
+    use bitcoin::base64::prelude::{Engine, BASE64_STANDARD};
+    use bitcoin::psbt::Psbt;
+    use bitcoin::{Address, Network};
+
+    // V1 payjoin deployments in use today are Bitcoin mainnet-only.
+    let network = Network::Bitcoin;
+
+    let psbt_bytes = match BASE64_STANDARD.decode(body) {
+        Ok(b) => b,
+        Err(e) => return ScreenResult::ParseError(format!("base64 decode: {e}")),
+    };
+
+    let psbt = match Psbt::deserialize(&psbt_bytes) {
+        Ok(p) => p,
+        Err(e) => return ScreenResult::ParseError(format!("PSBT deserialize: {e}")),
+    };
+
+    // Check output addresses
+    for txout in &psbt.unsigned_tx.output {
+        if let Ok(addr) = Address::from_script(&txout.script_pubkey, network) {
+            if is_blocked_address(blocked, &addr) {
+                return ScreenResult::Blocked;
+            }
+        }
+    }
+
+    // Check input addresses from witness_utxo and non_witness_utxo
+    for (i, input) in psbt.inputs.iter().enumerate() {
+        if let Some(ref utxo) = input.witness_utxo {
+            if let Ok(addr) = Address::from_script(&utxo.script_pubkey, network) {
+                if is_blocked_address(blocked, &addr) {
+                    return ScreenResult::Blocked;
+                }
+            }
+        }
+        if let Some(ref tx) = input.non_witness_utxo {
+            if let Some(prev_out) = psbt.unsigned_tx.input.get(i) {
+                if let Some(txout) = tx.output.get(prev_out.previous_output.vout as usize) {
+                    if let Ok(addr) = Address::from_script(&txout.script_pubkey, network) {
+                        if is_blocked_address(blocked, &addr) {
+                            return ScreenResult::Blocked;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    ScreenResult::Clean
+}
+
+fn is_blocked_address(
+    blocked: &std::collections::HashSet<String>,
+    addr: &bitcoin::Address,
+) -> bool {
+    let rendered = addr.to_string();
+    if blocked.contains(&rendered) {
+        return true;
+    }
+    if is_bech32_address(&rendered) {
+        return blocked.contains(&rendered.to_ascii_lowercase())
+            || blocked.contains(&rendered.to_ascii_uppercase());
+    }
+    false
+}
+
+fn is_bech32_address(addr: &str) -> bool {
+    let lower = addr.to_ascii_lowercase();
+    lower.starts_with("bc1") || lower.starts_with("tb1") || lower.starts_with("bcrt1")
 }
 
 fn handle_peek<Error: db::SendableError>(
@@ -598,4 +712,90 @@ fn empty() -> BoxBody<Bytes, hyper::Error> {
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into()).map_err(|never| match never {}).boxed()
+}
+
+#[cfg(test)]
+mod screen_tests {
+    use super::*;
+
+    fn make_test_psbt_base64(output_address: &str) -> String {
+        use bitcoin::base64::prelude::{Engine, BASE64_STANDARD};
+        use bitcoin::blockdata::opcodes;
+        use bitcoin::blockdata::script::Builder;
+        use bitcoin::psbt::Psbt;
+        use bitcoin::{Address, Amount, Network, Transaction, TxIn, TxOut};
+
+        let addr: Address<bitcoin::address::NetworkUnchecked> =
+            output_address.parse().expect("valid address");
+        let addr = addr.assume_checked();
+
+        let tx = Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::blockdata::locktime::absolute::LockTime::ZERO,
+            input: vec![TxIn::default()],
+            output: vec![TxOut {
+                value: Amount::from_sat(50_000),
+                script_pubkey: addr.script_pubkey(),
+            }],
+        };
+
+        let psbt = Psbt::from_unsigned_tx(tx).expect("valid psbt");
+        let serialized = psbt.serialize();
+        BASE64_STANDARD.encode(&serialized)
+    }
+
+    #[test]
+    fn screen_blocks_blocked_output_address() {
+        let blocked_addr = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
+        let mut blocked = std::collections::HashSet::new();
+        blocked.insert(blocked_addr.to_string());
+
+        let psbt_b64 = make_test_psbt_base64(blocked_addr);
+        assert!(matches!(screen_v1_addresses(&psbt_b64, &blocked), ScreenResult::Blocked));
+    }
+
+    #[test]
+    fn screen_allows_clean_psbt() {
+        let clean_addr = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
+        let blocked = std::collections::HashSet::new(); // empty
+        let psbt_b64 = make_test_psbt_base64(clean_addr);
+        assert!(matches!(screen_v1_addresses(&psbt_b64, &blocked), ScreenResult::Clean));
+    }
+
+    #[test]
+    fn screen_allows_non_blocked_address() {
+        let addr = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
+        let mut blocked = std::collections::HashSet::new();
+        blocked.insert("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy".to_string());
+
+        let psbt_b64 = make_test_psbt_base64(addr);
+        assert!(matches!(screen_v1_addresses(&psbt_b64, &blocked), ScreenResult::Clean));
+    }
+
+    #[test]
+    fn screen_parse_error_on_invalid_base64() {
+        let blocked = std::collections::HashSet::from(["test".to_string()]);
+        assert!(matches!(
+            screen_v1_addresses("not-valid-base64!!!", &blocked),
+            ScreenResult::ParseError(_)
+        ));
+    }
+
+    #[test]
+    fn screen_parse_error_on_invalid_psbt() {
+        use bitcoin::base64::prelude::{Engine, BASE64_STANDARD};
+        let blocked = std::collections::HashSet::from(["test".to_string()]);
+        let bad_psbt = BASE64_STANDARD.encode(b"not a psbt");
+        assert!(matches!(screen_v1_addresses(&bad_psbt, &blocked), ScreenResult::ParseError(_)));
+    }
+
+    #[test]
+    fn screen_blocks_uppercase_bech32_blocklist_entry() {
+        let addr = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
+        let mut blocked = std::collections::HashSet::new();
+        blocked.insert(addr.to_ascii_uppercase());
+
+        let psbt_b64 = make_test_psbt_base64(addr);
+        assert!(matches!(screen_v1_addresses(&psbt_b64, &blocked), ScreenResult::Blocked));
+    }
 }

@@ -71,6 +71,28 @@ impl AccessControl {
     }
 }
 
+pub fn load_blocked_addresses(path: &Path) -> anyhow::Result<HashSet<String>> {
+    let content = std::fs::read_to_string(path)?;
+    Ok(content
+        .lines()
+        .map(|l| normalize_blocked_address(l.trim()))
+        .filter(|l| !l.is_empty())
+        .collect())
+}
+
+pub fn normalize_blocked_address(addr: &str) -> String {
+    if is_bech32_address(addr) {
+        addr.to_ascii_lowercase()
+    } else {
+        addr.to_string()
+    }
+}
+
+fn is_bech32_address(addr: &str) -> bool {
+    let lower = addr.to_ascii_lowercase();
+    lower.starts_with("bc1") || lower.starts_with("tb1") || lower.starts_with("bcrt1")
+}
+
 async fn fetch_geoip_db(dest: &Path) -> anyhow::Result<()> {
     use std::io::Read;
 

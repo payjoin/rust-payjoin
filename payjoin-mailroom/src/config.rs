@@ -60,8 +60,8 @@ impl AcmeConfig {
 pub struct AccessControlConfig {
     pub geo_db_path: Option<PathBuf>,
     pub blocked_regions: Vec<String>,
+    pub blocked_addresses_path: Option<PathBuf>,
 }
-
 impl Default for Config {
     fn default() -> Self {
         Self {

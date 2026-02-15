@@ -33,7 +33,9 @@ jobs:
           password: ${{ secrets.PAYJOIN_DOCKER_RW }}
 
       - name: Build and release image
-        run: nix run .#packages.x86_64-linux.payjoin-mailroom-image.copyToRegistry
+        env:
+          IMAGE_TAG: ${{ github.ref_name }}
+        run: nix run --impure .#packages.x86_64-linux.payjoin-mailroom-image.copyToRegistry
 
   build-pr:
     name: "Build and upload image artifact"

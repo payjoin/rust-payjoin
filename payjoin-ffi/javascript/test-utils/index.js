@@ -84,4 +84,5 @@ export const {
     RpcClient,
     TestServices,
     initBitcoindSenderReceiver,
+    originalPsbt,
 } = nativeBinding;

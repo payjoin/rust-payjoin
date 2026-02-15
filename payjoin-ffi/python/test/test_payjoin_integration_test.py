@@ -120,7 +120,9 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         else:
             self.assertIn("FeeRateOutOfRange", str(ctx.exception))
 
-        prim_amount_variant = getattr(PrimitiveError, "AmountOutOfRange", PrimitiveError)
+        prim_amount_variant = getattr(
+            PrimitiveError, "AmountOutOfRange", PrimitiveError
+        )
         with self.assertRaises(prim_amount_variant) as ctx:
             pj_uri.set_amount_sats(too_large_amount)
         self.assertIsInstance(ctx.exception, PrimitiveError)

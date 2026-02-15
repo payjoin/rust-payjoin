@@ -1,6 +1,10 @@
+#[cfg(feature = "access-control")]
+use axum::extract::connect_info::Connected;
 use axum::extract::State;
 use axum::http::Method;
 use axum::response::{IntoResponse, Response};
+#[cfg(feature = "access-control")]
+use axum::serve::IncomingStream;
 use axum::Router;
 use config::Config;
 use ohttp_relay::SentinelTag;
@@ -10,6 +14,8 @@ use tokio_listener::{Listener, SystemOptions, UserOptions};
 use tower::{Service, ServiceBuilder};
 use tracing::info;
 
+#[cfg(feature = "access-control")]
+pub mod access_control;
 pub mod cli;
 pub mod config;
 pub mod metrics;
@@ -23,18 +29,27 @@ struct Services {
     directory: payjoin_directory::Service<payjoin_directory::FilesDb>,
     relay: ohttp_relay::Service,
     metrics: MetricsService,
+    #[cfg(feature = "access-control")]
+    access_control: Option<std::sync::Arc<access_control::AccessControl>>,
 }
 
 pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> anyhow::Result<()> {
     let sentinel_tag = generate_sentinel_tag();
 
+    #[cfg(feature = "access-control")]
+    let access_control = init_access_control(&config).await?;
+
     let services = Services {
         directory: init_directory(&config, sentinel_tag).await?,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
         metrics: MetricsService::new(meter_provider),
+        #[cfg(feature = "access-control")]
+        access_control,
     };
 
     let app = build_app(services);
+    #[cfg(feature = "access-control")]
+    let app = app.into_make_service_with_connect_info::<middleware::MaybePeerIp>();
 
     let listener =
         Listener::bind(&config.listener, &SystemOptions::default(), &UserOptions::default())
@@ -66,6 +81,8 @@ pub async fn serve_manual_tls(
         directory: init_directory(&config, sentinel_tag).await?,
         relay: ohttp_relay::Service::new_with_roots(root_store, sentinel_tag).await,
         metrics: MetricsService::new(None),
+        #[cfg(feature = "access-control")]
+        access_control: init_access_control(&config).await?,
     };
     let app = build_app(services);
 
@@ -82,14 +99,18 @@ pub async fn serve_manual_tls(
             info!("Payjoin service listening on port {} with TLS", port);
             tokio::spawn(async move {
                 axum_server::from_tcp_rustls(listener.into_std()?, tls)?
-                    .serve(app.into_make_service())
+                    .serve(app.into_make_service_with_connect_info::<SocketAddr>())
                     .await
                     .map_err(Into::into)
             })
         }
         None => {
             info!("Payjoin service listening on port {} without TLS", port);
-            tokio::spawn(async move { axum::serve(listener, app).await.map_err(Into::into) })
+            tokio::spawn(async move {
+                axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+                    .await
+                    .map_err(Into::into)
+            })
         }
     };
 
@@ -119,6 +140,8 @@ pub async fn serve_acme(
         directory: init_directory(&config, sentinel_tag).await?,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
         metrics: MetricsService::new(meter_provider),
+        #[cfg(feature = "access-control")]
+        access_control: init_access_control(&config).await?,
     };
     let app = build_app(services);
 
@@ -148,7 +171,10 @@ pub async fn serve_acme(
     });
 
     info!("Payjoin service listening on {} with ACME TLS", addr);
-    axum_server::bind(addr).acceptor(acceptor).serve(app.into_make_service()).await?;
+    axum_server::bind(addr)
+        .acceptor(acceptor)
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+        .await?;
     Ok(())
 }
 
@@ -156,6 +182,17 @@ pub async fn serve_acme(
 /// The relay and directory share this tag in a best-effort attempt
 /// at detecting self loops.
 fn generate_sentinel_tag() -> SentinelTag { SentinelTag::new(rand::thread_rng().gen()) }
+
+#[cfg(feature = "access-control")]
+impl Connected<IncomingStream<'_, Listener>> for middleware::MaybePeerIp {
+    fn connect_info(stream: IncomingStream<'_, Listener>) -> Self {
+        let ip = match stream.remote_addr() {
+            tokio_listener::SomeSocketAddr::Tcp(addr) => Some(addr.ip()),
+            _ => None,
+        };
+        Self(ip)
+    }
+}
 
 async fn init_directory(
     config: &Config,
@@ -168,6 +205,21 @@ async fn init_directory(
     let ohttp_config = init_ohttp_config(&ohttp_keys_dir)?;
 
     Ok(payjoin_directory::Service::new(db, ohttp_config.into(), sentinel_tag))
+}
+
+#[cfg(feature = "access-control")]
+async fn init_access_control(
+    config: &Config,
+) -> anyhow::Result<Option<std::sync::Arc<access_control::AccessControl>>> {
+    match &config.access_control {
+        Some(ac_config) => {
+            let ac =
+                access_control::AccessControl::from_config(ac_config, &config.storage_dir).await?;
+            info!("Access control enabled");
+            Ok(Some(std::sync::Arc::new(ac)))
+        }
+        None => Ok(None),
+    }
 }
 
 fn init_ohttp_config(
@@ -186,14 +238,28 @@ fn init_ohttp_config(
 
 fn build_app(services: Services) -> Router {
     let metrics = services.metrics.clone();
-    Router::new()
+
+    #[cfg(feature = "access-control")]
+    let acaccess_control = services.access_control.clone();
+
+    #[allow(unused_mut)]
+    let mut router = Router::new()
         .fallback(route_request)
         .layer(
             ServiceBuilder::new()
                 .layer(axum::middleware::from_fn_with_state(metrics.clone(), track_metrics))
                 .layer(axum::middleware::from_fn_with_state(metrics, track_connections)),
         )
-        .with_state(services)
+        .with_state(services);
+
+    #[cfg(feature = "access-control")]
+    {
+        router = router
+            .layer(axum::middleware::from_fn(middleware::check_access_control))
+            .layer(axum::Extension(acaccess_control));
+    }
+
+    router
 }
 
 async fn route_request(
@@ -284,7 +350,7 @@ mod tests {
 
         // Make a request through the relay that targets this same instance's directory.
         // The path format is /{gateway_url} where gateway_url points back to ourselves.
-        let ohttp_req_url = format!("{}/{}", base_url, base_url);
+        let ohttp_req_url = format!("{base_url}/{base_url}");
 
         let response = client
             .post(&ohttp_req_url)
@@ -322,7 +388,6 @@ mod tests {
         // Make a request through the relay instance to the directory instance.
         // Since they're different instances with different sentinel tags, this should work.
         let ohttp_req_url = format!("{}/{}", relay_url, directory_url);
-
         let response = client
             .post(&ohttp_req_url)
             .header("Content-Type", "message/ohttp-req")
@@ -361,6 +426,8 @@ mod tests {
             directory: init_directory(&config, sentinel_tag).await.unwrap(),
             relay: ohttp_relay::Service::new(sentinel_tag).await,
             metrics: MetricsService::new(Some(provider.clone())),
+            #[cfg(feature = "access-control")]
+            access_control: None,
         };
 
         let app = build_app(services);

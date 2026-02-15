@@ -85,6 +85,7 @@
           filter =
             path: type:
             (builtins.match ".*nginx.conf.template$" path != null)
+            || (builtins.match ".*/payjoin-mailroom/test-data/.*" path != null)
             || (craneLibVersions.msrv.filterCargoSources path type);
           name = "source";
         };

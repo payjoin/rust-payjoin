@@ -16,6 +16,8 @@ pub struct Config {
     pub telemetry: Option<TelemetryConfig>,
     #[cfg(feature = "acme")]
     pub acme: Option<AcmeConfig>,
+    #[cfg(feature = "access-control")]
+    pub access_control: Option<AccessControlConfig>,
 }
 
 #[cfg(feature = "telemetry")]
@@ -52,6 +54,14 @@ impl AcmeConfig {
     }
 }
 
+#[cfg(feature = "access-control")]
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct AccessControlConfig {
+    pub geo_db_path: Option<PathBuf>,
+    pub blocked_regions: Vec<String>,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -62,6 +72,8 @@ impl Default for Config {
             telemetry: None,
             #[cfg(feature = "acme")]
             acme: None,
+            #[cfg(feature = "access-control")]
+            access_control: None,
         }
     }
 }
@@ -84,6 +96,8 @@ impl Config {
             telemetry: None,
             #[cfg(feature = "acme")]
             acme: None,
+            #[cfg(feature = "access-control")]
+            access_control: None,
         }
     }
 
@@ -101,6 +115,7 @@ impl Config {
                     .list_separator(",")
                     .with_list_parse_key("acme.domains")
                     .with_list_parse_key("acme.contact")
+                    .with_list_parse_key("access_control.blocked_regions")
                     .try_parsing(true),
             )
             .build()?

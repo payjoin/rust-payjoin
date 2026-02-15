@@ -63,6 +63,7 @@ pub struct AccessControlConfig {
     pub blocked_addresses_path: Option<PathBuf>,
     pub blocked_addresses_url: Option<String>,
     pub blocked_addresses_refresh_secs: Option<u64>,
+    pub enable_v1: bool,
 }
 impl Default for Config {
     fn default() -> Self {

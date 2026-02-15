@@ -117,11 +117,23 @@ pub async fn init_directory(
     BoxSendSyncError,
 > {
     let tempdir = tempdir()?;
-    let config = payjoin_mailroom::config::Config::new(
+    let base_config = payjoin_mailroom::config::Config::new(
         "[::]:0".parse().expect("valid listener address"),
         tempdir.path().to_path_buf(),
         Duration::from_secs(2),
     );
+    #[cfg(feature = "access-control")]
+    let config = {
+        let mut config = base_config;
+        // Test services exercise V1/V2 interoperability paths; keep V1 enabled explicitly.
+        config.access_control = Some(payjoin_mailroom::config::AccessControlConfig {
+            enable_v1: true,
+            ..Default::default()
+        });
+        config
+    };
+    #[cfg(not(feature = "access-control"))]
+    let config = base_config;
 
     let tls_config = RustlsConfig::from_der(vec![local_cert_key.0], local_cert_key.1).await?;
 
@@ -144,11 +156,23 @@ async fn init_ohttp_relay(
     BoxSendSyncError,
 > {
     let tempdir = tempdir()?;
-    let config = payjoin_mailroom::config::Config::new(
+    let base_config = payjoin_mailroom::config::Config::new(
         "[::]:0".parse().expect("valid listener address"),
         tempdir.path().to_path_buf(),
         Duration::from_secs(2),
     );
+    #[cfg(feature = "access-control")]
+    let config = {
+        let mut config = base_config;
+        // Keep relay-side directory fallback behavior aligned with integration expectations.
+        config.access_control = Some(payjoin_mailroom::config::AccessControlConfig {
+            enable_v1: true,
+            ..Default::default()
+        });
+        config
+    };
+    #[cfg(not(feature = "access-control"))]
+    let config = base_config;
 
     let (port, handle) = payjoin_mailroom::serve_manual_tls(config, None, root_store)
         .await

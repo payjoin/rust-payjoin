@@ -44,7 +44,13 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
     let blocked_addresses = None;
 
     let services = Services {
-        directory: init_directory(&config, sentinel_tag, blocked_addresses, false).await?,
+        directory: init_directory(
+            &config,
+            sentinel_tag,
+            blocked_addresses,
+            get_v1_disabled(&config),
+        )
+        .await?,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
         metrics: MetricsService::new(meter_provider),
         #[cfg(feature = "access-control")]
@@ -87,7 +93,13 @@ pub async fn serve_manual_tls(
     let blocked_addresses = None;
 
     let services = Services {
-        directory: init_directory(&config, sentinel_tag, blocked_addresses, false).await?,
+        directory: init_directory(
+            &config,
+            sentinel_tag,
+            blocked_addresses,
+            get_v1_disabled(&config),
+        )
+        .await?,
         relay: ohttp_relay::Service::new_with_roots(root_store, sentinel_tag).await,
         metrics: MetricsService::new(None),
         #[cfg(feature = "access-control")]
@@ -151,7 +163,13 @@ pub async fn serve_acme(
     let blocked_addresses = None;
 
     let services = Services {
-        directory: init_directory(&config, sentinel_tag, blocked_addresses, false).await?,
+        directory: init_directory(
+            &config,
+            sentinel_tag,
+            blocked_addresses,
+            get_v1_disabled(&config),
+        )
+        .await?,
         relay: ohttp_relay::Service::new(sentinel_tag).await,
         metrics: MetricsService::new(meter_provider),
         #[cfg(feature = "access-control")]
@@ -334,6 +352,18 @@ async fn try_load_cache(
             }
             Err(e) => tracing::warn!("Failed to load address cache: {e}"),
         }
+    }
+}
+
+fn get_v1_disabled(config: &Config) -> bool {
+    #[cfg(feature = "access-control")]
+    {
+        !config.access_control.as_ref().is_some_and(|ac| ac.enable_v1)
+    }
+    #[cfg(not(feature = "access-control"))]
+    {
+        let _ = config;
+        false
     }
 }
 
@@ -563,5 +593,21 @@ mod tests {
         assert!(metric_names.contains(&HTTP_REQUESTS), "missing http_request_total");
         assert!(metric_names.contains(&TOTAL_CONNECTIONS), "missing total_connections");
         assert!(metric_names.contains(&ACTIVE_CONNECTIONS), "missing active_connections");
+    }
+
+    #[cfg(feature = "access-control")]
+    #[test]
+    fn v1_is_disabled_by_default() {
+        let config = Config::default();
+        assert!(get_v1_disabled(&config));
+    }
+
+    #[cfg(feature = "access-control")]
+    #[test]
+    fn v1_can_be_enabled_explicitly() {
+        let mut config = Config::default();
+        config.access_control =
+            Some(crate::config::AccessControlConfig { enable_v1: true, ..Default::default() });
+        assert!(!get_v1_disabled(&config));
     }
 }

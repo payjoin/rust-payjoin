@@ -8,6 +8,10 @@ repository = "https://github.com/payjoin/rust-payjoin"
 rust-version = "1.85"
 license = "MIT"
 
+[features]
+default = []
+access-control = ["payjoin-mailroom/access-control"]
+
 [dependencies]
 axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
 bitcoin = { version = "0.32.7", features = ["base64"] }

@@ -255,7 +255,7 @@ impl InternalInputPair<'_> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum PrevTxOutError {
+pub enum PrevTxOutError {
     MissingUtxoInformation,
     IndexOutOfBounds { output_count: usize, index: u32 },
 }
@@ -345,6 +345,10 @@ impl std::error::Error for PsbtInputError {
 pub struct PsbtInputsError {
     index: usize,
     error: InternalPsbtInputError,
+}
+
+impl PsbtInputsError {
+    pub fn index(&self) -> usize { self.index }
 }
 
 impl fmt::Display for PsbtInputsError {

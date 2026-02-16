@@ -1,0 +1,46 @@
+##
+## Payjoin Mailroom config.toml configuration file.
+## Copy this to config.toml and adjust values for your deployment.
+##
+
+# Core settings
+listener = "[::]:8080"
+storage_dir = "./data"
+timeout = 30
+
+# Optional telemetry settings (requires `--features telemetry`)
+#
+# [telemetry]
+# endpoint = "https://otlp-gateway-prod-us-west-0.grafana.net/otlp"
+# auth_token = "<base64 instanceID:token>"
+# operator_domain = "your-domain.example.com"
+
+# Optional ACME settings (requires `--features acme`)
+#
+# [acme]
+# domains = ["mailroom.example.com"]
+# contact = ["mailto:ops@example.com"]
+# # Optional; defaults to Let's Encrypt production when omitted.
+# directory_url = "https://acme-v02.api.letsencrypt.org/directory"
+
+# Optional access control settings (requires `--features access-control`)
+# GeoIP and address screening are opt-in. V1 is deny-by-default and must be
+# explicitly enabled.
+#
+# [access_control]
+# # If omitted and blocked_regions is non-empty, DB-IP Lite MMDB is auto-fetched
+# # into storage_dir on first startup.
+# geo_db_path = "/absolute/path/to/geoip.mmdb"
+#
+# # ISO 3166-1 alpha-2 region codes to block.
+# blocked_regions = ["IR", "KP"]
+#
+# # Optional local file with one address per line.
+# blocked_addresses_path = "/absolute/path/to/blocked_addresses.txt"
+#
+# # Optional URL for auto-updated address blocklist.
+# blocked_addresses_url = "https://example.com/blocked_addresses.txt"
+# blocked_addresses_refresh_secs = 86400
+#
+# # Enable V1 requests. Defaults to false when omitted.
+# enable_v1 = true

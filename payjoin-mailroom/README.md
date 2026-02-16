@@ -8,6 +8,8 @@ Note that this binary is under active development and thus the CLI and configura
 
 payjoin-mailroom reads configuration from `config.toml` (or the path given with `--config`). Every setting can also be supplied via environment variables prefixed with `PJ_`, using double underscores for nesting (e.g., `PJ_TELEMETRY__ENDPOINT`).
 
+A complete example is available at [config.example.toml](config.example.toml), including optional `[access_control]`, `[telemetry]`, and `[acme]` sections.
+
 ## Usage
 
 ### Cargo

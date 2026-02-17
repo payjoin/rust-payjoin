@@ -450,7 +450,7 @@ async function processReceiverProposal(
     throw new Error(`Unknown receiver state`);
 }
 
-function testInvalidPrimitives(): void {
+function testFfiValidation(): void {
     const tooLargeAmount = 21000000n * 100000000n + 1n;
 
     // Invalid outpoint (txid too long) should fail before amount checks.
@@ -486,9 +486,13 @@ function testInvalidPrimitives(): void {
         sequence: 0,
         witness: [],
     });
-    assert.throws(() => {
+    try {
         new payjoin.InputPair(amountOverflowTxIn, psbtIn, undefined);
-    }, /(Amount out of range|AmountOutOfRange)/);
+        assert.fail("Expected AmountOutOfRange error");
+    } catch (e) {
+        const [inner] = payjoin.InputPairError.FfiValidation.getInner(e);
+        assert.strictEqual(inner.tag, "AmountOutOfRange");
+    }
 
     // Oversized script_pubkey should fail.
     const hugeScript = new Uint8Array(10_001).fill(0x51).buffer;
@@ -501,9 +505,13 @@ function testInvalidPrimitives(): void {
         redeemScript: undefined,
         witnessScript: undefined,
     });
-    assert.throws(() => {
+    try {
         new payjoin.InputPair(amountOverflowTxIn, oversizedPsbtIn, undefined);
-    }, /(ScriptTooLarge|script too large|InvalidPrimitive)/);
+        assert.fail("Expected ScriptTooLarge error");
+    } catch (e) {
+        const [inner] = payjoin.InputPairError.FfiValidation.getInner(e);
+        assert.strictEqual(inner.tag, "ScriptTooLarge");
+    }
 
     // Weight must be positive and <= block weight.
     const smallTxOut = payjoin.PlainTxOut.create({
@@ -515,13 +523,17 @@ function testInvalidPrimitives(): void {
         redeemScript: undefined,
         witnessScript: undefined,
     });
-    assert.throws(() => {
+    try {
         new payjoin.InputPair(
             amountOverflowTxIn,
             smallPsbtIn,
             payjoin.PlainWeight.create({ weightUnits: 0n }),
         );
-    }, /(WeightOutOfRange|Weight out of range|InvalidPsbtInput|InvalidPrimitive)/);
+        assert.fail("Expected WeightOutOfRange error");
+    } catch (e) {
+        const [inner] = payjoin.InputPairError.FfiValidation.getInner(e);
+        assert.strictEqual(inner.tag, "WeightOutOfRange");
+    }
 
     const pjUri = payjoin.Uri.parse(
         "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com",
@@ -531,11 +543,11 @@ function testInvalidPrimitives(): void {
         new payjoin.SenderBuilder(psbt, pjUri).buildRecommended(
             18446744073709551615n,
         );
-    }, /(Fee rate out of range|RuntimeError)/);
+    }, /RuntimeError/);
 
     assert.throws(() => {
         pjUri.setAmountSats(tooLargeAmount);
-    }, /(Amount out of range|AmountOutOfRange)/);
+    }, /AmountOutOfRange/);
 }
 
 async function testIntegrationV2ToV2(): Promise<void> {
@@ -692,7 +704,7 @@ async function testIntegrationV2ToV2(): Promise<void> {
 
 async function runTests(): Promise<void> {
     await uniffiInitAsync();
-    testInvalidPrimitives();
+    testFfiValidation();
     await testIntegrationV2ToV2();
 }
 

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use payjoin::receive;
 
-use crate::error::{ImplementationError, PrimitiveError};
+use crate::error::{FfiValidationError, ImplementationError};
 use crate::uri::error::IntoUrlError;
 
 /// The top-level error type for the payjoin receiver
@@ -179,7 +179,7 @@ pub enum OutputSubstitutionError {
     #[error(transparent)]
     Protocol(Arc<OutputSubstitutionProtocolError>),
     #[error(transparent)]
-    Primitive(PrimitiveError),
+    FfiValidation(FfiValidationError),
 }
 
 impl From<receive::OutputSubstitutionError> for OutputSubstitutionError {
@@ -188,8 +188,8 @@ impl From<receive::OutputSubstitutionError> for OutputSubstitutionError {
     }
 }
 
-impl From<PrimitiveError> for OutputSubstitutionError {
-    fn from(value: PrimitiveError) -> Self { OutputSubstitutionError::Primitive(value) }
+impl From<FfiValidationError> for OutputSubstitutionError {
+    fn from(value: FfiValidationError) -> Self { OutputSubstitutionError::FfiValidation(value) }
 }
 
 /// Error that may occur when coin selection fails.
@@ -213,18 +213,12 @@ pub enum InputPairError {
     /// Provided outpoint could not be parsed.
     #[error("Invalid outpoint (txid={txid}, vout={vout})")]
     InvalidOutPoint { txid: String, vout: u32 },
-    /// Amount exceeds allowed maximum.
-    #[error("Amount out of range: {amount_sat} sats (max {max_sat})")]
-    AmountOutOfRange { amount_sat: u64, max_sat: u64 },
-    /// Weight must be positive and no more than a block.
-    #[error("Weight out of range: {weight_units} wu (max {max_wu})")]
-    WeightOutOfRange { weight_units: u64, max_wu: u64 },
     /// PSBT input failed validation in the core library.
     #[error("Invalid PSBT input: {0}")]
     InvalidPsbtInput(Arc<PsbtInputError>),
-    /// Primitive input failed validation in the FFI layer.
-    #[error("Invalid primitive input: {0}")]
-    InvalidPrimitive(PrimitiveError),
+    /// Input failed validation in the FFI layer.
+    #[error("Invalid input: {0}")]
+    FfiValidation(FfiValidationError),
 }
 
 impl InputPairError {
@@ -233,16 +227,8 @@ impl InputPairError {
     }
 }
 
-impl From<PrimitiveError> for InputPairError {
-    fn from(value: PrimitiveError) -> Self {
-        match value {
-            PrimitiveError::AmountOutOfRange { amount_sat, max_sat } =>
-                InputPairError::AmountOutOfRange { amount_sat, max_sat },
-            PrimitiveError::WeightOutOfRange { weight_units, max_wu } =>
-                InputPairError::WeightOutOfRange { weight_units, max_wu },
-            other => InputPairError::InvalidPrimitive(other),
-        }
-    }
+impl From<FfiValidationError> for InputPairError {
+    fn from(value: FfiValidationError) -> Self { InputPairError::FfiValidation(value) }
 }
 
 /// Error that may occur when a receiver event log is replayed

@@ -22,7 +22,7 @@ impl From<ImplementationError> for payjoin::ImplementationError {
 pub struct SerdeJsonError(#[from] serde_json::Error);
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
-pub enum PrimitiveError {
+pub enum FfiValidationError {
     #[error("Amount out of range: {amount_sat} sats (max {max_sat})")]
     AmountOutOfRange { amount_sat: u64, max_sat: u64 },
     #[error("{field} script is empty")]

@@ -5,7 +5,7 @@ pub use error::{PjNotSupported, PjParseError, UrlParseError};
 use payjoin::bitcoin::address::NetworkChecked;
 use payjoin::UriExt;
 
-use crate::error::PrimitiveError;
+use crate::error::FfiValidationError;
 use crate::validation::validate_amount_sat;
 
 pub mod error;
@@ -65,7 +65,7 @@ impl PjUri {
     pub fn amount_sats(&self) -> Option<u64> { self.0.clone().amount.map(|e| e.to_sat()) }
 
     /// Sets the amount in sats and returns a new PjUri
-    pub fn set_amount_sats(&self, amount_sats: u64) -> Result<Self, PrimitiveError> {
+    pub fn set_amount_sats(&self, amount_sats: u64) -> Result<Self, FfiValidationError> {
         let mut uri = self.0.clone();
         let amount = validate_amount_sat(amount_sats)?;
         uri.amount = Some(amount);

@@ -374,7 +374,7 @@ Future<payjoin.ReceiveSession?> process_receiver_proposal(
 
 void main() {
   group('Test integration', () {
-    test('Invalid primitives', () async {
+    test('FFI validation', () async {
       final tooLargeAmount = 21000000 * 100000000 + 1;
       // Invalid outpoint should fail before amount checks.
       final txinInvalid = payjoin.PlainTxIn(
@@ -439,7 +439,7 @@ void main() {
 
       expect(
         () => pjUri.setAmountSats(tooLargeAmount),
-        throwsA(isA<payjoin.PrimitiveException>()),
+        throwsA(isA<payjoin.FfiValidationException>()),
       );
     });
 

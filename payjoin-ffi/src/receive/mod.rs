@@ -12,7 +12,7 @@ use payjoin::bitcoin::FeeRate;
 use payjoin::persist::{MaybeFatalTransition, NextStateTransition};
 
 use crate::error::ForeignError;
-pub use crate::error::{ImplementationError, PrimitiveError, SerdeJsonError};
+pub use crate::error::{FfiValidationError, ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
 use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
 use crate::uri::error::FeeRateError;
@@ -275,7 +275,7 @@ pub struct PlainTxOut {
 }
 
 impl PlainTxOut {
-    fn into_core(self) -> Result<payjoin::bitcoin::TxOut, PrimitiveError> {
+    fn into_core(self) -> Result<payjoin::bitcoin::TxOut, FfiValidationError> {
         let value = validate_amount_sat(self.value_sat)?;
         let script_pubkey = validate_script_vec("script_pubkey", self.script_pubkey, false)?;
         Ok(payjoin::bitcoin::TxOut { value, script_pubkey })
@@ -370,7 +370,7 @@ pub struct PlainWeight {
 }
 
 impl PlainWeight {
-    fn into_core(self) -> Result<payjoin::bitcoin::Weight, PrimitiveError> {
+    fn into_core(self) -> Result<payjoin::bitcoin::Weight, FfiValidationError> {
         validate_weight_units(self.weight_units)
     }
 }
@@ -409,12 +409,12 @@ impl ReceiverBuilder {
         ))
     }
 
-    pub fn with_amount(&self, amount_sats: u64) -> Result<Self, PrimitiveError> {
+    pub fn with_amount(&self, amount_sats: u64) -> Result<Self, FfiValidationError> {
         let amount = validate_amount_sat(amount_sats)?;
         Ok(Self(self.0.clone().with_amount(amount)))
     }
 
-    pub fn with_expiration(&self, expiration: u64) -> Result<Self, PrimitiveError> {
+    pub fn with_expiration(&self, expiration: u64) -> Result<Self, FfiValidationError> {
         let expiration = validate_expiration_secs(expiration)?;
         Ok(Self(self.0.clone().with_expiration(expiration)))
     }
@@ -638,7 +638,7 @@ impl UncheckedOriginalPayload {
         &self,
         min_fee_rate: Option<u64>,
         can_broadcast: Arc<dyn CanBroadcast>,
-    ) -> Result<UncheckedOriginalPayloadTransition, PrimitiveError> {
+    ) -> Result<UncheckedOriginalPayloadTransition, FfiValidationError> {
         let min_fee_rate = validate_fee_rate_sat_per_kwu_opt(min_fee_rate)?;
         Ok(UncheckedOriginalPayloadTransition(Arc::new(RwLock::new(Some(
             self.0.clone().check_broadcast_suitability(min_fee_rate, |transaction| {
@@ -1031,7 +1031,7 @@ impl WantsFeeRange {
         &self,
         min_fee_rate_sat_per_vb: Option<u64>,
         max_effective_fee_rate_sat_per_vb: Option<u64>,
-    ) -> Result<WantsFeeRangeTransition, PrimitiveError> {
+    ) -> Result<WantsFeeRangeTransition, FfiValidationError> {
         let min_fee_rate_sat_per_vb = validate_fee_rate_sat_per_vb_opt(min_fee_rate_sat_per_vb)?;
         let max_effective_fee_rate_sat_per_vb =
             validate_fee_rate_sat_per_vb_opt(max_effective_fee_rate_sat_per_vb)?;

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use payjoin::bitcoin::psbt::PsbtParseError as CorePsbtParseError;
 use payjoin::send;
 
-use crate::error::{ImplementationError, PrimitiveError};
+use crate::error::{FfiValidationError, ImplementationError};
 
 /// Error building a Sender from a SenderBuilder.
 ///
@@ -42,11 +42,11 @@ pub enum SenderInputError {
     #[error(transparent)]
     Build(Arc<BuildSenderError>),
     #[error(transparent)]
-    Primitive(PrimitiveError),
+    FfiValidation(FfiValidationError),
 }
 
-impl From<PrimitiveError> for SenderInputError {
-    fn from(value: PrimitiveError) -> Self { SenderInputError::Primitive(value) }
+impl From<FfiValidationError> for SenderInputError {
+    fn from(value: FfiValidationError) -> Self { SenderInputError::FfiValidation(value) }
 }
 
 /// Error returned when request could not be created.

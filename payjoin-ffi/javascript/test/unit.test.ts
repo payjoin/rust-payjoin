@@ -1,6 +1,7 @@
 import { describe, test, before } from "node:test";
 import assert from "node:assert";
 import { payjoin, uniffiInitAsync } from "../dist/index.js";
+import * as testUtils from "../test-utils/index.js";
 
 before(async () => {
     await uniffiInitAsync();
@@ -210,8 +211,7 @@ describe("Persistence tests", () => {
         const uri = receiver.pjUri();
 
         const senderPersister = new InMemorySenderPersister(1);
-        const psbt =
-            "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+        const psbt = testUtils.originalPsbt();
         const withReplyKey = new payjoin.SenderBuilder(psbt, uri)
             .buildRecommended(BigInt(1000))
             .save(senderPersister);
@@ -280,8 +280,7 @@ describe("Async Persistence tests", () => {
         const uri = receiver.pjUri();
 
         const senderPersister = new InMemorySenderPersisterAsync(1);
-        const psbt =
-            "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+        const psbt = testUtils.originalPsbt();
         const withReplyKey = await new payjoin.SenderBuilder(psbt, uri)
             .buildRecommended(BigInt(1000))
             .saveAsync(senderPersister);
@@ -330,6 +329,15 @@ describe("Validation", () => {
                 witnessScript: undefined,
             });
             new payjoin.InputPair(txin, psbtIn, undefined);
+        });
+    });
+
+    test("sender builder rejects bad psbt", () => {
+        assert.throws(() => {
+            new payjoin.SenderBuilder(
+                "not-a-psbt",
+                "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX",
+            );
         });
     });
 });

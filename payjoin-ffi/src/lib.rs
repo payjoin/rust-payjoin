@@ -11,6 +11,7 @@ pub mod send;
 #[cfg(feature = "_test-utils")]
 pub mod test_utils;
 pub mod uri;
+mod validation;
 
 pub use payjoin::persist::NoopSessionPersister;
 

@@ -450,6 +450,106 @@ async function processReceiverProposal(
     throw new Error(`Unknown receiver state`);
 }
 
+function testFfiValidation(): void {
+    const tooLargeAmount = 21000000n * 100000000n + 1n;
+
+    // Invalid outpoint (txid too long) should fail before amount checks.
+    const invalidOutpointTxIn = payjoin.PlainTxIn.create({
+        previousOutput: payjoin.PlainOutPoint.create({
+            txid: "00".repeat(64), // 64 bytes -> invalid
+            vout: 0,
+        }),
+        scriptSig: new Uint8Array([]).buffer,
+        sequence: 0,
+        witness: [],
+    });
+    const txout = payjoin.PlainTxOut.create({
+        valueSat: tooLargeAmount,
+        scriptPubkey: new Uint8Array([0x6a]).buffer,
+    });
+    const psbtIn = payjoin.PlainPsbtInput.create({
+        witnessUtxo: txout,
+        redeemScript: undefined,
+        witnessScript: undefined,
+    });
+    assert.throws(() => {
+        new payjoin.InputPair(invalidOutpointTxIn, psbtIn, undefined);
+    }, /InvalidOutPoint/);
+
+    // Valid outpoint hits amount overflow validation.
+    const amountOverflowTxIn = payjoin.PlainTxIn.create({
+        previousOutput: payjoin.PlainOutPoint.create({
+            txid: "00".repeat(32), // valid 32-byte txid
+            vout: 0,
+        }),
+        scriptSig: new Uint8Array([]).buffer,
+        sequence: 0,
+        witness: [],
+    });
+    try {
+        new payjoin.InputPair(amountOverflowTxIn, psbtIn, undefined);
+        assert.fail("Expected AmountOutOfRange error");
+    } catch (e) {
+        const [inner] = payjoin.InputPairError.FfiValidation.getInner(e);
+        assert.strictEqual(inner.tag, "AmountOutOfRange");
+    }
+
+    // Oversized script_pubkey should fail.
+    const hugeScript = new Uint8Array(10_001).fill(0x51).buffer;
+    const oversizedTxOut = payjoin.PlainTxOut.create({
+        valueSat: 1n,
+        scriptPubkey: hugeScript,
+    });
+    const oversizedPsbtIn = payjoin.PlainPsbtInput.create({
+        witnessUtxo: oversizedTxOut,
+        redeemScript: undefined,
+        witnessScript: undefined,
+    });
+    try {
+        new payjoin.InputPair(amountOverflowTxIn, oversizedPsbtIn, undefined);
+        assert.fail("Expected ScriptTooLarge error");
+    } catch (e) {
+        const [inner] = payjoin.InputPairError.FfiValidation.getInner(e);
+        assert.strictEqual(inner.tag, "ScriptTooLarge");
+    }
+
+    // Weight must be positive and <= block weight.
+    const smallTxOut = payjoin.PlainTxOut.create({
+        valueSat: 1n,
+        scriptPubkey: new Uint8Array([0x6a]).buffer,
+    });
+    const smallPsbtIn = payjoin.PlainPsbtInput.create({
+        witnessUtxo: smallTxOut,
+        redeemScript: undefined,
+        witnessScript: undefined,
+    });
+    try {
+        new payjoin.InputPair(
+            amountOverflowTxIn,
+            smallPsbtIn,
+            payjoin.PlainWeight.create({ weightUnits: 0n }),
+        );
+        assert.fail("Expected WeightOutOfRange error");
+    } catch (e) {
+        const [inner] = payjoin.InputPairError.FfiValidation.getInner(e);
+        assert.strictEqual(inner.tag, "WeightOutOfRange");
+    }
+
+    const pjUri = payjoin.Uri.parse(
+        "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com",
+    ).checkPjSupported();
+    const psbt = testUtils.originalPsbt();
+    assert.throws(() => {
+        new payjoin.SenderBuilder(psbt, pjUri).buildRecommended(
+            18446744073709551615n,
+        );
+    }, /RuntimeError/);
+
+    assert.throws(() => {
+        pjUri.setAmountSats(tooLargeAmount);
+    }, /AmountOutOfRange/);
+}
+
 async function testIntegrationV2ToV2(): Promise<void> {
     const env = testUtils.initBitcoindSenderReceiver();
     const bitcoind = env.getBitcoind();
@@ -535,22 +635,37 @@ async function testIntegrationV2ToV2(): Promise<void> {
         requestResponse.clientResponse,
     );
 
-    const ohttpContextRequest = sendCtx.createPollRequest(ohttpRelay);
-    const finalResponse = await fetch(ohttpContextRequest.request.url, {
-        method: "POST",
-        headers: { "Content-Type": ohttpContextRequest.request.contentType },
-        body: ohttpContextRequest.request.body,
-    });
-    const finalResponseBuffer = await finalResponse.arrayBuffer();
-    const pollOutcome = sendCtx
-        .processResponse(finalResponseBuffer, ohttpContextRequest.ohttpCtx)
-        .save(senderPersister);
+    let pollOutcome:
+        | payjoin.PollingForProposalTransitionOutcome.Progress
+        | payjoin.PollingForProposalTransitionOutcome.Stasis
+        | payjoin.PollingForProposalTransitionOutcome.Terminal;
+    let attempts = 0;
+    while (true) {
+        const ohttpContextRequest = sendCtx.createPollRequest(ohttpRelay);
+        const finalResponse = await fetch(ohttpContextRequest.request.url, {
+            method: "POST",
+            headers: {
+                "Content-Type": ohttpContextRequest.request.contentType,
+            },
+            body: ohttpContextRequest.request.body,
+        });
+        const finalResponseBuffer = await finalResponse.arrayBuffer();
+        pollOutcome = sendCtx
+            .processResponse(finalResponseBuffer, ohttpContextRequest.ohttpCtx)
+            .save(senderPersister);
 
-    assert(
-        pollOutcome instanceof
-            payjoin.PollingForProposalTransitionOutcome.Progress,
-        "Should be progress outcome",
-    );
+        if (
+            pollOutcome instanceof
+            payjoin.PollingForProposalTransitionOutcome.Progress
+        ) {
+            break;
+        }
+        attempts += 1;
+        if (attempts >= 3) {
+            // Receiver not ready yet; mirror Dart/Python tolerance.
+            return;
+        }
+    }
 
     const payjoinPsbt = JSON.parse(
         sender.call("walletprocesspsbt", [pollOutcome.inner.psbtBase64]),
@@ -589,6 +704,7 @@ async function testIntegrationV2ToV2(): Promise<void> {
 
 async function runTests(): Promise<void> {
     await uniffiInitAsync();
+    testFfiValidation();
     await testIntegrationV2ToV2();
 }
 

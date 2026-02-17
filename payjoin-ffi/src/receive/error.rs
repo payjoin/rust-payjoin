@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use payjoin::receive;
 
-use crate::error::ImplementationError;
+use crate::error::{FfiValidationError, ImplementationError};
 use crate::uri::error::IntoUrlError;
 
 /// The top-level error type for the payjoin receiver
@@ -168,10 +168,29 @@ impl From<ProtocolError> for JsonReply {
 #[error(transparent)]
 pub struct SessionError(#[from] receive::v2::SessionError);
 
-/// Error that may occur when output substitution fails.
+/// Protocol error raised during output substitution.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
-pub struct OutputSubstitutionError(#[from] receive::OutputSubstitutionError);
+pub struct OutputSubstitutionProtocolError(#[from] receive::OutputSubstitutionError);
+
+/// Error that may occur when output substitution fails.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum OutputSubstitutionError {
+    #[error(transparent)]
+    Protocol(Arc<OutputSubstitutionProtocolError>),
+    #[error(transparent)]
+    FfiValidation(FfiValidationError),
+}
+
+impl From<receive::OutputSubstitutionError> for OutputSubstitutionError {
+    fn from(value: receive::OutputSubstitutionError) -> Self {
+        OutputSubstitutionError::Protocol(Arc::new(value.into()))
+    }
+}
+
+impl From<FfiValidationError> for OutputSubstitutionError {
+    fn from(value: FfiValidationError) -> Self { OutputSubstitutionError::FfiValidation(value) }
+}
 
 /// Error that may occur when coin selection fails.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
@@ -197,12 +216,19 @@ pub enum InputPairError {
     /// PSBT input failed validation in the core library.
     #[error("Invalid PSBT input: {0}")]
     InvalidPsbtInput(Arc<PsbtInputError>),
+    /// Input failed validation in the FFI layer.
+    #[error("Invalid input: {0}")]
+    FfiValidation(FfiValidationError),
 }
 
 impl InputPairError {
     pub fn invalid_outpoint(txid: String, vout: u32) -> Self {
         InputPairError::InvalidOutPoint { txid, vout }
     }
+}
+
+impl From<FfiValidationError> for InputPairError {
+    fn from(value: FfiValidationError) -> Self { InputPairError::FfiValidation(value) }
 }
 
 /// Error that may occur when a receiver event log is replayed

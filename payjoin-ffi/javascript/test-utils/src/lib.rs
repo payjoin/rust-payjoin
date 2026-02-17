@@ -8,6 +8,9 @@ use payjoin_test_utils::corepc_node::AddressType;
 use serde_json::Value;
 
 #[napi]
+pub fn original_psbt() -> String { payjoin_test_utils::ORIGINAL_PSBT.to_string() }
+
+#[napi]
 pub struct BitcoindEnv {
     bitcoind: BitcoindInstance,
     receiver: RpcClient,

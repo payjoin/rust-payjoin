@@ -89,7 +89,9 @@ mod integration {
         }
     }
 
+    // UNIX domain socket transport is only available on unix targets.
     #[tokio::test]
+    #[cfg(unix)]
     async fn test_request_response_socket() -> Result<(), Box<dyn std::error::Error>> {
         init_crypto_provider();
         let temp_dir = std::env::temp_dir();

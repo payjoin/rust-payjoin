@@ -870,9 +870,9 @@ async fn test_v1_wait() -> std::io::Result<()> {
     Ok(())
 }
 
-// FIXME test is a bit slow and flakey, how to improve?
-// unfortunately tokio::time::pause() can't be used because this uses SystemTime
-// as the underlying clock type, due to timestamps originating from disk
+// Simulate elapsed time deterministically by shifting stored timestamps
+// backward instead of sleeping. tokio::time::pause() can't be used because
+// prune compares against SystemTime (timestamps originate from disk).
 #[tokio::test]
 async fn test_prune() -> std::io::Result<()> {
     let dir = tempfile::tempdir()?;
@@ -881,12 +881,16 @@ async fn test_prune() -> std::io::Result<()> {
         .await
         .expect("initializing mailbox database should succeed");
 
+    let read_ttl = Duration::from_secs(60);
+    let unread_ttl_at_capacity = Duration::from_secs(600);
+    let unread_ttl_below_capacity = Duration::from_secs(3600);
+
     {
         let mut guard = db.mailboxes.lock().await;
         guard.capacity = 2;
-        guard.read_ttl = Duration::from_millis(10);
-        guard.unread_ttl_at_capacity = Duration::from_millis(100);
-        guard.unread_ttl_below_capacity = Duration::from_millis(200);
+        guard.read_ttl = read_ttl;
+        guard.unread_ttl_at_capacity = unread_ttl_at_capacity;
+        guard.unread_ttl_below_capacity = unread_ttl_below_capacity;
     }
 
     assert_eq!(db.mailboxes.lock().await.len(), 0);
@@ -896,6 +900,7 @@ async fn test_prune() -> std::io::Result<()> {
     let id = ShortId([0u8; 8]);
     let contents = b"fooo";
 
+    // Pending v2 waiter that times out should be cleaned up by prune
     let read_task1 = tokio::spawn({
         let db = db.clone();
         async move { db.wait_for_v2_payload(&id).await }
@@ -906,12 +911,13 @@ async fn test_prune() -> std::io::Result<()> {
 
     match read_task1.await.expect("joining should succeed") {
         Err(super::Error::Timeout(_)) => {}
-        res => panic!("expected timeout, got {:?}", res),
+        res => panic!("expected timeout, got {res:?}"),
     }
 
     db.prune().await.expect("pruning should not fail");
     assert_eq!(db.mailboxes.lock().await.len(), 0);
 
+    // Post a v2 payload — should survive immediate prune (TTL not elapsed)
     db.post_v2_payload(&id, contents.to_vec())
         .await
         .expect("posting payload should succeed")
@@ -921,42 +927,46 @@ async fn test_prune() -> std::io::Result<()> {
     db.prune().await.expect("pruning should not fail");
     assert_eq!(db.mailboxes.lock().await.len(), 1);
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Shift insert timestamps past unread_ttl_below_capacity
+    {
+        let mut guard = db.mailboxes.lock().await;
+        for (ts, _) in guard.insert_order.iter_mut() {
+            *ts = *ts - (unread_ttl_below_capacity + Duration::from_secs(1));
+        }
+    }
 
     assert_eq!(db.mailboxes.lock().await.len(), 1);
     db.prune().await.expect("pruning should not fail");
     assert_eq!(db.mailboxes.lock().await.len(), 0);
 
+    // Post again, read it, then verify read TTL pruning
     db.post_v2_payload(&id, contents.to_vec())
         .await
         .expect("posting payload should succeed")
         .expect("contents should be accepted");
 
     assert_eq!(db.mailboxes.lock().await.len(), 1);
-    // FIXME why does this fail?
-    // db.prune().await.expect("pruning should not fail");
-    // assert_eq!(db.mailboxes.lock().await.len(), 1);
-    // mailbox seems to get pruned prematurely
-    // likely cause is it's in both read and insert queue, and two pruning runs
-    // are needed to fully clear it?
 
-    // mark the mailbox as read
+    // Mark the mailbox as read
     _ = db.wait_for_v2_payload(&id).await.expect("waiting for payload should succeed");
 
     assert_eq!(db.mailboxes.lock().await.len(), 1);
-    // FIXME db.prune().await.expect("pruning should not fail");
+    db.prune().await.expect("pruning should not fail");
     assert_eq!(db.mailboxes.lock().await.len(), 1);
 
-    // allow read TTL to elapse
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    // Shift read timestamps past read_ttl
+    {
+        let mut guard = db.mailboxes.lock().await;
+        for (ts, _) in guard.read_order.iter_mut() {
+            *ts = *ts - (read_ttl + Duration::from_secs(1));
+        }
+    }
 
     assert_eq!(db.mailboxes.lock().await.len(), 1);
     db.prune().await.expect("pruning should not fail");
     assert_eq!(db.mailboxes.lock().await.len(), 0);
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    assert_eq!(db.mailboxes.lock().await.len(), 0);
+    // Empty db should remain empty after prune
     db.prune().await.expect("pruning should not fail");
     assert_eq!(db.mailboxes.lock().await.len(), 0);
 

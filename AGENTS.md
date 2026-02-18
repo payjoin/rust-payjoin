@@ -35,7 +35,7 @@ codespell
 ./contrib/lint.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features \
   --document-private-items
-./contrib/test_local.sh            # does NOT include payjoin-mailroom
+./contrib/test_local.sh
 treefmt --ci                       # prettier, taplo, nixfmt, shellcheck, shfmt
 codespell
 ```

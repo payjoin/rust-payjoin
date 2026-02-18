@@ -227,6 +227,7 @@ impl<D: Db> Service<D> {
         Ok(response)
     }
 
+    /// Handle an encapsulated OHTTP request and return an encapsulated response
     async fn handle_ohttp_gateway<B>(
         &self,
         body: B,
@@ -235,12 +236,12 @@ impl<D: Db> Service<D> {
         B: Body<Data = Bytes> + Send + 'static,
         B::Error: Into<BoxError>,
     {
+        // Decapsulate OHTTP request
         let ohttp_body = body
             .collect()
             .await
             .map_err(|e| HandlerError::BadRequest(anyhow::anyhow!(e.into())))?
             .to_bytes();
-
         let (bhttp_req, res_ctx) = self
             .ohttp
             .decapsulate(&ohttp_body)
@@ -261,8 +262,10 @@ impl<D: Db> Service<D> {
         }
         let request = http_req.body(full(body))?;
 
-        let response = self.handle_v2(request).await?;
+        // Handle decapsulated request
+        let response = self.handle_decapsulated_request(request).await?;
 
+        // Encapsulate OHTTP response
         let (parts, body) = response.into_parts();
         let mut bhttp_res = bhttp::Message::response(
             bhttp::StatusCode::try_from(parts.status.as_u16())
@@ -289,7 +292,7 @@ impl<D: Db> Service<D> {
         Ok(Response::new(full(ohttp_res)))
     }
 
-    async fn handle_v2(
+    async fn handle_decapsulated_request(
         &self,
         req: Request<BoxBody<Bytes, hyper::Error>>,
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {

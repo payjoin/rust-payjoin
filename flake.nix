@@ -209,6 +209,7 @@
                 dart
                 cargo-fuzz
                 bzip2 # needed for some machines to have access to libzip at runtime
+                codespell
                 treefmtEval.config.build.wrapper
               ]
               ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [

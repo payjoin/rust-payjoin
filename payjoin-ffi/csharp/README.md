@@ -80,6 +80,7 @@ dotnet build
 `Payjoin.nuspec` is included for packaging the generated C# source plus native library artifacts.
 
 Before packing, make sure generation has produced:
+
 - `src/payjoin.cs`
 - `lib/*` (native library for the current platform)
 

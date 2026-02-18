@@ -36,7 +36,7 @@ codespell
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features \
   --document-private-items
 ./contrib/test_local.sh            # does NOT include payjoin-mailroom
-npx prettier --check '**/*.md'     # CI runs prettier via treefmt
+treefmt --ci                       # prettier, taplo, nixfmt, shellcheck, shfmt
 codespell
 ```
 

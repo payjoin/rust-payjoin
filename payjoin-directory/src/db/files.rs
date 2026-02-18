@@ -931,7 +931,7 @@ async fn test_prune() -> std::io::Result<()> {
     {
         let mut guard = db.mailboxes.lock().await;
         for (ts, _) in guard.insert_order.iter_mut() {
-            *ts = *ts - (unread_ttl_below_capacity + Duration::from_secs(1));
+            *ts -= unread_ttl_below_capacity + Duration::from_secs(1);
         }
     }
 
@@ -958,7 +958,7 @@ async fn test_prune() -> std::io::Result<()> {
     {
         let mut guard = db.mailboxes.lock().await;
         for (ts, _) in guard.read_order.iter_mut() {
-            *ts = *ts - (read_ttl + Duration::from_secs(1));
+            *ts -= read_ttl + Duration::from_secs(1);
         }
     }
 

@@ -453,6 +453,7 @@ fn handle_peek<Error: db::SendableError>(
             db::Error::OverCapacity => Err(HandlerError::ServiceUnavailable(anyhow::Error::msg(
                 "mailbox storage at capacity",
             ))),
+            db::Error::AlreadyRead => Ok(timeout_response),
             db::Error::V1SenderUnavailable => Err(HandlerError::SenderGone(anyhow::Error::msg(
                 "Sender is unavailable try a new request",
             ))),

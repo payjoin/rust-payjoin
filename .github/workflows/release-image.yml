@@ -20,6 +20,13 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Wait for other workflows
+        uses: lewagon/wait-on-check-action@v1.5.0
+        with:
+          ref: ${{ github.sha }}
+          running-workflow-name: "Build and publish Docker image"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -33,7 +40,12 @@ jobs:
           password: ${{ secrets.PAYJOIN_DOCKER_RW }}
 
       - name: Build and release image
-        run: nix run .#packages.x86_64-linux.payjoin-mailroom-image.copyToRegistry
+        env:
+          IMAGE_TAG: ${{ github.ref_name }}
+        # --impure is needed to pass env variables into the flake.
+        # This breaks deterministic builds but allows us to identify
+        # the image with the release tag name.
+        run: nix run --impure .#packages.x86_64-linux.payjoin-mailroom-image.copyToRegistry
 
   build-pr:
     name: "Build and upload image artifact"
@@ -45,6 +57,13 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Wait for other workflows
+        uses: lewagon/wait-on-check-action@v1.5.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          running-workflow-name: "Build and upload image artifact"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Checkout
         uses: actions/checkout@v4
 

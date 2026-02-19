@@ -16,6 +16,8 @@ pub struct Config {
     pub timeout: Duration,
     pub storage_dir: PathBuf,
     pub ohttp_keys: PathBuf, // TODO OhttpConfig struct with rotation params, etc
+    #[serde(default)]
+    pub enable_v1: bool,
     #[cfg(feature = "acme")]
     pub acme: Option<AcmeConfig>,
 }
@@ -54,6 +56,7 @@ impl Config {
             timeout: Duration::from_secs(built_config.get("timeout")?),
             storage_dir: built_config.get("storage_dir")?,
             ohttp_keys: built_config.get("ohttp_keys")?,
+            enable_v1: built_config.get("enable_v1").unwrap_or(false),
             #[cfg(feature = "acme")]
             acme: if built_config.get_table("acme").is_ok() {
                 Some(AcmeConfig {

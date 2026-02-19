@@ -167,7 +167,7 @@ async fn init_directory(
     let ohttp_keys_dir = config.storage_dir.join("ohttp-keys");
     let ohttp_config = init_ohttp_config(&ohttp_keys_dir)?;
 
-    Ok(payjoin_directory::Service::new(db, ohttp_config.into(), sentinel_tag))
+    Ok(payjoin_directory::Service::new(db, ohttp_config.into(), sentinel_tag, config.enable_v1))
 }
 
 fn init_ohttp_config(
@@ -260,6 +260,7 @@ mod tests {
             "[::]:0".parse().expect("valid listener address"),
             tempdir.path().to_path_buf(),
             Duration::from_secs(2),
+            false,
         );
 
         let mut root_store = RootCertStore::empty();
@@ -284,7 +285,7 @@ mod tests {
 
         // Make a request through the relay that targets this same instance's directory.
         // The path format is /{gateway_url} where gateway_url points back to ourselves.
-        let ohttp_req_url = format!("{}/{}", base_url, base_url);
+        let ohttp_req_url = format!("{base_url}/{base_url}");
 
         let response = client
             .post(&ohttp_req_url)
@@ -354,6 +355,7 @@ mod tests {
             "[::]:0".parse().expect("valid listener address"),
             tempdir.path().to_path_buf(),
             Duration::from_secs(2),
+            false,
         );
 
         let sentinel_tag = generate_sentinel_tag();

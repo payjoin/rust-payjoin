@@ -12,6 +12,7 @@ pub struct Config {
     pub storage_dir: PathBuf,
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub timeout: Duration,
+    pub enable_v1: bool,
     #[cfg(feature = "telemetry")]
     pub telemetry: Option<TelemetryConfig>,
     #[cfg(feature = "acme")]
@@ -58,6 +59,7 @@ impl Default for Config {
             listener: "[::]:8080".parse().expect("valid default listener address"),
             storage_dir: PathBuf::from("./data"),
             timeout: Duration::from_secs(30),
+            enable_v1: false,
             #[cfg(feature = "telemetry")]
             telemetry: None,
             #[cfg(feature = "acme")]
@@ -75,11 +77,17 @@ where
 }
 
 impl Config {
-    pub fn new(listener: ListenerAddress, storage_dir: PathBuf, timeout: Duration) -> Self {
+    pub fn new(
+        listener: ListenerAddress,
+        storage_dir: PathBuf,
+        timeout: Duration,
+        enable_v1: bool,
+    ) -> Self {
         Self {
             listener,
             storage_dir,
             timeout,
+            enable_v1,
             #[cfg(feature = "telemetry")]
             telemetry: None,
             #[cfg(feature = "acme")]

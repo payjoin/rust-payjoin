@@ -5,6 +5,12 @@ For the full human guide see [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md
 Nightly Rust toolchain (`rust-toolchain.toml`) — required for `cargo fmt`
 unstable options.
 
+## Tooling
+
+Tools are provided by nix via direnv. Do not install tools globally.
+If you need a new tool, add it to the devshell in `flake.nix` so
+others can reproduce.
+
 ## Commit Rules
 
 Every commit must pass CI independently.

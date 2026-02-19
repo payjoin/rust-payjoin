@@ -244,7 +244,6 @@ impl<D: Db> Service<D> {
         if self.enable_v1 {
             self.post_fallback_v1(id, query, body).await
         } else {
-            let _ = (id, query, body);
             Ok(Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(CONTENT_TYPE, "application/json")

@@ -37,6 +37,8 @@ const V1_MAX_BUFFER_SIZE: usize = 65536;
 const V1_REJECT_RES_JSON: &str =
     r#"{{"errorCode": "original-psbt-rejected ", "message": "Body is not a string"}}"#;
 const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message": "V2 receiver offline. V1 sends require synchronous communications."}}"#;
+const V1_VERSION_UNSUPPORTED_RES_JSON: &str =
+    r#"{"errorCode": "version-unsupported", "supported": [2], "message": "V1 is not supported"}"#;
 
 pub(crate) mod db;
 
@@ -68,6 +70,7 @@ pub struct Service<D: Db> {
     db: D,
     ohttp: ohttp::Server,
     sentinel_tag: SentinelTag,
+    enable_v1: bool,
 }
 
 impl<D: Db, B> tower::Service<Request<B>> for Service<D>
@@ -91,8 +94,8 @@ where
 }
 
 impl<D: Db> Service<D> {
-    pub fn new(db: D, ohttp: ohttp::Server, sentinel_tag: SentinelTag) -> Self {
-        Self { db, ohttp, sentinel_tag }
+    pub fn new(db: D, ohttp: ohttp::Server, sentinel_tag: SentinelTag, enable_v1: bool) -> Self {
+        Self { db, ohttp, sentinel_tag, enable_v1 }
     }
 
     #[cfg(feature = "_manual-tls")]
@@ -214,7 +217,7 @@ impl<D: Db> Service<D> {
                 self.handle_ohttp_gateway_get(&query).await,
             (Method::POST, ["", ""]) => self.handle_ohttp_gateway(body).await,
             (Method::GET, ["", "ohttp-keys"]) => self.get_ohttp_keys().await,
-            (Method::POST, ["", id]) => self.post_fallback_v1(id, query, body).await,
+            (Method::POST, ["", id]) => self.handle_post_v1(id, query, body).await,
             (Method::GET, ["", "health"]) => health_check().await,
             (Method::GET, ["", ""]) => handle_directory_home_path().await,
             _ => Ok(not_found()),
@@ -225,6 +228,28 @@ impl<D: Db> Service<D> {
         response.headers_mut().insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
 
         Ok(response)
+    }
+
+    /// Route POST /{id}: forward to V1 fallback when enabled, otherwise reject.
+    async fn handle_post_v1<B>(
+        &self,
+        id: &str,
+        query: String,
+        body: B,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError>
+    where
+        B: Body<Data = Bytes> + Send + 'static,
+        B::Error: Into<BoxError>,
+    {
+        if self.enable_v1 {
+            self.post_fallback_v1(id, query, body).await
+        } else {
+            let _ = (id, query, body);
+            Ok(Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .header(CONTENT_TYPE, "application/json")
+                .body(full(V1_VERSION_UNSUPPORTED_RES_JSON))?)
+        }
     }
 
     /// Handle an encapsulated OHTTP request and return an encapsulated response
@@ -304,7 +329,7 @@ impl<D: Db> Service<D> {
         match (parts.method, path_segments.as_slice()) {
             (Method::POST, &["", id]) => self.post_mailbox(id, body).await,
             (Method::GET, &["", id]) => self.get_mailbox(id).await,
-            (Method::PUT, &["", id]) => self.put_payjoin_v1(id, body).await,
+            (Method::PUT, &["", id]) if self.enable_v1 => self.put_payjoin_v1(id, body).await,
             _ => Ok(not_found()),
         }
     }

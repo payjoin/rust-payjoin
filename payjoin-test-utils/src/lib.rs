@@ -121,6 +121,7 @@ pub async fn init_directory(
         "[::]:0".parse().expect("valid listener address"),
         tempdir.path().to_path_buf(),
         Duration::from_secs(2),
+        true,
     );
 
     let tls_config = RustlsConfig::from_der(vec![local_cert_key.0], local_cert_key.1).await?;
@@ -148,6 +149,7 @@ async fn init_ohttp_relay(
         "[::]:0".parse().expect("valid listener address"),
         tempdir.path().to_path_buf(),
         Duration::from_secs(2),
+        false,
     );
 
     let (port, handle) = payjoin_mailroom::serve_manual_tls(config, None, root_store)

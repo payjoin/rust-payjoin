@@ -1,0 +1,35 @@
+# Payjoin Mailroom configuration example
+#
+# Configuration can also be set via environment variables with the `PJ_`
+# prefix.  Nested values use double underscores as separators, e.g.
+# PJ_ACCESS_CONTROL__BLOCKED_REGIONS=CU,IR,KP,SY
+
+# Address and port to listen on
+# listener = "[::]:8080"
+
+# Directory for persistent storage (OHTTP keys, caches, etc.)
+# storage_dir = "./data"
+
+# Request timeout in seconds
+# timeout = 30
+
+# --- Access-control (requires `access-control` feature) ---
+# [access_control]
+
+# Optional path to a MaxMind GeoIP2 / DB-IP Country database.
+# If omitted but blocked_regions is non-empty, a free DB-IP Lite
+# database will be fetched automatically and cached under storage_dir.
+# geo_db_path = "/path/to/GeoIP2-Country.mmdb"
+
+# ISO 3166-1 alpha-2 country codes whose requests should be blocked.
+# blocked_regions = ["CU", "IR", "KP", "SY"]
+
+# Path to a local file containing blocked Bitcoin addresses (one per line).
+# Used for V1 PSBT screening.
+# blocked_addresses_path = "/path/to/blocked_addresses.txt"
+
+# URL to periodically fetch an updated blocked-address list from.
+# blocked_addresses_url = "https://example.com/blocked_addresses.txt"
+
+# How often (in seconds) to refresh the remote address list (default: 86400).
+# blocked_addresses_refresh_secs = 86400

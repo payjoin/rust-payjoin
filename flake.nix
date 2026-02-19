@@ -85,6 +85,7 @@
           filter =
             path: type:
             (builtins.match ".*nginx.conf.template$" path != null)
+            || (builtins.match ".*\\.mmdb$" path != null)
             || (craneLibVersions.msrv.filterCargoSources path type);
           name = "source";
         };
@@ -162,7 +163,7 @@
               "payjoin-cli" = "--features v1,v2";
               "payjoin-directory" = "";
               "ohttp-relay" = "";
-              "payjoin-mailroom" = "--features acme,telemetry";
+              "payjoin-mailroom" = "--features access-control,acme,telemetry";
             };
 
         # nix2container for building OCI/Docker images

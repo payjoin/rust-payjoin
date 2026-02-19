@@ -428,6 +428,30 @@ impl<D: Db> Service<D> {
         let timeout_response = Response::builder().status(StatusCode::ACCEPTED).body(empty())?;
         handle_peek(self.db.wait_for_v2_payload(&id).await, timeout_response)
     }
+
+    /// Screen a V1 PSBT body against the address blocklist.
+    ///
+    /// Returns `Ok(())` if screening passes or is not configured.
+    async fn check_v1_blocklist(&self, body_str: &str) -> Result<(), HandlerError> {
+        if let Some(blocked) = self.v1.as_ref().and_then(|v| v.blocked_addresses.as_ref()) {
+            let scripts = blocked.0.read().await;
+            if !scripts.is_empty() {
+                match screen_v1_addresses(body_str, &scripts) {
+                    ScreenResult::Blocked => {
+                        return Err(HandlerError::Forbidden(anyhow::anyhow!(
+                            "blocked address in V1 PSBT"
+                        )));
+                    }
+                    ScreenResult::Clean => {}
+                    ScreenResult::ParseError(e) => {
+                        warn!("Could not parse V1 PSBT: {e}");
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn put_payjoin_v1(
         &self,
         id: &str,
@@ -445,6 +469,9 @@ impl<D: Db> Service<D> {
         if req.len() > V1_MAX_BUFFER_SIZE {
             return Err(HandlerError::PayloadTooLarge);
         }
+
+        let body_str = std::str::from_utf8(&req).map_err(|e| HandlerError::BadRequest(e.into()))?;
+        self.check_v1_blocklist(body_str).await?;
 
         match self.db.post_v1_response(&id, req.into()).await {
             Ok(_) => Ok(ok_response),
@@ -479,23 +506,7 @@ impl<D: Db> Service<D> {
             Err(_) => return Ok(bad_request_body_res),
         };
 
-        if let Some(blocked) = self.v1.as_ref().and_then(|v| v.blocked_addresses.as_ref()) {
-            let scripts = blocked.0.read().await;
-            if !scripts.is_empty() {
-                match screen_v1_addresses(&body_str, &scripts) {
-                    ScreenResult::Blocked => {
-                        return Ok(Response::builder()
-                            .status(StatusCode::FORBIDDEN)
-                            .body(empty())?);
-                    }
-                    ScreenResult::Clean => {}
-                    ScreenResult::ParseError(e) => {
-                        warn!("Could not screen V1 payload: {e}");
-                        // fail-open: unparsable PSBTs can't complete transactions
-                    }
-                }
-            }
-        }
+        self.check_v1_blocklist(&body_str).await?;
 
         let v2_compat_body = format!("{body_str}\n{query}");
         let id = ShortId::from_str(id)?;
@@ -790,6 +801,8 @@ mod tests {
         (parts.status, String::from_utf8(bytes.to_vec()).unwrap())
     }
 
+    // V1 routing
+
     #[tokio::test]
     async fn post_v1_when_disabled_returns_version_unsupported() {
         let mut svc = test_service(None).await;
@@ -840,24 +853,17 @@ mod tests {
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body, V1_UNAVAILABLE_RES_JSON);
     }
-}
 
-#[cfg(test)]
-mod screen_tests {
-    use super::*;
-
-    fn addr_to_script(address: &str) -> bitcoin::ScriptBuf {
-        let addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> =
-            address.parse().expect("valid address");
-        addr.assume_checked().script_pubkey()
-    }
+    // Address screening
 
     fn make_test_psbt_base64(output_address: &str) -> String {
         use bitcoin::base64::prelude::{Engine, BASE64_STANDARD};
         use bitcoin::psbt::Psbt;
         use bitcoin::{Amount, Transaction, TxIn, TxOut};
 
-        let script_pubkey = addr_to_script(output_address);
+        let addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> =
+            output_address.parse().expect("valid address");
+        let script_pubkey = addr.assume_checked().script_pubkey();
 
         let tx = Transaction {
             version: bitcoin::transaction::Version::TWO,
@@ -867,8 +873,32 @@ mod screen_tests {
         };
 
         let psbt = Psbt::from_unsigned_tx(tx).expect("valid psbt");
-        let serialized = psbt.serialize();
-        BASE64_STANDARD.encode(&serialized)
+        BASE64_STANDARD.encode(psbt.serialize())
+    }
+
+    fn addr_to_script(address: &str) -> bitcoin::ScriptBuf {
+        let addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> =
+            address.parse().expect("valid address");
+        addr.assume_checked().script_pubkey()
+    }
+
+    #[tokio::test]
+    async fn post_v1_with_blocked_address_returns_forbidden() {
+        let blocked_addr = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
+        let blocked = BlockedAddresses::from_address_lines(blocked_addr);
+        let mut svc = test_service(Some(V1::new(Some(blocked)))).await;
+        let id = valid_short_id_path();
+        let psbt_b64 = make_test_psbt_base64(blocked_addr);
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(format!("http://localhost/{id}"))
+            .body(Full::new(Bytes::from(psbt_b64)))
+            .unwrap();
+
+        let res = tower::Service::call(&mut svc, req).await.unwrap();
+        let (status, _body) = collect_body(res).await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
     }
 
     #[test]

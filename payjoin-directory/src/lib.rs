@@ -94,6 +94,19 @@ impl BlockedAddresses {
     }
 }
 
+/// V1 protocol configuration.
+///
+/// Its presence in [`Service`] enables the V1 fallback path;
+/// its contents carry optional blocklist screening.
+#[derive(Clone, Default)]
+pub struct V1 {
+    blocked_addresses: Option<BlockedAddresses>,
+}
+
+impl V1 {
+    pub fn new(blocked_addresses: Option<BlockedAddresses>) -> Self { Self { blocked_addresses } }
+}
+
 fn parse_address_lines(text: &str) -> std::collections::HashSet<bitcoin::ScriptBuf> {
     text.lines()
         .filter_map(|l| {
@@ -117,8 +130,7 @@ pub struct Service<D: Db> {
     db: D,
     ohttp: ohttp::Server,
     sentinel_tag: SentinelTag,
-    enable_v1: bool,
-    blocked_addresses: Option<BlockedAddresses>,
+    v1: Option<V1>,
 }
 
 impl<D: Db, B> tower::Service<Request<B>> for Service<D>
@@ -142,13 +154,8 @@ where
 }
 
 impl<D: Db> Service<D> {
-    pub fn new(db: D, ohttp: ohttp::Server, sentinel_tag: SentinelTag, enable_v1: bool) -> Self {
-        Self { db, ohttp, sentinel_tag, enable_v1, blocked_addresses: None }
-    }
-
-    pub fn with_blocked_addresses(mut self, addrs: BlockedAddresses) -> Self {
-        self.blocked_addresses = Some(addrs);
-        self
+    pub fn new(db: D, ohttp: ohttp::Server, sentinel_tag: SentinelTag, v1: Option<V1>) -> Self {
+        Self { db, ohttp, sentinel_tag, v1 }
     }
 
     #[cfg(feature = "_manual-tls")]
@@ -294,7 +301,7 @@ impl<D: Db> Service<D> {
         B: Body<Data = Bytes> + Send + 'static,
         B::Error: Into<BoxError>,
     {
-        if self.enable_v1 {
+        if self.v1.is_some() {
             self.post_fallback_v1(id, query, body).await
         } else {
             let _ = (id, query, body);
@@ -382,7 +389,7 @@ impl<D: Db> Service<D> {
         match (parts.method, path_segments.as_slice()) {
             (Method::POST, &["", id]) => self.post_mailbox(id, body).await,
             (Method::GET, &["", id]) => self.get_mailbox(id).await,
-            (Method::PUT, &["", id]) if self.enable_v1 => self.put_payjoin_v1(id, body).await,
+            (Method::PUT, &["", id]) if self.v1.is_some() => self.put_payjoin_v1(id, body).await,
             _ => Ok(not_found()),
         }
     }
@@ -472,7 +479,7 @@ impl<D: Db> Service<D> {
             Err(_) => return Ok(bad_request_body_res),
         };
 
-        if let Some(blocked) = &self.blocked_addresses {
+        if let Some(blocked) = self.v1.as_ref().and_then(|v| v.blocked_addresses.as_ref()) {
             let scripts = blocked.0.read().await;
             if !scripts.is_empty() {
                 match screen_v1_addresses(&body_str, &scripts) {
@@ -763,12 +770,12 @@ mod tests {
 
     use super::*;
 
-    async fn test_service(enable_v1: bool) -> Service<FilesDb> {
+    async fn test_service(v1: Option<V1>) -> Service<FilesDb> {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = FilesDb::init(Duration::from_millis(100), dir.keep()).await.expect("db init");
         let ohttp: ohttp::Server =
             key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        Service::new(db, ohttp, SentinelTag::new([0u8; 32]), enable_v1)
+        Service::new(db, ohttp, SentinelTag::new([0u8; 32]), v1)
     }
 
     /// A valid ShortId encoded as bech32 for use in URL paths.
@@ -785,7 +792,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_v1_when_disabled_returns_version_unsupported() {
-        let mut svc = test_service(false).await;
+        let mut svc = test_service(None).await;
         let id = valid_short_id_path();
         let req = Request::builder()
             .method(Method::POST)
@@ -802,7 +809,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_v1_with_invalid_body_returns_reject() {
-        let mut svc = test_service(true).await;
+        let mut svc = test_service(Some(V1::new(None))).await;
         let id = valid_short_id_path();
         let req = Request::builder()
             .method(Method::POST)
@@ -819,7 +826,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_v1_with_no_receiver_returns_unavailable() {
-        let mut svc = test_service(true).await;
+        let mut svc = test_service(Some(V1::new(None))).await;
         let id = valid_short_id_path();
         let req = Request::builder()
             .method(Method::POST)

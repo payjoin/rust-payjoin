@@ -39,12 +39,7 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
 
-    #[allow(unused_mut)]
-    let mut directory = init_directory(&config, sentinel_tag).await?;
-    #[cfg(feature = "access-control")]
-    if let Some(blocked) = init_blocked_addresses(&config).await? {
-        directory = directory.with_blocked_addresses(blocked);
-    }
+    let directory = init_directory(&config, sentinel_tag).await?;
 
     let services = Services {
         directory,
@@ -87,12 +82,7 @@ pub async fn serve_manual_tls(
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
 
-    #[allow(unused_mut)]
-    let mut directory = init_directory(&config, sentinel_tag).await?;
-    #[cfg(feature = "access-control")]
-    if let Some(blocked) = init_blocked_addresses(&config).await? {
-        directory = directory.with_blocked_addresses(blocked);
-    }
+    let directory = init_directory(&config, sentinel_tag).await?;
 
     let services = Services {
         directory,
@@ -156,12 +146,7 @@ pub async fn serve_acme(
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
 
-    #[allow(unused_mut)]
-    let mut directory = init_directory(&config, sentinel_tag).await?;
-    #[cfg(feature = "access-control")]
-    if let Some(blocked) = init_blocked_addresses(&config).await? {
-        directory = directory.with_blocked_addresses(blocked);
-    }
+    let directory = init_directory(&config, sentinel_tag).await?;
 
     let services = Services {
         directory,
@@ -231,7 +216,16 @@ async fn init_directory(
     let ohttp_keys_dir = config.storage_dir.join("ohttp-keys");
     let ohttp_config = init_ohttp_config(&ohttp_keys_dir)?;
 
-    Ok(payjoin_directory::Service::new(db, ohttp_config.into(), sentinel_tag, config.enable_v1))
+    let v1 = if config.v1.is_some() {
+        #[cfg(feature = "access-control")]
+        let blocked = init_blocked_addresses(config).await?;
+        #[cfg(not(feature = "access-control"))]
+        let blocked = None;
+        Some(payjoin_directory::V1::new(blocked))
+    } else {
+        None
+    };
+    Ok(payjoin_directory::Service::new(db, ohttp_config.into(), sentinel_tag, v1))
 }
 
 #[cfg(feature = "access-control")]
@@ -252,18 +246,18 @@ async fn init_geoip(
 async fn init_blocked_addresses(
     config: &Config,
 ) -> anyhow::Result<Option<payjoin_directory::BlockedAddresses>> {
-    let ac_config = match &config.access_control {
+    let v1_config = match &config.v1 {
         Some(c) => c,
         None => return Ok(None),
     };
 
     // Neither file nor URL configured
-    if ac_config.blocked_addresses_path.is_none() && ac_config.blocked_addresses_url.is_none() {
+    if v1_config.blocked_addresses_path.is_none() && v1_config.blocked_addresses_url.is_none() {
         return Ok(None);
     }
 
     // Load initial addresses from file if available
-    let blocked = match &ac_config.blocked_addresses_path {
+    let blocked = match &v1_config.blocked_addresses_path {
         Some(path) => {
             let text = access_control::load_blocked_address_text(path)?;
             let ba = payjoin_directory::BlockedAddresses::from_address_lines(&text);
@@ -274,10 +268,10 @@ async fn init_blocked_addresses(
     };
 
     // If URL configured, try initial fetch and spawn background updater
-    if let Some(url) = &ac_config.blocked_addresses_url {
+    if let Some(url) = &v1_config.blocked_addresses_url {
         let cache_path = config.storage_dir.join("blocked_addresses_cache.txt");
         let refresh = std::time::Duration::from_secs(
-            ac_config.blocked_addresses_refresh_secs.unwrap_or(86400),
+            v1_config.blocked_addresses_refresh_secs.unwrap_or(86400),
         );
 
         // Try initial fetch; fall back to cache on failure
@@ -432,7 +426,7 @@ mod tests {
             "[::]:0".parse().expect("valid listener address"),
             tempdir.path().to_path_buf(),
             Duration::from_secs(2),
-            false,
+            None,
         );
 
         let mut root_store = RootCertStore::empty();
@@ -527,7 +521,7 @@ mod tests {
             "[::]:0".parse().expect("valid listener address"),
             tempdir.path().to_path_buf(),
             Duration::from_secs(2),
-            false,
+            None,
         );
 
         let sentinel_tag = generate_sentinel_tag();

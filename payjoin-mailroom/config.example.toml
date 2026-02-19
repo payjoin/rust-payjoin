@@ -13,6 +13,20 @@
 # Request timeout in seconds
 # timeout = 30
 
+# --- V1 protocol ---
+# Uncomment the [v1] section to enable V1 fallback support.
+# (address screening requires `access-control` feature)
+# [v1]
+
+# Path to a local file containing blocked Bitcoin addresses (one per line).
+# blocked_addresses_path = "/path/to/blocked_addresses.txt"
+
+# URL to periodically fetch an updated blocked-address list from.
+# blocked_addresses_url = "https://example.com/blocked_addresses.txt"
+
+# How often (in seconds) to refresh the remote address list (default: 86400).
+# blocked_addresses_refresh_secs = 86400
+
 # --- Access-control (requires `access-control` feature) ---
 # [access_control]
 
@@ -23,13 +37,3 @@
 
 # ISO 3166-1 alpha-2 country codes whose requests should be blocked.
 # blocked_regions = ["CU", "IR", "KP", "SY"]
-
-# Path to a local file containing blocked Bitcoin addresses (one per line).
-# Used for V1 PSBT screening.
-# blocked_addresses_path = "/path/to/blocked_addresses.txt"
-
-# URL to periodically fetch an updated blocked-address list from.
-# blocked_addresses_url = "https://example.com/blocked_addresses.txt"
-
-# How often (in seconds) to refresh the remote address list (default: 86400).
-# blocked_addresses_refresh_secs = 86400

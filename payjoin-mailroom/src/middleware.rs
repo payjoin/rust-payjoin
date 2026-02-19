@@ -12,7 +12,7 @@ pub struct MaybePeerIp(pub Option<std::net::IpAddr>);
 pub async fn check_geoip(req: Request, next: Next) -> Response {
     use axum::http::StatusCode;
 
-    let geoip = req.extensions().get::<Option<std::sync::Arc<crate::access_control::GeoIp>>>();
+    let geoip = req.extensions().get::<Option<std::sync::Arc<crate::access_control::IpFilter>>>();
 
     if let Some(Some(geoip)) = geoip {
         if let Some(connect_info) =

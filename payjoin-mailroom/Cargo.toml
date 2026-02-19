@@ -22,7 +22,7 @@ acme = [
   "dep:rustls",
   "dep:tokio-stream",
 ]
-access-control = ["dep:flate2", "dep:maxminddb", "dep:reqwest"]
+access-control = ["dep:flate2", "dep:ipnet", "dep:maxminddb", "dep:reqwest"]
 telemetry = ["dep:opentelemetry-otlp"]
 
 [dependencies]
@@ -34,6 +34,7 @@ axum-server = { version = "0.8", features = [
 clap = { version = "4.5", features = ["derive", "env"] }
 config = "0.15"
 flate2 = { version = "1.1", optional = true }
+ipnet = { version = "2", optional = true }
 maxminddb = { version = "0.27", optional = true }
 ohttp-relay = { path = "../ohttp-relay", features = ["bootstrap"] }
 opentelemetry = "0.31"

@@ -30,7 +30,7 @@ struct Services {
     relay: ohttp_relay::Service,
     metrics: MetricsService,
     #[cfg(feature = "access-control")]
-    geoip: Option<std::sync::Arc<access_control::GeoIp>>,
+    geoip: Option<std::sync::Arc<access_control::IpFilter>>,
 }
 
 pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> anyhow::Result<()> {
@@ -231,10 +231,10 @@ async fn init_directory(
 #[cfg(feature = "access-control")]
 async fn init_geoip(
     config: &Config,
-) -> anyhow::Result<Option<std::sync::Arc<access_control::GeoIp>>> {
+) -> anyhow::Result<Option<std::sync::Arc<access_control::IpFilter>>> {
     match &config.access_control {
         Some(ac_config) => {
-            let gi = access_control::GeoIp::from_config(ac_config, &config.storage_dir).await?;
+            let gi = access_control::IpFilter::from_config(ac_config, &config.storage_dir).await?;
             info!("GeoIP access control enabled");
             Ok(Some(std::sync::Arc::new(gi)))
         }

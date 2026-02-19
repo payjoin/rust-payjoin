@@ -6,12 +6,13 @@ use maxminddb::PathElement;
 
 use crate::config::AccessControlConfig;
 
-pub struct GeoIp {
+pub struct IpFilter {
     geo_reader: Option<maxminddb::Reader<Vec<u8>>>,
     blocked_regions: HashSet<String>,
+    blocked_ips: Vec<ipnet::IpNet>,
 }
 
-impl GeoIp {
+impl IpFilter {
     pub async fn from_config(
         config: &AccessControlConfig,
         storage_dir: &Path,
@@ -42,11 +43,30 @@ impl GeoIp {
 
         let blocked_regions = config.blocked_regions.iter().cloned().collect();
 
-        Ok(Self { geo_reader, blocked_regions })
+        let blocked_ips = config
+            .blocked_ips
+            .iter()
+            .map(|s| {
+                s.parse::<ipnet::IpNet>().or_else(|_| {
+                    // Accept bare IP addresses without CIDR prefix length
+                    Ok(ipnet::IpNet::from(s.parse::<IpAddr>()?))
+                })
+            })
+            .collect::<Result<Vec<_>, anyhow::Error>>()?;
+
+        Ok(Self { geo_reader, blocked_regions, blocked_ips })
     }
 
-    /// Returns `true` if the IP is allowed. Fail-open on lookup errors.
+    /// Returns `true` if the IP is allowed. Fail-open on GeoIP lookup errors.
     pub fn check_ip(&self, ip: IpAddr) -> bool {
+        if self.blocked_ips.iter().any(|net| net.contains(&ip)) {
+            return false;
+        }
+
+        self.check_geoip(ip)
+    }
+
+    fn check_geoip(&self, ip: IpAddr) -> bool {
         let reader = match &self.geo_reader {
             Some(r) => r,
             None => return true,
@@ -165,14 +185,19 @@ mod tests {
 
     #[test]
     fn check_ip_allows_when_no_geo_reader() {
-        let ac = GeoIp { geo_reader: None, blocked_regions: HashSet::new() };
+        let ac =
+            IpFilter { geo_reader: None, blocked_regions: HashSet::new(), blocked_ips: vec![] };
         assert!(ac.check_ip("1.2.3.4".parse().unwrap()));
     }
 
     #[test]
     fn check_ip_allows_when_no_blocked_regions() {
         let reader = test_geo_reader();
-        let ac = GeoIp { geo_reader: Some(reader), blocked_regions: HashSet::new() };
+        let ac = IpFilter {
+            geo_reader: Some(reader),
+            blocked_regions: HashSet::new(),
+            blocked_ips: vec![],
+        };
         assert!(ac.check_ip("2.125.160.216".parse().unwrap()));
     }
 
@@ -181,7 +206,7 @@ mod tests {
         let reader = test_geo_reader();
         // 2.125.160.216 is GB in the test database
         let blocked_regions: HashSet<String> = ["GB"].iter().map(|s| s.to_string()).collect();
-        let ac = GeoIp { geo_reader: Some(reader), blocked_regions };
+        let ac = IpFilter { geo_reader: Some(reader), blocked_regions, blocked_ips: vec![] };
         assert!(!ac.check_ip("2.125.160.216".parse().unwrap()));
     }
 
@@ -190,7 +215,7 @@ mod tests {
         let reader = test_geo_reader();
         // 2.125.160.216 is GB in the test database
         let blocked_regions: HashSet<String> = ["US"].iter().map(|s| s.to_string()).collect();
-        let ac = GeoIp { geo_reader: Some(reader), blocked_regions };
+        let ac = IpFilter { geo_reader: Some(reader), blocked_regions, blocked_ips: vec![] };
         assert!(ac.check_ip("2.125.160.216".parse().unwrap()));
     }
 
@@ -198,9 +223,42 @@ mod tests {
     fn check_ip_fail_open_on_unknown_ip() {
         let reader = test_geo_reader();
         let blocked_regions: HashSet<String> = ["US"].iter().map(|s| s.to_string()).collect();
-        let ac = GeoIp { geo_reader: Some(reader), blocked_regions };
+        let ac = IpFilter { geo_reader: Some(reader), blocked_regions, blocked_ips: vec![] };
         // 127.0.0.1 won't be in test DB
         assert!(ac.check_ip("127.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn blocked_ips_blocks_exact_ipv4() {
+        let blocked_ips = vec!["192.0.2.1/32".parse().unwrap()];
+        let ac = IpFilter { geo_reader: None, blocked_regions: HashSet::new(), blocked_ips };
+        assert!(!ac.check_ip("192.0.2.1".parse().unwrap()));
+        assert!(ac.check_ip("192.0.2.2".parse().unwrap()));
+    }
+
+    #[test]
+    fn blocked_ips_blocks_exact_ipv6() {
+        let blocked_ips = vec!["2001:db8::1/128".parse().unwrap()];
+        let ac = IpFilter { geo_reader: None, blocked_regions: HashSet::new(), blocked_ips };
+        assert!(!ac.check_ip("2001:db8::1".parse().unwrap()));
+        assert!(ac.check_ip("2001:db8::2".parse().unwrap()));
+    }
+
+    #[test]
+    fn blocked_ips_blocks_cidr_range() {
+        let blocked_ips = vec!["198.51.100.0/24".parse().unwrap()];
+        let ac = IpFilter { geo_reader: None, blocked_regions: HashSet::new(), blocked_ips };
+        assert!(!ac.check_ip("198.51.100.0".parse().unwrap()));
+        assert!(!ac.check_ip("198.51.100.255".parse().unwrap()));
+        assert!(ac.check_ip("198.51.101.0".parse().unwrap()));
+    }
+
+    #[test]
+    fn empty_blocked_ips_allows_all() {
+        let ac =
+            IpFilter { geo_reader: None, blocked_regions: HashSet::new(), blocked_ips: vec![] };
+        assert!(ac.check_ip("192.0.2.1".parse().unwrap()));
+        assert!(ac.check_ip("2001:db8::1".parse().unwrap()));
     }
 
     #[test]

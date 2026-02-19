@@ -2798,6 +2798,7 @@ dependencies = [
  "clap",
  "config",
  "flate2",
+ "ipnet",
  "maxminddb",
  "ohttp-relay",
  "opentelemetry",

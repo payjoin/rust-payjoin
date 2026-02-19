@@ -59,6 +59,7 @@ pub struct AcmeConfig {
 pub struct AccessControlConfig {
     pub geo_db_path: Option<PathBuf>,
     pub blocked_regions: Vec<String>,
+    pub blocked_ips: Vec<String>,
 }
 
 #[cfg(feature = "acme")]
@@ -139,6 +140,7 @@ impl Config {
                     .with_list_parse_key("acme.domains")
                     .with_list_parse_key("acme.contact")
                     .with_list_parse_key("access_control.blocked_regions")
+                    .with_list_parse_key("access_control.blocked_ips")
                     .try_parsing(true),
             )
             .build()?

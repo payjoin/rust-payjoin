@@ -37,3 +37,6 @@
 
 # ISO 3166-1 alpha-2 country codes whose requests should be blocked.
 # blocked_regions = ["CU", "IR", "KP", "SY"]
+
+# IP addresses or CIDR ranges whose requests should be blocked.
+# blocked_ips = ["192.0.2.0/24", "2001:db8::1"]

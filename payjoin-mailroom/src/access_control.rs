@@ -71,6 +71,36 @@ impl GeoIp {
     }
 }
 
+pub fn load_blocked_address_text(path: &Path) -> anyhow::Result<String> {
+    Ok(std::fs::read_to_string(path)?)
+}
+
+pub fn spawn_address_list_updater(
+    url: String,
+    refresh: std::time::Duration,
+    cache_path: std::path::PathBuf,
+    blocked: payjoin_directory::BlockedAddresses,
+) {
+    tokio::spawn(async move {
+        loop {
+            match reqwest::get(&url).await.and_then(|r| r.error_for_status()) {
+                Ok(resp) => match resp.text().await {
+                    Ok(body) => {
+                        if let Err(e) = std::fs::write(&cache_path, &body) {
+                            tracing::warn!("Failed to write address cache: {e}");
+                        }
+                        let count = blocked.update_from_lines(&body).await;
+                        tracing::info!("Updated blocked address list ({count} entries)");
+                    }
+                    Err(e) => tracing::warn!("Failed to read address list response: {e}"),
+                },
+                Err(e) => tracing::warn!("Failed to fetch address list: {e}"),
+            }
+            tokio::time::sleep(refresh).await;
+        }
+    });
+}
+
 async fn fetch_geoip_db(dest: &Path) -> anyhow::Result<()> {
     use std::io::Read;
 

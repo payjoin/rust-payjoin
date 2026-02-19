@@ -39,7 +39,12 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
 
-    let directory = init_directory(&config, sentinel_tag).await?;
+    #[allow(unused_mut)]
+    let mut directory = init_directory(&config, sentinel_tag).await?;
+    #[cfg(feature = "access-control")]
+    if let Some(blocked) = init_blocked_addresses(&config).await? {
+        directory = directory.with_blocked_addresses(blocked);
+    }
 
     let services = Services {
         directory,
@@ -82,7 +87,12 @@ pub async fn serve_manual_tls(
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
 
-    let directory = init_directory(&config, sentinel_tag).await?;
+    #[allow(unused_mut)]
+    let mut directory = init_directory(&config, sentinel_tag).await?;
+    #[cfg(feature = "access-control")]
+    if let Some(blocked) = init_blocked_addresses(&config).await? {
+        directory = directory.with_blocked_addresses(blocked);
+    }
 
     let services = Services {
         directory,
@@ -146,7 +156,12 @@ pub async fn serve_acme(
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
 
-    let directory = init_directory(&config, sentinel_tag).await?;
+    #[allow(unused_mut)]
+    let mut directory = init_directory(&config, sentinel_tag).await?;
+    #[cfg(feature = "access-control")]
+    if let Some(blocked) = init_blocked_addresses(&config).await? {
+        directory = directory.with_blocked_addresses(blocked);
+    }
 
     let services = Services {
         directory,
@@ -230,6 +245,86 @@ async fn init_geoip(
             Ok(Some(std::sync::Arc::new(gi)))
         }
         None => Ok(None),
+    }
+}
+
+#[cfg(feature = "access-control")]
+async fn init_blocked_addresses(
+    config: &Config,
+) -> anyhow::Result<Option<payjoin_directory::BlockedAddresses>> {
+    let ac_config = match &config.access_control {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+
+    // Neither file nor URL configured
+    if ac_config.blocked_addresses_path.is_none() && ac_config.blocked_addresses_url.is_none() {
+        return Ok(None);
+    }
+
+    // Load initial addresses from file if available
+    let blocked = match &ac_config.blocked_addresses_path {
+        Some(path) => {
+            let text = access_control::load_blocked_address_text(path)?;
+            let ba = payjoin_directory::BlockedAddresses::from_address_lines(&text);
+            info!("Loaded blocked addresses from {}", path.display());
+            ba
+        }
+        None => payjoin_directory::BlockedAddresses::empty(),
+    };
+
+    // If URL configured, try initial fetch and spawn background updater
+    if let Some(url) = &ac_config.blocked_addresses_url {
+        let cache_path = config.storage_dir.join("blocked_addresses_cache.txt");
+        let refresh = std::time::Duration::from_secs(
+            ac_config.blocked_addresses_refresh_secs.unwrap_or(86400),
+        );
+
+        // Try initial fetch; fall back to cache on failure
+        match reqwest::get(url).await.and_then(|r| r.error_for_status()) {
+            Ok(resp) => match resp.text().await {
+                Ok(body) => {
+                    if let Err(e) = std::fs::write(&cache_path, &body) {
+                        tracing::warn!("Failed to write address cache: {e}");
+                    }
+                    let count = blocked.update_from_lines(&body).await;
+                    info!("Fetched {count} blocked addresses from URL");
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to read address list response: {e}");
+                    load_address_cache(&cache_path, &blocked).await;
+                }
+            },
+            Err(e) => {
+                tracing::warn!("Failed to fetch address list: {e}");
+                load_address_cache(&cache_path, &blocked).await;
+            }
+        }
+
+        access_control::spawn_address_list_updater(
+            url.clone(),
+            refresh,
+            cache_path,
+            blocked.clone(),
+        );
+    }
+
+    Ok(Some(blocked))
+}
+
+#[cfg(feature = "access-control")]
+async fn load_address_cache(
+    cache_path: &std::path::Path,
+    blocked: &payjoin_directory::BlockedAddresses,
+) {
+    if cache_path.exists() {
+        match access_control::load_blocked_address_text(cache_path) {
+            Ok(text) => {
+                let count = blocked.update_from_lines(&text).await;
+                info!("Loaded {count} blocked addresses from cache");
+            }
+            Err(e) => tracing::warn!("Failed to load address cache: {e}"),
+        }
     }
 }
 

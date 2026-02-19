@@ -53,4 +53,6 @@ bash contrib/update-lock-files.sh
 
 ## AI Disclosure
 
-Required in PR body. Do **not** add `Co-Authored-By` in commits.
+Add to PR body: `Disclosure: co-authored by <agent-name>`
+
+Do **not** add `Co-Authored-By` in commits.

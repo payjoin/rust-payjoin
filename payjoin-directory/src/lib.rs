@@ -438,7 +438,7 @@ impl<D: Db> Service<D> {
             if !scripts.is_empty() {
                 match screen_v1_addresses(body_str, &scripts) {
                     ScreenResult::Blocked => {
-                        return Err(HandlerError::Forbidden(anyhow::anyhow!(
+                        return Err(HandlerError::V1PsbtRejected(anyhow::anyhow!(
                             "blocked address in V1 PSBT"
                         )));
                     }
@@ -651,6 +651,8 @@ enum HandlerError {
     SenderGone(anyhow::Error),
     OhttpKeyRejection(anyhow::Error),
     BadRequest(anyhow::Error),
+    /// V1 PSBT rejected — returns the BIP78 `original-psbt-rejected` error.
+    V1PsbtRejected(anyhow::Error),
     Forbidden(anyhow::Error),
 }
 
@@ -683,6 +685,11 @@ impl HandlerError {
             HandlerError::BadRequest(e) => {
                 warn!("Bad request: {}", e);
                 *res.status_mut() = StatusCode::BAD_REQUEST
+            }
+            HandlerError::V1PsbtRejected(e) => {
+                warn!("PSBT rejected: {}", e);
+                *res.status_mut() = StatusCode::BAD_REQUEST;
+                *res.body_mut() = full(V1_REJECT_RES_JSON);
             }
             HandlerError::Forbidden(e) => {
                 warn!("Forbidden: {}", e);
@@ -883,7 +890,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_v1_with_blocked_address_returns_forbidden() {
+    async fn post_v1_with_blocked_address_returns_bad_request() {
         let blocked_addr = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
         let blocked = BlockedAddresses::from_address_lines(blocked_addr);
         let mut svc = test_service(Some(V1::new(Some(blocked)))).await;
@@ -896,9 +903,10 @@ mod tests {
             .unwrap();
 
         let res = tower::Service::call(&mut svc, req).await.unwrap();
-        let (status, _body) = collect_body(res).await;
+        let (status, body) = collect_body(res).await;
 
-        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body, V1_REJECT_RES_JSON);
     }
 
     #[test]

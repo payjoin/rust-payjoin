@@ -278,7 +278,7 @@ impl<D: Db> Service<D> {
             (Method::POST, ["", ""]) => self.handle_ohttp_gateway(body).await,
             (Method::GET, ["", "ohttp-keys"]) => self.get_ohttp_keys().await,
             (Method::POST, ["", id]) => self.handle_post_v1(id, query, body).await,
-            (Method::GET, ["", "health"]) => health_check().await,
+            (Method::GET, ["", "health"]) => self.health_check().await,
             (Method::GET, ["", ""]) => handle_directory_home_path().await,
             _ => Ok(not_found()),
         }
@@ -577,8 +577,14 @@ fn handle_peek<Error: db::SendableError>(
     }
 }
 
-async fn health_check() -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
-    Ok(Response::new(empty()))
+impl<D: Db> Service<D> {
+    async fn health_check(&self) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError> {
+        let versions = if self.v1.is_some() { "[1,2]" } else { "[2]" };
+        let body = format!(r#"{{"versions":{versions}}}"#);
+        let mut res = Response::new(full(body));
+        res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        Ok(res)
+    }
 }
 
 async fn handle_directory_home_path() -> Result<Response<BoxBody<Bytes, hyper::Error>>, HandlerError>
@@ -961,5 +967,39 @@ mod tests {
 
         let psbt_b64 = make_test_psbt_base64(addr);
         assert!(matches!(screen_v1_addresses(&psbt_b64, &blocked), ScreenResult::Blocked));
+    }
+
+    // Health check
+
+    #[tokio::test]
+    async fn health_check_without_v1() {
+        let mut svc = test_service(None).await;
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri("http://localhost/health")
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+
+        let res = tower::Service::call(&mut svc, req).await.unwrap();
+        assert_eq!(res.headers().get(CONTENT_TYPE).unwrap(), "application/json");
+        let (status, body) = collect_body(res).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, r#"{"versions":[2]}"#);
+    }
+
+    #[tokio::test]
+    async fn health_check_with_v1() {
+        let mut svc = test_service(Some(V1::new(None))).await;
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri("http://localhost/health")
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+
+        let res = tower::Service::call(&mut svc, req).await.unwrap();
+        assert_eq!(res.headers().get(CONTENT_TYPE).unwrap(), "application/json");
+        let (status, body) = collect_body(res).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, r#"{"versions":[1,2]}"#);
     }
 }

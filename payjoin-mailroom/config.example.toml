@@ -30,8 +30,8 @@
 # --- Access-control (requires `access-control` feature) ---
 # [access_control]
 
-# Optional path to a MaxMind GeoIP2 / DB-IP Country database.
-# If omitted but blocked_regions is non-empty, a free DB-IP Lite
+# Optional path to a MaxMind GeoIP2 / GeoLite2 Country database.
+# If omitted but blocked_regions is non-empty, the free GeoLite2-Country
 # database will be fetched automatically and cached under storage_dir.
 # geo_db_path = "/path/to/GeoIP2-Country.mmdb"
 

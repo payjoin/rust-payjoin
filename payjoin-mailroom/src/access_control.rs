@@ -124,12 +124,10 @@ pub fn spawn_address_list_updater(
 async fn fetch_geoip_db(dest: &Path) -> anyhow::Result<()> {
     use std::io::Read;
 
-    let now = chrono_month_year();
-    let url =
-        format!("https://download.db-ip.com/free/dbip-country-lite-{}-{}.mmdb.gz", now.0, now.1);
+    let url = "https://cdn.jsdelivr.net/npm/geolite2-country/GeoLite2-Country.mmdb.gz";
     tracing::info!("Fetching GeoIP database from {}", url);
 
-    let response = reqwest::get(&url).await?;
+    let response = reqwest::get(url).await?;
     if !response.status().is_success() {
         anyhow::bail!("Failed to fetch GeoIP database: HTTP {}", response.status());
     }
@@ -144,31 +142,6 @@ async fn fetch_geoip_db(dest: &Path) -> anyhow::Result<()> {
     std::fs::write(dest, &decompressed)?;
     tracing::info!("GeoIP database saved to {}", dest.display());
     Ok(())
-}
-
-/// Returns (year, month) as strings for the DB-IP download URL.
-fn chrono_month_year() -> (String, String) {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system time should be after UNIX_EPOCH");
-    let days_since_epoch = (now.as_secs() / 86_400) as i64;
-    let (year, month) = year_month_from_days_since_epoch(days_since_epoch);
-    (year.to_string(), format!("{month:02}"))
-}
-
-fn year_month_from_days_since_epoch(days_since_epoch: i64) -> (i32, u32) {
-    // Exact conversion from Unix days to Gregorian year/month in UTC.
-    // Based on Howard Hinnant's civil calendar algorithm.
-    let z = days_since_epoch + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let month = (mp + if mp < 10 { 3 } else { -9 }) as u32;
-    let year = (y + if month <= 2 { 1 } else { 0 }) as i32;
-    (year, month)
 }
 
 #[cfg(test)]
@@ -259,21 +232,5 @@ mod tests {
             IpFilter { geo_reader: None, blocked_regions: HashSet::new(), blocked_ips: vec![] };
         assert!(ac.check_ip("192.0.2.1".parse().unwrap()));
         assert!(ac.check_ip("2001:db8::1".parse().unwrap()));
-    }
-
-    #[test]
-    fn year_month_conversion_handles_leap_day() {
-        // 2024-02-29 00:00:00 UTC
-        let days = 19_782;
-        let (year, month) = year_month_from_days_since_epoch(days);
-        assert_eq!((year, month), (2024, 2));
-    }
-
-    #[test]
-    fn year_month_conversion_handles_year_start() {
-        // 2024-01-01 00:00:00 UTC
-        let days = 19_723;
-        let (year, month) = year_month_from_days_since_epoch(days);
-        assert_eq!((year, month), (2024, 1));
     }
 }

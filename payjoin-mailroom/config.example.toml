@@ -2,7 +2,7 @@
 #
 # Configuration can also be set via environment variables with the `PJ_`
 # prefix.  Nested values use double underscores as separators, e.g.
-# PJ_ACCESS_CONTROL__BLOCKED_REGIONS=CU,IR,KP,SY
+# PJ_TELEMETRY__OPERATOR_DOMAIN="your-domain.example.com"
 
 # Address and port to listen on
 # listener = "[::]:8080"
@@ -13,19 +13,18 @@
 # Request timeout in seconds
 # timeout = 30
 
-# --- V1 protocol ---
-# Uncomment the [v1] section to enable V1 fallback support.
-# (address screening requires `access-control` feature)
-# [v1]
+# --- Telemetry (requires `--telemetry` feature) ---
+# [telemetry]
 
-# Path to a local file containing blocked Bitcoin addresses (one per line).
-# blocked_addresses_path = "/path/to/blocked_addresses.txt"
+# OpenTelemetry Protocol (OTLP) endpoint to export telemetry to
+# endpoint = "https://otlp-gateway-prod-us-west-0.grafana.net/otlp"
 
-# URL to periodically fetch an updated blocked-address list from.
-# blocked_addresses_url = "https://example.com/blocked_addresses.txt"
+# Authentication token for the OTLP endpoint 
+# auth_token = "<base64 instanceID:token>"
 
-# How often (in seconds) to refresh the remote address list (default: 86400).
-# blocked_addresses_refresh_secs = 86400
+# The domain you are running the payjoin-mailroom from.
+# This serves as an identifier for metrics collection.
+# operator_domain = "your-domain.example.com"
 
 # --- Access-control (requires `access-control` feature) ---
 # [access_control]
@@ -40,3 +39,17 @@
 
 # IP addresses or CIDR ranges whose requests should be blocked.
 # blocked_ips = ["192.0.2.0/24", "2001:db8::1"]
+
+# --- V1 protocol ---
+# Uncomment the [v1] section to enable V1 fallback support.
+# (address screening requires `access-control` feature)
+# [v1]
+
+# Path to a local file containing blocked Bitcoin addresses (one per line).
+# blocked_addresses_path = "/path/to/blocked_addresses.txt"
+
+# URL to periodically fetch an updated blocked-address list from.
+# blocked_addresses_url = "https://example.com/blocked_addresses.txt"
+
+# How often (in seconds) to refresh the remote address list (default: 86400).
+# blocked_addresses_refresh_secs = 86400

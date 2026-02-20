@@ -47,13 +47,7 @@ The test utilities library which provides commonly used testing fixtures such as
 
 ### [`payjoin-ffi`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-ffi)
 
-The language bindings which expose the Rust-based Payjoin implementation to various programming languages.
-
-Currently supported languages:
-
-- Dart
-- Javascript
-- Python
+The language bindings which expose the Rust-based Payjoin implementation to [various programming languages](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-ffi#supported-target-languages-and-platforms).
 
 ## Minimum Supported Rust Version (MSRV)
 

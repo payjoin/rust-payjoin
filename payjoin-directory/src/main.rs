@@ -29,7 +29,8 @@ async fn main() -> Result<(), BoxError> {
         .await
         .expect("Failed to initialize persistent storage");
 
-    let service = Service::new(db, ohttp.into(), SentinelTag::new([0u8; 32]), config.enable_v1);
+    let v1 = if config.enable_v1 { Some(V1::new(None)) } else { None };
+    let service = Service::new(db, ohttp.into(), SentinelTag::new([0u8; 32]), v1);
 
     let listener = TcpListener::bind(config.listen_addr).await?;
 

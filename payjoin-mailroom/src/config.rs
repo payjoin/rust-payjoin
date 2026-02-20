@@ -12,11 +12,28 @@ pub struct Config {
     pub storage_dir: PathBuf,
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub timeout: Duration,
-    pub enable_v1: bool,
+    pub v1: Option<V1Config>,
     #[cfg(feature = "telemetry")]
     pub telemetry: Option<TelemetryConfig>,
     #[cfg(feature = "acme")]
     pub acme: Option<AcmeConfig>,
+    #[cfg(feature = "access-control")]
+    pub access_control: Option<AccessControlConfig>,
+}
+
+/// V1 protocol configuration.
+///
+/// Present in [`Config`] to enable the V1 fallback path.
+/// Contains optional address-screening settings that only apply to V1.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct V1Config {
+    #[cfg(feature = "access-control")]
+    pub blocked_addresses_path: Option<PathBuf>,
+    #[cfg(feature = "access-control")]
+    pub blocked_addresses_url: Option<String>,
+    #[cfg(feature = "access-control")]
+    pub blocked_addresses_refresh_secs: Option<u64>,
 }
 
 #[cfg(feature = "telemetry")]
@@ -34,6 +51,15 @@ pub struct AcmeConfig {
     pub contact: Vec<String>,
     #[serde(default)]
     pub directory_url: Option<String>,
+}
+
+#[cfg(feature = "access-control")]
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct AccessControlConfig {
+    pub geo_db_path: Option<PathBuf>,
+    pub blocked_regions: Vec<String>,
+    pub blocked_ips: Vec<String>,
 }
 
 #[cfg(feature = "acme")]
@@ -59,11 +85,13 @@ impl Default for Config {
             listener: "[::]:8080".parse().expect("valid default listener address"),
             storage_dir: PathBuf::from("./data"),
             timeout: Duration::from_secs(30),
-            enable_v1: false,
+            v1: None,
             #[cfg(feature = "telemetry")]
             telemetry: None,
             #[cfg(feature = "acme")]
             acme: None,
+            #[cfg(feature = "access-control")]
+            access_control: None,
         }
     }
 }
@@ -81,17 +109,19 @@ impl Config {
         listener: ListenerAddress,
         storage_dir: PathBuf,
         timeout: Duration,
-        enable_v1: bool,
+        v1: Option<V1Config>,
     ) -> Self {
         Self {
             listener,
             storage_dir,
             timeout,
-            enable_v1,
+            v1,
             #[cfg(feature = "telemetry")]
             telemetry: None,
             #[cfg(feature = "acme")]
             acme: None,
+            #[cfg(feature = "access-control")]
+            access_control: None,
         }
     }
 
@@ -109,6 +139,8 @@ impl Config {
                     .list_separator(",")
                     .with_list_parse_key("acme.domains")
                     .with_list_parse_key("acme.contact")
+                    .with_list_parse_key("access_control.blocked_regions")
+                    .with_list_parse_key("access_control.blocked_ips")
                     .try_parsing(true),
             )
             .build()?

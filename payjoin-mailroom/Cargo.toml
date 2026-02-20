@@ -22,6 +22,7 @@ acme = [
   "dep:rustls",
   "dep:tokio-stream",
 ]
+access-control = ["dep:flate2", "dep:ipnet", "dep:maxminddb", "dep:reqwest"]
 telemetry = ["dep:opentelemetry-otlp"]
 
 [dependencies]
@@ -32,6 +33,9 @@ axum-server = { version = "0.8", features = [
 ], optional = true }
 clap = { version = "4.5", features = ["derive", "env"] }
 config = "0.15"
+flate2 = { version = "1.1", optional = true }
+ipnet = { version = "2", optional = true }
+maxminddb = { version = "0.27", optional = true }
 ohttp-relay = { path = "../ohttp-relay", features = ["bootstrap"] }
 opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", optional = true, features = [
@@ -40,6 +44,9 @@ opentelemetry-otlp = { version = "0.31", optional = true, features = [
 opentelemetry_sdk = "0.31"
 payjoin-directory = { path = "../payjoin-directory" }
 rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls",
+], optional = true }
 rustls = { version = "0.23", default-features = false, features = [
   "ring",
 ], optional = true }

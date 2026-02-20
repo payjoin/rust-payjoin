@@ -1,0 +1,55 @@
+# Payjoin Mailroom configuration example
+#
+# Configuration can also be set via environment variables with the `PJ_`
+# prefix.  Nested values use double underscores as separators, e.g.
+# PJ_TELEMETRY__OPERATOR_DOMAIN="your-domain.example.com"
+
+# Address and port to listen on
+# listener = "[::]:8080"
+
+# Directory for persistent storage (OHTTP keys, caches, etc.)
+# storage_dir = "./data"
+
+# Request timeout in seconds
+# timeout = 30
+
+# --- Telemetry (requires `--telemetry` feature) ---
+# [telemetry]
+
+# OpenTelemetry Protocol (OTLP) endpoint to export telemetry to
+# endpoint = "https://otlp-gateway-prod-us-west-0.grafana.net/otlp"
+
+# Authentication token for the OTLP endpoint 
+# auth_token = "<base64 instanceID:token>"
+
+# The domain you are running the payjoin-mailroom from.
+# This serves as an identifier for metrics collection.
+# operator_domain = "your-domain.example.com"
+
+# --- Access-control (requires `access-control` feature) ---
+# [access_control]
+
+# Optional path to a MaxMind GeoIP2 / GeoLite2 Country database.
+# If omitted but blocked_regions is non-empty, the free GeoLite2-Country
+# database will be fetched automatically and cached under storage_dir.
+# geo_db_path = "/path/to/GeoIP2-Country.mmdb"
+
+# ISO 3166-1 alpha-2 country codes whose requests should be blocked.
+# blocked_regions = ["CU", "IR", "KP", "SY"]
+
+# IP addresses or CIDR ranges whose requests should be blocked.
+# blocked_ips = ["192.0.2.0/24", "2001:db8::1"]
+
+# --- V1 protocol ---
+# Uncomment the [v1] section to enable V1 fallback support.
+# (address screening requires `access-control` feature)
+# [v1]
+
+# Path to a local file containing blocked Bitcoin addresses (one per line).
+# blocked_addresses_path = "/path/to/blocked_addresses.txt"
+
+# URL to periodically fetch an updated blocked-address list from.
+# blocked_addresses_url = "https://example.com/blocked_addresses.txt"
+
+# How often (in seconds) to refresh the remote address list (default: 86400).
+# blocked_addresses_refresh_secs = 86400

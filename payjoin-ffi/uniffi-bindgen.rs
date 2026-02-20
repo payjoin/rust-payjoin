@@ -2,13 +2,16 @@ fn main() { uniffi_bindgen() }
 
 fn uniffi_bindgen() {
     // uniffi_bindgen_main parses command line arguments for officially supported languages,
-    // but we need to parse them manually first to decide whether to use the uniffi_dart plugin.
+    // but we need to parse them manually first to decide whether to use external language plugins.
     let args: Vec<String> = std::env::args().collect();
-    let language =
-        args.iter().position(|arg| arg == "--language").and_then(|idx| args.get(idx + 1));
-    match language {
+    let language = args
+        .iter()
+        .position(|arg| arg == "--language")
+        .and_then(|idx| args.get(idx + 1).cloned())
+        .or_else(|| std::env::var("UNIFFI_BINDGEN_LANGUAGE").ok());
+    match language.as_deref() {
         #[cfg(feature = "dart")]
-        Some(lang) if lang == "dart" => {
+        Some("dart") => {
             let library_path = args
                 .iter()
                 .position(|arg| arg == "--library")
@@ -27,6 +30,10 @@ fn uniffi_bindgen() {
                 true,
             )
             .expect("Failed to generate dart bindings");
+        }
+        #[cfg(feature = "csharp")]
+        Some("csharp") => {
+            uniffi_bindgen_cs::main().expect("Failed to generate csharp bindings");
         }
         _ => uniffi::uniffi_bindgen_main(),
     }

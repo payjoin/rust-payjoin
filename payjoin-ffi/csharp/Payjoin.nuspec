@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package>
+  <metadata>
+    <id>Payjoin</id>
+    <version>0.24.0</version>
+    <title>Payjoin</title>
+    <authors>Payjoin Dev Kit Contributors</authors>
+    <owners>payjoin</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="expression">MIT OR Apache-2.0</license>
+    <readme>README.md</readme>
+    <projectUrl>https://github.com/payjoin/rust-payjoin</projectUrl>
+    <repository type="git" url="https://github.com/payjoin/rust-payjoin" />
+    <description>C# bindings for payjoin-ffi, generated from rust-payjoin via UniFFI.</description>
+    <tags>bitcoin payjoin bip78 ffi csharp dotnet</tags>
+    <contentFiles>
+      <files include="cs/any/payjoin.cs" buildAction="Compile" copyToOutput="false" flatten="true" />
+    </contentFiles>
+  </metadata>
+
+  <files>
+    <file src="README.md" target="README.md" />
+    <file src="src/payjoin.cs" target="contentFiles/cs/any/payjoin.cs" />
+    <file src="lib/*" target="runtimes/any/native" />
+  </files>
+</package>

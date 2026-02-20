@@ -1,0 +1,18 @@
+# Generated bindings
+src/*.cs
+
+# Build outputs
+bin/
+obj/
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# NuGet
+*.nupkg
+packages/
+/lib/*.so
+/lib/*.dylib
+/lib/*.dll

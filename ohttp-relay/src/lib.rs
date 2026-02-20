@@ -24,9 +24,14 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::service::TowerToHyperService;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::{TcpListener, UnixListener};
+use tokio::net::TcpListener;
+#[cfg(unix)]
+use tokio::net::UnixListener;
 use tokio_util::net::Listener;
-use tracing::{error, info, instrument};
+// `info!` is only used by the unix-only `listen_socket` implementation.
+#[cfg(unix)]
+use tracing::info;
+use tracing::{error, instrument};
 
 pub mod error;
 #[cfg(not(feature = "_test-util"))]
@@ -60,6 +65,7 @@ pub async fn listen_tcp(
 }
 
 #[instrument]
+#[cfg(unix)]
 pub async fn listen_socket(
     socket_path: &str,
     gateway_origin: GatewayUri,
@@ -68,6 +74,21 @@ pub async fn listen_socket(
     info!("OHTTP relay listening on socket: {}", socket_path);
     let sentinel_tag = SentinelTag::new([0u8; 32]);
     ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin, sentinel_tag)).await
+}
+
+#[instrument]
+#[cfg(not(unix))]
+pub async fn listen_socket(
+    socket_path: &str,
+    gateway_origin: GatewayUri,
+) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
+    // Keep API parity across targets while making the limitation explicit at runtime.
+    let _ = (socket_path, gateway_origin);
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "UNIX_SOCKET is only supported on unix targets; use PORT instead",
+    )
+    .into())
 }
 
 #[cfg(feature = "_test-util")]

@@ -1,0 +1,22 @@
+name: Standup Compile
+
+on:
+  schedule:
+    # Tuesday 06:00 UTC = Tuesday 14:00 Taipei
+    - cron: "0 6 * * 2"
+  workflow_dispatch:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python .github/scripts/compile_standup.py
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          STANDUP_TOKEN: ${{ secrets.STANDUP_TOKEN }}
+          DISCUSSION_CATEGORY_NODE_ID: ${{ secrets.DISCUSSION_CATEGORY_NODE_ID }}

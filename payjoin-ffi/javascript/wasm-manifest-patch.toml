@@ -3,6 +3,12 @@
 # Because that generated crate doesn't belong to the `payjoin` workspace, we need to patch the generated Cargo.toml accordingly for local development.
 # The patch is applied via the ubrn.config.yaml `manifestPatchFile` option.
 # The paths below are relative to payjoin-ffi/javascript/rust_modules/wasm/Cargo.toml
+[dependencies]
+# Pin wasm-bindgen to match the CLI version in .github/workflows/javascript.yml.
+# The generated template uses "*", which resolves to latest. A mismatch between
+# the library and CLI versions causes "unreachable" panics at runtime.
+wasm-bindgen = "=0.2.108"
+
 [patch.crates-io]
 payjoin = { path = "../../../../payjoin" }
 payjoin-directory = { path = "../../../../payjoin-directory" }

@@ -37,8 +37,9 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: brew install llvm
 
+      # 0.2.109+ requires rustc 1.88 (via time crate).
       - name: Install wasm-bindgen
-        run: cargo install --locked wasm-bindgen-cli
+        run: cargo install --locked wasm-bindgen-cli --version 0.2.108
 
       - name: "Install dependencies"
         run: npm ci

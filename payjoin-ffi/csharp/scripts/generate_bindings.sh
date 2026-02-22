@@ -22,8 +22,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/../.."
 
 echo "Generating payjoin C#..."
-# Keep parity with other language test scripts: include _test-utils by default.
-PAYJOIN_FFI_FEATURES=${PAYJOIN_FFI_FEATURES:-_test-utils}
+# Include test utilities and manual TLS by default so local test services
+# can fetch OHTTP keys over HTTPS with their generated self-signed cert.
+PAYJOIN_FFI_FEATURES=${PAYJOIN_FFI_FEATURES:-_test-utils,_manual-tls}
 GENERATOR_FEATURES="csharp"
 if [[ -n $PAYJOIN_FFI_FEATURES ]]; then
     GENERATOR_FEATURES="$GENERATOR_FEATURES,$PAYJOIN_FFI_FEATURES"

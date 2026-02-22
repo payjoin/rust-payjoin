@@ -323,6 +323,31 @@ namespace Payjoin.Tests
             return ValueTask.CompletedTask;
         }
 
+        /// <summary>
+        /// Regression test: <see cref="PayjoinMethods.FetchOhttpKeys"/> called from a plain .NET async
+        /// context should successfully return OHTTP keys.
+        ///
+        /// Without the fix this test fails with:
+        ///   PanicException: "there is no reactor running, must be called from the context of a Tokio 1.x runtime"
+        /// </summary>
+        [Fact]
+        public async Task FetchOhttpKeys_ShouldWorkFromNonTokioContext()
+        {
+            // Arrange: use TestServices' URLs so connectivity is guaranteed and
+            // the failure (if any) is purely about missing Tokio runtime, not networking.
+            _services!.WaitForServicesReady();
+            var ohttpRelay = _services.OhttpRelayUrl();
+            var directory = _services.DirectoryUrl();
+
+            // Act: call the raw UniFFI async binding directly — NOT TestServices.FetchOhttpKeys(),
+            // which uses an internal block_on(RUNTIME) and therefore always has a Tokio context.
+            // PayjoinMethods.FetchOhttpKeys() has no such safety net.
+            var keys = await PayjoinMethods.FetchOhttpKeys(ohttpRelay, directory);
+
+            // Assert
+            Assert.NotNull(keys);
+        }
+
         [Fact]
         public void TestFfiValidation()
         {

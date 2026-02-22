@@ -324,7 +324,7 @@ namespace Payjoin.Tests
         }
 
         /// <summary>
-        /// Regression test: <see cref="PayjoinMethods.FetchOhttpKeys"/> called from a plain .NET async
+        /// Regression test: <see cref="PayjoinMethods.FetchOhttpKeysWithCert"/> called from a plain .NET async
         /// context should successfully return OHTTP keys.
         ///
         /// Without the fix this test fails with:
@@ -333,16 +333,17 @@ namespace Payjoin.Tests
         [Fact]
         public async Task FetchOhttpKeys_ShouldWorkFromNonTokioContext()
         {
-            // Arrange: use TestServices' URLs so connectivity is guaranteed and
-            // the failure (if any) is purely about missing Tokio runtime, not networking.
+            // Arrange: use TestServices' URLs and certificate so connectivity is guaranteed and
+            // the failure (if any) is purely about missing Tokio runtime, not TLS trust setup.
             _services!.WaitForServicesReady();
             var ohttpRelay = _services.OhttpRelayUrl();
             var directory = _services.DirectoryUrl();
+            var cert = _services.Cert();
 
             // Act: call the raw UniFFI async binding directly — NOT TestServices.FetchOhttpKeys(),
             // which uses an internal block_on(RUNTIME) and therefore always has a Tokio context.
-            // PayjoinMethods.FetchOhttpKeys() has no such safety net.
-            var keys = await PayjoinMethods.FetchOhttpKeys(ohttpRelay, directory);
+            // PayjoinMethods.FetchOhttpKeysWithCert() has no such safety net.
+            var keys = await PayjoinMethods.FetchOhttpKeysWithCert(ohttpRelay, directory, cert);
 
             // Assert
             Assert.NotNull(keys);

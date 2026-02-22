@@ -43,6 +43,7 @@ pub async fn fetch_ohttp_keys(
 ///
 /// * `cert_der`: The DER-encoded certificate to use for local HTTPS connections.
 #[cfg(feature = "_manual-tls")]
+#[uniffi::export(async_runtime = "tokio")]
 pub async fn fetch_ohttp_keys_with_cert(
     ohttp_relay: &str,
     payjoin_directory: &str,

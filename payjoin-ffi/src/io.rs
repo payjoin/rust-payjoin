@@ -21,7 +21,7 @@ pub mod error {
 ///
 /// * `payjoin_directory`: The payjoin directory from which to fetch the ohttp keys.  This
 ///   directory stores and forwards payjoin client payloads.
-#[uniffi::export]
+#[uniffi::export(async_runtime = "tokio")]
 pub async fn fetch_ohttp_keys(
     ohttp_relay: &str,
     payjoin_directory: &str,

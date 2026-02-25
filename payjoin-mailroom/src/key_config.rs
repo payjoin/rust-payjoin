@@ -41,7 +41,6 @@ pub fn persist_new_key_config(ohttp_config: ServerKeyConfig, dir: &Path) -> Resu
     use std::io::Write;
 
     let key_path = key_path(dir);
-
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -50,8 +49,7 @@ pub fn persist_new_key_config(ohttp_config: ServerKeyConfig, dir: &Path) -> Resu
 
     file.write_all(&ohttp_config.ikm)
         .map_err(|e| anyhow!("Failed to write OHTTP keys to file: {}", e))?;
-    info!("Saved OHTTP Key Configuration to {}", &key_path.display());
-
+    info!("Saved OHTTP Key Configuration to {}", key_path.display());
     Ok(key_path)
 }
 

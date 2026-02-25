@@ -18,6 +18,9 @@ use tracing::info;
 pub mod access_control;
 pub mod cli;
 pub mod config;
+pub mod db;
+pub mod directory;
+pub mod key_config;
 pub mod metrics;
 pub mod middleware;
 
@@ -26,7 +29,7 @@ use crate::middleware::{track_connections, track_metrics};
 
 #[derive(Clone)]
 struct Services {
-    directory: payjoin_directory::Service<payjoin_directory::FilesDb>,
+    directory: crate::directory::Service<crate::db::DbServiceAdapter>,
     relay: ohttp_relay::Service,
     metrics: MetricsService,
     #[cfg(feature = "access-control")]
@@ -209,9 +212,10 @@ impl Connected<IncomingStream<'_, Listener>> for middleware::MaybePeerIp {
 async fn init_directory(
     config: &Config,
     sentinel_tag: SentinelTag,
-) -> anyhow::Result<payjoin_directory::Service<payjoin_directory::FilesDb>> {
-    let db = payjoin_directory::FilesDb::init(config.timeout, config.storage_dir.clone()).await?;
-    db.spawn_background_prune().await;
+) -> anyhow::Result<crate::directory::Service<crate::db::DbServiceAdapter>> {
+    let files_db = crate::db::FilesDb::init(config.timeout, config.storage_dir.clone()).await?;
+    files_db.spawn_background_prune().await;
+    let db = crate::db::DbServiceAdapter::new(files_db);
 
     let ohttp_keys_dir = config.storage_dir.join("ohttp-keys");
     let ohttp_config = init_ohttp_config(&ohttp_keys_dir)?;
@@ -221,11 +225,11 @@ async fn init_directory(
         let blocked = init_blocked_addresses(config).await?;
         #[cfg(not(feature = "access-control"))]
         let blocked = None;
-        Some(payjoin_directory::V1::new(blocked))
+        Some(crate::directory::V1::new(blocked))
     } else {
         None
     };
-    Ok(payjoin_directory::Service::new(db, ohttp_config.into(), sentinel_tag, v1))
+    Ok(crate::directory::Service::new(db, ohttp_config.into(), sentinel_tag, v1))
 }
 
 #[cfg(feature = "access-control")]
@@ -245,7 +249,7 @@ async fn init_geoip(
 #[cfg(feature = "access-control")]
 async fn init_blocked_addresses(
     config: &Config,
-) -> anyhow::Result<Option<payjoin_directory::BlockedAddresses>> {
+) -> anyhow::Result<Option<crate::directory::BlockedAddresses>> {
     let v1_config = match &config.v1 {
         Some(c) => c,
         None => return Ok(None),
@@ -260,11 +264,11 @@ async fn init_blocked_addresses(
     let blocked = match &v1_config.blocked_addresses_path {
         Some(path) => {
             let text = access_control::load_blocked_address_text(path)?;
-            let ba = payjoin_directory::BlockedAddresses::from_address_lines(&text);
+            let ba = crate::directory::BlockedAddresses::from_address_lines(&text);
             info!("Loaded blocked addresses from {}", path.display());
             ba
         }
-        None => payjoin_directory::BlockedAddresses::empty(),
+        None => crate::directory::BlockedAddresses::empty(),
     };
 
     // If URL configured, try initial fetch and spawn background updater
@@ -309,7 +313,7 @@ async fn init_blocked_addresses(
 #[cfg(feature = "access-control")]
 async fn load_address_cache(
     cache_path: &std::path::Path,
-    blocked: &payjoin_directory::BlockedAddresses,
+    blocked: &crate::directory::BlockedAddresses,
 ) {
     if cache_path.exists() {
         match access_control::load_blocked_address_text(cache_path) {
@@ -324,13 +328,13 @@ async fn load_address_cache(
 
 fn init_ohttp_config(
     ohttp_keys_dir: &std::path::Path,
-) -> anyhow::Result<payjoin_directory::ServerKeyConfig> {
+) -> anyhow::Result<crate::key_config::ServerKeyConfig> {
     std::fs::create_dir_all(ohttp_keys_dir)?;
-    match payjoin_directory::read_server_config(ohttp_keys_dir) {
+    match crate::key_config::read_server_config(ohttp_keys_dir) {
         Ok(config) => Ok(config),
         Err(_) => {
-            let config = payjoin_directory::gen_ohttp_server_config()?;
-            payjoin_directory::persist_new_key_config(config.clone(), ohttp_keys_dir)?;
+            let config = crate::key_config::gen_ohttp_server_config()?;
+            crate::key_config::persist_new_key_config(config.clone(), ohttp_keys_dir)?;
             Ok(config)
         }
     }

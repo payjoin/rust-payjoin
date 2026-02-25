@@ -18,5 +18,5 @@ features = ["wasm-unstable-single-threaded"]
 
 [patch.crates-io]
 payjoin = { path = "../../../../payjoin" }
-payjoin-directory = { path = "../../../../payjoin-directory" }
+payjoin-mailroom = { path = "../../../../payjoin-mailroom" }
 payjoin-test-utils = { path = "../../../../payjoin-test-utils" }

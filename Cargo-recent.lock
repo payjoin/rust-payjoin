@@ -2826,34 +2826,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "payjoin-directory"
-version = "0.0.3"
-dependencies = [
- "anyhow",
- "bhttp",
- "bitcoin 0.32.8",
- "bitcoin-ohttp",
- "clap 4.5.46",
- "config",
- "futures",
- "http-body-util",
- "hyper",
- "hyper-util",
- "ohttp-relay",
- "payjoin",
- "rand 0.8.5",
- "serde",
- "tempfile",
- "tokio",
- "tokio-rustls",
- "tokio-rustls-acme",
- "tokio-stream",
- "tower",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "payjoin-ffi"
 version = "0.24.0"
 dependencies = [
@@ -2892,16 +2864,21 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-server",
+ "bhttp",
+ "bitcoin 0.32.8",
+ "bitcoin-ohttp",
  "clap 4.5.46",
  "config",
  "flate2",
+ "futures",
+ "http-body-util",
  "ipnet",
  "maxminddb",
  "ohttp-relay",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
- "payjoin-directory",
+ "payjoin",
  "payjoin-test-utils",
  "rand 0.8.5",
  "reqwest",

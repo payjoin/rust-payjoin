@@ -99,7 +99,7 @@ pub fn spawn_address_list_updater(
     url: String,
     refresh: std::time::Duration,
     cache_path: std::path::PathBuf,
-    blocked: payjoin_directory::BlockedAddresses,
+    blocked: crate::directory::BlockedAddresses,
 ) {
     tokio::spawn(async move {
         loop {

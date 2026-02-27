@@ -20,6 +20,3 @@ features = ["wasm-unstable-single-threaded"]
 payjoin = { path = "../../../../payjoin" }
 payjoin-directory = { path = "../../../../payjoin-directory" }
 payjoin-test-utils = { path = "../../../../payjoin-test-utils" }
-# uniffi-runtime-javascript is not yet published with uniffi_core 0.30 support.
-# This path patch lets cargo resolve it from the installed npm package.
-uniffi-runtime-javascript = { path = "../../node_modules/uniffi-bindgen-react-native/crates/uniffi-runtime-javascript" }

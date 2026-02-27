@@ -29,7 +29,7 @@
         "prettier": "^3.6.2",
         "tsx": "^4.20.6",
         "typescript": "^5.9.3",
-        "uniffi-bindgen-react-native": "github:jhugman/uniffi-bindgen-react-native#93bed377c6e0b5cd7afd3fb7ee0d7211d5f294c5"
+        "uniffi-bindgen-react-native": "0.30.0-1"
     },
     "repository": {
         "type": "git",

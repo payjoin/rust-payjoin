@@ -131,11 +131,23 @@ impl Config {
 
         config = handle_subcommands(config, cli)?;
 
+        let mut config_file_found = false;
+        let mut config_file_paths = Vec::new();
+
         if let Some(config_dir) = dirs::config_dir() {
             let global_config_path = config_dir.join(CONFIG_DIR).join("config.toml");
+            if global_config_path.exists() {
+                config_file_found = true;
+            }
+            config_file_paths.push(global_config_path.display().to_string());
             config = config.add_source(File::from(global_config_path).required(false));
         }
 
+        let local_config_path = std::path::Path::new("config.toml");
+        if local_config_path.exists() {
+            config_file_found = true;
+        }
+        config_file_paths.push("config.toml (current directory)".to_string());
         config = config.add_source(File::new("config.toml", FileFormat::Toml).required(false));
         let built_config = config.build()?;
 
@@ -164,10 +176,20 @@ impl Config {
 
                             config.version = Some(VersionConfig::V1(v1))
                         }
-                        Err(e) =>
+                        Err(e) => {
+                            let hint = if config_file_found {
+                                String::new()
+                            } else {
+                                format!(
+                                    "\nNo config file found. Searched: {}. \
+                                     Create a config.toml or provide configuration via CLI arguments.",
+                                    config_file_paths.join(", ")
+                                )
+                            };
                             return Err(ConfigError::Message(format!(
-                                "Valid V1 configuration is required for BIP78 mode: {e}"
-                            ))),
+                                "Valid V1 configuration is required for BIP78 mode: {e}{hint}"
+                            )));
+                        }
                     }
                 }
                 #[cfg(not(feature = "v1"))]
@@ -187,10 +209,20 @@ impl Config {
                             }
                             config.version = Some(VersionConfig::V2(v2))
                         }
-                        Err(e) =>
+                        Err(e) => {
+                            let hint = if config_file_found {
+                                String::new()
+                            } else {
+                                format!(
+                                    "\nNo config file found. Searched: {}. \
+                                     Create a config.toml or provide configuration via CLI arguments.",
+                                    config_file_paths.join(", ")
+                                )
+                            };
                             return Err(ConfigError::Message(format!(
-                                "Valid V2 configuration is required for BIP77 mode: {e}"
-                            ))),
+                                "Valid V2 configuration is required for BIP77 mode: {e}{hint}"
+                            )));
+                        }
                     }
                 }
                 #[cfg(not(feature = "v2"))]

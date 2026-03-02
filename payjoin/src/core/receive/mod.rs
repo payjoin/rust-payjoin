@@ -239,8 +239,7 @@ pub(crate) fn parse_payload(
     let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
     tracing::trace!("Received original psbt: {psbt:?}");
 
-    let pairs = url::form_urlencoded::parse(query.as_bytes());
-    let params = Params::from_query_pairs(pairs, supported_versions)
+    let params = Params::from_query_str(query, supported_versions)
         .map_err(InternalPayloadError::SenderParams)?;
     tracing::trace!("Received request with params: {params:?}");
 
@@ -484,9 +483,8 @@ pub(crate) mod tests {
     use crate::psbt::NON_WITNESS_INPUT_WEIGHT;
 
     pub(crate) fn original_from_test_vector() -> OriginalPayload {
-        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
-        let params = Params::from_query_pairs(pairs, &[Version::One])
-            .expect("Could not parse params from query pairs");
+        let params = Params::from_query_str(QUERY_PARAMS, &[Version::One])
+            .expect("Could not parse params from query str");
         OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
     }
 

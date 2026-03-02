@@ -142,9 +142,7 @@ impl App {
         // If --port 0 is specified, a free port is chosen, so we need to set it
         // on the endpoint which must not have a port.
         if port == 0 {
-            endpoint
-                .set_port(Some(listener.local_addr()?.port()))
-                .expect("setting port must succeed");
+            endpoint.set_port(Some(listener.local_addr()?.port()));
         }
 
         let pj_uri_string = self.construct_payjoin_uri(amount, endpoint.as_str())?;
@@ -234,8 +232,10 @@ impl App {
             (&Method::GET, "/bip21") => {
                 let query_string = req.uri().query().unwrap_or("");
                 tracing::trace!("{:?}, {query_string:?}", req.method());
-                let query_params: HashMap<_, _> =
-                    url::form_urlencoded::parse(query_string.as_bytes()).into_owned().collect();
+                let query_url = payjoin::Url::parse(&format!("http://localhost/?{query_string}"))
+                    .expect("valid query URL");
+                let query_params: HashMap<String, String> =
+                    query_url.query_pairs().into_iter().collect();
                 let amount = query_params.get("amount").map(|amt| {
                     Amount::from_btc(amt.parse().expect("Failed to parse amount")).unwrap()
                 });

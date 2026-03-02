@@ -2736,13 +2736,13 @@ dependencies = [
  "http",
  "once_cell",
  "payjoin-test-utils",
+ "percent-encoding-rfc3986",
  "reqwest",
  "rustls 0.23.31",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
- "url",
  "web-time",
 ]
 
@@ -2773,7 +2773,6 @@ dependencies = [
  "tokio-rustls 0.26.2",
  "tracing",
  "tracing-subscriber",
- "url",
 ]
 
 [[package]]

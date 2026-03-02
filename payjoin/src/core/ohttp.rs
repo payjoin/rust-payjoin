@@ -23,14 +23,14 @@ pub(crate) fn ohttp_encapsulate(
     let mut ohttp_keys = ohttp_keys.clone();
 
     let ctx = ohttp::ClientRequest::from_config(&mut ohttp_keys)?;
-    let url = url::Url::parse(target_resource)?;
-    let authority_bytes = url.host().map_or_else(Vec::new, |host| {
-        let mut authority = host.to_string();
+    let url = crate::core::Url::parse(target_resource)?;
+    let authority_bytes = {
+        let mut authority = url.host_str();
         if let Some(port) = url.port() {
             write!(authority, ":{port}").unwrap();
         }
         authority.into_bytes()
-    });
+    };
     let mut bhttp_message = bhttp::Message::request(
         method.as_bytes().to_vec(),
         url.scheme().as_bytes().to_vec(),
@@ -164,7 +164,7 @@ pub enum OhttpEncapsulationError {
     Http(http::Error),
     Ohttp(ohttp::Error),
     Bhttp(bhttp::Error),
-    ParseUrl(url::ParseError),
+    ParseUrl(crate::core::UrlParseError),
 }
 
 impl From<http::Error> for OhttpEncapsulationError {
@@ -179,8 +179,8 @@ impl From<bhttp::Error> for OhttpEncapsulationError {
     fn from(value: bhttp::Error) -> Self { Self::Bhttp(value) }
 }
 
-impl From<url::ParseError> for OhttpEncapsulationError {
-    fn from(value: url::ParseError) -> Self { Self::ParseUrl(value) }
+impl From<crate::core::UrlParseError> for OhttpEncapsulationError {
+    fn from(value: crate::core::UrlParseError) -> Self { Self::ParseUrl(value) }
 }
 
 impl fmt::Display for OhttpEncapsulationError {

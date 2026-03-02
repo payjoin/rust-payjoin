@@ -38,10 +38,10 @@ pub use session::{
     replay_event_log, replay_event_log_async, SessionEvent, SessionHistory, SessionOutcome,
     SessionStatus,
 };
-use url::Url;
 
 use super::error::BuildSenderError;
 use super::*;
+use crate::core::Url;
 use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};

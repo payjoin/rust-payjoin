@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use clap::{value_parser, Parser, Subcommand};
 use payjoin::bitcoin::amount::ParseAmountError;
 use payjoin::bitcoin::{Amount, FeeRate};
+use payjoin::Url;
 use serde::Deserialize;
-use url::Url;
 
 #[derive(Debug, Clone, Deserialize, Parser)]
 pub struct Flags {
@@ -114,13 +114,13 @@ pub enum Commands {
 
         #[cfg(feature = "v1")]
         /// The `pj=` endpoint to receive the payjoin request
-        #[arg(long = "pj-endpoint", value_parser = value_parser!(Url))]
-        pj_endpoint: Option<Url>,
+        #[arg(long = "pj-endpoint", value_parser = parse_boxed_url)]
+        pj_endpoint: Option<Box<Url>>,
 
         #[cfg(feature = "v2")]
         /// The directory to store payjoin requests
-        #[arg(long = "pj-directory", value_parser = value_parser!(Url))]
-        pj_directory: Option<Url>,
+        #[arg(long = "pj-directory", value_parser = parse_boxed_url)]
+        pj_directory: Option<Box<Url>>,
 
         #[cfg(feature = "v2")]
         /// The path to the ohttp keys file
@@ -143,4 +143,8 @@ pub fn parse_fee_rate_in_sat_per_vb(s: &str) -> Result<FeeRate, std::num::ParseF
     let fee_rate_sat_per_vb: f32 = s.parse()?;
     let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;
     Ok(FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64))
+}
+
+fn parse_boxed_url(s: &str) -> Result<Box<Url>, String> {
+    s.parse::<Url>().map(Box::new).map_err(|e| e.to_string())
 }

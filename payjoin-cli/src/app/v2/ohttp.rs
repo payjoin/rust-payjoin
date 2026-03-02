@@ -1,35 +1,36 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
+use payjoin::Url;
 
 use super::Config;
 
 #[derive(Debug, Clone)]
 pub struct RelayManager {
-    selected_relay: Option<url::Url>,
-    failed_relays: Vec<url::Url>,
+    selected_relay: Option<Url>,
+    failed_relays: Vec<Url>,
 }
 
 impl RelayManager {
     pub fn new() -> Self { RelayManager { selected_relay: None, failed_relays: Vec::new() } }
 
-    pub fn set_selected_relay(&mut self, relay: url::Url) { self.selected_relay = Some(relay); }
+    pub fn set_selected_relay(&mut self, relay: Url) { self.selected_relay = Some(relay); }
 
-    pub fn get_selected_relay(&self) -> Option<url::Url> { self.selected_relay.clone() }
+    pub fn get_selected_relay(&self) -> Option<Url> { self.selected_relay.clone() }
 
-    pub fn add_failed_relay(&mut self, relay: url::Url) { self.failed_relays.push(relay); }
+    pub fn add_failed_relay(&mut self, relay: Url) { self.failed_relays.push(relay); }
 
-    pub fn get_failed_relays(&self) -> Vec<url::Url> { self.failed_relays.clone() }
+    pub fn get_failed_relays(&self) -> Vec<Url> { self.failed_relays.clone() }
 }
 
 pub(crate) struct ValidatedOhttpKeys {
     pub(crate) ohttp_keys: payjoin::OhttpKeys,
-    pub(crate) relay_url: url::Url,
+    pub(crate) relay_url: Url,
 }
 
 pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
     config: &Config,
-    directory: Option<url::Url>,
+    directory: Option<Url>,
     relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<ValidatedOhttpKeys> {
     if let Some(ohttp_keys) = config.v2()?.ohttp_keys.clone() {
@@ -46,7 +47,7 @@ pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
 
 async fn fetch_ohttp_keys(
     config: &Config,
-    directory: Option<url::Url>,
+    directory: Option<Url>,
     relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<ValidatedOhttpKeys> {
     use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;

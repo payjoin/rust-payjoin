@@ -1,9 +1,9 @@
-use url::{ParseError, Url};
+use crate::core::{Url, UrlParseError};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     BadScheme,
-    ParseError(ParseError),
+    ParseError(UrlParseError),
 }
 
 impl std::fmt::Display for Error {
@@ -19,8 +19,8 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<ParseError> for Error {
-    fn from(err: ParseError) -> Error { Error::ParseError(err) }
+impl From<UrlParseError> for Error {
+    fn from(err: UrlParseError) -> Error { Error::ParseError(err) }
 }
 
 type Result<T> = core::result::Result<T, Error>;
@@ -53,13 +53,7 @@ impl IntoUrlSealed for &Url {
 }
 
 impl IntoUrlSealed for Url {
-    fn into_url(self) -> Result<Url> {
-        if self.has_host() {
-            Ok(self)
-        } else {
-            Err(Error::BadScheme)
-        }
-    }
+    fn into_url(self) -> Result<Url> { Ok(self) }
 
     fn as_str(&self) -> &str { self.as_ref() }
 }
@@ -101,13 +95,19 @@ mod tests {
     #[test]
     fn into_url_file_scheme() {
         let err = "file:///etc/hosts".into_url().unwrap_err();
-        assert_eq!(err.to_string(), "URL scheme is not allowed");
+        assert_eq!(err.to_string(), "empty host");
     }
 
     #[test]
     fn into_url_blob_scheme() {
         let err = "blob:https://example.com".into_url().unwrap_err();
-        assert_eq!(err.to_string(), "URL scheme is not allowed");
+        assert_eq!(err.to_string(), "invalid format");
+    }
+
+    #[test]
+    fn into_url_rejects_userinfo() {
+        let err = "http://user@example.com/".into_url().unwrap_err();
+        assert_eq!(err.to_string(), "invalid host");
     }
 
     #[test]

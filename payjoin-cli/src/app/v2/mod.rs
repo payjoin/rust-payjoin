@@ -813,7 +813,7 @@ impl App {
     async fn unwrap_relay_or_else_fetch(
         &self,
         directory: Option<impl payjoin::IntoUrl>,
-    ) -> Result<url::Url> {
+    ) -> Result<payjoin::Url> {
         let directory = directory.map(|url| url.into_url()).transpose()?;
         let selected_relay =
             self.relay_manager.lock().expect("Lock should not be poisoned").get_selected_relay();

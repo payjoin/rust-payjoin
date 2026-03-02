@@ -243,6 +243,8 @@ impl From<&PayloadError> for JsonReply {
                 }
                 super::optional_parameters::Error::FeeRate =>
                     JsonReply::new(OriginalPsbtRejected, e),
+                super::optional_parameters::Error::MalformedQuery =>
+                    JsonReply::new(OriginalPsbtRejected, e),
             },
         }
     }

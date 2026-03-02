@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use bitcoin::bech32::Hrp;
-use url::Url;
 
+use crate::core::Url;
 use crate::hpke::HpkePublicKey;
 use crate::ohttp::OhttpKeys;
 use crate::time::{ParseTimeError, Time};

@@ -24,7 +24,7 @@ default = ["v2"]
 #[doc = "Core features for payjoin state machines"]
 _core = [
   "bitcoin/rand-std",
-  "dep:http",
+  "http",
   "serde_json",
   "form_urlencoded",
   "bitcoin_uri",

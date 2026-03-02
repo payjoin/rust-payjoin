@@ -171,7 +171,7 @@ impl<'de> serde::Deserialize<'de> for HpkePublicKey {
 
 /// Message A is sent from the sender to the receiver containing an Original PSBT payload
 pub fn encrypt_message_a(
-    body: Vec<u8>,
+    mut body: Vec<u8>,
     reply_pk: &HpkePublicKey,
     receiver_pk: &HpkePublicKey,
 ) -> Result<Vec<u8>, HpkeError> {
@@ -182,7 +182,6 @@ pub fn encrypt_message_a(
             INFO_A,
             &mut OsRng,
         )?;
-    let mut body = body;
     pad_plaintext(&mut body, PADDED_PLAINTEXT_A_LENGTH)?;
     let mut plaintext = compressed_bytes_from_pubkey(reply_pk).to_vec();
     plaintext.extend(body);
@@ -194,7 +193,7 @@ pub fn encrypt_message_a(
 
 pub fn decrypt_message_a(
     message_a: &[u8],
-    receiver_sk: HpkeSecretKey,
+    receiver_sk: &HpkeSecretKey,
 ) -> Result<(Vec<u8>, HpkePublicKey), HpkeError> {
     use std::io::{Cursor, Read};
 
@@ -247,7 +246,7 @@ pub fn encrypt_message_b(
 pub fn decrypt_message_b(
     message_b: &[u8],
     receiver_pk: HpkePublicKey,
-    sender_sk: HpkeSecretKey,
+    sender_sk: &HpkeSecretKey,
 ) -> Result<Vec<u8>, HpkeError> {
     let enc = message_b.get(..ELLSWIFT_ENCODING_SIZE).ok_or(HpkeError::PayloadTooShort)?;
     let enc = encapped_key_from_ellswift_bytes(enc)?;
@@ -345,7 +344,7 @@ mod test {
         .expect("encryption should work");
         assert_eq!(message_a.len(), PADDED_MESSAGE_BYTES);
 
-        let decrypted = decrypt_message_a(&message_a, receiver_keypair.secret_key().clone())
+        let decrypted = decrypt_message_a(&message_a, receiver_keypair.secret_key())
             .expect("decryption should work");
 
         assert_eq!(decrypted.0.len(), PADDED_PLAINTEXT_A_LENGTH);
@@ -363,7 +362,7 @@ mod test {
         )
         .expect("encryption should work");
 
-        let decrypted = decrypt_message_a(&message_a, receiver_keypair.secret_key().clone())
+        let decrypted = decrypt_message_a(&message_a, receiver_keypair.secret_key())
             .expect("decryption should work");
 
         assert_eq!(decrypted.0.len(), plaintext.len());
@@ -371,20 +370,20 @@ mod test {
 
         let unrelated_keypair = HpkeKeyPair::gen_keypair();
         assert_eq!(
-            decrypt_message_a(&message_a, unrelated_keypair.secret_key().clone()),
+            decrypt_message_a(&message_a, unrelated_keypair.secret_key()),
             Err(HpkeError::Hpke(hpke::HpkeError::OpenError))
         );
 
         let mut corrupted_message_a = message_a.clone();
         corrupted_message_a[3] ^= 1; // corrupt dhkem
         assert_eq!(
-            decrypt_message_a(&corrupted_message_a, receiver_keypair.secret_key().clone()),
+            decrypt_message_a(&corrupted_message_a, receiver_keypair.secret_key()),
             Err(HpkeError::Hpke(hpke::HpkeError::OpenError))
         );
         let mut corrupted_message_a = message_a.clone();
         corrupted_message_a[PADDED_MESSAGE_BYTES - 3] ^= 1; // corrupt aead ciphertext
         assert_eq!(
-            decrypt_message_a(&corrupted_message_a, receiver_keypair.secret_key().clone()),
+            decrypt_message_a(&corrupted_message_a, receiver_keypair.secret_key()),
             Err(HpkeError::Hpke(hpke::HpkeError::OpenError))
         );
 
@@ -418,7 +417,7 @@ mod test {
         let decrypted = decrypt_message_b(
             &message_b,
             receiver_keypair.public_key().clone(),
-            reply_keypair.secret_key().clone(),
+            reply_keypair.secret_key(),
         )
         .expect("decryption should work");
 
@@ -437,7 +436,7 @@ mod test {
         let decrypted = decrypt_message_b(
             &message_b,
             receiver_keypair.public_key().clone(),
-            reply_keypair.secret_key().clone(),
+            reply_keypair.secret_key(),
         )
         .expect("decryption should work");
         assert_eq!(decrypted.len(), plaintext.len());
@@ -448,7 +447,7 @@ mod test {
             decrypt_message_b(
                 &message_b,
                 receiver_keypair.public_key().clone(),
-                unrelated_keypair.secret_key().clone() // wrong decryption key
+                unrelated_keypair.secret_key() // wrong decryption key
             ),
             Err(HpkeError::Hpke(hpke::HpkeError::OpenError))
         );
@@ -456,7 +455,7 @@ mod test {
             decrypt_message_b(
                 &message_b,
                 unrelated_keypair.public_key().clone(), // wrong auth key
-                reply_keypair.secret_key().clone()
+                reply_keypair.secret_key()
             ),
             Err(HpkeError::Hpke(hpke::HpkeError::OpenError))
         );
@@ -467,7 +466,7 @@ mod test {
             decrypt_message_b(
                 &corrupted_message_b,
                 receiver_keypair.public_key().clone(),
-                reply_keypair.secret_key().clone()
+                reply_keypair.secret_key()
             ),
             Err(HpkeError::Hpke(hpke::HpkeError::OpenError))
         );
@@ -477,7 +476,7 @@ mod test {
             decrypt_message_b(
                 &corrupted_message_b,
                 receiver_keypair.public_key().clone(),
-                reply_keypair.secret_key().clone()
+                reply_keypair.secret_key()
             ),
             Err(HpkeError::Hpke(hpke::HpkeError::OpenError))
         );

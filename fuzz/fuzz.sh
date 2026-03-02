@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 
 # This script is used to briefly fuzz every target when no target is provided. Otherwise, it will briefly fuzz the provided target
+# When fuzzing with a specific target a number of concurrent forks can be applied. Be sure to leave one or two available CPUs open for the OS.
 
 set -euo pipefail
 
 TARGET=""
+FORKS=1
 
 if [[ $# -gt 0 ]]; then
     TARGET="$1"
+    shift
+fi
+
+if [[ $# -gt 0 ]]; then
+    FORKS="$1"
     shift
 fi
 
@@ -26,5 +33,5 @@ fi
 for targetFile in $targetFiles; do
     targetName=$(targetFileToName "$targetFile")
     echo "Fuzzing target $targetName ($targetFile)"
-    cargo fuzz run "$targetName" -- -max_total_time=30
+    cargo fuzz run "$targetName" -- -max_total_time=30 -fork="$FORKS"
 done

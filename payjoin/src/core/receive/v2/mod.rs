@@ -1394,7 +1394,7 @@ pub mod test {
     });
 
     pub(crate) fn unchecked_proposal_v2_from_test_vector() -> UncheckedOriginalPayload {
-        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
+        let pairs = form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::Two])
             .expect("Test utils query params should not fail");
         UncheckedOriginalPayload {
@@ -1403,7 +1403,7 @@ pub mod test {
     }
 
     pub(crate) fn maybe_inputs_owned_v2_from_test_vector() -> MaybeInputsOwned {
-        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
+        let pairs = form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::Two])
             .expect("Test utils query params should not fail");
         MaybeInputsOwned {

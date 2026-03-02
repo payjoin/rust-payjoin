@@ -14,6 +14,10 @@ pub(crate) enum Error {
     Serialize(serde_json::Error),
     #[cfg(feature = "v2")]
     Deserialize(serde_json::Error),
+    #[cfg(feature = "v2")]
+    DuplicateUri,
+    #[cfg(feature = "v2")]
+    DuplicateRk,
 }
 
 impl fmt::Display for Error {
@@ -25,6 +29,13 @@ impl fmt::Display for Error {
             Error::Serialize(e) => write!(f, "Serialization failed: {e}"),
             #[cfg(feature = "v2")]
             Error::Deserialize(e) => write!(f, "Deserialization failed: {e}"),
+            #[cfg(feature = "v2")]
+            Error::DuplicateUri => write!(f, "A send session for this URI is already active"),
+            #[cfg(feature = "v2")]
+            Error::DuplicateRk => write!(
+                f,
+                "A send session with this receiver pubkey is already active under a different URI"
+            ),
         }
     }
 }
@@ -38,6 +49,10 @@ impl std::error::Error for Error {
             Error::Serialize(e) => Some(e),
             #[cfg(feature = "v2")]
             Error::Deserialize(e) => Some(e),
+            #[cfg(feature = "v2")]
+            Error::DuplicateUri => None,
+            #[cfg(feature = "v2")]
+            Error::DuplicateRk => None,
         }
     }
 }

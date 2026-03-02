@@ -229,7 +229,7 @@ impl AppTrait for App {
                     Some((sender_state, persister)) => (sender_state, persister),
                     None => {
                         let persister =
-                            SenderPersister::new(self.db.clone(), receiver_pubkey.clone())?;
+                            SenderPersister::new(self.db.clone(), bip21, receiver_pubkey)?;
                         let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
                         let sender =
                             SenderBuilder::from_parts(psbt, pj_param, &address, Some(amount))
@@ -307,17 +307,17 @@ impl AppTrait for App {
 
         // Process sender sessions
         for session_id in send_session_ids {
-            let sender_persiter = SenderPersister::from_id(self.db.clone(), session_id.clone());
-            match replay_sender_event_log(&sender_persiter) {
+            let sender_persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
+            match replay_sender_event_log(&sender_persister) {
                 Ok((sender_state, _)) => {
                     let self_clone = self.clone();
                     tasks.push(tokio::spawn(async move {
-                        self_clone.process_sender_session(sender_state, &sender_persiter).await
+                        self_clone.process_sender_session(sender_state, &sender_persister).await
                     }));
                 }
                 Err(e) => {
                     tracing::error!("An error {:?} occurred while replaying Sender session", e);
-                    Self::close_failed_session(&sender_persiter, &session_id, "sender");
+                    Self::close_failed_session(&sender_persister, &session_id, "sender");
                 }
             }
         }

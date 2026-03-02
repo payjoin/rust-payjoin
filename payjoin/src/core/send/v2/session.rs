@@ -172,9 +172,9 @@ pub enum SessionOutcome {
 mod tests {
     use bitcoin::{FeeRate, ScriptBuf};
     use payjoin_test_utils::{KEM, KEY_ID, PARSED_ORIGINAL_PSBT, SYMMETRIC};
-    use url::Url;
 
     use super::*;
+    use crate::core::Url;
     use crate::output_substitution::OutputSubstitution;
     use crate::persist::test_utils::{InMemoryAsyncTestPersister, InMemoryTestPersister};
     use crate::persist::NoopSessionPersister;
@@ -190,7 +190,7 @@ mod tests {
     fn test_sender_session_event_serialization_roundtrip() {
         let keypair = HpkeKeyPair::gen_keypair();
         let id = crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id");
-        let endpoint = url::Url::parse("http://localhost:1234").expect("valid url");
+        let endpoint = Url::parse("http://localhost:1234").expect("valid url");
         let expiration =
             Time::from_now(std::time::Duration::from_secs(60)).expect("expiration should be valid");
         let pj_param = crate::uri::v2::PjParam::new(

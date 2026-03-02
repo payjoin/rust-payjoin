@@ -49,7 +49,7 @@ impl PjParam {
 
     pub fn endpoint(&self) -> String { self.endpoint_url().to_string() }
 
-    pub(crate) fn endpoint_url(&self) -> url::Url {
+    pub(crate) fn endpoint_url(&self) -> crate::core::Url {
         match self {
             #[cfg(feature = "v1")]
             PjParam::V1(url) => url.endpoint(),
@@ -70,7 +70,7 @@ impl std::fmt::Display for PjParam {
             .endpoint()
             .as_str()
             .replacen(scheme, &scheme.to_uppercase(), 1)
-            .replacen(host, &host.to_uppercase(), 1);
+            .replacen(&host, &host.to_uppercase(), 1);
         write!(f, "{endpoint_str}")
     }
 }

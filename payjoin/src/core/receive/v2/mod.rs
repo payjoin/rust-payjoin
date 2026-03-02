@@ -39,7 +39,6 @@ pub use session::{
     replay_event_log, replay_event_log_async, SessionEvent, SessionHistory, SessionOutcome,
     SessionStatus,
 };
-use url::Url;
 #[cfg(target_arch = "wasm32")]
 use web_time::Duration;
 
@@ -47,6 +46,7 @@ use super::error::{Error, InputContributionError};
 use super::{
     common, InternalPayloadError, JsonReply, OutputSubstitutionError, ProtocolError, SelectionError,
 };
+use crate::core::Url;
 use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{
@@ -73,7 +73,7 @@ static TWENTY_FOUR_HOURS_DEFAULT_EXPIRATION: Duration = Duration::from_secs(60 *
 pub struct SessionContext {
     #[serde(deserialize_with = "deserialize_address_assume_checked")]
     address: Address,
-    directory: url::Url,
+    directory: Url,
     ohttp_keys: OhttpKeys,
     expiration: Time,
     amount: Option<Amount>,

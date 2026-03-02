@@ -9,7 +9,7 @@ mod integration {
     use bitcoin::{Amount, FeeRate, OutPoint, TxIn, TxOut, Weight};
     use payjoin::receive::v1::build_v1_pj_uri;
     use payjoin::receive::InputPair;
-    use payjoin::{ImplementationError, OutputSubstitution, PjUri, Request, Uri};
+    use payjoin::{ImplementationError, OutputSubstitution, PjUri, Request, Uri, Url};
     use payjoin_test_utils::corepc_node::vtype::ListUnspentItem;
     use payjoin_test_utils::corepc_node::AddressType;
     use payjoin_test_utils::{corepc_node, init_bitcoind_sender_receiver, init_tracing, BoxError};
@@ -1487,7 +1487,7 @@ mod integration {
         // Receiver receive payjoin proposal, IRL it will be an HTTP request (over ssl or onion)
         let proposal = payjoin::receive::v1::UncheckedOriginalPayload::from_request(
             req.body.as_slice(),
-            url::Url::from_str(&req.url).expect("Could not parse url").query().unwrap_or(""),
+            Url::from_str(&req.url).expect("Could not parse url").query().unwrap_or(""),
             headers,
         )?;
         let proposal =

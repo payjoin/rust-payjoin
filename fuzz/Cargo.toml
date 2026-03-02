@@ -29,3 +29,9 @@ name = "uri_deserialize_pjuri"
 path = "fuzz_targets/uri/deserialize_pjuri.rs"
 doc = false
 bench = false
+
+[[bin]]
+name = "url_decode_url"
+path = "fuzz_targets/url/decode_url.rs"
+doc = false
+bench = false

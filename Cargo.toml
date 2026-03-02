@@ -19,6 +19,6 @@ payjoin-directory = { path = "payjoin-directory" }
 payjoin-mailroom = { path = "payjoin-mailroom" }
 payjoin-test-utils = { path = "payjoin-test-utils" }
 
-[profile.crane]
+[profile.nix-ci]
 inherits = "test"
 debug = false

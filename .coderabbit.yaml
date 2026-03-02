@@ -5,9 +5,14 @@ reviews:
   high_level_summary: false
   changed_files_summary: false
   sequence_diagrams: false
+  poem: false
+  review_status: false
+  collapse_walkthrough: true
   estimate_code_review_effort: false
   suggested_labels: false
   suggested_reviewers: false
+  auto_review:
+    drafts: true
   path_instructions:
     - path: "payjoin/src/**/*.rs"
       instructions: |

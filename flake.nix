@@ -30,7 +30,10 @@
       treefmt-nix,
       nix2container,
     }:
-    flake-utils.lib.eachDefaultSystem (
+    {
+      nixosModules.payjoin-mailroom = import ./nix/modules/payjoin-mailroom.nix self;
+    }
+    // flake-utils.lib.eachDefaultSystem (
       system:
       let
         pkgs = import nixpkgs {

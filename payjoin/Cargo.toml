@@ -26,7 +26,6 @@ _core = [
   "bitcoin/rand-std",
   "dep:http",
   "serde_json",
-  "url/serde",
   "form_urlencoded",
   "bitcoin_uri",
   "serde",
@@ -55,9 +54,6 @@ rustls = { version = "0.23.31", optional = true, default-features = false, featu
 serde = { version = "1.0.219", default-features = false, optional = true }
 serde_json = { version = "1.0.142", optional = true }
 tracing = "0.1.41"
-url = { version = "2.5.4", optional = true, default-features = false, features = [
-  "serde",
-] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-time = "1.1.0"

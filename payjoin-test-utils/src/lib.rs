@@ -103,7 +103,7 @@ impl TestServices {
         fetch_ohttp_keys_with_cert(
             self.ohttp_relay_url().as_str(),
             self.directory_url().as_str(),
-            self.cert(),
+            &self.cert(),
         )
         .await
     }

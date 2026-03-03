@@ -45,13 +45,13 @@ pub async fn fetch_ohttp_keys(
 pub async fn fetch_ohttp_keys_with_cert(
     ohttp_relay: impl IntoUrl,
     payjoin_directory: impl IntoUrl,
-    cert_der: Vec<u8>,
+    cert_der: &[u8],
 ) -> Result<OhttpKeys, Error> {
     let ohttp_keys_url = payjoin_directory.into_url()?.join("/.well-known/ohttp-gateway")?;
     let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
     let client = Client::builder()
         .use_rustls_tls()
-        .add_root_certificate(reqwest::tls::Certificate::from_der(&cert_der)?)
+        .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der)?)
         .proxy(proxy)
         .http1_only()
         .build()?;

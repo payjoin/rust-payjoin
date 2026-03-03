@@ -377,7 +377,7 @@ pub(crate) fn extract_request(
 ) -> Result<(Request, ClientResponse), CreateRequestError> {
     let body = encrypt_message_a(
         body,
-        &HpkeKeyPair::from_secret_key(&session_context.reply_key).public_key().clone(),
+        HpkeKeyPair::from_secret_key(&session_context.reply_key).public_key(),
         session_context.pj_param.receiver_pubkey(),
     )
     .map_err(InternalCreateRequestError::Hpke)?;
@@ -495,7 +495,7 @@ impl Sender<PollingForProposal> {
         let body = match decrypt_message_b(
             &body,
             self.session_context.pj_param.receiver_pubkey().clone(),
-            self.session_context.reply_key.clone(),
+            &self.session_context.reply_key,
         ) {
             Ok(body) => body,
             Err(e) =>

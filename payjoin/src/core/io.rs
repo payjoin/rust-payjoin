@@ -13,6 +13,12 @@ use crate::OhttpKeys;
 ///   directory.  Proxying requests for ohttp keys ensures a client IP address is never revealed to
 ///   the payjoin directory.
 ///
+///   When multiple relays are available, callers SHOULD select one at random rather than
+///   always using the same relay. A fixed selection order creates a fingerprintable pattern
+///   at the network layer even though the IP is protected by OHTTP.
+///   See `payjoin-cli`'s `RelayManager` for a reference implementation that combines
+///   random selection with failed-relay tracking for resilience.
+///
 /// * `payjoin_directory`: The payjoin directory from which to fetch the ohttp keys.  This
 ///   directory stores and forwards payjoin client payloads.
 pub async fn fetch_ohttp_keys(

@@ -32,6 +32,26 @@ The rust-payjoin flake also provides `payjoin-mailroom` as a package.
 nix run .#payjoin-mailroom -- --config payjoin-mailroom/config.toml
 ```
 
+We also provide a nix module for the payjoin-mailroom to be run as a standalone payjoin-mailroom node through the use of a nix flake.
+
+This repo includes an [example flake](./flake.example.nix) to be used as a starting point in creating a standalone payjoin-mailroom service.
+
+To use it copy it to be alongside your nixos configuration, in our case it is best suited in.
+
+`/etc/nixos/payjoin-mailroom/flake.nix`
+
+Add any necessary configs you deem necessary to this flake, we recommend following our [example config toml](./config.example.toml) for suggestions and then run this command to start the flake.
+
+```
+nixos-rebuild switch --flake /etc/nixos/payjoin-mailroom#payjoin-mailroom
+```
+
+That's it! you should be able to observe the service running via the systemctl with
+
+```
+systemctl status payjoin-mailroom.service
+```
+
 ## Telemetry
 
 payjoin-mailroom supports **optional** OpenTelemetry-based telemetry (metrics).

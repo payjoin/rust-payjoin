@@ -13,7 +13,7 @@
 # Request timeout in seconds
 # timeout = 30
 
-# --- Telemetry (requires `--telemetry` feature) ---
+# --- Telemetry (requires `telemetry` feature) ---
 # [telemetry]
 
 # OpenTelemetry Protocol (OTLP) endpoint to export telemetry to
@@ -39,6 +39,18 @@
 
 # IP addresses or CIDR ranges whose requests should be blocked.
 # blocked_ips = ["192.0.2.0/24", "2001:db8::1"]
+
+# --- ACME TLS (requires `acme` feature) ---
+# [acme]
+
+# Domain names for the TLS certificate
+# domains = ["your-domain.example.com"]
+
+# Contact addresses for the ACME account
+# contact = ["mailto:contact@example.com"]
+
+# Custom ACME directory URL (defaults to Let's Encrypt production)
+# directory_url = "https://acme-v02.api.letsencrypt.org/directory"
 
 # --- V1 protocol ---
 # Uncomment the [v1] section to enable V1 fallback support.

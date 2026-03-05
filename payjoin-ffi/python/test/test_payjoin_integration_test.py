@@ -4,6 +4,7 @@ import httpx
 import json
 
 from payjoin import *
+from payjoin.http import fetch_ohttp_keys
 from typing import Optional
 import unittest
 
@@ -98,7 +99,8 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         services = TestServices.initialize()
         services.wait_for_services_ready()
         directory = services.directory_url()
-        ohttp_keys = services.fetch_ohttp_keys()
+        ohttp_relay = services.ohttp_relay_url()
+        ohttp_keys = await fetch_ohttp_keys(ohttp_relay, directory, services.cert())
         recv_persister = InMemoryReceiverSessionEventLog(999)
         pj_uri = self.create_receiver_context(
             receiver_address, directory, ohttp_keys, recv_persister
@@ -261,8 +263,8 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
 
             services.wait_for_services_ready()
             directory = services.directory_url()
-            ohttp_keys = services.fetch_ohttp_keys()
             ohttp_relay = services.ohttp_relay_url()
+            ohttp_keys = await fetch_ohttp_keys(ohttp_relay, directory, services.cert())
             agent = httpx.AsyncClient()
 
             # **********************

@@ -20,20 +20,40 @@ impl std::fmt::Display for SessionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct SenderPersister {
     db: Arc<Database>,
     session_id: SessionId,
 }
 
 impl SenderPersister {
-    pub fn new(db: Arc<Database>, receiver_pubkey: HpkePublicKey) -> crate::db::Result<Self> {
+    pub fn new(
+        db: Arc<Database>,
+        pj_uri: &str,
+        receiver_pubkey: &HpkePublicKey,
+    ) -> crate::db::Result<Self> {
         let conn = db.get_connection()?;
+        let receiver_pubkey_bytes = receiver_pubkey.to_compressed_bytes();
+
+        let (duplicate_uri, duplicate_rk): (bool, bool) = conn.query_row(
+            "SELECT \
+                EXISTS(SELECT 1 FROM send_sessions WHERE completed_at IS NULL AND pj_uri = ?1), \
+                EXISTS(SELECT 1 FROM send_sessions WHERE completed_at IS NULL AND receiver_pubkey = ?2)",
+            params![pj_uri, &receiver_pubkey_bytes.as_slice()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+
+        if duplicate_uri {
+            return Err(Error::DuplicateUri);
+        }
+        if duplicate_rk {
+            return Err(Error::DuplicateRk);
+        }
 
         // Create a new session in send_sessions and get its ID
         let session_id: i64 = conn.query_row(
-            "INSERT INTO send_sessions (session_id, receiver_pubkey) VALUES (NULL, ?1) RETURNING session_id",
-            params![receiver_pubkey.to_compressed_bytes()],
+            "INSERT INTO send_sessions (pj_uri, receiver_pubkey) VALUES (?1, ?2) RETURNING session_id",
+            params![pj_uri, &receiver_pubkey_bytes.as_slice()],
             |row| row.get(0),
         )?;
 
@@ -42,7 +62,6 @@ impl SenderPersister {
 
     pub fn from_id(db: Arc<Database>, id: SessionId) -> Self { Self { db, session_id: id } }
 }
-
 impl SessionPersister for SenderPersister {
     type SessionEvent = SenderSessionEvent;
     type InternalStorageError = crate::db::error::Error;
@@ -266,5 +285,80 @@ impl Database {
             session_ids.push((session_id, completed_at));
         }
         Ok(session_ids)
+    }
+}
+
+#[cfg(all(test, feature = "v2"))]
+mod tests {
+    use std::sync::Arc;
+
+    use payjoin::HpkeKeyPair;
+
+    use super::*;
+
+    fn create_test_db() -> Arc<Database> {
+        // Use an in-memory database for tests
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory()
+            .with_init(|conn| conn.execute_batch("PRAGMA locking_mode = EXCLUSIVE;"));
+        let pool = r2d2::Pool::new(manager).expect("pool creation should succeed");
+        let conn = pool.get().expect("connection should succeed");
+        Database::init_schema(&conn).expect("schema init should succeed");
+        Arc::new(Database(pool))
+    }
+
+    fn make_receiver_pubkey() -> payjoin::HpkePublicKey { HpkeKeyPair::gen_keypair().1 }
+
+    /// Second call with the same URI (same active session) should return DuplicateUri.
+    #[test]
+    fn test_duplicate_uri_returns_error() {
+        let db = create_test_db();
+        let rk1 = make_receiver_pubkey();
+        let rk2 = make_receiver_pubkey();
+        let uri = "bitcoin:addr1?pj=https://example.com/BBBBBBBB";
+
+        SenderPersister::new(db.clone(), uri, &rk1).expect("first session should succeed");
+
+        let err = SenderPersister::new(db, uri, &rk2).expect_err("duplicate URI should fail");
+        assert!(
+            matches!(err, crate::db::error::Error::DuplicateUri),
+            "expected DuplicateUri, got: {err:?}"
+        );
+    }
+
+    /// Same receiver pubkey under a different URI should return DuplicateRk.
+    #[test]
+    fn test_duplicate_rk_returns_error() {
+        let db = create_test_db();
+        let rk = make_receiver_pubkey();
+        let uri1 = "bitcoin:addr1?pj=https://example.com/CCCCCCCC";
+        let uri2 = "bitcoin:addr1?pj=https://example.com/DDDDDDDD";
+
+        SenderPersister::new(db.clone(), uri1, &rk).expect("first session should succeed");
+
+        let err = SenderPersister::new(db, uri2, &rk).expect_err("duplicate RK should fail");
+        assert!(
+            matches!(err, crate::db::error::Error::DuplicateRk),
+            "expected DuplicateRk, got: {err:?}"
+        );
+    }
+
+    /// After a session is marked completed, a new session with the same URI should be allowed.
+    #[test]
+    fn test_completed_session_allows_reuse() {
+        let db = create_test_db();
+        let rk1 = make_receiver_pubkey();
+        let rk2 = make_receiver_pubkey();
+        let uri = "bitcoin:addr1?pj=https://example.com/EEEEEEEE";
+
+        let persister =
+            SenderPersister::new(db.clone(), uri, &rk1).expect("first session should succeed");
+
+        // Mark the session as completed
+        use payjoin::persist::SessionPersister;
+        persister.close().expect("close should succeed");
+
+        // Now a new session with the same URI should succeed (completed sessions don't block)
+        let result = SenderPersister::new(db, uri, &rk2);
+        assert!(result.is_ok(), "reuse after completion should succeed");
     }
 }

@@ -1,9 +1,9 @@
-use url::{ParseError, Url};
+use crate::core::{Url, UrlParseError};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     BadScheme,
-    ParseError(ParseError),
+    ParseError(UrlParseError),
 }
 
 impl std::fmt::Display for Error {
@@ -19,8 +19,8 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<ParseError> for Error {
-    fn from(err: ParseError) -> Error { Error::ParseError(err) }
+impl From<UrlParseError> for Error {
+    fn from(err: UrlParseError) -> Error { Error::ParseError(err) }
 }
 
 type Result<T> = core::result::Result<T, Error>;

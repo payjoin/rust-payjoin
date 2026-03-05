@@ -23,7 +23,7 @@ pub async fn fetch_ohttp_keys(
     let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
     let client = Client::builder().proxy(proxy).http1_only().build()?;
     let res = client
-        .get(ohttp_keys_url)
+        .get(ohttp_keys_url.as_str())
         .timeout(Duration::from_secs(10))
         .header(ACCEPT, "application/ohttp-keys")
         .send()
@@ -56,7 +56,7 @@ pub async fn fetch_ohttp_keys_with_cert(
         .http1_only()
         .build()?;
     let res = client
-        .get(ohttp_keys_url)
+        .get(ohttp_keys_url.as_str())
         .timeout(Duration::from_secs(10))
         .header(ACCEPT, "application/ohttp-keys")
         .send()
@@ -98,8 +98,8 @@ enum InternalErrorInner {
     InvalidOhttpKeys(String),
 }
 
-impl From<url::ParseError> for Error {
-    fn from(value: url::ParseError) -> Self {
+impl From<crate::core::UrlParseError> for Error {
+    fn from(value: crate::core::UrlParseError) -> Self {
         Self::Internal(InternalError(InternalErrorInner::ParseUrl(value.into())))
     }
 }

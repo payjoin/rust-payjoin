@@ -492,7 +492,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "16fc24bc615b9fd63148f59b218ea58a444b55762f8845da910e23aca686398b"
 dependencies = [
  "thiserror 1.0.63",
- "url",
 ]
 
 [[package]]
@@ -2782,6 +2781,7 @@ dependencies = [
  "bitcoin-hpke",
  "bitcoin-ohttp",
  "bitcoin_uri",
+ "form_urlencoded",
  "http",
  "once_cell",
  "payjoin-test-utils",
@@ -2791,7 +2791,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "url",
  "web-time",
 ]
 
@@ -2805,6 +2804,7 @@ dependencies = [
  "clap 4.5.46",
  "config",
  "dirs",
+ "form_urlencoded",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -2822,7 +2822,6 @@ dependencies = [
  "tokio-rustls",
  "tracing",
  "tracing-subscriber",
- "url",
 ]
 
 [[package]]

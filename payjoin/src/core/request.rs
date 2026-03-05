@@ -1,4 +1,4 @@
-use url::Url;
+use crate::core::Url;
 #[cfg(feature = "v1")]
 const V1_REQ_CONTENT_TYPE: &str = "text/plain";
 

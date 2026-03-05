@@ -405,7 +405,7 @@ mod tests {
     }
 
     fn unchecked_proposal_from_test_vector() -> UncheckedOriginalPayload {
-        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
+        let pairs = form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
         UncheckedOriginalPayload {
@@ -414,7 +414,7 @@ mod tests {
     }
 
     fn maybe_inputs_owned_from_test_vector() -> MaybeInputsOwned {
-        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
+        let pairs = form_urlencoded::parse(QUERY_PARAMS.as_bytes());
         let params = Params::from_query_pairs(pairs, &[Version::One])
             .expect("Could not parse params from query pairs");
         MaybeInputsOwned {

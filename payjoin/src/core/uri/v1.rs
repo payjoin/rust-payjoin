@@ -1,8 +1,7 @@
 //! Payjoin v1 URI functionality
 
-use url::Url;
-
 use super::PjParseError;
+use crate::core::Url;
 use crate::uri::error::InternalPjParseError;
 
 /// Payjoin v1 parameter containing the endpoint URL

@@ -138,31 +138,33 @@ def gather_activity(user, since_date):
     return merged_prs, reviewed_prs, issues_opened
 
 
-def gather_potential_blockers(user, since_date):
-    """Identify potential blockers for a contributor (stretch goal)."""
+def gather_potential_bottlenecks(user, since_date):
+    """Identify potential bottlenecks for a contributor."""
     since = since_date.strftime("%Y-%m-%d")
-    blockers = []
+    bottlenecks = []
 
     # Open PRs with no reviews
     open_prs = search_issues(
         f"author:{user} org:{ORG} type:pr state:open review:none created:>{since}"
     )
     for pr in open_prs:
-        blockers.append(f"- PR awaiting review: [{pr['title']}]({pr['html_url']})")
+        bottlenecks.append(f"- PR awaiting review: [{pr['title']}]({pr['html_url']})")
 
     # PRs with requested changes
     changes_requested = search_issues(
         f"author:{user} org:{ORG} type:pr state:open review:changes_requested"
     )
     for pr in changes_requested:
-        blockers.append(
+        bottlenecks.append(
             f"- PR has requested changes: [{pr['title']}]({pr['html_url']})"
         )
 
-    return blockers
+    return bottlenecks
 
 
-def format_contributor_comment(user, merged_prs, reviewed_prs, issues_opened, blockers):
+def format_contributor_comment(
+    user, merged_prs, reviewed_prs, issues_opened, bottlenecks
+):
     """Format the threaded reply for a contributor."""
     lines = [f"## @{user}", ""]
 
@@ -194,14 +196,27 @@ def format_contributor_comment(user, merged_prs, reviewed_prs, issues_opened, bl
     lines.append("### Focus")
     lines.append("_What are you working on this week? (please edit)_")
 
-    # Blockers section
+    # Bottleneck section
     lines.append("")
-    lines.append("### Blockers")
-    if blockers:
-        lines.append("_Auto-detected (please edit/confirm):_")
-        lines.extend(blockers)
-    else:
-        lines.append("_Any blockers? Name who can help. (please edit)_")
+    lines.append("### Bottleneck")
+    lines.append("")
+    lines.append(
+        "What is the single biggest bottleneck in progress toward your greater goal?"
+    )
+    lines.append(
+        "Name your goal. Name the constraint. Name who or what can unblock it."
+    )
+    lines.append("")
+    lines.append(
+        '*(There\'s always one. Not just "waiting on review." Example: '
+        '"Goal: ship mailroom to production. Bottleneck: I need 30 min '
+        "with @X to align on the ohttp-relay migration plan before I can "
+        'write the PR.")*'
+    )
+    if bottlenecks:
+        lines.append("")
+        lines.append("_Auto-detected signals:_")
+        lines.extend(bottlenecks)
 
     return "\n".join(lines)
 
@@ -218,7 +233,7 @@ def main():
     body = (
         "Weekly standup — each contributor has a thread below "
         "with auto-gathered activity.\n\n"
-        "**Please review your thread and edit to add Focus and Blockers "
+        "**Please review your thread and edit to add Focus and Bottleneck "
         "by end-of-day Monday (your timezone).**"
     )
     discussion_id, discussion_url = create_discussion(title, body, repo_node_id)
@@ -227,9 +242,9 @@ def main():
     # Create a threaded reply for each contributor
     for user in CONTRIBUTORS:
         merged_prs, reviewed_prs, issues_opened = gather_activity(user, since_date)
-        blockers = gather_potential_blockers(user, since_date)
+        bottlenecks = gather_potential_bottlenecks(user, since_date)
         comment_body = format_contributor_comment(
-            user, merged_prs, reviewed_prs, issues_opened, blockers
+            user, merged_prs, reviewed_prs, issues_opened, bottlenecks
         )
         add_discussion_comment(discussion_id, comment_body)
         print(f"  Added thread for @{user}")

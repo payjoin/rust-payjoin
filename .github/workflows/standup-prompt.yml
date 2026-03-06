@@ -18,5 +18,5 @@ jobs:
       - run: python .github/scripts/create_standup_discussion.py
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
-          STANDUP_TOKEN: ${{ secrets.STANDUP_TOKEN }}
+          STANDUP_TOKEN: ${{ secrets.STANDUP_BOT_TOKEN || secrets.STANDUP_TOKEN }}
           DISCUSSION_CATEGORY_NODE_ID: ${{ secrets.DISCUSSION_CATEGORY_NODE_ID }}

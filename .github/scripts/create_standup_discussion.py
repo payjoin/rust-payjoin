@@ -40,7 +40,7 @@ REPOS = [
     "payjoin/tx-indexer",
 ]
 
-REPO_FILTER = " ".join(f"repo:{r}" for r in REPOS)
+REPO_BATCH_SIZE = 5
 
 
 def get_repo_node_id():
@@ -120,14 +120,23 @@ def add_discussion_comment(discussion_id, body):
 
 
 def search_issues(query):
-    """Run a GitHub search/issues query and return the items."""
-    resp = requests.get(
-        f"{API}/search/issues",
-        headers=HEADERS,
-        params={"q": query, "per_page": 30},
-    )
-    resp.raise_for_status()
-    return resp.json().get("items", [])
+    """Run a GitHub search/issues query across REPOS in batches."""
+    seen = set()
+    items = []
+    for i in range(0, len(REPOS), REPO_BATCH_SIZE):
+        batch = REPOS[i : i + REPO_BATCH_SIZE]
+        repo_filter = " ".join(f"repo:{r}" for r in batch)
+        resp = requests.get(
+            f"{API}/search/issues",
+            headers=HEADERS,
+            params={"q": f"{query} {repo_filter}", "per_page": 30},
+        )
+        resp.raise_for_status()
+        for item in resp.json().get("items", []):
+            if item["id"] not in seen:
+                seen.add(item["id"])
+                items.append(item)
+    return items
 
 
 def gather_activity(user, since_date):
@@ -135,19 +144,16 @@ def gather_activity(user, since_date):
     since = since_date.strftime("%Y-%m-%d")
 
     # PRs merged (authored)
-    merged_prs = search_issues(f"author:{user} {REPO_FILTER} type:pr merged:>{since}")
+    merged_prs = search_issues(f"author:{user} type:pr merged:>{since}")
 
     # PRs reviewed
-    reviewed_prs = search_issues(
-        f"reviewed-by:{user} {REPO_FILTER} type:pr updated:>{since}"
-    )
+    reviewed_prs = search_issues(f"reviewed-by:{user} type:pr updated:>{since}"
+    
     # Exclude PRs the user authored (already counted above)
     reviewed_prs = [pr for pr in reviewed_prs if pr["user"]["login"] != user]
 
     # Issues opened
-    issues_opened = search_issues(
-        f"author:{user} {REPO_FILTER} type:issue created:>{since}"
-    )
+    issues_opened = search_issues(f"author:{user} type:issue created:>{since}")
 
     return merged_prs, reviewed_prs, issues_opened
 
@@ -159,14 +165,14 @@ def gather_potential_bottlenecks(user, since_date):
 
     # Open PRs with no reviews
     open_prs = search_issues(
-        f"author:{user} {REPO_FILTER} type:pr state:open review:none created:>{since}"
+        f"author:{user} type:pr state:open review:none created:>{since}"
     )
     for pr in open_prs:
         bottlenecks.append(f"- PR awaiting review: [{pr['title']}]({pr['html_url']})")
 
     # PRs with requested changes
     changes_requested = search_issues(
-        f"author:{user} {REPO_FILTER} type:pr state:open review:changes_requested"
+        f"author:{user} type:pr state:open review:changes_requested"
     )
     for pr in changes_requested:
         bottlenecks.append(

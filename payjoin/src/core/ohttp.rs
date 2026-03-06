@@ -1,3 +1,8 @@
+//! OHTTP encapsulation (RFC 9458) for v2 communication.
+//!
+//! The relay (ohttp-relay) sees client IPs but not content; the gateway
+//! (inside payjoin-directory) sees content but not IPs.
+
 use std::ops::{Deref, DerefMut};
 use std::{error, fmt};
 

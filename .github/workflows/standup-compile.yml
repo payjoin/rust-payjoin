@@ -2,7 +2,7 @@ name: Standup Compile
 
 on:
   schedule:
-    # Tuesday 06:00 UTC = Tuesday 14:00 Taipei
+    # Tuesday 06:00 UTC = Tuesday 14:00 Taipei (before the meeting)
     - cron: "0 6 * * 2"
   workflow_dispatch:
 
@@ -14,9 +14,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install requests
+      - run: pip install requests pyyaml
       - run: python .github/scripts/compile_standup.py
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
-          STANDUP_TOKEN: ${{ secrets.STANDUP_TOKEN }}
-          DISCUSSION_CATEGORY_NODE_ID: ${{ secrets.DISCUSSION_CATEGORY_NODE_ID }}
+          STANDUP_TOKEN: ${{ secrets.STANDUP_BOT_TOKEN || secrets.STANDUP_TOKEN }}

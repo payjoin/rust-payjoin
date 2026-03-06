@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+reviews:
+  profile: "chill"
+  high_level_summary: false
+  changed_files_summary: false
+  sequence_diagrams: false
+  poem: false
+  review_status: false
+  collapse_walkthrough: true
+  estimate_code_review_effort: false
+  assess_linked_issues: false
+  related_issues: false
+  related_prs: false
+  suggested_labels: false
+  suggested_reviewers: false
+  in_progress_fortune: false
+  enable_prompt_for_ai_agents: false
+  auto_review:
+    drafts: true
+  pre_merge_checks:
+    description:
+      mode: "off"
+    title:
+      mode: "off"
+    issue_assessment:
+      mode: "off"
+  path_instructions:
+    - path: "payjoin/src/**/*.rs"
+      instructions: |
+        Check for these Rust API guideline violations:
+
+        C-CALLER-CONTROL (critical): Flag any pub fn taking &T, &str,
+        or &[u8] that internally clones, copies, or calls .to_owned()
+        / .to_string() / .to_vec() on the parameter. The fix is to
+        take T, String, or Vec<u8> by value and let the caller decide
+        whether to clone or move.
+
+        Also check the Rust API guidelines checklist:
+        - C-COMMON-TRAITS: pub types should impl Send, Sync, Debug,
+          Display, Default, serde traits where appropriate
+        - C-CONV: use From/Into and AsRef for conversions rather than
+          ad-hoc methods
+        - C-GETTER: prefer foo() / set_foo() naming for getters and
+          setters, not get_foo()
+        - C-ITER: collections should impl IntoIterator and expose
+          iter(), iter_mut() where appropriate
+        - C-SERDE: pub types should impl Serialize/Deserialize when
+          they represent data that crosses process boundaries
+        - C-SEND-SYNC: err on the side of Send + Sync for pub types
+          unless there is a specific reason not to
+
+        If no violations are found, say "No findings." Do not invent
+        issues. Format: file:line - pattern - suggested fix.
+    - path: "payjoin-cli/src/**/*.rs"
+      instructions: |
+        Check for these Rust API guideline violations:
+
+        C-CALLER-CONTROL (critical): Flag any pub fn taking &T, &str,
+        or &[u8] that internally clones, copies, or calls .to_owned()
+        / .to_string() / .to_vec() on the parameter. The fix is to
+        take T, String, or Vec<u8> by value and let the caller decide
+        whether to clone or move.
+
+        Also check the Rust API guidelines checklist:
+        - C-COMMON-TRAITS: pub types should impl Send, Sync, Debug,
+          Display, Default, serde traits where appropriate
+        - C-CONV: use From/Into and AsRef for conversions rather than
+          ad-hoc methods
+        - C-GETTER: prefer foo() / set_foo() naming for getters and
+          setters, not get_foo()
+        - C-ITER: collections should impl IntoIterator and expose
+          iter(), iter_mut() where appropriate
+        - C-SEND-SYNC: err on the side of Send + Sync for pub types
+          unless there is a specific reason not to
+
+        If no violations are found, say "No findings." Do not invent
+        issues. Format: file:line - pattern - suggested fix.

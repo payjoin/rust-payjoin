@@ -7,7 +7,7 @@ body:
       value: |
         ### This issue tracker is only for technical issues related to the following crates:
         - [`payjoin-cli`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli)
-        - [`payjoin-directory`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-directory)
+        - [`payjoin-mailroom`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-mailroom)
         - [`payjoin-test-utils`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-test-utils)
         - [`payjoin-ffi`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-ffi)
 
@@ -27,7 +27,7 @@ body:
       multiple: false
       options:
         - payjoin-cli
-        - payjoin-directory
+        - payjoin-mailroom
         - payjoin-test-utils
         - payjoin-ffi
         - ohttp-relay
@@ -56,7 +56,7 @@ body:
     attributes:
       label: What version of the selected crate are you using?
       description:
-        Run `payjoin-cli --version` or `payjoin-directory --version` for the binaries.
+        Run `payjoin-cli --version` or `payjoin-mailroom --version` for the binaries.
         For the library crates (`payjoin-test-utils`, and `payjoin-ffi`),
         check your respective package manager file to see which version you have installed.
       placeholder: e.g. payjoin-0.23.0 or master@ceef77b

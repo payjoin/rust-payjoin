@@ -8,7 +8,7 @@ body:
       options:
         - payjoin
         - payjoin-cli
-        - payjoin-directory
+        - payjoin-mailroom
         - payjoin-test-utils
         - payjoin-ffi
         - ohttp-relay

@@ -166,7 +166,6 @@
             {
               "payjoin" = "--features v2";
               "payjoin-cli" = "--features v1,v2";
-              "payjoin-directory" = "";
               "ohttp-relay" = "";
               "payjoin-mailroom" = "--features access-control,acme,telemetry";
             };

@@ -85,7 +85,7 @@ async fn fetch_ohttp_keys(
                     payjoin::io::fetch_ohttp_keys_with_cert(
                         selected_relay.as_str(),
                         payjoin_directory.as_str(),
-                        cert_der,
+                        &cert_der,
                     )
                     .await
                 } else {

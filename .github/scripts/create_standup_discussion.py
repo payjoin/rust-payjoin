@@ -222,9 +222,25 @@ def main():
     week_label = today.strftime("Week of %Y-%m-%d")
     since_date = today - timedelta(days=7)
 
-    repo_node_id = get_repo_node_id()
+    dry_run = os.environ.get("DRY_RUN")
 
-    # Create the Discussion
+    # Gather all comments first
+    comments = []
+    for user in CONTRIBUTORS:
+        merged_prs, reviewed_prs, issues_opened = gather_activity(user, since_date)
+        bottlenecks = gather_potential_bottlenecks(user, since_date)
+        comment_body = format_contributor_comment(
+            user, merged_prs, reviewed_prs, issues_opened, bottlenecks
+        )
+        comments.append((user, comment_body))
+
+    if dry_run:
+        for user, comment_body in comments:
+            print(f"--- {user} ---\n{comment_body}\n")
+        print("Dry run complete — nothing was created.")
+        return
+
+    repo_node_id = get_repo_node_id()
     title = f"Weekly Check-in: {week_label}"
     body = (
         "Weekly standup — each contributor has a thread below "
@@ -235,13 +251,7 @@ def main():
     discussion_id, discussion_url = create_discussion(title, body, repo_node_id)
     print(f"Created discussion: {discussion_url}")
 
-    # Create a threaded reply for each contributor
-    for user in CONTRIBUTORS:
-        merged_prs, reviewed_prs, issues_opened = gather_activity(user, since_date)
-        bottlenecks = gather_potential_bottlenecks(user, since_date)
-        comment_body = format_contributor_comment(
-            user, merged_prs, reviewed_prs, issues_opened, bottlenecks
-        )
+    for user, comment_body in comments:
         add_discussion_comment(discussion_id, comment_body)
         print(f"  Added thread for @{user}")
 

@@ -147,8 +147,7 @@ def gather_activity(user, since_date):
     merged_prs = search_issues(f"author:{user} type:pr merged:>{since}")
 
     # PRs reviewed
-    reviewed_prs = search_issues(f"reviewed-by:{user} type:pr updated:>{since}"
-    
+    reviewed_prs = search_issues(f"reviewed-by:{user} type:pr updated:>{since}")
     # Exclude PRs the user authored (already counted above)
     reviewed_prs = [pr for pr in reviewed_prs if pr["user"]["login"] != user]
 

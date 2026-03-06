@@ -191,12 +191,11 @@ def format_contributor_comment(
     else:
         lines.append("_No activity found — please edit to add yours._")
 
-    # Focus section (for contributor to fill in)
+    # Fenced template for contributor to copy-paste and fill in
     lines.append("")
+    lines.append("```")
     lines.append("### Focus")
-    lines.append("_What are you working on this week? (please edit)_")
-
-    # Bottleneck section
+    lines.append("What are you working on this week? (please edit)")
     lines.append("")
     lines.append("### Bottleneck")
     lines.append("")
@@ -208,11 +207,12 @@ def format_contributor_comment(
     )
     lines.append("")
     lines.append(
-        '*(There\'s always one. Not just "waiting on review." Example: '
+        '(There\'s always one. Not just "waiting on review." Example: '
         '"Goal: ship mailroom to production. Bottleneck: I need 30 min '
         "with @X to align on the ohttp-relay migration plan before I can "
-        'write the PR.")*'
+        'write the PR.")'
     )
+    lines.append("```")
     if bottlenecks:
         lines.append("")
         lines.append("_Auto-detected signals:_")

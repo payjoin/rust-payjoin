@@ -14,7 +14,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install requests
+      - run: pip install requests pyyaml
       - run: python .github/scripts/create_standup_discussion.py
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}

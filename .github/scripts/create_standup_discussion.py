@@ -3,8 +3,10 @@
 
 import os
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 import requests
+import yaml
 
 REPO = os.environ["GITHUB_REPOSITORY"]
 TOKEN = os.environ["STANDUP_TOKEN"]
@@ -16,15 +18,9 @@ HEADERS = {
     "Accept": "application/vnd.github+json",
 }
 
-CONTRIBUTORS = [
-    "DanGould",
-    "spacebear21",
-    "arminsabouri",
-    "benalleng",
-    "chavic",
-    "zealsham",
-    "Mshehu5",
-]
+_CONFIG_PATH = Path(__file__).resolve().parent.parent / "standup-contributors.yml"
+with open(_CONFIG_PATH) as _f:
+    CONTRIBUTORS = [c["username"] for c in yaml.safe_load(_f)["contributors"]]
 
 ORG = "payjoin"
 

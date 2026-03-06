@@ -22,7 +22,25 @@ _CONFIG_PATH = Path(__file__).resolve().parent.parent / "standup-contributors.ym
 with open(_CONFIG_PATH) as _f:
     CONTRIBUTORS = [c["username"] for c in yaml.safe_load(_f)["contributors"]]
 
-ORG = "payjoin"
+# Public repos to search — explicit list avoids leaking private repo
+# data when the bot token has org membership.
+REPOS = [
+    "payjoin/rust-payjoin",
+    "payjoin/payjoin.org",
+    "payjoin/payjoindevkit.org",
+    "payjoin/cja",
+    "payjoin/cja-2",
+    "payjoin/bitcoin-hpke",
+    "payjoin/ohttp",
+    "payjoin/bitcoin_uri",
+    "payjoin/bitcoin-uri-ffi",
+    "payjoin/research-docs",
+    "payjoin/multiparty-protocol-docs",
+    "payjoin/btsim",
+    "payjoin/tx-indexer",
+]
+
+REPO_FILTER = " ".join(f"repo:{r}" for r in REPOS)
 
 
 def get_repo_node_id():
@@ -117,18 +135,18 @@ def gather_activity(user, since_date):
     since = since_date.strftime("%Y-%m-%d")
 
     # PRs merged (authored)
-    merged_prs = search_issues(f"author:{user} org:{ORG} type:pr merged:>{since}")
+    merged_prs = search_issues(f"author:{user} {REPO_FILTER} type:pr merged:>{since}")
 
     # PRs reviewed
     reviewed_prs = search_issues(
-        f"reviewed-by:{user} org:{ORG} type:pr updated:>{since}"
+        f"reviewed-by:{user} {REPO_FILTER} type:pr updated:>{since}"
     )
     # Exclude PRs the user authored (already counted above)
     reviewed_prs = [pr for pr in reviewed_prs if pr["user"]["login"] != user]
 
     # Issues opened
     issues_opened = search_issues(
-        f"author:{user} org:{ORG} type:issue created:>{since}"
+        f"author:{user} {REPO_FILTER} type:issue created:>{since}"
     )
 
     return merged_prs, reviewed_prs, issues_opened
@@ -141,14 +159,14 @@ def gather_potential_bottlenecks(user, since_date):
 
     # Open PRs with no reviews
     open_prs = search_issues(
-        f"author:{user} org:{ORG} type:pr state:open review:none created:>{since}"
+        f"author:{user} {REPO_FILTER} type:pr state:open review:none created:>{since}"
     )
     for pr in open_prs:
         bottlenecks.append(f"- PR awaiting review: [{pr['title']}]({pr['html_url']})")
 
     # PRs with requested changes
     changes_requested = search_issues(
-        f"author:{user} org:{ORG} type:pr state:open review:changes_requested"
+        f"author:{user} {REPO_FILTER} type:pr state:open review:changes_requested"
     )
     for pr in changes_requested:
         bottlenecks.append(

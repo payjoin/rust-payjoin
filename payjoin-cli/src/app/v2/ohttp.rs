@@ -4,6 +4,15 @@ use anyhow::{anyhow, Result};
 
 use super::Config;
 
+/// Manages OHTTP relay selection with privacy and resilience in mind.
+///
+/// Relays are selected randomly from the configured list to avoid creating
+/// a fingerprintable pattern at the network layer. Even though OHTTP protects
+/// the user's IP address, always contacting the same relay in the same order
+/// reveals metadata about the client's behavior.
+///
+/// Failed relays are tracked and excluded from future selections until
+/// the session is reset, providing resilience without sacrificing privacy.
 #[derive(Debug, Clone)]
 pub struct RelayManager {
     selected_relay: Option<url::Url>,
@@ -46,6 +55,10 @@ pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
     }
 }
 
+/// Fetches OHTTP keys using a randomly selected relay from the configured list.
+///
+/// Random relay selection prevents network-layer fingerprinting. See [`RelayManager`]
+/// for details on the selection and failure-tracking strategy.
 async fn fetch_ohttp_keys(
     config: &Config,
     directory: Option<url::Url>,

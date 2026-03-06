@@ -20,7 +20,6 @@ acme = ["tokio-rustls-acme"]
 
 [dependencies]
 anyhow = "1.0.99"
-bhttp = { version = "0.6.1", features = ["http"] }
 bitcoin = { version = "0.32.7", features = ["base64", "rand-std"] }
 clap = { version = "4.5.45", features = ["derive", "env"] }
 config = "0.15.14"

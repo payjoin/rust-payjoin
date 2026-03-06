@@ -36,6 +36,7 @@ config = "0.15"
 flate2 = { version = "1.1", optional = true }
 ipnet = { version = "2", optional = true }
 maxminddb = { version = "0.27", optional = true }
+ohttp = { package = "bitcoin-ohttp", version = "0.6" }
 ohttp-relay = { path = "../ohttp-relay", features = ["bootstrap"] }
 opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", optional = true, features = [

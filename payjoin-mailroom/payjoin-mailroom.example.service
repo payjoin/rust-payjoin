@@ -1,0 +1,15 @@
+[Unit]
+Description=Payjoin Mailroom
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/rust-payjoin/payjoin-mailroom
+ExecStart=/root/.cargo/bin/payjoin-mailroom --config /root/rust-payjoin/payjoin-mailroom/config.toml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

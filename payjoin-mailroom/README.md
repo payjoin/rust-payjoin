@@ -32,6 +32,15 @@ The rust-payjoin flake also provides `payjoin-mailroom` as a package.
 nix run .#payjoin-mailroom -- --config payjoin-mailroom/config.toml
 ```
 
+### systemd
+
+```sh
+# A minimal [payjoin-mailroom.example.service](payjoin-mailroom.example.service) unit file is provided for convenience. Edit paths and User= as your setup requires.
+vim /etc/systemd/system/payjoin-mailroom.service
+systemctl daemon-reload
+systemctl enable --now payjoin-mailroom
+```
+
 ## Telemetry
 
 payjoin-mailroom supports **optional** OpenTelemetry-based telemetry (metrics).

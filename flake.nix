@@ -91,6 +91,7 @@
             path: type:
             (builtins.match ".*nginx.conf.template$" path != null)
             || (builtins.match ".*\\.mmdb$" path != null)
+            || (builtins.match ".*\\.html$" path != null)
             || (craneLibVersions.msrv.filterCargoSources path type);
           name = "source";
         };

@@ -7,7 +7,6 @@
 //! `fetch_ohttp_keys` selects a relay at random from the configured list,
 //! excluding relays that [`RelayManager`] has marked as failed,
 //! to avoid a fixed contact pattern at the network layer.
-use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use payjoin::Url;
@@ -40,7 +39,7 @@ pub(crate) struct ValidatedOhttpKeys {
 pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
     config: &Config,
     directory: Option<Url>,
-    relay_manager: Arc<Mutex<RelayManager>>,
+    relay_manager: &mut RelayManager,
 ) -> Result<ValidatedOhttpKeys> {
     if let Some(ohttp_keys) = config.v2()?.ohttp_keys.clone() {
         println!("Using OHTTP Keys from config");
@@ -57,15 +56,14 @@ pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
 async fn fetch_ohttp_keys(
     config: &Config,
     directory: Option<Url>,
-    relay_manager: Arc<Mutex<RelayManager>>,
+    relay_manager: &mut RelayManager,
 ) -> Result<ValidatedOhttpKeys> {
     use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
     let payjoin_directory = directory.unwrap_or(config.v2()?.pj_directory.clone());
     let relays = config.v2()?.ohttp_relays.clone();
 
     loop {
-        let failed_relays =
-            relay_manager.lock().expect("Lock should not be poisoned").get_failed_relays();
+        let failed_relays = relay_manager.get_failed_relays();
 
         let remaining_relays: Vec<_> =
             relays.iter().filter(|r| !failed_relays.contains(r)).cloned().collect();
@@ -80,10 +78,7 @@ async fn fetch_ohttp_keys(
                 None => return Err(anyhow!("Failed to select from remaining relays")),
             };
 
-        relay_manager
-            .lock()
-            .expect("Lock should not be poisoned")
-            .set_selected_relay(selected_relay.clone());
+        relay_manager.set_selected_relay(selected_relay.clone());
 
         let ohttp_keys = {
             #[cfg(feature = "_manual-tls")]
@@ -116,10 +111,7 @@ async fn fetch_ohttp_keys(
             }
             Err(e) => {
                 tracing::debug!("Failed to connect to relay: {selected_relay}, {e:?}");
-                relay_manager
-                    .lock()
-                    .expect("Lock should not be poisoned")
-                    .add_failed_relay(selected_relay);
+                relay_manager.add_failed_relay(selected_relay);
             }
         }
     }

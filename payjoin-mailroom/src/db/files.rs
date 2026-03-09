@@ -13,7 +13,7 @@ use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{oneshot, Mutex};
 use tracing::trace;
 
-use super::Db as DbTrait;
+use crate::db::{Db as DbTrait, Error as DbError};
 
 /// The maximum number of pending or populated mailbox entries.
 ///
@@ -220,12 +220,12 @@ impl Mailboxes {
 }
 
 #[derive(Clone, Debug)]
-pub struct Db {
+pub struct FilesDb {
     timeout: Duration,
-    mailboxes: Arc<Mutex<Mailboxes>>,
+    pub(crate) mailboxes: Arc<Mutex<Mailboxes>>,
 }
 
-impl Db {
+impl FilesDb {
     pub async fn init(timeout: Duration, path: PathBuf) -> io::Result<Self> {
         Ok(Self { timeout, mailboxes: Arc::new(Mutex::new(Mailboxes::init(path).await?)) })
     }
@@ -245,13 +245,13 @@ impl Db {
     }
 }
 
-impl DbTrait for Db {
+impl DbTrait for FilesDb {
     type OperationalError = io::Error;
     async fn post_v2_payload(
         &self,
         id: &ShortId,
         payload: Vec<u8>,
-    ) -> Result<Option<()>, super::Error<Self::OperationalError>> {
+    ) -> Result<Option<()>, DbError<Self::OperationalError>> {
         let mut guard = self.mailboxes.lock().await;
         Ok(guard.post_v2(id, payload).await?)
     }
@@ -259,7 +259,7 @@ impl DbTrait for Db {
     async fn wait_for_v2_payload(
         &self,
         id: &ShortId,
-    ) -> Result<Arc<Vec<u8>>, super::Error<Self::OperationalError>> {
+    ) -> Result<Arc<Vec<u8>>, DbError<Self::OperationalError>> {
         let receiver = {
             let mut guard = self.mailboxes.lock().await;
 
@@ -272,7 +272,7 @@ impl DbTrait for Db {
 
         let ret = match tokio::time::timeout(self.timeout, receiver).await {
             Ok(payload) => Ok((payload.expect("receiver must not fail")).clone()),
-            Err(elapsed) => Err(super::Error::Timeout(elapsed)),
+            Err(elapsed) => Err(DbError::Timeout(elapsed)),
         };
 
         self.mailboxes.lock().await.maybe_cleanup_v2_waitmap(id);
@@ -284,21 +284,21 @@ impl DbTrait for Db {
         &self,
         id: &ShortId,
         payload: Vec<u8>,
-    ) -> Result<Arc<Vec<u8>>, super::Error<Self::OperationalError>> {
+    ) -> Result<Arc<Vec<u8>>, DbError<Self::OperationalError>> {
         let receiver = {
             self.mailboxes
                 .lock()
                 .await
                 .post_v1_req_and_wait(id, payload)
                 .await?
-                .ok_or(super::Error::OverCapacity)?
+                .ok_or(DbError::OverCapacity)?
         };
 
         trace!("v1 sender waiting for v2 receiver's response");
 
         let ret = match tokio::time::timeout(self.timeout, receiver).await {
             Ok(payload) => Ok(Arc::new(payload.expect("receiver must not fail"))),
-            Err(elapsed) => Err(super::Error::Timeout(elapsed)),
+            Err(elapsed) => Err(DbError::Timeout(elapsed)),
         };
 
         // unconditionally clear the pending v1 entry. on timeout, the sender
@@ -313,7 +313,7 @@ impl DbTrait for Db {
         &self,
         id: &ShortId,
         payload: Vec<u8>,
-    ) -> Result<(), super::Error<Self::OperationalError>> {
+    ) -> Result<(), DbError<Self::OperationalError>> {
         let mut guard = self.mailboxes.lock().await;
         Ok(guard.post_v1_res(id, payload).await?)
     }
@@ -488,12 +488,6 @@ impl Mailboxes {
 
         // Prune any fully expired mailboxes, whether read or unread
         while let Some((created, id)) = self.insert_order.front().cloned() {
-            println!(
-                "checking if {id} elapsed: {:?} < {:?} = {}",
-                (created + self.unread_ttl_below_capacity),
-                now,
-                (created + self.unread_ttl_below_capacity) < now,
-            );
             if created + self.unread_ttl_below_capacity < now {
                 debug_assert!(self.insert_order.len() >= self.early_removal_count);
                 _ = self.insert_order.pop_front();
@@ -513,14 +507,7 @@ impl Mailboxes {
         // So long as there expired read mailboxes, prune those. Stop when a
         // mailbox within the TTL is encountered.
         while let Some((read, id)) = self.read_order.front().cloned() {
-            println!(
-                "checking if {id} elapsed (read ttl): {:?} < {:?} = {}",
-                (read + self.read_ttl),
-                now,
-                (read + self.read_ttl) < now,
-            );
             if read + self.read_ttl < now {
-                println!("removing");
                 _ = self.read_order.pop_front();
                 if self.remove(&id).await?.is_some() {
                     self.early_removal_count += 1;
@@ -594,13 +581,13 @@ impl From<io::Error> for Error {
 }
 
 // FIXME why isn't this sufficient for ?, necessitating ugly map_err(into)?
-impl From<Error> for super::Error<std::io::Error> {
-    fn from(val: Error) -> super::Error<io::Error> {
+impl From<Error> for DbError<std::io::Error> {
+    fn from(val: Error) -> DbError<io::Error> {
         match val {
-            Error::V1SenderUnavailable => super::Error::V1SenderUnavailable,
-            Error::OverCapacity => super::Error::OverCapacity,
-            Error::AlreadyRead => super::Error::AlreadyRead,
-            Error::IO(e) => super::Error::Operational(e),
+            Error::V1SenderUnavailable => DbError::V1SenderUnavailable,
+            Error::OverCapacity => DbError::OverCapacity,
+            Error::AlreadyRead => DbError::AlreadyRead,
+            Error::IO(e) => DbError::Operational(e),
         }
     }
 }
@@ -626,7 +613,7 @@ impl std::fmt::Display for Error {
     }
 }
 
-impl super::SendableError for Error {}
+impl crate::db::SendableError for Error {}
 
 #[tokio::test]
 async fn test_disk_storage_initialization() -> std::io::Result<()> {
@@ -767,7 +754,7 @@ async fn test_disk_storage_mailboxes() -> std::io::Result<()> {
 async fn test_mailbox_storage() -> std::io::Result<()> {
     let dir = tempfile::tempdir()?;
 
-    let db = Db::init(Duration::from_millis(10), dir.path().to_owned())
+    let db = FilesDb::init(Duration::from_millis(10), dir.path().to_owned())
         .await
         .expect("initializing mailbox database should succeed");
 
@@ -788,7 +775,7 @@ async fn test_mailbox_storage() -> std::io::Result<()> {
 async fn test_v2_wait() -> std::io::Result<()> {
     let dir = tempfile::tempdir()?;
 
-    let db = Db::init(Duration::from_millis(1), dir.path().to_owned())
+    let db = FilesDb::init(Duration::from_millis(1), dir.path().to_owned())
         .await
         .expect("initializing mailbox database should succeed");
 
@@ -796,7 +783,7 @@ async fn test_v2_wait() -> std::io::Result<()> {
     let contents = b"foo bar";
 
     match db.wait_for_v2_payload(&id).await {
-        Err(super::Error::Timeout(_)) => {}
+        Err(DbError::Timeout(_)) => {}
         res => panic!("expected timeout, got {res:?}"),
     }
 
@@ -845,7 +832,7 @@ async fn test_v1_wait() -> std::io::Result<()> {
     let dir = tempfile::tempdir()?;
 
     let db = Arc::new(
-        Db::init(Duration::from_millis(1), dir.path().to_owned())
+        FilesDb::init(Duration::from_millis(1), dir.path().to_owned())
             .await
             .expect("initializing mailbox database should succeed"),
     );
@@ -863,7 +850,7 @@ async fn test_v1_wait() -> std::io::Result<()> {
     assert!(
         matches!(
             db.post_v1_request_and_wait_for_response(&id, b"different request".to_vec()).await,
-            Err(super::Error::OverCapacity),
+            Err(DbError::OverCapacity),
         ),
         "second v1 sender with the same shortid should be rejected while request is in flight",
     );
@@ -879,7 +866,7 @@ async fn test_v1_wait() -> std::io::Result<()> {
     assert!(
         matches!(
             db.post_v1_response(&id, b"response".to_vec()).await,
-            Err(super::Error::V1SenderUnavailable)
+            Err(DbError::V1SenderUnavailable)
         ),
         "posting without a v1 sender waiting should fail"
     );
@@ -892,7 +879,7 @@ async fn test_v1_data_minimization() -> std::io::Result<()> {
     let dir = tempfile::tempdir()?;
 
     let db = Arc::new(
-        Db::init(Duration::from_millis(500), dir.path().to_owned())
+        FilesDb::init(Duration::from_millis(500), dir.path().to_owned())
             .await
             .expect("initializing mailbox database should succeed"),
     );
@@ -914,7 +901,7 @@ async fn test_v1_data_minimization() -> std::io::Result<()> {
 
     // Subsequent reads should not return the plaintext payload again.
     assert!(
-        matches!(db.wait_for_v2_payload(&id).await, Err(super::Error::AlreadyRead)),
+        matches!(db.wait_for_v2_payload(&id).await, Err(DbError::AlreadyRead)),
         "subsequent reads should indicate the payload was already consumed"
     );
 
@@ -947,7 +934,7 @@ async fn test_v1_data_minimization() -> std::io::Result<()> {
 async fn test_prune() -> std::io::Result<()> {
     let dir = tempfile::tempdir()?;
 
-    let db = Db::init(Duration::from_millis(2), dir.path().to_owned())
+    let db = FilesDb::init(Duration::from_millis(2), dir.path().to_owned())
         .await
         .expect("initializing mailbox database should succeed");
 
@@ -980,7 +967,7 @@ async fn test_prune() -> std::io::Result<()> {
     assert_eq!(db.mailboxes.lock().await.len(), 1);
 
     match read_task1.await.expect("joining should succeed") {
-        Err(super::Error::Timeout(_)) => {}
+        Err(DbError::Timeout(_)) => {}
         res => panic!("expected timeout, got {res:?}"),
     }
 

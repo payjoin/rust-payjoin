@@ -24,9 +24,6 @@ path = "../../../ohttp-relay"
 [patch.crates-io.payjoin]
 path = "../../../payjoin"
 
-[patch.crates-io.payjoin-directory]
-path = "../../../payjoin-directory"
-
 [patch.crates-io.payjoin-mailroom]
 path = "../../../payjoin-mailroom"
 

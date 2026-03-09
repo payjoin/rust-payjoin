@@ -276,7 +276,6 @@ impl AppTrait for App {
         Ok(())
     }
 
-    #[allow(clippy::incompatible_msrv)]
     async fn resume_payjoins(&self) -> Result<()> {
         let recv_session_ids = self.db.get_recv_session_ids()?;
         let send_session_ids = self.db.get_send_session_ids()?;
@@ -290,12 +289,14 @@ impl AppTrait for App {
 
         // Process receiver sessions
         for session_id in recv_session_ids {
-            let self_clone = self.clone();
             let recv_persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
             match replay_receiver_event_log(&recv_persister) {
                 Ok((receiver_state, _)) => {
+                    let self_clone = self.clone();
                     tasks.push(tokio::spawn(async move {
-                        self_clone.process_receiver_session(receiver_state, &recv_persister).await
+                        let mut app = self_clone;
+                        app.relay_manager = Arc::new(Mutex::new(RelayManager::new()));
+                        app.process_receiver_session(receiver_state, &recv_persister).await
                     }));
                 }
                 Err(e) => {
@@ -312,7 +313,9 @@ impl AppTrait for App {
                 Ok((sender_state, _)) => {
                     let self_clone = self.clone();
                     tasks.push(tokio::spawn(async move {
-                        self_clone.process_sender_session(sender_state, &sender_persiter).await
+                        let mut app = self_clone;
+                        app.relay_manager = Arc::new(Mutex::new(RelayManager::new()));
+                        app.process_sender_session(sender_state, &sender_persiter).await
                     }));
                 }
                 Err(e) => {

@@ -793,4 +793,13 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body, r#"{"versions":[1,2]}"#);
     }
+
+    // Landing page
+
+    #[test]
+    fn landing_page_contains_version() {
+        let html = landing_page_html();
+        assert!(!html.contains("{{VERSION}}"));
+        assert!(!html.contains("{{COMMIT}}"));
+    }
 }

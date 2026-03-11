@@ -215,7 +215,13 @@
         containerImages =
           let
             envTag = builtins.getEnv "IMAGE_TAG";
-            tag = if envTag != "" then envTag else (self.shortRev or "dirty");
+            tag =
+              if envTag == "master" then
+                self.shortRev
+              else if envTag != "" then
+                envTag
+              else
+                self.shortRev or "dirty";
           in
           {
             "payjoin-mailroom-image" = mkContainerImage "payjoin-mailroom" packages.payjoin-mailroom tag;

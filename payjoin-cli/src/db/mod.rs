@@ -15,11 +15,13 @@ pub(crate) fn now() -> i64 {
 
 pub(crate) const DB_PATH: &str = "payjoin.sqlite";
 
+#[derive(Debug)]
 pub(crate) struct Database(Pool<SqliteConnectionManager>);
 
 impl Database {
     pub(crate) fn create(path: impl AsRef<Path>) -> Result<Self> {
-        let manager = SqliteConnectionManager::file(path.as_ref());
+        let manager = SqliteConnectionManager::file(path.as_ref())
+            .with_init(|conn| conn.execute_batch("PRAGMA locking_mode = EXCLUSIVE;"));
         let pool = Pool::new(manager)?;
 
         // Initialize database schema
@@ -36,6 +38,7 @@ impl Database {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS send_sessions (
                 session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pj_uri TEXT NOT NULL,
                 receiver_pubkey BLOB NOT NULL,
                 completed_at INTEGER
             )",

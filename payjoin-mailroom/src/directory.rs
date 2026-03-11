@@ -436,8 +436,11 @@ fn handle_peek<E: SendableError>(
 fn landing_page_html() -> String {
     const TEMPLATE: &str = include_str!("../static/index.html");
     const VERSION: &str = env!("CARGO_PKG_VERSION");
-    const COMMIT: &str = env!("GIT_COMMIT");
-    TEMPLATE.replace("{{VERSION}}", VERSION).replace("{{COMMIT}}", COMMIT)
+    let version_string = match option_env!("GIT_COMMIT") {
+        Some(commit) => format!("payjoin-mailroom-v{VERSION} @ {commit}"),
+        None => format!("payjoin-mailroom-v{VERSION}"),
+    };
+    TEMPLATE.replace("{{VERSION_STRING}}", &version_string)
 }
 
 async fn handle_directory_home_path() -> Result<Response<Body>, HandlerError> {
@@ -799,7 +802,6 @@ mod tests {
     #[test]
     fn landing_page_contains_version() {
         let html = landing_page_html();
-        assert!(!html.contains("{{VERSION}}"));
-        assert!(!html.contains("{{COMMIT}}"));
+        assert!(!html.contains("{{VERSION_STRING}}"));
     }
 }

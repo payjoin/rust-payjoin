@@ -18,6 +18,21 @@
     nix2container = {
       url = "github:nlewo/nix2container";
     };
+    pyproject-nix = {
+      url = "github:pyproject-nix/pyproject.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    uv2nix = {
+      url = "github:pyproject-nix/uv2nix";
+      inputs.pyproject-nix.follows = "pyproject-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    pyproject-build-systems = {
+      url = "github:pyproject-nix/build-system-pkgs";
+      inputs.pyproject-nix.follows = "pyproject-nix";
+      inputs.uv2nix.follows = "uv2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -29,6 +44,9 @@
       crane,
       treefmt-nix,
       nix2container,
+      pyproject-nix,
+      uv2nix,
+      pyproject-build-systems,
     }:
     {
       nixosModules.payjoin-mailroom = import ./nix/modules/payjoin-mailroom.nix self;
@@ -224,6 +242,56 @@
           }
         ) craneLibVersions;
 
+        # uv2nix: load the Python workspace from payjoin-ffi/python/uv.lock
+        pythonWorkspace = uv2nix.lib.workspace.loadWorkspace {
+          workspaceRoot = ./payjoin-ffi/python;
+        };
+
+        pythonOverlay = pythonWorkspace.mkPyprojectOverlay {
+          sourcePreference = "wheel";
+        };
+
+        pythonSet =
+          (pkgs.callPackage pyproject-nix.build.packages {
+            python = pkgs.python3;
+          }).overrideScope
+            (
+              nixpkgs.lib.composeManyExtensions [
+                pyproject-build-systems.overlays.wheel
+                pythonOverlay
+              ]
+            );
+
+        # Build a virtualenv with dependency groups from uv.lock, excluding the payjoin package, which is built separately
+        pythonVenv = pythonSet.mkVirtualEnv "payjoin-python-dev-env" (
+          builtins.removeAttrs pythonWorkspace.deps.all [ "payjoin" ]
+        );
+
+        pythonDevShell = pkgs.mkShell {
+          name = "python-dev";
+          packages = [
+            pythonVenv
+            pkgs.uv
+            rustVersions.msrv
+          ]
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            pkgs.pkg-config
+            pkgs.openssl
+            pkgs.clang
+          ];
+
+          env = {
+            # Prevent uv from downloading Python or managing the venv itself, nix provides both;
+            UV_NO_SYNC = "1";
+            UV_PYTHON_DOWNLOADS = "never";
+          };
+
+          shellHook = ''
+            # to avoid host/global Python path leaking into the Nix env
+            unset PYTHONPATH
+          '';
+        };
+
         simpleCheck =
           args:
           pkgs.stdenvNoCC.mkDerivation (
@@ -253,6 +321,7 @@
           };
         devShells = devShells // {
           default = devShells.nightly;
+          python = pythonDevShell;
         };
         formatter = treefmtEval.config.build.wrapper;
         checks =

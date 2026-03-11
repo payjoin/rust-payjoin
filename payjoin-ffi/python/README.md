@@ -13,27 +13,29 @@ pip install payjoin
 uv add payjoin
 ```
 
-## Running Tests
+## Development
 
-Follow these steps to clone the repository and run the tests.
+### Using Nix (recommended)
 
-```shell
-# Ensure you have uv installed:
-# https://docs.astral.sh/uv/getting-started/installation/
+If you have [nix](https://nixos.org/download/) installed, enter the Python dev
+environment and run the test script:
 
-# Setup virtual environment/install all packages (including developer packages)
-uv sync --all-extras
+```sh
+nix develop .#python
+cd payjoin-ffi/python
+./contrib/test.sh
+```
 
-bash ./scripts/generate_bindings.sh
+This provides `uv`, Python, Rust, and all other dependencies needed to generate
+bindings, build the wheel, and run the tests.
 
-# Build the wheel
-uv build --wheel
+### Without Nix
 
-# Force reinstall payjoin with <version>
-uv pip install ./dist/payjoin-*.whl --force-reinstall
+Ensure you have [uv](https://docs.astral.sh/uv/getting-started/installation/)
+and Rust 1.85+ installed, then from `payjoin-ffi/python`:
 
-# Run all tests
-uv run python -m unittest --verbose
+```sh
+./contrib/test.sh
 ```
 
 ## Building the Package

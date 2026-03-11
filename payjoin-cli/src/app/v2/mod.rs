@@ -513,12 +513,11 @@ impl App {
         sender: Sender<PollingForProposal>,
         persister: &SenderPersister,
     ) -> Result<()> {
+        let ohttp_relay = self.unwrap_relay_or_else_fetch(Some(&sender.endpoint())).await?;
         let mut session = sender.clone();
         // Long poll until we get a response
         loop {
-            let (req, ctx) = session.create_poll_request(
-                self.unwrap_relay_or_else_fetch(Some(&session.endpoint())).await?.as_str(),
-            )?;
+            let (req, ctx) = session.create_poll_request(ohttp_relay.as_str())?;
             let response = self.post_request(req).await?;
             let res = session.process_response(&response.bytes().await?, ctx).save(persister);
             match res {

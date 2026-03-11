@@ -14,8 +14,7 @@ use std::str::FromStr;
 
 use bitcoin::transaction::InputWeightPrediction;
 use bitcoin::{
-    psbt, AddressType, FeeRate, OutPoint, Psbt, Script, ScriptBuf, Sequence, Transaction, TxIn,
-    TxOut, Weight,
+    psbt, AddressType, FeeRate, OutPoint, Psbt, Script, ScriptBuf, Transaction, TxIn, TxOut, Weight,
 };
 pub(crate) use error::InternalPayloadError;
 pub use error::{
@@ -88,14 +87,11 @@ impl InputPair {
     fn new_legacy_input_pair(
         non_witness_utxo: Transaction,
         outpoint: OutPoint,
-        sequence: Option<Sequence>,
         redeem_script: Option<ScriptBuf>,
     ) -> Result<Self, PsbtInputError> {
         let txin = TxIn {
             previous_output: OutPoint { txid: outpoint.txid, vout: outpoint.vout },
-            script_sig: Default::default(),
-            sequence: sequence.unwrap_or_default(),
-            witness: Default::default(),
+            ..Default::default()
         };
 
         let psbtin = psbt::Input {
@@ -131,13 +127,12 @@ impl InputPair {
     pub fn new_p2pkh(
         non_witness_utxo: Transaction,
         outpoint: OutPoint,
-        sequence: Option<Sequence>,
     ) -> Result<Self, PsbtInputError> {
         let txout = Self::get_txout_for_outpoint(&non_witness_utxo, outpoint)?;
         if !txout.script_pubkey.is_p2pkh() {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2pkh).into());
         }
-        Self::new_legacy_input_pair(non_witness_utxo, outpoint, sequence, None)
+        Self::new_legacy_input_pair(non_witness_utxo, outpoint, None)
     }
 
     /// Constructs a new [`InputPair`] for spending a legacy P2SH output.
@@ -145,27 +140,23 @@ impl InputPair {
         non_witness_utxo: Transaction,
         outpoint: OutPoint,
         redeem_script: ScriptBuf,
-        sequence: Option<Sequence>,
     ) -> Result<Self, PsbtInputError> {
         let txout = Self::get_txout_for_outpoint(&non_witness_utxo, outpoint)?;
         if !txout.script_pubkey.is_p2sh() {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2sh).into());
         }
-        Self::new_legacy_input_pair(non_witness_utxo, outpoint, sequence, Some(redeem_script))
+        Self::new_legacy_input_pair(non_witness_utxo, outpoint, Some(redeem_script))
     }
 
     /// Helper function for creating SegWit input pairs
     fn new_segwit_input_pair(
         txout: TxOut,
         outpoint: OutPoint,
-        sequence: Option<Sequence>,
         expected_weight: Option<Weight>,
     ) -> Result<Self, PsbtInputError> {
         let txin = TxIn {
             previous_output: OutPoint { txid: outpoint.txid, vout: outpoint.vout },
-            script_sig: Default::default(),
-            sequence: sequence.unwrap_or_default(),
-            witness: Default::default(),
+            ..Default::default()
         };
 
         let psbtin = psbt::Input {
@@ -177,50 +168,36 @@ impl InputPair {
     }
 
     /// Constructs a new [`InputPair`] for spending a native SegWit P2WPKH output.
-    pub fn new_p2wpkh(
-        txout: TxOut,
-        outpoint: OutPoint,
-        sequence: Option<Sequence>,
-    ) -> Result<Self, PsbtInputError> {
+    pub fn new_p2wpkh(txout: TxOut, outpoint: OutPoint) -> Result<Self, PsbtInputError> {
         if !txout.script_pubkey.is_p2wpkh() {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2wpkh).into());
         }
 
-        Self::new_segwit_input_pair(txout, outpoint, sequence, None)
+        Self::new_segwit_input_pair(txout, outpoint, None)
     }
 
     /// Constructs a new [`InputPair`] for spending a native SegWit P2WSH output.
     pub fn new_p2wsh(
         txout: TxOut,
         outpoint: OutPoint,
-        sequence: Option<Sequence>,
         expected_weight: Weight,
     ) -> Result<Self, PsbtInputError> {
         if !txout.script_pubkey.is_p2wsh() {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2wsh).into());
         }
 
-        Self::new_segwit_input_pair(txout, outpoint, sequence, Some(expected_weight))
+        Self::new_segwit_input_pair(txout, outpoint, Some(expected_weight))
     }
 
     /// Constructs a new [`InputPair`] for spending a native SegWit P2TR output
     /// via the key spend path using the default taproot sighash (64-byte
     /// signature) and no annex.
-    pub fn new_p2tr_keyspend(
-        txout: TxOut,
-        outpoint: OutPoint,
-        sequence: Option<Sequence>,
-    ) -> Result<Self, PsbtInputError> {
+    pub fn new_p2tr_keyspend(txout: TxOut, outpoint: OutPoint) -> Result<Self, PsbtInputError> {
         if !txout.script_pubkey.is_p2tr() {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2tr).into());
         }
 
-        Self::new_segwit_input_pair(
-            txout,
-            outpoint,
-            sequence,
-            Some(DEFAULT_SIGHASH_KEY_SPEND_INPUT_WEIGHT),
-        )
+        Self::new_segwit_input_pair(txout, outpoint, Some(DEFAULT_SIGHASH_KEY_SPEND_INPUT_WEIGHT))
     }
 
     /// Constructs a new [`InputPair`] for spending a native SegWit P2TR output via the script path.
@@ -230,14 +207,13 @@ impl InputPair {
     pub fn new_p2tr_scriptpath_spend(
         txout: TxOut,
         outpoint: OutPoint,
-        sequence: Option<Sequence>,
         expected_weight: Weight,
     ) -> Result<Self, PsbtInputError> {
         if !txout.script_pubkey.is_p2tr() {
             return Err(InternalPsbtInputError::InvalidScriptPubKey(AddressType::P2tr).into());
         }
 
-        Self::new_segwit_input_pair(txout, outpoint, sequence, Some(expected_weight))
+        Self::new_segwit_input_pair(txout, outpoint, Some(expected_weight))
     }
 
     pub(crate) fn previous_txout(&self) -> TxOut {
@@ -498,7 +474,8 @@ pub(crate) mod tests {
     use bitcoin::secp256k1::SECP256K1;
     use bitcoin::transaction::InputWeightPrediction;
     use bitcoin::{
-        witness, Amount, PubkeyHash, ScriptBuf, ScriptHash, Txid, WScriptHash, XOnlyPublicKey,
+        witness, Amount, PubkeyHash, ScriptBuf, ScriptHash, Sequence, Txid, WScriptHash,
+        XOnlyPublicKey,
     };
     use payjoin_test_utils::{DUMMY20, DUMMY32, PARSED_ORIGINAL_PSBT, QUERY_PARAMS};
 
@@ -557,11 +534,8 @@ pub(crate) mod tests {
             output: vec![p2sh_txout, p2pkh_txout],
         };
         let outpoint = OutPoint { txid: utxo.compute_txid(), vout: 1 };
-        let sequence = Sequence::from_512_second_intervals(123);
-
-        let p2pkh_pair = InputPair::new_p2pkh(utxo.clone(), outpoint, Some(sequence)).unwrap();
+        let p2pkh_pair = InputPair::new_p2pkh(utxo.clone(), outpoint).unwrap();
         assert_eq!(p2pkh_pair.txin.previous_output, outpoint);
-        assert_eq!(p2pkh_pair.txin.sequence, sequence);
         assert_eq!(p2pkh_pair.psbtin.non_witness_utxo.unwrap(), utxo);
         assert_eq!(
             p2pkh_pair.expected_weight,
@@ -579,7 +553,7 @@ pub(crate) mod tests {
             }],
         };
         let outpoint = OutPoint { txid: utxo_with_p2sh.compute_txid(), vout: 0 };
-        let invalid_p2pkh_pair = InputPair::new_p2pkh(utxo_with_p2sh.clone(), outpoint, None);
+        let invalid_p2pkh_pair = InputPair::new_p2pkh(utxo_with_p2sh.clone(), outpoint);
         assert_eq!(
             invalid_p2pkh_pair.err().unwrap(),
             PsbtInputError::from(InvalidScriptPubKey(AddressType::P2pkh))
@@ -592,7 +566,7 @@ pub(crate) mod tests {
             output: vec![],
         };
         let outpoint = OutPoint { txid: utxo_empty_outputs.compute_txid(), vout: 0 };
-        let invalid_p2pkh_pair = InputPair::new_p2pkh(utxo_empty_outputs.clone(), outpoint, None);
+        let invalid_p2pkh_pair = InputPair::new_p2pkh(utxo_empty_outputs.clone(), outpoint);
         assert_eq!(
             invalid_p2pkh_pair.err().unwrap(),
             PsbtInputError::from(InternalPsbtInputError::PrevTxOut(
@@ -619,11 +593,9 @@ pub(crate) mod tests {
             output: vec![p2sh_txout, p2pkh_txout],
         };
         let outpoint = OutPoint { txid: utxo.compute_txid(), vout: 0 };
-        let sequence = Sequence::from_512_second_intervals(123);
         let redeem_script = ScriptBuf::new_p2sh(&ScriptHash::from_byte_array(DUMMY20));
 
-        let p2sh_pair =
-            InputPair::new_p2sh(utxo.clone(), outpoint, redeem_script.clone(), Some(sequence));
+        let p2sh_pair = InputPair::new_p2sh(utxo.clone(), outpoint, redeem_script.clone());
 
         assert_eq!(
             p2sh_pair.err().unwrap(),
@@ -643,7 +615,7 @@ pub(crate) mod tests {
         let outpoint = OutPoint { txid: utxo_with_p2pkh.compute_txid(), vout: 0 };
         let redeem_script = ScriptBuf::new_p2sh(&ScriptHash::from_byte_array(DUMMY20));
         let invalid_p2sh_pair =
-            InputPair::new_p2sh(utxo_with_p2pkh.clone(), outpoint, redeem_script.clone(), None);
+            InputPair::new_p2sh(utxo_with_p2pkh.clone(), outpoint, redeem_script.clone());
         assert_eq!(
             invalid_p2sh_pair.err().unwrap(),
             PsbtInputError::from(InvalidScriptPubKey(AddressType::P2sh))
@@ -657,7 +629,7 @@ pub(crate) mod tests {
         };
         let outpoint = OutPoint { txid: utxo_empty_outputs.compute_txid(), vout: 0 };
         let invalid_p2sh_pair =
-            InputPair::new_p2sh(utxo_empty_outputs.clone(), outpoint, redeem_script, None);
+            InputPair::new_p2sh(utxo_empty_outputs.clone(), outpoint, redeem_script);
         assert_eq!(
             invalid_p2sh_pair.err().unwrap(),
             PsbtInputError::from(InternalPsbtInputError::PrevTxOut(
@@ -669,15 +641,12 @@ pub(crate) mod tests {
     #[test]
     fn create_p2wpkh_input_pair() {
         let outpoint = OutPoint { txid: Txid::from_byte_array(DUMMY32), vout: 31 };
-        let sequence = Sequence::from_512_second_intervals(123);
         let p2wpkh_txout = TxOut {
             value: Amount::from_sat(12345),
             script_pubkey: ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array(DUMMY20)),
         };
-        let p2wpkh_pair =
-            InputPair::new_p2wpkh(p2wpkh_txout.clone(), outpoint, Some(sequence)).unwrap();
+        let p2wpkh_pair = InputPair::new_p2wpkh(p2wpkh_txout.clone(), outpoint).unwrap();
         assert_eq!(p2wpkh_pair.txin.previous_output, outpoint);
-        assert_eq!(p2wpkh_pair.txin.sequence, sequence);
         assert_eq!(p2wpkh_pair.psbtin.witness_utxo.unwrap(), p2wpkh_txout);
         assert_eq!(
             p2wpkh_pair.expected_weight,
@@ -689,7 +658,7 @@ pub(crate) mod tests {
             script_pubkey: ScriptBuf::new_p2sh(&ScriptHash::all_zeros()),
         };
         assert_eq!(
-            InputPair::new_p2wpkh(p2sh_txout, outpoint, Some(sequence)).err().unwrap(),
+            InputPair::new_p2wpkh(p2sh_txout, outpoint).err().unwrap(),
             PsbtInputError::from(InvalidScriptPubKey(AddressType::P2wpkh))
         )
     }
@@ -697,23 +666,20 @@ pub(crate) mod tests {
     #[test]
     fn create_p2wsh_input_pair() {
         let outpoint = OutPoint { txid: Txid::from_byte_array(DUMMY32), vout: 31 };
-        let sequence = Sequence::from_512_second_intervals(123);
         let p2wsh_txout = TxOut {
             value: Amount::from_sat(12345),
             script_pubkey: ScriptBuf::new_p2wsh(&WScriptHash::from_byte_array(DUMMY32)),
         };
         let expected_weight = Weight::from_wu(42);
-        let p2wsh_pair =
-            InputPair::new_p2wsh(p2wsh_txout.clone(), outpoint, Some(sequence), expected_weight)
-                .expect("valid params for p2wsh");
+        let p2wsh_pair = InputPair::new_p2wsh(p2wsh_txout.clone(), outpoint, expected_weight)
+            .expect("valid params for p2wsh");
 
         assert_eq!(p2wsh_pair.txin.previous_output, outpoint);
-        assert_eq!(p2wsh_pair.txin.sequence, sequence);
         assert_eq!(p2wsh_pair.psbtin.witness_utxo.unwrap(), p2wsh_txout);
         assert_eq!(p2wsh_pair.expected_weight, expected_weight);
 
         let p2wsh_pair = InputPair::new(
-            TxIn { previous_output: outpoint, sequence, ..Default::default() },
+            TxIn { previous_output: outpoint, ..Default::default() },
             psbt::Input { witness_utxo: Some(p2wsh_txout.clone()), ..Default::default() },
             None,
         );
@@ -728,9 +694,7 @@ pub(crate) mod tests {
             script_pubkey: ScriptBuf::new_p2sh(&ScriptHash::all_zeros()),
         };
         assert_eq!(
-            InputPair::new_p2wsh(p2sh_txout, outpoint, Some(sequence), expected_weight)
-                .err()
-                .unwrap(),
+            InputPair::new_p2wsh(p2sh_txout, outpoint, expected_weight).err().unwrap(),
             PsbtInputError::from(InvalidScriptPubKey(AddressType::P2wsh))
         );
 
@@ -770,7 +734,6 @@ pub(crate) mod tests {
     #[test]
     fn create_p2tr_input_pair() {
         let outpoint = OutPoint { txid: Txid::from_byte_array(DUMMY32), vout: 31 };
-        let sequence = Sequence::from_512_second_intervals(123);
         let pubkey_string = "0347ff3dacd07a1f43805ec6808e801505a6e18245178609972a68afbc2777ff2b";
         let pubkey = pubkey_string.parse::<PublicKey>().expect("valid pubkey");
         let xonly_pubkey = XOnlyPublicKey::from(pubkey.inner);
@@ -785,10 +748,8 @@ pub(crate) mod tests {
             InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH.weight() + NON_WITNESS_INPUT_WEIGHT
         );
         let expected_key_weight = DEFAULT_SIGHASH_KEY_SPEND_INPUT_WEIGHT;
-        let keyspend_pair =
-            InputPair::new_p2tr_keyspend(p2tr_txout.clone(), outpoint, Some(sequence)).unwrap();
+        let keyspend_pair = InputPair::new_p2tr_keyspend(p2tr_txout.clone(), outpoint).unwrap();
         assert_eq!(keyspend_pair.txin.previous_output, outpoint);
-        assert_eq!(keyspend_pair.txin.sequence, sequence);
         let witness_utxo = keyspend_pair.psbtin.witness_utxo.clone().unwrap();
         assert_eq!(witness_utxo, p2tr_txout);
         assert_eq!(keyspend_pair.expected_weight, expected_key_weight);
@@ -798,14 +759,13 @@ pub(crate) mod tests {
         let script_pair = InputPair::new_p2tr_scriptpath_spend(
             p2tr_txout.clone(),
             outpoint,
-            Some(sequence),
             script_expected_weight,
         )
         .unwrap();
         assert_eq!(script_pair.expected_weight, script_expected_weight);
 
         // P2TR without witness requires explicit weight (cannot auto-detect spend type)
-        let txin = TxIn { previous_output: outpoint, sequence, ..Default::default() };
+        let txin = TxIn { previous_output: outpoint, ..Default::default() };
         let psbtin = psbt::Input { witness_utxo: Some(witness_utxo.clone()), ..Default::default() };
         let p2tr_pair = InputPair::new(txin.clone(), psbtin.clone(), None);
         assert_eq!(
@@ -819,7 +779,7 @@ pub(crate) mod tests {
             script_pubkey: ScriptBuf::new_p2sh(&ScriptHash::all_zeros()),
         };
         assert_eq!(
-            InputPair::new_p2tr_keyspend(p2sh_txout, outpoint, Some(sequence)).err().unwrap(),
+            InputPair::new_p2tr_keyspend(p2sh_txout, outpoint).err().unwrap(),
             PsbtInputError::from(InvalidScriptPubKey(AddressType::P2tr))
         )
     }
@@ -827,7 +787,6 @@ pub(crate) mod tests {
     #[test]
     fn p2tr_expected_weight_from_witness() {
         let outpoint = OutPoint { txid: Txid::from_byte_array(DUMMY32), vout: 31 };
-        let sequence = Sequence::ZERO;
         let pubkey_string = "0347ff3dacd07a1f43805ec6808e801505a6e18245178609972a68afbc2777ff2b";
         let pubkey = pubkey_string.parse::<PublicKey>().expect("valid pubkey");
         let xonly_pubkey = XOnlyPublicKey::from(pubkey.inner);
@@ -835,7 +794,7 @@ pub(crate) mod tests {
             value: Amount::from_sat(12345),
             script_pubkey: ScriptBuf::new_p2tr(SECP256K1, xonly_pubkey, None),
         };
-        let base_txin = TxIn { previous_output: outpoint, sequence, ..Default::default() };
+        let base_txin = TxIn { previous_output: outpoint, ..Default::default() };
         let psbtin = psbt::Input { witness_utxo: Some(p2tr_txout.clone()), ..Default::default() };
 
         // P2tr with witness elements

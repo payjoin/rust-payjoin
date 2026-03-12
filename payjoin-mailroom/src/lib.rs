@@ -29,9 +29,12 @@ pub mod ohttp_relay;
 use crate::metrics::MetricsService;
 use crate::middleware::{track_connections, track_metrics};
 
+type DirectoryService =
+    crate::directory::Service<crate::db::MetricsDb<crate::db::DbServiceAdapter>>;
+
 #[derive(Clone)]
 struct Services {
-    directory: crate::directory::Service<crate::db::DbServiceAdapter>,
+    directory: DirectoryService,
     relay: crate::ohttp_relay::Service,
     metrics: MetricsService,
     #[cfg(feature = "access-control")]
@@ -40,16 +43,17 @@ struct Services {
 
 pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> anyhow::Result<()> {
     let sentinel_tag = generate_sentinel_tag();
+    let metrics = MetricsService::new(meter_provider);
 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
 
-    let directory = init_directory(&config, sentinel_tag).await?;
+    let directory = init_directory(&config, sentinel_tag, &metrics).await?;
 
     let services = Services {
         directory,
         relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
-        metrics: MetricsService::new(meter_provider),
+        metrics,
         #[cfg(feature = "access-control")]
         geoip,
     };
@@ -84,11 +88,12 @@ pub async fn serve_manual_tls(
     use std::net::SocketAddr;
 
     let sentinel_tag = generate_sentinel_tag();
+    let metrics = MetricsService::new(None);
 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
 
-    let directory = init_directory(&config, sentinel_tag).await?;
+    let directory = init_directory(&config, sentinel_tag, &metrics).await?;
 
     let services = Services {
         directory,
@@ -98,7 +103,7 @@ pub async fn serve_manual_tls(
             default_gateway,
         )
         .await,
-        metrics: MetricsService::new(None),
+        metrics,
         #[cfg(feature = "access-control")]
         geoip,
     };
@@ -153,16 +158,17 @@ pub async fn serve_acme(
         .ok_or_else(|| anyhow::anyhow!("ACME configuration is required for serve_acme"))?;
 
     let sentinel_tag = generate_sentinel_tag();
+    let metrics = MetricsService::new(meter_provider);
 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
 
-    let directory = init_directory(&config, sentinel_tag).await?;
+    let directory = init_directory(&config, sentinel_tag, &metrics).await?;
 
     let services = Services {
         directory,
         relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
-        metrics: MetricsService::new(meter_provider),
+        metrics,
         #[cfg(feature = "access-control")]
         geoip,
     };
@@ -220,10 +226,11 @@ impl Connected<IncomingStream<'_, Listener>> for middleware::MaybePeerIp {
 async fn init_directory(
     config: &Config,
     sentinel_tag: SentinelTag,
-) -> anyhow::Result<crate::directory::Service<crate::db::DbServiceAdapter>> {
+    metrics: &MetricsService,
+) -> anyhow::Result<DirectoryService> {
     let files_db = crate::db::FilesDb::init(config.timeout, config.storage_dir.clone()).await?;
     files_db.spawn_background_prune().await;
-    let db = crate::db::DbServiceAdapter::new(files_db);
+    let db = crate::db::MetricsDb::new(crate::db::DbServiceAdapter::new(files_db), metrics.clone());
 
     let ohttp_keys_dir = config.storage_dir.join("ohttp-keys");
     let ohttp_config = init_ohttp_config(&ohttp_keys_dir)?;
@@ -538,10 +545,11 @@ mod tests {
         );
 
         let sentinel_tag = generate_sentinel_tag();
+        let metrics = MetricsService::new(Some(provider.clone()));
         let services = Services {
-            directory: init_directory(&config, sentinel_tag).await.unwrap(),
+            directory: init_directory(&config, sentinel_tag, &metrics).await.unwrap(),
             relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
-            metrics: MetricsService::new(Some(provider.clone())),
+            metrics,
             #[cfg(feature = "access-control")]
             geoip: None,
         };

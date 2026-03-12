@@ -218,7 +218,7 @@ impl WantsInputs {
     /// Heuristics and PayJoin Transactions by Ghesmati et al. (2022)](https://eprint.iacr.org/2022/589).
     ///
     /// Based on the paper, we are looking for the candidate input which, when added to the
-    /// transaction with 2 existing outputs, results in the minimum input amount to be lower than the minimum
+    /// transaction with 2 existing outputs, results in the minimum input amount to be greater than the minimum
     /// output amount. Note that when calculating the minimum output amount, we consider the
     /// post-contribution amounts, and expect the output which pays to the receiver to have its
     /// value increased by the amount of the candidate input.

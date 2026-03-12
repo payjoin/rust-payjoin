@@ -7,7 +7,7 @@ use hyper::header::{HeaderValue, RETRY_AFTER};
 use hyper::{Response, StatusCode};
 use tracing::error;
 
-use crate::{empty, full};
+use super::{empty, full};
 
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 

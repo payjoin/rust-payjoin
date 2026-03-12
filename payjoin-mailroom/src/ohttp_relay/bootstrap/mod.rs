@@ -5,8 +5,8 @@ use hyper::body::Bytes;
 use hyper::{Request, Response};
 use tracing::instrument;
 
-use crate::error::Error;
-use crate::GatewayUri;
+use crate::ohttp_relay::error::Error;
+use crate::ohttp_relay::GatewayUri;
 
 #[cfg(feature = "connect-bootstrap")]
 pub mod connect;

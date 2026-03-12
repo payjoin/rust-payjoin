@@ -18,8 +18,10 @@ mod integration {
     use hyper_rustls::HttpsConnectorBuilder;
     use hyper_util::client::legacy::Client;
     use hyper_util::rt::{TokioExecutor, TokioIo};
-    use ohttp_relay::gateway_prober::{ALLOWED_PURPOSES_CONTENT_TYPE, MAGIC_BIP77_PURPOSE};
-    use ohttp_relay::*;
+    use payjoin_mailroom::ohttp_relay::gateway_prober::{
+        ALLOWED_PURPOSES_CONTENT_TYPE, MAGIC_BIP77_PURPOSE,
+    };
+    use payjoin_mailroom::ohttp_relay::*;
     use rcgen::Certificate;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
     use tempfile::NamedTempFile;
@@ -285,7 +287,7 @@ mod integration {
                 gateway: GatewayUri,
                 cert: CertificateDer<'_>,
             ) {
-                use ohttp_relay::bootstrap::ws::WsIo;
+                use payjoin_mailroom::ohttp_relay::bootstrap::ws::WsIo;
 
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 

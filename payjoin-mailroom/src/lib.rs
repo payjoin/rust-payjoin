@@ -7,12 +7,13 @@ use axum::response::{IntoResponse, Response};
 use axum::serve::IncomingStream;
 use axum::Router;
 use config::Config;
-use ohttp_relay::SentinelTag;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use rand::Rng;
 use tokio_listener::{Listener, SystemOptions, UserOptions};
 use tower::{Service, ServiceBuilder};
 use tracing::info;
+
+use crate::ohttp_relay::SentinelTag;
 
 #[cfg(feature = "access-control")]
 pub mod access_control;
@@ -23,6 +24,7 @@ pub mod directory;
 pub mod key_config;
 pub mod metrics;
 pub mod middleware;
+pub mod ohttp_relay;
 
 use crate::metrics::MetricsService;
 use crate::middleware::{track_connections, track_metrics};
@@ -30,7 +32,7 @@ use crate::middleware::{track_connections, track_metrics};
 #[derive(Clone)]
 struct Services {
     directory: crate::directory::Service<crate::db::DbServiceAdapter>,
-    relay: ohttp_relay::Service,
+    relay: crate::ohttp_relay::Service,
     metrics: MetricsService,
     #[cfg(feature = "access-control")]
     geoip: Option<std::sync::Arc<access_control::IpFilter>>,
@@ -46,7 +48,7 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
 
     let services = Services {
         directory,
-        relay: ohttp_relay::Service::new(sentinel_tag).await,
+        relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
         metrics: MetricsService::new(meter_provider),
         #[cfg(feature = "access-control")]
         geoip,
@@ -89,7 +91,7 @@ pub async fn serve_manual_tls(
 
     let services = Services {
         directory,
-        relay: ohttp_relay::Service::new_with_roots(root_store, sentinel_tag).await,
+        relay: crate::ohttp_relay::Service::new_with_roots(root_store, sentinel_tag).await,
         metrics: MetricsService::new(None),
         #[cfg(feature = "access-control")]
         geoip,
@@ -153,7 +155,7 @@ pub async fn serve_acme(
 
     let services = Services {
         directory,
-        relay: ohttp_relay::Service::new(sentinel_tag).await,
+        relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
         metrics: MetricsService::new(meter_provider),
         #[cfg(feature = "access-control")]
         geoip,
@@ -531,7 +533,7 @@ mod tests {
         let sentinel_tag = generate_sentinel_tag();
         let services = Services {
             directory: init_directory(&config, sentinel_tag).await.unwrap(),
-            relay: ohttp_relay::Service::new(sentinel_tag).await,
+            relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
             metrics: MetricsService::new(Some(provider.clone())),
             #[cfg(feature = "access-control")]
             geoip: None,

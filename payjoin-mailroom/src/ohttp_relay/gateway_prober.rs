@@ -12,7 +12,7 @@ use hyper::body::Incoming;
 use tokio::sync::{oneshot, RwLock};
 use tokio::time::Instant;
 
-use crate::gateway_uri::GatewayUri;
+use super::gateway_uri::GatewayUri;
 
 // these are only pub for the integration test
 pub const MAGIC_BIP77_PURPOSE: &[u8] = b"BIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e";
@@ -402,7 +402,7 @@ mod tests {
     use tokio::time::advance;
 
     use super::*;
-    use crate::gateway_uri::RFC_9540_GATEWAY_PATH;
+    use crate::ohttp_relay::gateway_uri::RFC_9540_GATEWAY_PATH;
 
     const BIP77_OPT_IN_RESPONSE: &[u8] = b"\x00\x01\x2aBIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e";
     const TIMESTEP: Duration = Duration::from_secs(1); // only used with advance()

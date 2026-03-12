@@ -1,5 +1,4 @@
 use std::fmt::Debug;
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -24,13 +23,9 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::service::TowerToHyperService;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio_util::net::Listener;
-// `info!` is only used by the unix-only `listen_socket` implementation.
-#[cfg(unix)]
-use tracing::info;
 use tracing::{error, instrument};
 
 pub mod error;
@@ -42,27 +37,13 @@ mod gateway_uri;
 pub mod sentinel;
 pub use sentinel::SentinelTag;
 
-use crate::error::{BoxError, Error};
+use self::error::{BoxError, Error};
 
 #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
 pub mod bootstrap;
 
-pub const DEFAULT_PORT: u16 = 3000;
-pub const OHTTP_RELAY_HOST: HeaderValue = HeaderValue::from_static("0.0.0.0");
 pub const EXPECTED_MEDIA_TYPE: HeaderValue = HeaderValue::from_static("message/ohttp-req");
 pub const DEFAULT_GATEWAY: &str = "https://payjo.in";
-
-#[instrument]
-pub async fn listen_tcp(
-    port: u16,
-    gateway_origin: GatewayUri,
-) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = TcpListener::bind(addr).await?;
-    println!("OHTTP relay listening on tcp://{}", addr);
-    let sentinel_tag = SentinelTag::new([0u8; 32]);
-    ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin, sentinel_tag)).await
-}
 
 #[instrument]
 #[cfg(unix)]
@@ -71,7 +52,7 @@ pub async fn listen_socket(
     gateway_origin: GatewayUri,
 ) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
     let listener = UnixListener::bind(socket_path)?;
-    info!("OHTTP relay listening on socket: {}", socket_path);
+    tracing::info!("OHTTP relay listening on socket: {}", socket_path);
     let sentinel_tag = SentinelTag::new([0u8; 32]);
     ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin, sentinel_tag)).await
 }
@@ -271,7 +252,8 @@ where
         #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
         (&Method::GET, _) | (&Method::CONNECT, _) => {
             match parse_gateway_uri(&method, path, authority, config).await {
-                Ok(gateway_uri) => crate::bootstrap::handle_ohttp_keys(req, gateway_uri).await,
+                Ok(gateway_uri) =>
+                    crate::ohttp_relay::bootstrap::handle_ohttp_keys(req, gateway_uri).await,
                 Err(e) => Err(e),
             }
         }

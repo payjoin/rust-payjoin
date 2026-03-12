@@ -8,11 +8,11 @@ use axum::body::{Body, Bytes};
 use axum::http::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
 use axum::http::{Method, Request, Response, StatusCode, Uri};
 use http_body_util::BodyExt;
-use ohttp_relay::SentinelTag;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tracing::{debug, error, trace, warn};
 
 use crate::db::{Db, Error as DbError, SendableError};
+use crate::ohttp_relay::SentinelTag;
 
 const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
 const POLY1305_TAG_SIZE: usize = 16;
@@ -134,10 +134,12 @@ impl<D: Db> Service<D> {
 
         // Best-effort validation that the relay and gateway aren't on the same
         // payjoin-mailroom instance
-        if let Some(header_value) =
-            parts.headers.get(ohttp_relay::sentinel::HEADER_NAME).and_then(|v| v.to_str().ok())
+        if let Some(header_value) = parts
+            .headers
+            .get(crate::ohttp_relay::sentinel::HEADER_NAME)
+            .and_then(|v| v.to_str().ok())
         {
-            if ohttp_relay::sentinel::is_self_loop(&self.sentinel_tag, header_value) {
+            if crate::ohttp_relay::sentinel::is_self_loop(&self.sentinel_tag, header_value) {
                 warn!("Rejected OHTTP request from same-instance relay");
                 return Ok(HandlerError::Forbidden(anyhow::anyhow!(
                     "Relay and gateway must be operated by different entities"
@@ -581,11 +583,11 @@ mod tests {
     use std::time::Duration;
 
     use http_body_util::BodyExt;
-    use ohttp_relay::SentinelTag;
     use payjoin::directory::ShortId;
 
     use super::*;
     use crate::db::FilesDb;
+    use crate::ohttp_relay::SentinelTag;
 
     async fn test_service(v1: Option<V1>) -> Service<FilesDb> {
         let dir = tempfile::tempdir().expect("tempdir");

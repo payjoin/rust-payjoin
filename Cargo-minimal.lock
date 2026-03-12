@@ -2557,10 +2557,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ohttp-relay"
-version = "0.0.11"
-
-[[package]]
 name = "oid-registry"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

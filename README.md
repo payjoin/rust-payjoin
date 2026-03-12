@@ -39,7 +39,7 @@ A CLI tool which performs no-frills Payjoin. It is a reference implementation of
 
 ### [`payjoin-mailroom`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-mailroom)
 
-An [Oblivious HTTP (OHTTP) Relay](https://github.com/payjoin/rust-payjoin/tree/master/ohttp-relay) and a BIP77 [Payjoin Directory](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-directory) combined in one binary.
+A combined [Oblivious HTTP (OHTTP)](https://en.wikipedia.org/wiki/Oblivious_HTTP) Relay and BIP77 Payjoin Directory in one binary.
 
 ### [`payjoin-test-utils`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-test-utils)
 

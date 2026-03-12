@@ -12,6 +12,7 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use rand::Rng;
 use tokio_listener::{Listener, SystemOptions, UserOptions};
 use tower::{Service, ServiceBuilder};
+use tower_http::limit::RequestBodyLimitLayer;
 use tracing::info;
 
 #[cfg(feature = "access-control")]
@@ -352,7 +353,8 @@ fn build_app(services: Services) -> Router {
         .layer(
             ServiceBuilder::new()
                 .layer(axum::middleware::from_fn_with_state(metrics.clone(), track_metrics))
-                .layer(axum::middleware::from_fn_with_state(metrics, track_connections)),
+                .layer(axum::middleware::from_fn_with_state(metrics, track_connections))
+                .layer(RequestBodyLimitLayer::new(65_536)),
         )
         .with_state(services);
 
@@ -555,5 +557,98 @@ mod tests {
         assert!(metric_names.contains(&HTTP_REQUESTS), "missing http_request_total");
         assert!(metric_names.contains(&TOTAL_CONNECTIONS), "missing total_connections");
         assert!(metric_names.contains(&ACTIVE_CONNECTIONS), "missing active_connections");
+    }
+
+    /// Exercises the full middleware stack (track_metrics, track_connections, RequestBodyLimit)
+    /// with a request that has a body, ensuring the layer ordering compiles and runs correctly.
+    #[tokio::test]
+    async fn middleware_stack_accepts_request_with_body() {
+        use axum::body::Body;
+        use axum::http::header::CONTENT_TYPE;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        let tempdir = tempdir().unwrap();
+        let config = Config::new(
+            "[::]:0".parse().expect("valid listener address"),
+            tempdir.path().to_path_buf(),
+            Duration::from_secs(2),
+            None,
+        );
+
+        let sentinel_tag = generate_sentinel_tag();
+        let services = Services {
+            directory: init_directory(&config, sentinel_tag).await.unwrap(),
+            relay: ohttp_relay::Service::new(sentinel_tag).await,
+            metrics: MetricsService::new(None),
+            #[cfg(feature = "access-control")]
+            geoip: None,
+        };
+
+        let app = build_app(services);
+
+        let body = b"small payload under 65k limit";
+        let request = Request::builder()
+            .method("POST")
+            .uri("/some-path")
+            .header(CONTENT_TYPE, ohttp_relay::EXPECTED_MEDIA_TYPE.clone())
+            .body(Body::from(body.as_slice()))
+            .unwrap();
+
+        let response = ServiceExt::<Request<Body>>::oneshot(app, request).await.unwrap();
+
+        assert!(
+            !response.status().is_server_error(),
+            "middleware stack should accept request with body (no 5xx)"
+        );
+        assert_ne!(
+            response.status(),
+            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+            "small body should not be rejected by body limit"
+        );
+    }
+
+    /// Ensures RequestBodyLimitLayer (65_536 bytes) rejects oversized bodies (413 or 415).
+    #[tokio::test]
+    async fn request_body_limit_rejects_oversized_body() {
+        use axum::body::Body;
+        use axum::http::header::CONTENT_TYPE;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        let tempdir = tempdir().unwrap();
+        let config = Config::new(
+            "[::]:0".parse().expect("valid listener address"),
+            tempdir.path().to_path_buf(),
+            Duration::from_secs(2),
+            None,
+        );
+
+        let sentinel_tag = generate_sentinel_tag();
+        let services = Services {
+            directory: init_directory(&config, sentinel_tag).await.unwrap(),
+            relay: ohttp_relay::Service::new(sentinel_tag).await,
+            metrics: MetricsService::new(None),
+            #[cfg(feature = "access-control")]
+            geoip: None,
+        };
+
+        let app = build_app(services);
+
+        let oversized: Vec<u8> = (0..65_537).map(|_| 0u8).collect();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/")
+            .header(CONTENT_TYPE, ohttp_relay::EXPECTED_MEDIA_TYPE.clone())
+            .body(Body::from(oversized))
+            .unwrap();
+
+        let response = ServiceExt::<Request<Body>>::oneshot(app, request).await.unwrap();
+
+        assert!(
+            response.status().is_client_error(),
+            "body over 65_536 bytes should be rejected with a 4xx status, got {}",
+            response.status()
+        );
     }
 }

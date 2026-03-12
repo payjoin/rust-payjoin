@@ -79,6 +79,7 @@ pub async fn serve_manual_tls(
     config: Config,
     tls_config: Option<axum_server::tls_rustls::RustlsConfig>,
     root_store: rustls::RootCertStore,
+    default_gateway: Option<crate::ohttp_relay::GatewayUri>,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<anyhow::Result<()>>)> {
     use std::net::SocketAddr;
 
@@ -91,7 +92,12 @@ pub async fn serve_manual_tls(
 
     let services = Services {
         directory,
-        relay: crate::ohttp_relay::Service::new_with_roots(root_store, sentinel_tag).await,
+        relay: crate::ohttp_relay::Service::new_with_roots(
+            sentinel_tag,
+            root_store,
+            default_gateway,
+        )
+        .await,
         metrics: MetricsService::new(None),
         #[cfg(feature = "access-control")]
         geoip,
@@ -439,7 +445,8 @@ mod tests {
         root_store.add(CertificateDer::from(cert_der.clone())).unwrap();
         let tls_config = RustlsConfig::from_der(vec![cert_der], key_der).await.unwrap();
 
-        let (port, handle) = serve_manual_tls(config, Some(tls_config), root_store).await.unwrap();
+        let (port, handle) =
+            serve_manual_tls(config, Some(tls_config), root_store, None).await.unwrap();
         (port, handle, tempdir)
     }
 

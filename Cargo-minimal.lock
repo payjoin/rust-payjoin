@@ -2871,7 +2871,6 @@ dependencies = [
  "tokio-rustls-acme",
  "tokio-stream",
  "tokio-tungstenite",
- "tokio-util",
  "tower",
  "tracing",
  "tracing-subscriber",

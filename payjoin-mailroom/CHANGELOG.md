@@ -1,5 +1,15 @@
 # Payjoin Mailroom Changelog
 
+## 0.1.1
+
+- Implement Directory and its db as a tower-service (#1361)
+- Add ACME section for mailroom example config (#1382)
+- Add an example `systemd` service (#1393)
+- Add mailroom landing page (#1401)
+- Update mailroom README description (#1402)
+- Make git commit hash optional in landing page (#1408)
+- Fold ohttp relay into mailroom (#1409)
+
 ## 0.1.0
 
 Initial release of payjoin-mailroom (combining payjoin-directory and ohttp-relay).

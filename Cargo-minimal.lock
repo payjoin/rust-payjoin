@@ -1130,7 +1130,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69bd382fc775f760a8b55d658527621b890eaa3d8e8bc9779864659b172e81c6"
 dependencies = [
  "anyhow",
- "bitcoin_hashes 0.13.0",
+ "bitcoin_hashes 0.14.0",
  "corepc-client",
  "flate2",
  "log",
@@ -2831,7 +2831,7 @@ dependencies = [
 
 [[package]]
 name = "payjoin-mailroom"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -3700,7 +3700,7 @@ version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
 dependencies = [
- "bitcoin_hashes 0.12.0",
+ "bitcoin_hashes 0.14.0",
  "rand 0.8.5",
  "secp256k1-sys 0.10.0",
  "serde",

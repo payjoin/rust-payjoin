@@ -1,3 +1,9 @@
+//! Session persistence for the typestate protocol.
+//!
+//! Protocol methods that advance state return a transition type from
+//! this module. Call `.save(&persister)` to persist the session event
+//! and extract the next state.
+
 use std::fmt;
 
 /// Representation of the actions that the persister should take, if any.

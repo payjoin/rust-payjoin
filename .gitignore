@@ -8,3 +8,6 @@ mutants.out*
 *.ikm
 *payjoin.sqlite
 data
+.claude/
+.direnv/
+__pycache__/

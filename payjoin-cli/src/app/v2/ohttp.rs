@@ -1,3 +1,12 @@
+//! OHTTP relay selection and key bootstrapping for the payjoin-cli.
+//!
+//! [`RelayManager`] tracks the currently selected relay and any relays that
+//! have failed, excluding them from future selections for the lifetime of
+//! the [`RelayManager`].
+//!
+//! `fetch_ohttp_keys` selects a relay at random from the configured list,
+//! excluding relays that [`RelayManager`] has marked as failed,
+//! to avoid a fixed contact pattern at the network layer.
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};

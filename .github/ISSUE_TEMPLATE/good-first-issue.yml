@@ -12,7 +12,6 @@ body:
         - payjoin-mailroom
         - payjoin-test-utils
         - payjoin-ffi
-        - ohttp-relay
   - type: markdown
     attributes:
       value: |

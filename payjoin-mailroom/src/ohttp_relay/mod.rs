@@ -1,5 +1,4 @@
 use std::fmt::Debug;
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -15,95 +14,27 @@ use hyper::header::{
     HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
     ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_LENGTH, CONTENT_TYPE,
 };
-use hyper::server::conn::http1;
 use hyper::{Method, Request, Response};
 use hyper_rustls::builderstates::WantsSchemes;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use hyper_util::service::TowerToHyperService;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
-#[cfg(unix)]
-use tokio::net::UnixListener;
-use tokio_util::net::Listener;
-// `info!` is only used by the unix-only `listen_socket` implementation.
-#[cfg(unix)]
-use tracing::info;
-use tracing::{error, instrument};
+use hyper_util::rt::TokioExecutor;
+use tracing::instrument;
 
 pub mod error;
-#[cfg(not(feature = "_test-util"))]
 mod gateway_prober;
-#[cfg(feature = "_test-util")]
-pub mod gateway_prober;
 mod gateway_uri;
 pub mod sentinel;
 pub use sentinel::SentinelTag;
 
-use crate::error::{BoxError, Error};
+use self::error::{BoxError, Error};
 
 #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
 pub mod bootstrap;
 
-pub const DEFAULT_PORT: u16 = 3000;
-pub const OHTTP_RELAY_HOST: HeaderValue = HeaderValue::from_static("0.0.0.0");
 pub const EXPECTED_MEDIA_TYPE: HeaderValue = HeaderValue::from_static("message/ohttp-req");
 pub const DEFAULT_GATEWAY: &str = "https://payjo.in";
-
-#[instrument]
-pub async fn listen_tcp(
-    port: u16,
-    gateway_origin: GatewayUri,
-) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = TcpListener::bind(addr).await?;
-    println!("OHTTP relay listening on tcp://{}", addr);
-    let sentinel_tag = SentinelTag::new([0u8; 32]);
-    ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin, sentinel_tag)).await
-}
-
-#[instrument]
-#[cfg(unix)]
-pub async fn listen_socket(
-    socket_path: &str,
-    gateway_origin: GatewayUri,
-) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
-    let listener = UnixListener::bind(socket_path)?;
-    info!("OHTTP relay listening on socket: {}", socket_path);
-    let sentinel_tag = SentinelTag::new([0u8; 32]);
-    ohttp_relay(listener, RelayConfig::new_with_default_client(gateway_origin, sentinel_tag)).await
-}
-
-#[instrument]
-#[cfg(not(unix))]
-pub async fn listen_socket(
-    socket_path: &str,
-    gateway_origin: GatewayUri,
-) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError> {
-    // Keep API parity across targets while making the limitation explicit at runtime.
-    let _ = (socket_path, gateway_origin);
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "UNIX_SOCKET is only supported on unix targets; use PORT instead",
-    )
-    .into())
-}
-
-#[cfg(feature = "_test-util")]
-pub async fn listen_tcp_on_free_port(
-    default_gateway: GatewayUri,
-    root_store: rustls::RootCertStore,
-) -> Result<(u16, tokio::task::JoinHandle<Result<(), BoxError>>), BoxError> {
-    let listener = tokio::net::TcpListener::bind("[::]:0").await?;
-    let port = listener.local_addr()?.port();
-    println!("OHTTP relay binding to port {}", listener.local_addr()?);
-    let sentinel_tag = SentinelTag::new([0u8; 32]);
-    let config = RelayConfig::new(default_gateway, root_store, sentinel_tag);
-    let handle = ohttp_relay(listener, config).await?;
-    Ok((port, handle))
-}
 
 #[derive(Debug)]
 struct RelayConfig {
@@ -135,8 +66,6 @@ pub struct Service {
 }
 
 impl Service {
-    fn from_config(config: Arc<RelayConfig>) -> Self { Self { config } }
-
     pub async fn new(sentinel_tag: SentinelTag) -> Self {
         // The default gateway is hardcoded because it is obsolete and required only for backwards
         // compatibility.
@@ -148,12 +77,14 @@ impl Service {
         Self { config: Arc::new(config) }
     }
 
-    #[cfg(feature = "_test-util")]
+    #[cfg(feature = "_manual-tls")]
     pub async fn new_with_roots(
-        root_store: rustls::RootCertStore,
         sentinel_tag: SentinelTag,
+        root_store: rustls::RootCertStore,
+        default_gateway: Option<GatewayUri>,
     ) -> Self {
-        let gateway_origin = GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri");
+        let gateway_origin = default_gateway
+            .unwrap_or_else(|| GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri"));
         let config = RelayConfig::new(gateway_origin, root_store, sentinel_tag);
         config.prober.assert_opt_in(&config.default_gateway).await;
         Self { config: Arc::new(config) }
@@ -216,38 +147,6 @@ impl From<rustls::RootCertStore> for HttpClient {
     }
 }
 
-#[instrument(skip(listener))]
-async fn ohttp_relay<L>(
-    mut listener: L,
-    config: RelayConfig,
-) -> Result<tokio::task::JoinHandle<Result<(), BoxError>>, BoxError>
-where
-    L: Listener + Unpin + Send + 'static,
-    L::Io: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
-    config.prober.assert_opt_in(&config.default_gateway).await;
-
-    let config = Arc::new(config);
-
-    let handle = tokio::spawn(async move {
-        while let Ok((stream, _)) = listener.accept().await {
-            let service = Service::from_config(config.clone());
-            let io = TokioIo::new(stream);
-            tokio::spawn(async move {
-                let hyper_service = TowerToHyperService::new(service);
-                if let Err(err) =
-                    http1::Builder::new().serve_connection(io, hyper_service).with_upgrades().await
-                {
-                    error!("Error serving connection: {:?}", err);
-                }
-            });
-        }
-        Ok(())
-    });
-
-    Ok(handle)
-}
-
 #[instrument]
 async fn serve_ohttp_relay<B>(
     req: Request<B>,
@@ -271,7 +170,8 @@ where
         #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
         (&Method::GET, _) | (&Method::CONNECT, _) => {
             match parse_gateway_uri(&method, path, authority, config).await {
-                Ok(gateway_uri) => crate::bootstrap::handle_ohttp_keys(req, gateway_uri).await,
+                Ok(gateway_uri) =>
+                    crate::ohttp_relay::bootstrap::handle_ohttp_keys(req, gateway_uri).await,
                 Err(e) => Err(e),
             }
         }

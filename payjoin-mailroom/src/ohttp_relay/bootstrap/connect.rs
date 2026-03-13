@@ -9,8 +9,8 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 use tracing::{error, instrument};
 
-use crate::error::Error;
-use crate::{empty, GatewayUri};
+use crate::ohttp_relay::error::Error;
+use crate::ohttp_relay::{empty, GatewayUri};
 
 pub(crate) fn is_connect_request<B>(req: &Request<B>) -> bool { Method::CONNECT == req.method() }
 

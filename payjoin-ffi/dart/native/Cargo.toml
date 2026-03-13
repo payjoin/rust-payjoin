@@ -24,7 +24,6 @@ payjoin-ffi = { git = "https://github.com/payjoin/rust-payjoin.git", branch = "m
 payjoin-ffi = { path = "../.." }
 
 [patch.crates-io]
-ohttp-relay = { path = "../../../ohttp-relay" }
 payjoin = { path = "../../../payjoin" }
 payjoin-mailroom = { path = "../../../payjoin-mailroom" }
 payjoin-test-utils = { path = "../../../payjoin-test-utils" }

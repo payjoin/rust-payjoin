@@ -7,12 +7,13 @@ use axum::response::{IntoResponse, Response};
 use axum::serve::IncomingStream;
 use axum::Router;
 use config::Config;
-use ohttp_relay::SentinelTag;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use rand::Rng;
 use tokio_listener::{Listener, SystemOptions, UserOptions};
 use tower::{Service, ServiceBuilder};
 use tracing::info;
+
+use crate::ohttp_relay::SentinelTag;
 
 #[cfg(feature = "access-control")]
 pub mod access_control;
@@ -23,6 +24,7 @@ pub mod directory;
 pub mod key_config;
 pub mod metrics;
 pub mod middleware;
+pub mod ohttp_relay;
 
 use crate::metrics::MetricsService;
 use crate::middleware::{track_connections, track_metrics};
@@ -30,7 +32,7 @@ use crate::middleware::{track_connections, track_metrics};
 #[derive(Clone)]
 struct Services {
     directory: crate::directory::Service<crate::db::DbServiceAdapter>,
-    relay: ohttp_relay::Service,
+    relay: crate::ohttp_relay::Service,
     metrics: MetricsService,
     #[cfg(feature = "access-control")]
     geoip: Option<std::sync::Arc<access_control::IpFilter>>,
@@ -46,7 +48,7 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
 
     let services = Services {
         directory,
-        relay: ohttp_relay::Service::new(sentinel_tag).await,
+        relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
         metrics: MetricsService::new(meter_provider),
         #[cfg(feature = "access-control")]
         geoip,
@@ -77,6 +79,7 @@ pub async fn serve_manual_tls(
     config: Config,
     tls_config: Option<axum_server::tls_rustls::RustlsConfig>,
     root_store: rustls::RootCertStore,
+    default_gateway: Option<crate::ohttp_relay::GatewayUri>,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<anyhow::Result<()>>)> {
     use std::net::SocketAddr;
 
@@ -89,7 +92,12 @@ pub async fn serve_manual_tls(
 
     let services = Services {
         directory,
-        relay: ohttp_relay::Service::new_with_roots(root_store, sentinel_tag).await,
+        relay: crate::ohttp_relay::Service::new_with_roots(
+            sentinel_tag,
+            root_store,
+            default_gateway,
+        )
+        .await,
         metrics: MetricsService::new(None),
         #[cfg(feature = "access-control")]
         geoip,
@@ -153,7 +161,7 @@ pub async fn serve_acme(
 
     let services = Services {
         directory,
-        relay: ohttp_relay::Service::new(sentinel_tag).await,
+        relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
         metrics: MetricsService::new(meter_provider),
         #[cfg(feature = "access-control")]
         geoip,
@@ -437,7 +445,8 @@ mod tests {
         root_store.add(CertificateDer::from(cert_der.clone())).unwrap();
         let tls_config = RustlsConfig::from_der(vec![cert_der], key_der).await.unwrap();
 
-        let (port, handle) = serve_manual_tls(config, Some(tls_config), root_store).await.unwrap();
+        let (port, handle) =
+            serve_manual_tls(config, Some(tls_config), root_store, None).await.unwrap();
         (port, handle, tempdir)
     }
 
@@ -531,7 +540,7 @@ mod tests {
         let sentinel_tag = generate_sentinel_tag();
         let services = Services {
             directory: init_directory(&config, sentinel_tag).await.unwrap(),
-            relay: ohttp_relay::Service::new(sentinel_tag).await,
+            relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
             metrics: MetricsService::new(Some(provider.clone())),
             #[cfg(feature = "access-control")]
             geoip: None,

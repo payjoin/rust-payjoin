@@ -3,7 +3,7 @@ use std::str::FromStr;
 use http::uri::{Authority, Scheme};
 use http::Uri;
 
-use crate::error::BoxError;
+use super::error::BoxError;
 
 pub(crate) const RFC_9540_GATEWAY_PATH: &str = "/.well-known/ohttp-gateway";
 const ALLOWED_PURPOSES_PATH_AND_QUERY: &str = "/.well-known/ohttp-gateway?allowed_purposes";

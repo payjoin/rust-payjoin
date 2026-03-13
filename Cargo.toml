@@ -1,7 +1,6 @@
 [workspace]
 members = [
   "fuzz",
-  "ohttp-relay",
   "payjoin",
   "payjoin-cli",
   "payjoin-test-utils",
@@ -12,7 +11,6 @@ resolver = "2"
 
 [patch.crates-io]
 payjoin-fuzz = { path = "fuzz" }
-ohttp-relay = { path = "ohttp-relay" }
 payjoin = { path = "payjoin" }
 payjoin-mailroom = { path = "payjoin-mailroom" }
 payjoin-test-utils = { path = "payjoin-test-utils" }

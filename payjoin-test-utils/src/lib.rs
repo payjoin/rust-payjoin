@@ -61,7 +61,7 @@ impl TestServices {
         root_store.add(CertificateDer::from(cert.cert.der().to_vec())).unwrap();
 
         let directory = init_directory(cert_key, root_store.clone()).await?;
-        let ohttp_relay = init_ohttp_relay(root_store).await?;
+        let ohttp_relay = init_ohttp_relay(root_store, None).await?;
 
         let http_agent: Arc<Client> = Arc::new(http_agent(cert_der)?);
 
@@ -126,9 +126,10 @@ pub async fn init_directory(
 
     let tls_config = RustlsConfig::from_der(vec![local_cert_key.0], local_cert_key.1).await?;
 
-    let (port, handle) = payjoin_mailroom::serve_manual_tls(config, Some(tls_config), root_store)
-        .await
-        .map_err(|e| e.to_string())?;
+    let (port, handle) =
+        payjoin_mailroom::serve_manual_tls(config, Some(tls_config), root_store, None)
+            .await
+            .map_err(|e| e.to_string())?;
 
     let handle = tokio::spawn(async move {
         let _tempdir = tempdir; // keep the tempdir until the directory shuts down
@@ -138,8 +139,9 @@ pub async fn init_directory(
     Ok((port, handle))
 }
 
-async fn init_ohttp_relay(
+pub async fn init_ohttp_relay(
     root_store: RootCertStore,
+    default_gateway: Option<payjoin_mailroom::ohttp_relay::GatewayUri>,
 ) -> std::result::Result<
     (u16, tokio::task::JoinHandle<std::result::Result<(), BoxSendSyncError>>),
     BoxSendSyncError,
@@ -152,9 +154,10 @@ async fn init_ohttp_relay(
         None,
     );
 
-    let (port, handle) = payjoin_mailroom::serve_manual_tls(config, None, root_store)
-        .await
-        .map_err(|e| e.to_string())?;
+    let (port, handle) =
+        payjoin_mailroom::serve_manual_tls(config, None, root_store, default_gateway)
+            .await
+            .map_err(|e| e.to_string())?;
 
     let handle = tokio::spawn(async move {
         let _tempdir = tempdir; // keep the tempdir until the relay shuts down

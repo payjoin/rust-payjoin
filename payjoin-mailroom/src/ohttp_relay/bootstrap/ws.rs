@@ -16,9 +16,9 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{tungstenite, WebSocketStream};
 use tracing::{error, instrument};
 
-use crate::empty;
-use crate::error::Error;
-use crate::gateway_uri::GatewayUri;
+use crate::ohttp_relay::empty;
+use crate::ohttp_relay::error::Error;
+use crate::ohttp_relay::gateway_uri::GatewayUri;
 
 /// Check if the request is a WebSocket upgrade request.
 ///

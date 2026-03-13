@@ -1,5 +1,4 @@
 #[cfg(test)]
-#[cfg(feature = "_test-util")]
 mod integration {
     use std::fs::File;
     use std::io::Read;
@@ -18,8 +17,8 @@ mod integration {
     use hyper_rustls::HttpsConnectorBuilder;
     use hyper_util::client::legacy::Client;
     use hyper_util::rt::{TokioExecutor, TokioIo};
-    use ohttp_relay::gateway_prober::{ALLOWED_PURPOSES_CONTENT_TYPE, MAGIC_BIP77_PURPOSE};
-    use ohttp_relay::*;
+    use payjoin_mailroom::ohttp_relay::*;
+    use payjoin_test_utils::init_ohttp_relay;
     use rcgen::Certificate;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
     use tempfile::NamedTempFile;
@@ -39,6 +38,8 @@ mod integration {
     const ENCAPSULATED_REQ: &str = "010020000100014b28f881333e7c164ffc499ad9796f877f4e1051ee6d31bad19dec96c208b4726374e469135906992e1268c594d2a10c695d858c40a026e7965e7d86b83dd440b2c0185204b4d63525";
     const ENCAPSULATED_RES: &str =
         "c789e7151fcba46158ca84b04464910d86f9013e404feea014e7be4a441f234f857fbd";
+    const MAGIC_BIP77_PURPOSE: &[u8] = b"BIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e";
+    const ALLOWED_PURPOSES_CONTENT_TYPE: &str = "application/x-ohttp-allowed-purposes";
 
     /// See: https://www.ietf.org/rfc/rfc9458.html#name-complete-example-of-a-reque
     #[tokio::test]
@@ -52,7 +53,7 @@ mod integration {
         let mut root_store = rustls::RootCertStore::empty();
         root_store.add(nginx_cert_der.clone()).unwrap();
 
-        let (relay_port, relay_handle) = listen_tcp_on_free_port(gateway.clone(), root_store)
+        let (relay_port, relay_handle) = init_ohttp_relay(root_store, Some(gateway.clone()))
             .await
             .expect("Failed to listen on free port");
         let relay_task = tokio::spawn(async move {
@@ -87,60 +88,6 @@ mod integration {
             }
             _ = ohttp_req(n_https_port, nginx_cert_der, gateway) => {}
         }
-    }
-
-    // UNIX domain socket transport is only available on unix targets.
-    #[tokio::test]
-    #[cfg(unix)]
-    async fn test_request_response_socket() -> Result<(), Box<dyn std::error::Error>> {
-        init_crypto_provider();
-        let temp_dir = std::env::temp_dir();
-        let socket_path = temp_dir.as_path().join("test.socket");
-
-        if socket_path.exists() {
-            std::fs::remove_file(&socket_path).expect("Failed to remove existing socket file");
-        }
-
-        let gateway_port = find_free_port();
-        let gateway = GatewayUri::from_str(&format!("http://0.0.0.0:{}", gateway_port)).unwrap();
-        let nginx_cert = gen_localhost_cert();
-        let nginx_cert_der = cert_to_cert_der(&nginx_cert);
-        let socket_path_str = socket_path.to_str().unwrap();
-        let relay_handle = listen_socket(socket_path_str, gateway.clone())
-            .await
-            .expect("Failed to listen on socket");
-        let relay_task = tokio::spawn(async move {
-            if let Err(e) = relay_handle.await {
-                eprintln!("Relay failed: {}", e);
-            }
-        });
-        let n_http_port = find_free_port();
-        let n_https_port = find_free_port();
-        let _nginx = match start_nginx(
-            n_http_port,
-            n_https_port,
-            format!("unix:{}", socket_path_str),
-            nginx_cert,
-        )
-        .await
-        {
-            Ok(nginx) => nginx,
-            Err(NginxInitError::NginxNotAvailable) => {
-                eprintln!("Skipping test: NGINX_EXE environment variable not set");
-                return Ok(());
-            }
-            Err(e) => return Err(Box::new(e) as Box<dyn std::error::Error>),
-        };
-        tokio::select! {
-            _ = example_gateway_http(gateway_port) => {
-                panic!("Gateway is long running");
-            }
-            _ = relay_task => {
-                panic!("Relay is long running");
-            }
-            _ = ohttp_req(n_https_port, nginx_cert_der, gateway) => {}
-        }
-        Ok(())
     }
 
     async fn example_gateway_http(port: u16) -> Result<(), Box<dyn std::error::Error>> {
@@ -285,7 +232,7 @@ mod integration {
                 gateway: GatewayUri,
                 cert: CertificateDer<'_>,
             ) {
-                use ohttp_relay::bootstrap::ws::WsIo;
+                use payjoin_mailroom::ohttp_relay::bootstrap::ws::WsIo;
 
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
@@ -378,7 +325,7 @@ mod integration {
             let mut root_store = rustls::RootCertStore::empty();
             root_store.add(gateway_cert_der.clone()).unwrap();
             root_store.add(nginx_cert_der).unwrap();
-            let (relay_port, relay_handle) = listen_tcp_on_free_port(gateway.clone(), root_store)
+            let (relay_port, relay_handle) = init_ohttp_relay(root_store, Some(gateway.clone()))
                 .await
                 .expect("Failed to listen on free port");
             let relay_task = tokio::spawn(async move {

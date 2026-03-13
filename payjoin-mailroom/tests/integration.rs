@@ -1,5 +1,4 @@
 #[cfg(test)]
-#[cfg(feature = "_test-util")]
 mod integration {
     use std::fs::File;
     use std::io::Read;
@@ -18,9 +17,6 @@ mod integration {
     use hyper_rustls::HttpsConnectorBuilder;
     use hyper_util::client::legacy::Client;
     use hyper_util::rt::{TokioExecutor, TokioIo};
-    use payjoin_mailroom::ohttp_relay::gateway_prober::{
-        ALLOWED_PURPOSES_CONTENT_TYPE, MAGIC_BIP77_PURPOSE,
-    };
     use payjoin_mailroom::ohttp_relay::*;
     use payjoin_test_utils::init_ohttp_relay;
     use rcgen::Certificate;
@@ -42,6 +38,8 @@ mod integration {
     const ENCAPSULATED_REQ: &str = "010020000100014b28f881333e7c164ffc499ad9796f877f4e1051ee6d31bad19dec96c208b4726374e469135906992e1268c594d2a10c695d858c40a026e7965e7d86b83dd440b2c0185204b4d63525";
     const ENCAPSULATED_RES: &str =
         "c789e7151fcba46158ca84b04464910d86f9013e404feea014e7be4a441f234f857fbd";
+    const MAGIC_BIP77_PURPOSE: &[u8] = b"BIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e";
+    const ALLOWED_PURPOSES_CONTENT_TYPE: &str = "application/x-ohttp-allowed-purposes";
 
     /// See: https://www.ietf.org/rfc/rfc9458.html#name-complete-example-of-a-reque
     #[tokio::test]

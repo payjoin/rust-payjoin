@@ -14,9 +14,8 @@ use tokio::time::Instant;
 
 use super::gateway_uri::GatewayUri;
 
-// these are only pub for the integration test
-pub const MAGIC_BIP77_PURPOSE: &[u8] = b"BIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e";
-pub const ALLOWED_PURPOSES_CONTENT_TYPE: &str = "application/x-ohttp-allowed-purposes";
+const MAGIC_BIP77_PURPOSE: &[u8] = b"BIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e";
+const ALLOWED_PURPOSES_CONTENT_TYPE: &str = "application/x-ohttp-allowed-purposes";
 const DEFAULT_CAPACITY: usize = 1000;
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]

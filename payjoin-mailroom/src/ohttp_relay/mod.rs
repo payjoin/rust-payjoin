@@ -23,10 +23,7 @@ use hyper_util::rt::TokioExecutor;
 use tracing::instrument;
 
 pub mod error;
-#[cfg(not(feature = "_test-util"))]
 mod gateway_prober;
-#[cfg(feature = "_test-util")]
-pub mod gateway_prober;
 mod gateway_uri;
 pub mod sentinel;
 pub use sentinel::SentinelTag;
@@ -80,7 +77,7 @@ impl Service {
         Self { config: Arc::new(config) }
     }
 
-    #[cfg(feature = "_test-util")]
+    #[cfg(feature = "_manual-tls")]
     pub async fn new_with_roots(
         sentinel_tag: SentinelTag,
         root_store: rustls::RootCertStore,

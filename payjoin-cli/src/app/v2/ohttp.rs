@@ -34,10 +34,8 @@ pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
 ) -> Result<ValidatedOhttpKeys> {
     if let Some(ohttp_keys) = config.v2()?.ohttp_keys.clone() {
         println!("Using OHTTP Keys from config");
-        return Ok(ValidatedOhttpKeys {
-            ohttp_keys,
-            relay_url: config.v2()?.ohttp_relays[0].clone(),
-        });
+        let validated = fetch_ohttp_keys(config, directory, relay_manager).await?;
+        Ok(ValidatedOhttpKeys { ohttp_keys, relay_url: validated.relay_url })
     } else {
         println!("Bootstrapping private network transport over Oblivious HTTP");
         let fetched_keys = fetch_ohttp_keys(config, directory, relay_manager).await?;

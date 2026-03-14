@@ -1,153 +1,159 @@
 #!/usr/bin/env python3
-"""Compile standup responses into a GitHub Discussion and close the issue."""
+"""Update the latest Weekly Check-in Discussion body with participation summary."""
 
 import os
-from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 import requests
+import yaml
 
 REPO = os.environ["GITHUB_REPOSITORY"]
 TOKEN = os.environ["STANDUP_TOKEN"]
-CATEGORY_NODE_ID = os.environ["DISCUSSION_CATEGORY_NODE_ID"]
-API = "https://api.github.com"
 GRAPHQL = "https://api.github.com/graphql"
 HEADERS = {
     "Authorization": f"token {TOKEN}",
     "Accept": "application/vnd.github+json",
 }
 
-
-def find_standup_issue():
-    """Find the most recent open standup-input issue from the last 7 days."""
-    since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-    resp = requests.get(
-        f"{API}/repos/{REPO}/issues",
-        headers=HEADERS,
-        params={
-            "labels": "standup-input",
-            "state": "open",
-            "since": since,
-            "sort": "created",
-            "direction": "desc",
-            "per_page": 1,
-        },
-    )
-    resp.raise_for_status()
-    issues = resp.json()
-    if not issues:
-        print("No standup-input issue found in the last 7 days.")
-        return None
-    return issues[0]
+_CONFIG_PATH = Path(__file__).resolve().parent.parent / "standup-contributors.yml"
+with open(_CONFIG_PATH) as _f:
+    CONTRIBUTORS = [c["username"] for c in yaml.safe_load(_f)["contributors"]]
 
 
-def fetch_comments(issue_number):
-    """Fetch all comments on an issue."""
-    comments = []
-    page = 1
-    while True:
-        resp = requests.get(
-            f"{API}/repos/{REPO}/issues/{issue_number}/comments",
-            headers=HEADERS,
-            params={"per_page": 100, "page": page},
-        )
-        resp.raise_for_status()
-        batch = resp.json()
-        if not batch:
-            break
-        comments.extend(batch)
-        page += 1
-    return comments
-
-
-def get_repo_node_id():
-    """Get the repository node ID for the GraphQL mutation."""
-    resp = requests.get(f"{API}/repos/{REPO}", headers=HEADERS)
-    resp.raise_for_status()
-    return resp.json()["node_id"]
-
-
-def create_discussion(title, body, repo_node_id):
-    """Create a GitHub Discussion via GraphQL."""
-    mutation = """
-    mutation($repoId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
-      createDiscussion(input: {
-        repositoryId: $repoId,
-        categoryId: $categoryId,
-        title: $title,
-        body: $body
-      }) {
-        discussion {
-          url
-        }
-      }
-    }
-    """
+def graphql(query, variables=None):
+    """Run a GraphQL query and return the data."""
     resp = requests.post(
         GRAPHQL,
         headers=HEADERS,
-        json={
-            "query": mutation,
-            "variables": {
-                "repoId": repo_node_id,
-                "categoryId": CATEGORY_NODE_ID,
-                "title": title,
-                "body": body,
-            },
-        },
+        json={"query": query, "variables": variables or {}},
     )
     resp.raise_for_status()
     data = resp.json()
     if "errors" in data:
         raise RuntimeError(f"GraphQL errors: {data['errors']}")
-    return data["data"]["createDiscussion"]["discussion"]["url"]
+    return data["data"]
 
 
-def close_issue(issue_number, discussion_url):
-    """Close the standup issue with a link to the compiled discussion."""
-    requests.post(
-        f"{API}/repos/{REPO}/issues/{issue_number}/comments",
-        headers=HEADERS,
-        json={"body": f"Compiled into discussion: {discussion_url}"},
+def find_latest_checkin():
+    """Find the most recent Weekly Check-in Discussion."""
+    owner, name = REPO.split("/")
+    data = graphql(
+        """
+        query($owner: String!, $name: String!) {
+          repository(owner: $owner, name: $name) {
+            discussions(first: 10, orderBy: {field: CREATED_AT, direction: DESC}) {
+              nodes {
+                id
+                title
+                url
+                body
+              }
+            }
+          }
+        }
+        """,
+        {"owner": owner, "name": name},
     )
-    requests.patch(
-        f"{API}/repos/{REPO}/issues/{issue_number}",
-        headers=HEADERS,
-        json={"state": "closed"},
+    for d in data["repository"]["discussions"]["nodes"]:
+        if d["title"].startswith("Weekly Check-in:"):
+            return d
+    return None
+
+
+def get_discussion_comments(discussion_id):
+    """Fetch top-level comments and their replies for a Discussion."""
+    data = graphql(
+        """
+        query($id: ID!) {
+          node(id: $id) {
+            ... on Discussion {
+              comments(first: 50) {
+                nodes {
+                  body
+                  replies(first: 50) {
+                    nodes {
+                      author { login }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """,
+        {"id": discussion_id},
     )
+    return data["node"]["comments"]["nodes"]
+
+
+def check_participation(comments):
+    """Return list of contributors who replied to their thread."""
+    participated = []
+    for comment in comments:
+        body = comment["body"]
+        for user in CONTRIBUTORS:
+            if f"@{user}" not in body:
+                continue
+            reply_authors = {
+                r["author"]["login"] for r in comment["replies"]["nodes"] if r["author"]
+            }
+            if user in reply_authors:
+                participated.append(user)
+    return participated
+
+
+def update_discussion_body(discussion_id, new_body):
+    """Edit the Discussion body via GraphQL."""
+    graphql(
+        """
+        mutation($discussionId: ID!, $body: String!) {
+          updateDiscussion(input: {
+            discussionId: $discussionId,
+            body: $body
+          }) {
+            discussion { id }
+          }
+        }
+        """,
+        {"discussionId": discussion_id, "body": new_body},
+    )
+
+
+PARTICIPATION_MARKER = "<!-- participation -->"
 
 
 def main():
-    issue = find_standup_issue()
-    if not issue:
+    dry_run = os.environ.get("DRY_RUN")
+
+    discussion = find_latest_checkin()
+    if not discussion:
+        print("No Weekly Check-in discussion found.")
         return
 
-    issue_number = issue["number"]
-    # Extract the week label from the issue title
-    title_suffix = issue["title"].removeprefix("Standup Input: ")
-    week_label = title_suffix or datetime.now(timezone.utc).strftime("Week of %Y-%m-%d")
+    print(f"Found: {discussion['url']}")
 
-    comments = fetch_comments(issue_number)
+    comments = get_discussion_comments(discussion["id"])
+    participated = check_participation(comments)
 
-    # Build sections per contributor
-    sections = []
-    for comment in comments:
-        user = comment["user"]["login"]
-        if comment["user"]["type"] == "Bot":
-            continue
-        body = comment["body"].strip()
-        sections.append(f"### @{user}\n{body}")
+    if participated:
+        names = ", ".join(f"@{u}" for u in participated)
+        participation_line = f"**Participated:** {names}"
+    else:
+        participation_line = "**Participated:** _(none yet)_"
 
-    updates = "\n\n".join(sections) if sections else "_No responses._"
+    # Strip any previous participation section, then append
+    body = discussion["body"]
+    if PARTICIPATION_MARKER in body:
+        body = body[: body.index(PARTICIPATION_MARKER)].rstrip()
 
-    discussion_title = f"Weekly Check-in: {week_label}"
-    discussion_body = updates
+    new_body = f"{body}\n\n{PARTICIPATION_MARKER}\n{participation_line}"
 
-    repo_node_id = get_repo_node_id()
-    discussion_url = create_discussion(discussion_title, discussion_body, repo_node_id)
-    print(f"Created discussion: {discussion_url}")
+    if dry_run:
+        print(f"Would update body to:\n---\n{new_body}\n---")
+        return
 
-    close_issue(issue_number, discussion_url)
-    print(f"Closed issue #{issue_number}")
+    update_discussion_body(discussion["id"], new_body)
+    print(f"Updated discussion: {participation_line}")
 
 
 if __name__ == "__main__":

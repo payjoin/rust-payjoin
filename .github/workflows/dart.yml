@@ -35,8 +35,5 @@ jobs:
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
 
-      - name: Generate bindings and binaries
-        run: bash ./scripts/generate_bindings.sh
-
-      - name: Run tests
-        run: dart test
+      - name: "Build and test"
+        run: bash ./contrib/test.sh

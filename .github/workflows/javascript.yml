@@ -41,11 +41,5 @@ jobs:
       - name: Install wasm-bindgen
         run: cargo install --locked wasm-bindgen-cli --version 0.2.108
 
-      - name: "Install dependencies"
-        run: npm ci
-
-      - name: Generate bindings and binaries
-        run: bash ./scripts/generate_bindings.sh
-
-      - name: Run tests
-        run: npm test
+      - name: "Build and test"
+        run: bash ./contrib/test.sh

@@ -209,7 +209,7 @@ def format_contributor_comment(
     user, merged_prs, reviewed_prs, issues_opened, bottlenecks
 ):
     """Format the threaded reply for a contributor."""
-    lines = [f"## @{user}", ""]
+    lines = [f"## {user}", "", f"@{user}", ""]
 
     # SHIPPED section
     lines.append("### Shipped")

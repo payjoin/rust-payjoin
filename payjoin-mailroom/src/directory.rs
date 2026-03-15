@@ -806,4 +806,45 @@ mod tests {
         let html = landing_page_html();
         assert!(!html.contains("{{VERSION_STRING}}"));
     }
+
+    // MetricsDb decorator
+
+    #[tokio::test]
+    async fn post_mailbox_increments_v2_db_entry_metric() {
+        use opentelemetry_sdk::metrics::{
+            InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
+        };
+
+        use crate::db::MetricsDb;
+        use crate::metrics::{MetricsService, DB_ENTRIES};
+
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone()).build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+        let metrics = MetricsService::new(Some(provider.clone()));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = FilesDb::init(Duration::from_millis(100), dir.keep()).await.expect("db init");
+        let db = MetricsDb::new(db, metrics);
+        let ohttp: ohttp::Server =
+            crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
+        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None);
+
+        let id = valid_short_id_path();
+        let res = svc
+            .post_mailbox(&id, Body::from(b"small payload under 65k limit".to_vec()))
+            .await
+            .expect("post_mailbox should succeed");
+        assert_eq!(res.status(), StatusCode::OK);
+
+        provider.force_flush().expect("flush failed");
+        let finished = exporter.get_finished_metrics().expect("metrics");
+        let metric_names: Vec<&str> = finished
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .map(|m| m.name())
+            .collect();
+        assert!(metric_names.contains(&DB_ENTRIES), "missing db_entries_total metric");
+    }
 }

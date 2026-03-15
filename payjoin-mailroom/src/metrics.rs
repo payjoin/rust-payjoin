@@ -1,10 +1,12 @@
 use opentelemetry::metrics::{Counter, MeterProvider, UpDownCounter};
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
+use payjoin::Version;
 
 pub(crate) const TOTAL_CONNECTIONS: &str = "total_connections";
 pub(crate) const ACTIVE_CONNECTIONS: &str = "active_connections";
 pub(crate) const HTTP_REQUESTS: &str = "http_request_total";
+pub(crate) const DB_ENTRIES: &str = "db_entries_total";
 
 #[derive(Clone)]
 pub struct MetricsService {
@@ -14,6 +16,8 @@ pub struct MetricsService {
     total_connections: Counter<u64>,
     /// Number of active connections right now
     active_connections: UpDownCounter<i64>,
+    /// Total v1/v2 mailbox entries written, labelled by `version`
+    db_entries_total: Counter<u64>,
 }
 
 impl MetricsService {
@@ -36,7 +40,12 @@ impl MetricsService {
             .with_description("Number of active connections")
             .build();
 
-        Self { http_requests_total, total_connections, active_connections }
+        let db_entries_total = meter
+            .u64_counter(DB_ENTRIES)
+            .with_description("Total mailbox entries stored by protocol version")
+            .build();
+
+        Self { http_requests_total, total_connections, active_connections, db_entries_total }
     }
 
     pub fn record_http_request(&self, endpoint: &str, method: &str, status_code: u16) {
@@ -56,4 +65,8 @@ impl MetricsService {
     }
 
     pub fn record_connection_close(&self) { self.active_connections.add(-1, &[]); }
+
+    pub fn record_db_entry(&self, version: Version) {
+        self.db_entries_total.add(1, &[KeyValue::new("version", version.to_string())]);
+    }
 }

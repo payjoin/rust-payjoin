@@ -343,7 +343,6 @@
                   partitions = 1;
                   partitionType = "count";
                   cargoExtraArgs = "--locked --workspace --all-features --exclude payjoin-fuzz";
-                  NEXTEST_SHOW_PROGRESS = "none";
                   BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
                   NGINX_EXE = nixpkgs.lib.getExe' nginxWithStream "nginx";
                   nativeBuildInputs = [ nginxWithStream ];

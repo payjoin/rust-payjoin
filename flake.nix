@@ -121,6 +121,15 @@
           stable = default;
           nightly = recent;
         };
+
+        vendoredDeps = builtins.mapAttrs (
+          name: _:
+          craneLibVersions.stable.vendorCargoDeps {
+            cargoLock = cargoLock.${name};
+            inherit src;
+          }
+        ) craneLibVersions;
+
         commonArgs = {
           inherit src;
           strictDeps = true;
@@ -139,10 +148,18 @@
           BITCOIND_SKIP_DOWNLOAD = 1;
         };
 
+        # Per-toolchain common args that include pre-vendored deps
+        commonArgsFor =
+          name:
+          commonArgs
+          // {
+            cargoVendorDir = vendoredDeps.${name};
+          };
+
         cargoArtifacts = builtins.mapAttrs (
           name: craneLib:
           craneLib.buildDepsOnly (
-            commonArgs
+            commonArgsFor name
             // {
               name = "workspace-deps-${name}";
               cargoLock = cargoLock.${name};
@@ -169,7 +186,7 @@
               # build packages with MSRV toolchain by default, since the builds are
               # mostly for testing purposes
               craneLibVersions.msrv.buildPackage (
-                commonArgs
+                commonArgsFor "msrv"
                 // craneLibVersions.msrv.crateNameFromCargoToml {
                   cargoToml = builtins.toPath "${./.}/${name}/Cargo.toml";
                 }
@@ -335,7 +352,7 @@
             name: craneLib:
             (pkgs.lib.nameValuePair "payjoin-workspace-nextest-${name}" (
               craneLib.cargoNextest (
-                commonArgs
+                commonArgsFor name
                 // {
                   name = "payjoin-workspace-nextest-${name}";
                   cargoLock = cargoLock.${name};
@@ -355,7 +372,7 @@
           )
           // {
             payjoin-workspace-machete = craneLibVersions.nightly.mkCargoDerivation (
-              commonArgs
+              commonArgsFor "nightly"
               // {
                 pname = "payjoin-workspace-machete";
                 cargoLock = cargoLock.nightly;
@@ -368,7 +385,7 @@
             );
 
             payjoin-workspace-clippy = craneLibVersions.nightly.cargoClippy (
-              commonArgs
+              commonArgsFor "nightly"
               // {
                 cargoLock = cargoLock.nightly;
                 cargoArtifacts = cargoArtifacts.nightly;
@@ -377,7 +394,7 @@
             );
 
             payjoin-workspace-doc = craneLibVersions.nightly.cargoDoc (
-              commonArgs
+              commonArgsFor "nightly"
               // {
                 cargoLock = cargoLock.nightly;
                 cargoArtifacts = cargoArtifacts.nightly;
@@ -385,7 +402,7 @@
             );
 
             payjoin-workspace-fmt = craneLibVersions.nightly.cargoFmt (
-              commonArgs
+              commonArgsFor "nightly"
               // {
                 inherit src;
                 # cargoLock = cargoLock.nightly;

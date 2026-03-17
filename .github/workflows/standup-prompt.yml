@@ -1,21 +1,28 @@
-name: Standup Prompt
+name: Weekly Standup
 
 on:
   schedule:
     # Monday 00:00 UTC = Monday 08:00 Taipei
     - cron: "0 0 * * 1"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Set to 'true' to gather activity without creating a Discussion"
+        required: false
+        default: ""
 
 jobs:
-  create-issue:
+  create-discussion:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install requests
-      - run: python .github/scripts/create_standup_issue.py
+      - run: pip install requests pyyaml
+      - run: python .github/scripts/create_standup_discussion.py
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
-          STANDUP_TOKEN: ${{ secrets.STANDUP_TOKEN }}
+          STANDUP_TOKEN: ${{ secrets.STANDUP_BOT_TOKEN || secrets.STANDUP_TOKEN }}
+          DISCUSSION_CATEGORY_NODE_ID: ${{ secrets.DISCUSSION_CATEGORY_NODE_ID }}
+          DRY_RUN: ${{ inputs.dry_run }}

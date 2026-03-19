@@ -8,10 +8,17 @@ repository = "https://github.com/payjoin/rust-payjoin"
 rust-version = "1.85"
 license = "MIT"
 
+[features]
+default = []
+bitcoind = ["corepc-node"]
+
 [dependencies]
 axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
 bitcoin = { version = "0.32.7", features = ["base64"] }
-corepc-node = { version = "0.10.0", features = ["download", "29_0"] }
+corepc-node = { version = "0.10.0", features = [
+  "download",
+  "29_0",
+], optional = true }
 http = "1.3.1"
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
 once_cell = "1.21.3"

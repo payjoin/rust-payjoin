@@ -1,6 +1,6 @@
 using Payjoin.Http;
+using System.Security.Authentication;
 using System.Text.Json;
-using Payjoin;
 using Xunit;
 
 namespace Payjoin.Tests
@@ -8,7 +8,6 @@ namespace Payjoin.Tests
     public class IntegrationTests : IAsyncLifetime
     {
         private static string RpcCall(RpcClient rpc, string method, params string?[] args) => rpc.Call(method, args);
-        private BitcoindEnv? _env;
         private TestServices? _services;
         private HttpClient? _httpClient;
 
@@ -319,7 +318,6 @@ namespace Payjoin.Tests
         {
             _httpClient?.Dispose();
             _services?.Dispose();
-            _env?.Dispose();
 
             return ValueTask.CompletedTask;
         }
@@ -329,14 +327,33 @@ namespace Payjoin.Tests
         {
             var cancellationToken = TestContext.Current.CancellationToken;
 
-            _services!.WaitForServicesReady();
+            Assert.NotNull(_services);
+            _services.WaitForServicesReady();
             var ohttpRelay = _services.OhttpRelayUrl();
             var directory = _services.DirectoryUrl();
             var cert = _services.Cert();
 
-            using var keys = await OhttpKeysClient.GetOhttpKeysAsync(new System.Uri(ohttpRelay), new System.Uri(directory), cert, cancellationToken);
+            using var ohttpClient = new OhttpKeysClient(new System.Uri(ohttpRelay), cert);
+            using var keys = await ohttpClient.GetOhttpKeysAsync(new System.Uri(directory), cancellationToken);
 
             Assert.NotNull(keys);
+        }
+
+        [Fact]
+        public async Task FetchOhttpKeysWithoutTestCertificateThrowsException()
+        {
+            var cancellationToken = TestContext.Current.CancellationToken;
+
+            Assert.NotNull(_services);
+            _services.WaitForServicesReady();
+            var ohttpRelay = _services.OhttpRelayUrl();
+            var directory = _services.DirectoryUrl();
+
+            using var ohttpClient = new OhttpKeysClient(new System.Uri(ohttpRelay));
+            var ex = await Assert.ThrowsAsync<HttpRequestException>(
+                () => ohttpClient.GetOhttpKeysAsync(new System.Uri(directory), cancellationToken));
+
+            Assert.IsType<AuthenticationException>(ex.InnerException);
         }
 
         [Fact]
@@ -412,7 +429,8 @@ namespace Payjoin.Tests
                 new InputPair(txin, psbtIn, new PlainWeight(0));
             });
 
-            var directory = _services!.DirectoryUrl();
+            Assert.NotNull(_services);
+            var directory = _services.DirectoryUrl();
             _services.WaitForServicesReady();
             var ohttpKeys = _services.FetchOhttpKeys();
 
@@ -439,23 +457,17 @@ namespace Payjoin.Tests
         public async Task TestIntegrationV2ToV2()
         {
             var cancellationToken = TestContext.Current.CancellationToken;
-            try
-            {
-                _env = PayjoinMethods.InitBitcoindSenderReceiver();
-            }
-            catch (Exception ex)
-            {
-                Assert.Skip($"test-utils are not available: {ex.GetType().Name}: {ex.Message}");
-            }
 
-            using var bitcoind = _env.GetBitcoind();
-            using var receiver = _env.GetReceiver();
-            using var sender = _env.GetSender();
+            using var env = PayjoinMethods.InitBitcoindSenderReceiver();
+            using var bitcoind = env.GetBitcoind();
+            using var receiver = env.GetReceiver();
+            using var sender = env.GetSender();
 
             var receiverAddressJson = RpcCall(receiver, "getnewaddress");
             var receiverAddress = JsonSerializer.Deserialize<string>(receiverAddressJson)!;
 
-            var directory = _services!.DirectoryUrl();
+            Assert.NotNull(_services);
+            var directory = _services.DirectoryUrl();
             var ohttpRelay = _services.OhttpRelayUrl();
             _services.WaitForServicesReady();
 

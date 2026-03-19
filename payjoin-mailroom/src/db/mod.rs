@@ -8,7 +8,7 @@ use tower::util::BoxCloneSyncService;
 use tower::{Service, ServiceExt};
 
 pub mod files;
-use crate::metrics::MetricsService;
+use crate::metrics::{MetricsService, PayjoinVersion};
 
 pub trait SendableError:
     std::error::Error + std::marker::Send + std::marker::Sync + std::convert::Into<anyhow::Error>
@@ -258,7 +258,7 @@ impl<D: Db> Db for MetricsDb<D> {
     ) -> Result<Option<()>, Error<Self::OperationalError>> {
         let result = self.inner.post_v2_payload(mailbox_id, data).await?;
         if result.is_some() {
-            self.metrics.record_db_entry(payjoin::Version::Two);
+            self.metrics.record_db_entry(PayjoinVersion::Two);
         }
         Ok(result)
     }
@@ -284,7 +284,7 @@ impl<D: Db> Db for MetricsDb<D> {
         data: Vec<u8>,
     ) -> Result<Arc<Vec<u8>>, Error<Self::OperationalError>> {
         let result = self.inner.post_v1_request_and_wait_for_response(mailbox_id, data).await?;
-        self.metrics.record_db_entry(payjoin::Version::One);
+        self.metrics.record_db_entry(PayjoinVersion::One);
         Ok(result)
     }
 }

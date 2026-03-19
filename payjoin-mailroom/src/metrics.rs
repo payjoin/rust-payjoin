@@ -1,7 +1,8 @@
+use std::fmt;
+
 use opentelemetry::metrics::{Counter, MeterProvider, UpDownCounter};
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use payjoin::Version;
 
 pub(crate) const TOTAL_CONNECTIONS: &str = "total_connections";
 pub(crate) const ACTIVE_CONNECTIONS: &str = "active_connections";
@@ -18,6 +19,19 @@ pub struct MetricsService {
     active_connections: UpDownCounter<i64>,
     /// Total v1/v2 mailbox entries written, labelled by `version`
     db_entries_total: Counter<u64>,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PayjoinVersion {
+    /// BIP 78 Payjoin
+    One = 1,
+    /// BIP 77 Async Payjoin
+    Two = 2,
+}
+
+impl fmt::Display for PayjoinVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { (*self as u8).fmt(f) }
 }
 
 impl MetricsService {
@@ -66,7 +80,7 @@ impl MetricsService {
 
     pub fn record_connection_close(&self) { self.active_connections.add(-1, &[]); }
 
-    pub fn record_db_entry(&self, version: Version) {
+    pub fn record_db_entry(&self, version: PayjoinVersion) {
         self.db_entries_total.add(1, &[KeyValue::new("version", version.to_string())]);
     }
 }

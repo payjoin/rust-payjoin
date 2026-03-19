@@ -379,7 +379,7 @@ namespace Payjoin.Tests
             });
 
             var validTxid = new string('0', 64);
-            Assert.Throws<InputPairException.FfiValidation>(() =>
+            var amountOutOfRange = Assert.Throws<InputPairException.FfiValidation>(() =>
             {
                 var txin = new PlainTxIn(
                     new PlainOutPoint(validTxid, 0),
@@ -394,10 +394,11 @@ namespace Payjoin.Tests
                 );
                 new InputPair(txin, psbtIn, null);
             });
+            Assert.IsType<FfiValidationException.AmountOutOfRange>(amountOutOfRange.v1);
 
             var hugeScript = new byte[10_001];
             Array.Fill(hugeScript, (byte)0x51);
-            Assert.Throws<InputPairException.FfiValidation>(() =>
+            var scriptTooLarge = Assert.Throws<InputPairException.FfiValidation>(() =>
             {
                 var txin = new PlainTxIn(
                     new PlainOutPoint(validTxid, 0),
@@ -412,8 +413,9 @@ namespace Payjoin.Tests
                 );
                 new InputPair(txin, psbtIn, null);
             });
+            Assert.IsType<FfiValidationException.ScriptTooLarge>(scriptTooLarge.v1);
 
-            Assert.Throws<InputPairException.FfiValidation>(() =>
+            var weightOutOfRange = Assert.Throws<InputPairException.FfiValidation>(() =>
             {
                 var txin = new PlainTxIn(
                     new PlainOutPoint(validTxid, 0),
@@ -428,6 +430,7 @@ namespace Payjoin.Tests
                 );
                 new InputPair(txin, psbtIn, new PlainWeight(0));
             });
+            Assert.IsType<FfiValidationException.WeightOutOfRange>(weightOutOfRange.v1);
 
             Assert.NotNull(_services);
             var directory = _services.DirectoryUrl();
@@ -440,12 +443,13 @@ namespace Payjoin.Tests
             using var receiver = receiveTransition.Save(recvPersister);
             using var pjUri = receiver.PjUri();
 
-            var psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+            var psbt = PayjoinMethods.OriginalPsbt();
 
-            Assert.Throws<SenderInputException.FfiValidation>(() =>
+            var feeRateOutOfRange = Assert.Throws<SenderInputException.FfiValidation>(() =>
             {
                 new SenderBuilder(psbt, pjUri).BuildRecommended(ulong.MaxValue);
             });
+            Assert.IsType<FfiValidationException.FeeRateOutOfRange>(feeRateOutOfRange.v1);
 
             Assert.Throws<FfiValidationException.AmountOutOfRange>(() =>
             {

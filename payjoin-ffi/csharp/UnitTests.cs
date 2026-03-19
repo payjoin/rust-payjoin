@@ -168,7 +168,7 @@ public class PersistenceTests
         var uri = receiver.PjUri();
 
         var senderPersister = new InMemorySenderPersister();
-        var psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+        var psbt = PayjoinMethods.OriginalPsbt();
         
         var withReplyKey = new SenderBuilder(psbt, uri)
             .BuildRecommended(1000)
@@ -210,7 +210,7 @@ public class PersistenceTests
         var uri = receiver.PjUri();
 
         var senderPersister = new InMemorySenderPersisterAsync();
-        var psbt = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
+        var psbt = PayjoinMethods.OriginalPsbt();
 
         var withReplyKey = await new SenderBuilder(psbt, uri)
             .BuildRecommended(1000)
@@ -237,6 +237,16 @@ public class ValidationTests
         0x00, 0x01, 0x00, 0x03,
     };
 
+    private static PjUri CreateV2PjUri()
+    {
+        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var persister = new InMemoryReceiverPersister();
+        using var builder = new ReceiverBuilder("2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK", "https://example.com", ohttpKeys);
+        using var transition = builder.Build();
+        using var receiver = transition.Save(persister);
+        return receiver.PjUri();
+    }
+
     [Fact]
     public void ReceiverBuilderRejectsBadAddress()
     {
@@ -262,5 +272,94 @@ public class ValidationTests
             var psbtIn = new PlainPsbtInput(null, null, null);
             new InputPair(txin, psbtIn, null);
         });
+    }
+
+    [Fact]
+    public void SenderBuilderRejectsBadPsbt()
+    {
+        using var parsed = Uri.Parse("bitcoin:tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4?pj=https://example.com/pj");
+        using var uri = parsed.CheckPjSupported();
+
+        var ex = Assert.Throws<SenderInputException.Psbt>(() =>
+        {
+            new SenderBuilder("not-a-psbt", uri);
+        });
+
+        Assert.IsType<PsbtParseException.InvalidPsbt>(ex.v1);
+    }
+
+    [Fact]
+    public void ReceiverBuilderRejectsAmountOverflow()
+    {
+        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        using var builder = new ReceiverBuilder(
+            "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+            "https://example.com",
+            ohttpKeys);
+
+        Assert.Throws<FfiValidationException.AmountOutOfRange>(() =>
+        {
+            builder.WithAmount(21_000_000UL * 100_000_000UL + 1);
+        });
+    }
+
+    [Fact]
+    public void ReceiverBuilderRejectsExpirationOverflow()
+    {
+        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        using var builder = new ReceiverBuilder(
+            "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+            "https://example.com",
+            ohttpKeys);
+
+        Assert.Throws<FfiValidationException.ExpirationOutOfRange>(() =>
+        {
+            builder.WithExpiration((ulong)uint.MaxValue + 1);
+        });
+    }
+
+    [Fact]
+    public void SenderBuilderWithAdditionalFeeRejectsFeeContributionOverflow()
+    {
+        using var uri = CreateV2PjUri();
+        var psbt = PayjoinMethods.OriginalPsbt();
+        using var builder = new SenderBuilder(psbt, uri);
+
+        var ex = Assert.Throws<SenderInputException.FfiValidation>(() =>
+        {
+            builder.BuildWithAdditionalFee(21_000_000UL * 100_000_000UL + 1, null, 1000, false);
+        });
+
+        Assert.IsType<FfiValidationException.AmountOutOfRange>(ex.v1);
+    }
+
+    [Fact]
+    public void SenderBuilderWithAdditionalFeeRejectsFeeRateOverflow()
+    {
+        using var uri = CreateV2PjUri();
+        var psbt = PayjoinMethods.OriginalPsbt();
+        using var builder = new SenderBuilder(psbt, uri);
+
+        var ex = Assert.Throws<SenderInputException.FfiValidation>(() =>
+        {
+            builder.BuildWithAdditionalFee(1, null, ulong.MaxValue, false);
+        });
+
+        Assert.IsType<FfiValidationException.FeeRateOutOfRange>(ex.v1);
+    }
+
+    [Fact]
+    public void SenderBuilderNonIncentivizingRejectsFeeRateOverflow()
+    {
+        using var uri = CreateV2PjUri();
+        var psbt = PayjoinMethods.OriginalPsbt();
+        using var builder = new SenderBuilder(psbt, uri);
+
+        var ex = Assert.Throws<SenderInputException.FfiValidation>(() =>
+        {
+            builder.BuildNonIncentivizing(ulong.MaxValue);
+        });
+
+        Assert.IsType<FfiValidationException.FeeRateOutOfRange>(ex.v1);
     }
 }

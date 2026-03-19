@@ -1254,6 +1254,8 @@ impl HasReplyableErrorTransition {
 
 #[uniffi::export]
 impl HasReplyableError {
+    pub fn error_reply(&self) -> JsonReply { self.0.error_reply().clone().into() }
+
     pub fn create_error_request(
         &self,
         ohttp_relay: String,

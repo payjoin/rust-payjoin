@@ -1,3 +1,4 @@
+import json
 import unittest
 import payjoin
 
@@ -228,6 +229,42 @@ class TestValidation(unittest.TestCase):
         ).check_pj_supported()
         with self.assertRaises(payjoin.SenderInputError):
             payjoin.SenderBuilder("not-a-psbt", uri)
+
+
+class TestJsonReplyAccessors(unittest.TestCase):
+    def test_json_reply_round_trips_supported_versions(self):
+        reply = payjoin.JsonReply.from_json(
+            json.dumps(
+                {
+                    "errorCode": "version-unsupported",
+                    "message": "custom message here",
+                    "supported": [1, 2],
+                    "debug": "keep-me",
+                }
+            )
+        )
+
+        self.assertEqual(reply.error_code(), "version-unsupported")
+        self.assertEqual(reply.message(), "custom message here")
+        self.assertEqual(reply.status_code(), 400)
+        self.assertEqual(reply.supported_versions(), [1, 2])
+        self.assertEqual(
+            json.loads(reply.to_json()),
+            {
+                "errorCode": "version-unsupported",
+                "message": "custom message here",
+                "supported": [1, 2],
+                "debug": "keep-me",
+            },
+        )
+
+    def test_json_reply_accepts_legacy_supported_string(self):
+        reply = payjoin.JsonReply.from_json(
+            '{"errorCode":"version-unsupported","message":"custom message here","supported":"[1,2]"}'
+        )
+
+        self.assertEqual(reply.supported_versions(), [1, 2])
+        self.assertEqual(json.loads(reply.to_json())["supported"], [1, 2])
 
 
 if __name__ == "__main__":

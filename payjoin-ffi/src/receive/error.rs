@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use payjoin::receive;
 
-use crate::error::{FfiValidationError, ImplementationError};
+use crate::error::{FfiValidationError, ImplementationError, SerdeJsonError};
 use crate::uri::error::IntoUrlError;
 
 /// The top-level error type for the payjoin receiver
@@ -161,6 +161,27 @@ impl From<receive::JsonReply> for JsonReply {
 
 impl From<ProtocolError> for JsonReply {
     fn from(value: ProtocolError) -> Self { Self((&value.0).into()) }
+}
+
+#[uniffi::export]
+impl JsonReply {
+    #[uniffi::constructor]
+    pub fn from_json(json: String) -> Result<Self, SerdeJsonError> {
+        let value: serde_json::Value = serde_json::from_str(&json)?;
+        receive::JsonReply::from_json(value).map(Self).map_err(Into::into)
+    }
+
+    pub fn to_json(&self) -> Result<String, SerdeJsonError> {
+        serde_json::to_string(&self.0.to_json()).map_err(Into::into)
+    }
+
+    pub fn error_code(&self) -> String { self.0.error_code() }
+
+    pub fn message(&self) -> String { self.0.message().to_string() }
+
+    pub fn supported_versions(&self) -> Option<Vec<u64>> { self.0.supported_versions() }
+
+    pub fn status_code(&self) -> u16 { self.0.status_code() }
 }
 
 /// Error that may occur during a v2 session typestate change

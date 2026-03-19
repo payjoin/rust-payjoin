@@ -1,4 +1,7 @@
+use std::str::FromStr;
 use std::{error, fmt};
+
+use serde::Deserialize;
 
 use crate::error_codes::ErrorCode::{
     self, NotEnoughMoney, OriginalPsbtRejected, Unavailable, VersionUnsupported,
@@ -93,6 +96,47 @@ impl JsonReply {
         Self { error_code, message: message.to_string(), extra: serde_json::Map::new() }
     }
 
+    /// Parse a reply from the BIP78 wire JSON shape.
+    pub fn from_json(json: serde_json::Value) -> Result<Self, serde_json::Error> {
+        #[derive(serde::Deserialize)]
+        struct WireJsonReply {
+            #[serde(rename = "errorCode")]
+            error_code: String,
+            message: String,
+            #[serde(default, deserialize_with = "deserialize_supported_versions")]
+            supported: Option<Vec<u64>>,
+            #[serde(flatten)]
+            extra: serde_json::Map<String, serde_json::Value>,
+        }
+
+        fn deserialize_supported_versions<'de, D>(
+            deserializer: D,
+        ) -> Result<Option<Vec<u64>>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            use serde::de::Error as _;
+
+            let supported = Option::<serde_json::Value>::deserialize(deserializer)?;
+            parse_supported_versions_value(supported.as_ref()).map_err(D::Error::custom)
+        }
+
+        let wire: WireJsonReply = serde_json::from_value(json)?;
+        let error_code = ErrorCode::from_str(&wire.error_code).map_err(|()| {
+            <serde_json::Error as serde::de::Error>::custom(format!(
+                "invalid errorCode: {}",
+                wire.error_code
+            ))
+        })?;
+
+        let mut reply = Self::new(error_code, wire.message);
+        if let Some(supported) = wire.supported {
+            reply = reply.with_extra("supported", serde_json::to_value(supported)?);
+        }
+        reply.extra.extend(wire.extra);
+        Ok(reply)
+    }
+
     /// Add an additional field to the JSON response
     pub fn with_extra(mut self, key: &str, value: impl Into<serde_json::Value>) -> Self {
         self.extra.insert(key.to_string(), value.into());
@@ -118,6 +162,45 @@ impl JsonReply {
             | ErrorCode::OriginalPsbtRejected => http::StatusCode::BAD_REQUEST,
         }
         .as_u16()
+    }
+
+    /// Return the wire-format error code, such as `version-unsupported`.
+    pub fn error_code(&self) -> String { self.error_code.to_string() }
+
+    /// Return the human-readable message.
+    pub fn message(&self) -> &str { &self.message }
+
+    /// Return the supported versions when present.
+    pub fn supported_versions(&self) -> Option<Vec<u64>> {
+        self.extra
+            .get("supported")
+            .and_then(|value| parse_supported_versions_value(Some(value)).ok().flatten())
+    }
+}
+
+fn parse_supported_versions_value(
+    value: Option<&serde_json::Value>,
+) -> Result<Option<Vec<u64>>, String> {
+    use serde_json::Value;
+
+    let Some(value) = value else {
+        return Ok(None);
+    };
+
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .map(|item| {
+                item.as_u64()
+                    .ok_or_else(|| "supported versions must be an array of u64 values".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some),
+        // Backward compatibility for the old broken wire shape where `supported`
+        // was serialized as a JSON string containing the array.
+        Value::String(json) =>
+            serde_json::from_str::<Vec<u64>>(json).map(Some).map_err(|err| err.to_string()),
+        other => Err(format!("unsupported versions must be an array or JSON string, got {other}")),
     }
 }
 
@@ -235,12 +318,12 @@ impl From<&PayloadError> for JsonReply {
             FeeTooHigh(_, _) => JsonReply::new(NotEnoughMoney, e),
 
             SenderParams(e) => match e {
-                super::optional_parameters::Error::UnknownVersion { supported_versions } => {
-                    let supported_versions_json =
-                        serde_json::to_string(supported_versions).unwrap_or_default();
+                super::optional_parameters::Error::UnknownVersion { supported_versions } =>
                     JsonReply::new(VersionUnsupported, "This version of payjoin is not supported.")
-                        .with_extra("supported", supported_versions_json)
-                }
+                        .with_extra(
+                            "supported",
+                            serde_json::to_value(supported_versions).unwrap_or_default(),
+                        ),
                 super::optional_parameters::Error::FeeRate =>
                     JsonReply::new(OriginalPsbtRejected, e),
             },
@@ -503,5 +586,44 @@ mod tests {
         let json = reply.to_json();
         assert_eq!(json["errorCode"], "original-psbt-rejected");
         assert_eq!(json["message"], "Missing payment.");
+    }
+
+    #[test]
+    fn test_json_reply_supported_versions_are_arrays() {
+        let supported_versions = &[crate::Version::One, crate::Version::Two];
+        let reply = JsonReply::new(ErrorCode::VersionUnsupported, "unsupported")
+            .with_extra("supported", serde_json::to_value(supported_versions).unwrap());
+
+        assert_eq!(reply.supported_versions(), Some(vec![1, 2]));
+        assert_eq!(
+            reply.to_json(),
+            serde_json::json!({
+                "errorCode": "version-unsupported",
+                "message": "unsupported",
+                "supported": [1, 2],
+            })
+        );
+    }
+
+    #[test]
+    fn test_json_reply_from_json_accepts_legacy_supported_string() {
+        let reply = JsonReply::from_json(serde_json::json!({
+            "errorCode": "version-unsupported",
+            "message": "unsupported",
+            "supported": "[1,2]",
+        }))
+        .expect("legacy supported string should parse");
+
+        assert_eq!(reply.error_code(), "version-unsupported");
+        assert_eq!(reply.message(), "unsupported");
+        assert_eq!(reply.supported_versions(), Some(vec![1, 2]));
+        assert_eq!(
+            reply.to_json(),
+            serde_json::json!({
+                "errorCode": "version-unsupported",
+                "message": "unsupported",
+                "supported": [1, 2],
+            })
+        );
     }
 }

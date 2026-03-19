@@ -1172,6 +1172,9 @@ pub struct HasReplyableError {
 }
 
 impl Receiver<HasReplyableError> {
+    /// Return the replyable error payload that will be sent back to the sender.
+    pub fn error_reply(&self) -> &JsonReply { &self.state.error_reply }
+
     /// Construct an OHTTP Encapsulated HTTP POST request to return
     /// a Receiver Error Response
     pub fn create_error_request(

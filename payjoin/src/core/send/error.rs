@@ -330,6 +330,22 @@ impl fmt::Debug for ResponseError {
 
 impl ResponseError {
     pub(crate) fn from_json(json: serde_json::Value) -> Self {
+        fn supported_versions(json: &serde_json::Value) -> Vec<u64> {
+            let Some(supported) = json.as_object().and_then(|v| v.get("supported")) else {
+                return vec![];
+            };
+
+            if let Some(array) = supported.as_array() {
+                return array.iter().filter_map(|v| v.as_u64()).collect();
+            }
+
+            if let Some(json) = supported.as_str() {
+                return serde_json::from_str::<Vec<u64>>(json).unwrap_or_default();
+            }
+
+            vec![]
+        }
+
         let message = json
             .as_object()
             .and_then(|v| v.get("message"))
@@ -341,15 +357,8 @@ impl ResponseError {
 
         match error_code {
             Some(code) => match ErrorCode::from_str(code) {
-                Ok(ErrorCode::VersionUnsupported) => {
-                    let supported = json
-                        .as_object()
-                        .and_then(|v| v.get("supported"))
-                        .and_then(|v| v.as_array())
-                        .map(|array| array.iter().filter_map(|v| v.as_u64()).collect::<Vec<u64>>())
-                        .unwrap_or_default();
-                    WellKnownError::version_unsupported(message, supported).into()
-                }
+                Ok(ErrorCode::VersionUnsupported) =>
+                    WellKnownError::version_unsupported(message, supported_versions(&json)).into(),
                 Ok(code) => WellKnownError::new(code, message).into(),
                 Err(_) => Self::Unrecognized { error_code: code.to_string(), message },
             },
@@ -399,6 +408,15 @@ impl WellKnownError {
     pub(crate) fn version_unsupported(message: String, supported: Vec<u64>) -> Self {
         Self { code: ErrorCode::VersionUnsupported, message, supported_versions: Some(supported) }
     }
+
+    /// Return the wire-format error code, such as `version-unsupported`.
+    pub fn code(&self) -> String { self.code.to_string() }
+
+    /// Return the protocol message associated with the error.
+    pub fn message(&self) -> &str { &self.message }
+
+    /// Return the advertised supported versions when present.
+    pub fn supported_versions(&self) -> Option<Vec<u64>> { self.supported_versions.clone() }
 }
 
 #[cfg(test)]
@@ -410,10 +428,11 @@ mod tests {
     #[test]
     fn test_parse_json() {
         let known_str_error = r#"{"errorCode":"version-unsupported", "message":"custom message here", "supported": [1, 2]}"#;
-        match ResponseError::parse(known_str_error) {
+        match ResponseError::from_json(serde_json::from_str(known_str_error).unwrap()) {
             ResponseError::WellKnown(e) => {
                 assert_eq!(e.code, ErrorCode::VersionUnsupported);
                 assert_eq!(e.message, "custom message here");
+                assert_eq!(e.supported_versions(), Some(vec![1, 2]));
                 assert_eq!(
                     e.to_string(),
                     "This version of payjoin is not supported. Use version [1, 2]."
@@ -421,9 +440,18 @@ mod tests {
             }
             _ => panic!("Expected WellKnown error"),
         };
+        let legacy_supported_string = r#"{"errorCode":"version-unsupported", "message":"custom message here", "supported": "[1,2]"}"#;
+        match ResponseError::from_json(serde_json::from_str(legacy_supported_string).unwrap()) {
+            ResponseError::WellKnown(e) => {
+                assert_eq!(e.code(), "version-unsupported");
+                assert_eq!(e.message(), "custom message here");
+                assert_eq!(e.supported_versions(), Some(vec![1, 2]));
+            }
+            _ => panic!("Expected WellKnown error"),
+        };
         let unrecognized_error = r#"{"errorCode":"random", "message":"random"}"#;
         assert!(matches!(
-            ResponseError::parse(unrecognized_error),
+            ResponseError::from_json(serde_json::from_str(unrecognized_error).unwrap()),
             ResponseError::Unrecognized { .. }
         ));
         let invalid_json_error = json!({

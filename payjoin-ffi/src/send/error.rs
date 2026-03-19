@@ -109,6 +109,15 @@ impl From<send::ResponseError> for ResponseError {
 #[error(transparent)]
 pub struct WellKnownError(#[from] send::WellKnownError);
 
+#[uniffi::export]
+impl WellKnownError {
+    pub fn code(&self) -> String { self.0.code() }
+
+    pub fn message(&self) -> String { self.0.message().to_string() }
+
+    pub fn supported_versions(&self) -> Option<Vec<u64>> { self.0.supported_versions() }
+}
+
 /// Error that may occur when the sender session event log is replayed
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]

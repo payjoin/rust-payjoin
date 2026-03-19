@@ -8,7 +8,6 @@ namespace Payjoin.Tests
     public class IntegrationTests : IAsyncLifetime
     {
         private static string RpcCall(RpcClient rpc, string method, params string?[] args) => rpc.Call(method, args);
-        private BitcoindEnv? _env;
         private TestServices? _services;
         private HttpClient? _httpClient;
 
@@ -311,7 +310,6 @@ namespace Payjoin.Tests
         {
             _httpClient = new HttpClient();
             _services = TestServices.Initialize();
-            _env = PayjoinMethods.InitBitcoindSenderReceiver();
 
             return ValueTask.CompletedTask;
         }
@@ -320,7 +318,6 @@ namespace Payjoin.Tests
         {
             _httpClient?.Dispose();
             _services?.Dispose();
-            _env?.Dispose();
 
             return ValueTask.CompletedTask;
         }
@@ -461,10 +458,10 @@ namespace Payjoin.Tests
         {
             var cancellationToken = TestContext.Current.CancellationToken;
 
-            Assert.NotNull(_env);
-            using var bitcoind = _env.GetBitcoind();
-            using var receiver = _env.GetReceiver();
-            using var sender = _env.GetSender();
+            using var env = PayjoinMethods.InitBitcoindSenderReceiver();
+            using var bitcoind = env.GetBitcoind();
+            using var receiver = env.GetReceiver();
+            using var sender = env.GetSender();
 
             var receiverAddressJson = RpcCall(receiver, "getnewaddress");
             var receiverAddress = JsonSerializer.Deserialize<string>(receiverAddressJson)!;

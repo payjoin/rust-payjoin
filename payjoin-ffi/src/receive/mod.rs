@@ -25,6 +25,11 @@ use crate::{ClientResponse, OutputSubstitution, Request};
 
 pub mod error;
 
+#[cfg(feature = "async_callbacks")]
+mod async_callbacks;
+#[cfg(feature = "async_callbacks")]
+pub use async_callbacks::*;
+
 macro_rules! impl_save_for_transition {
     ($ty:ident, $next_state:ident) => {
         #[uniffi::export]

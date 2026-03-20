@@ -17,6 +17,20 @@ impl From<ImplementationError> for payjoin::ImplementationError {
     fn from(value: ImplementationError) -> Self { value.0 }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ReplayErrorKind {
+    NoEvents,
+    InvalidEvent,
+    Expired,
+    PersistenceFailure,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ReplayInvalidEventKind {
+    InitialEvent,
+    SessionTransition,
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error("Error de/serializing JSON object: {0}")]
 pub struct SerdeJsonError(#[from] serde_json::Error);

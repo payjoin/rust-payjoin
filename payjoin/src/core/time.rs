@@ -51,6 +51,9 @@ impl Time {
         buf
     }
 
+    /// Encode as a UNIX timestamp in seconds.
+    pub(crate) fn to_unix_seconds(self) -> u32 { self.0.to_consensus_u32() }
+
     /// Check if the time is in the past.
     pub(crate) fn elapsed(self) -> bool { self <= Self::now() }
 }

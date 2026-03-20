@@ -38,9 +38,7 @@ macro_rules! impl_save_for_transition {
 
                 let value = inner.take().expect("Already saved or moved");
 
-                let res = value
-                    .save(&adapter)
-                    .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
+                let res = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
                 Ok(res.into())
             }
 
@@ -55,10 +53,7 @@ macro_rules! impl_save_for_transition {
                     inner.take().expect("Already saved or moved")
                 };
 
-                let res = value
-                    .save_async(&adapter)
-                    .await
-                    .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
+                let res = value.save_async(&adapter).await.map_err(ReceiverPersistedError::from)?;
                 Ok(res.into())
             }
         }
@@ -1186,7 +1181,7 @@ impl PayjoinProposal {
     }
 }
 
-#[derive(Clone, uniffi::Object)]
+#[derive(Debug, Clone, uniffi::Object)]
 pub struct HasReplyableError(
     pub payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>,
 );

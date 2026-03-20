@@ -598,12 +598,57 @@ pub struct PersistedError<
     ErrorState: fmt::Debug = (),
 >(InternalPersistedError<ApiError, StorageError, ErrorState>);
 
+/// High-level persisted error classification for session transitions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistedErrorKind {
+    Storage,
+    Transient,
+    Fatal,
+    FatalWithState,
+}
+
+/// Stable public decomposition of a persisted transition failure.
+#[derive(Debug)]
+pub enum PersistedErrorVariant<ApiErr, StorageErr, ErrorState = ()>
+where
+    ApiErr: std::error::Error,
+    StorageErr: std::error::Error,
+    ErrorState: fmt::Debug,
+{
+    Storage(StorageErr),
+    Transient(ApiErr),
+    Fatal(ApiErr),
+    FatalWithState(ApiErr, ErrorState),
+}
+
 impl<ApiErr, StorageErr, ErrorState> PersistedError<ApiErr, StorageErr, ErrorState>
 where
     StorageErr: std::error::Error,
     ApiErr: std::error::Error,
     ErrorState: fmt::Debug,
 {
+    pub fn kind(&self) -> PersistedErrorKind {
+        match &self.0 {
+            InternalPersistedError::Storage(_) => PersistedErrorKind::Storage,
+            InternalPersistedError::Api(ApiError::Transient(_)) => PersistedErrorKind::Transient,
+            InternalPersistedError::Api(ApiError::Fatal(_)) => PersistedErrorKind::Fatal,
+            InternalPersistedError::Api(ApiError::FatalWithState(_, _)) =>
+                PersistedErrorKind::FatalWithState,
+        }
+    }
+
+    pub fn into_variant(self) -> PersistedErrorVariant<ApiErr, StorageErr, ErrorState> {
+        match self.0 {
+            InternalPersistedError::Storage(error) => PersistedErrorVariant::Storage(error),
+            InternalPersistedError::Api(ApiError::Transient(error)) =>
+                PersistedErrorVariant::Transient(error),
+            InternalPersistedError::Api(ApiError::Fatal(error)) =>
+                PersistedErrorVariant::Fatal(error),
+            InternalPersistedError::Api(ApiError::FatalWithState(error, state)) =>
+                PersistedErrorVariant::FatalWithState(error, state),
+        }
+    }
+
     #[allow(dead_code)]
     pub fn storage_error(self) -> Option<StorageErr> {
         match self.0 {
@@ -1446,5 +1491,48 @@ mod tests {
         );
         assert!(transient_error.storage_error_ref().is_none());
         assert!(transient_error.api_error_ref().is_some());
+    }
+
+    #[test]
+    fn test_persisted_error_kind_and_variant() {
+        let storage_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
+            InternalPersistedError::Storage(InMemoryTestError {}),
+        );
+        assert_eq!(storage_error.kind(), PersistedErrorKind::Storage);
+        match storage_error.into_variant() {
+            PersistedErrorVariant::Storage(_) => {}
+            other => panic!("unexpected storage variant: {other:?}"),
+        }
+
+        let transient_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
+            InternalPersistedError::Api(ApiError::Transient(InMemoryTestError {})),
+        );
+        assert_eq!(transient_error.kind(), PersistedErrorKind::Transient);
+        match transient_error.into_variant() {
+            PersistedErrorVariant::Transient(_) => {}
+            other => panic!("unexpected transient variant: {other:?}"),
+        }
+
+        let fatal_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
+            InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})),
+        );
+        assert_eq!(fatal_error.kind(), PersistedErrorKind::Fatal);
+        match fatal_error.into_variant() {
+            PersistedErrorVariant::Fatal(_) => {}
+            other => panic!("unexpected fatal variant: {other:?}"),
+        }
+
+        let fatal_with_state_error = PersistedError::<
+            InMemoryTestError,
+            InMemoryTestError,
+            &'static str,
+        >(InternalPersistedError::Api(
+            ApiError::FatalWithState(InMemoryTestError {}, "replyable"),
+        ));
+        assert_eq!(fatal_with_state_error.kind(), PersistedErrorKind::FatalWithState);
+        match fatal_with_state_error.into_variant() {
+            PersistedErrorVariant::FatalWithState(_, "replyable") => {}
+            other => panic!("unexpected fatal-with-state variant: {other:?}"),
+        }
     }
 }

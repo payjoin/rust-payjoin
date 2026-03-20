@@ -14,8 +14,37 @@ use crate::time::Time;
 #[derive(Debug)]
 pub struct SessionError(pub(super) InternalSessionError);
 
+/// A stable classification for BIP 77 v2 session errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SessionErrorKind {
+    /// URL parsing failed.
+    ParseUrl,
+    /// The session expired.
+    Expired,
+    /// OHTTP encapsulation failed.
+    OhttpEncapsulation,
+    /// HPKE processing failed.
+    Hpke,
+    /// The directory returned a malformed or unexpected response.
+    DirectoryResponse,
+}
+
 impl From<InternalSessionError> for SessionError {
     fn from(value: InternalSessionError) -> Self { SessionError(value) }
+}
+
+impl SessionError {
+    /// Returns the stable classification of the session error.
+    pub fn kind(&self) -> SessionErrorKind {
+        match &self.0 {
+            InternalSessionError::ParseUrl(_) => SessionErrorKind::ParseUrl,
+            InternalSessionError::Expired(_) => SessionErrorKind::Expired,
+            InternalSessionError::OhttpEncapsulation(_) => SessionErrorKind::OhttpEncapsulation,
+            InternalSessionError::Hpke(_) => SessionErrorKind::Hpke,
+            InternalSessionError::DirectoryResponse(_) => SessionErrorKind::DirectoryResponse,
+        }
+    }
 }
 
 impl From<InternalSessionError> for Error {
@@ -71,5 +100,18 @@ impl error::Error for SessionError {
             Hpke(e) => Some(e),
             DirectoryResponse(e) => Some(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_error_kind_accessor() {
+        let expiration = Time::now();
+        let error = SessionError::from(InternalSessionError::Expired(expiration));
+
+        assert_eq!(error.kind(), SessionErrorKind::Expired);
     }
 }

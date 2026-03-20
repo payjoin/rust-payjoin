@@ -68,6 +68,66 @@ pub enum ProtocolError {
     V2(crate::receive::v2::SessionError),
 }
 
+/// A stable classification for receiver protocol errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ProtocolErrorKind {
+    /// The sender's original PSBT payload was invalid.
+    OriginalPayload,
+    /// The receiver rejected the incoming BIP 78 v1 request.
+    #[cfg(feature = "v1")]
+    V1Request,
+    /// The receiver session failed before a replyable error could be produced.
+    #[cfg(feature = "v2")]
+    V2Session,
+}
+
+impl ProtocolError {
+    /// Returns the stable classification of the protocol error.
+    pub fn kind(&self) -> ProtocolErrorKind {
+        match self {
+            Self::OriginalPayload(_) => ProtocolErrorKind::OriginalPayload,
+            #[cfg(feature = "v1")]
+            Self::V1(_) => ProtocolErrorKind::V1Request,
+            #[cfg(feature = "v2")]
+            Self::V2(_) => ProtocolErrorKind::V2Session,
+        }
+    }
+
+    /// Returns the original payload validation error, if present.
+    pub fn payload_error(&self) -> Option<&PayloadError> {
+        match self {
+            Self::OriginalPayload(error) => Some(error),
+            #[cfg(feature = "v1")]
+            Self::V1(_) => None,
+            #[cfg(feature = "v2")]
+            Self::V2(_) => None,
+        }
+    }
+
+    /// Returns the BIP 78 v1 request validation error, if present.
+    #[cfg(feature = "v1")]
+    pub fn request_error(&self) -> Option<&crate::receive::v1::RequestError> {
+        match self {
+            Self::OriginalPayload(_) => None,
+            Self::V1(error) => Some(error),
+            #[cfg(feature = "v2")]
+            Self::V2(_) => None,
+        }
+    }
+
+    /// Returns the BIP 77 v2 session error, if present.
+    #[cfg(feature = "v2")]
+    pub fn session_error(&self) -> Option<&crate::receive::v2::SessionError> {
+        match self {
+            Self::OriginalPayload(_) => None,
+            #[cfg(feature = "v1")]
+            Self::V1(_) => None,
+            Self::V2(error) => Some(error),
+        }
+    }
+}
+
 /// The standard format for errors that can be replied as JSON.
 ///
 /// The JSON output includes the following fields:
@@ -182,6 +242,70 @@ pub struct PayloadError(pub(crate) InternalPayloadError);
 
 impl From<InternalPayloadError> for PayloadError {
     fn from(value: InternalPayloadError) -> Self { PayloadError(value) }
+}
+
+/// A stable classification for receiver payload validation errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PayloadErrorKind {
+    /// The payload bytes were not valid UTF-8.
+    InvalidUtf8,
+    /// The payload bytes were not a valid PSBT.
+    InvalidPsbt,
+    /// The sender requested an unsupported payjoin version.
+    UnsupportedVersion,
+    /// The sender supplied an invalid fee rate parameter.
+    InvalidSenderFeeRate,
+    /// The PSBT violated payjoin-specific invariants.
+    InconsistentPsbt,
+    /// The PSBT was missing previous transaction output data.
+    PrevTxOut,
+    /// The PSBT did not pay the receiver.
+    MissingPayment,
+    /// The original PSBT cannot be broadcast as a fallback transaction.
+    OriginalPsbtNotBroadcastable,
+    /// The sender attempted to spend a receiver-owned input.
+    InputOwned,
+    /// The original PSBT reused an input already seen before.
+    InputSeen,
+    /// The original PSBT fee rate was below the receiver minimum.
+    PsbtBelowFeeRate,
+    /// The receiver contribution would exceed the configured fee ceiling.
+    FeeTooHigh,
+}
+
+impl PayloadError {
+    /// Returns the stable classification of the payload validation error.
+    pub fn kind(&self) -> PayloadErrorKind {
+        use InternalPayloadError::*;
+
+        match &self.0 {
+            Utf8(_) => PayloadErrorKind::InvalidUtf8,
+            ParsePsbt(_) => PayloadErrorKind::InvalidPsbt,
+            SenderParams(super::optional_parameters::Error::UnknownVersion { .. }) =>
+                PayloadErrorKind::UnsupportedVersion,
+            SenderParams(super::optional_parameters::Error::FeeRate) =>
+                PayloadErrorKind::InvalidSenderFeeRate,
+            InconsistentPsbt(_) => PayloadErrorKind::InconsistentPsbt,
+            PrevTxOut(_) => PayloadErrorKind::PrevTxOut,
+            MissingPayment => PayloadErrorKind::MissingPayment,
+            OriginalPsbtNotBroadcastable => PayloadErrorKind::OriginalPsbtNotBroadcastable,
+            InputOwned(_) => PayloadErrorKind::InputOwned,
+            InputSeen(_) => PayloadErrorKind::InputSeen,
+            PsbtBelowFeeRate(_, _) => PayloadErrorKind::PsbtBelowFeeRate,
+            FeeTooHigh(_, _) => PayloadErrorKind::FeeTooHigh,
+        }
+    }
+
+    /// Returns the supported versions when the sender requested an unsupported version.
+    pub fn supported_versions(&self) -> Option<Vec<u64>> {
+        match &self.0 {
+            InternalPayloadError::SenderParams(
+                super::optional_parameters::Error::UnknownVersion { supported_versions },
+            ) => Some(supported_versions.iter().map(|version| *version as u64).collect()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -434,7 +558,7 @@ impl From<InternalInputContributionError> for InputContributionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ImplementationError;
+    use crate::{ImplementationError, Version};
 
     #[test]
     fn test_json_reply_from_implementation_error() {
@@ -503,5 +627,33 @@ mod tests {
         let json = reply.to_json();
         assert_eq!(json["errorCode"], "original-psbt-rejected");
         assert_eq!(json["message"], "Missing payment.");
+    }
+
+    #[test]
+    fn test_protocol_error_accessors() {
+        let protocol_error =
+            ProtocolError::OriginalPayload(PayloadError(InternalPayloadError::MissingPayment));
+
+        assert_eq!(protocol_error.kind(), ProtocolErrorKind::OriginalPayload);
+        assert_eq!(
+            protocol_error.payload_error().expect("payload error should be present").kind(),
+            PayloadErrorKind::MissingPayment
+        );
+        #[cfg(feature = "v1")]
+        assert!(protocol_error.request_error().is_none());
+        #[cfg(feature = "v2")]
+        assert!(protocol_error.session_error().is_none());
+    }
+
+    #[test]
+    fn test_payload_error_supported_versions_accessor() {
+        let payload_error = PayloadError(InternalPayloadError::SenderParams(
+            crate::receive::optional_parameters::Error::UnknownVersion {
+                supported_versions: &[Version::One, Version::Two],
+            },
+        ));
+
+        assert_eq!(payload_error.kind(), PayloadErrorKind::UnsupportedVersion);
+        assert_eq!(payload_error.supported_versions(), Some(vec![1, 2]));
     }
 }

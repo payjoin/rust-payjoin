@@ -30,7 +30,7 @@ impl From<receive::Error> for ReceiverError {
         use ReceiverError::*;
 
         match value {
-            receive::Error::Protocol(e) => Protocol(Arc::new(ProtocolError(e))),
+            receive::Error::Protocol(e) => Protocol(Arc::new(e.into())),
             receive::Error::Implementation(e) =>
                 Implementation(Arc::new(ImplementationError::from(e))),
             _ => Unexpected,
@@ -135,9 +135,165 @@ impl From<payjoin::bitcoin::address::ParseError> for AddressParseError {
 /// 3. Support proper error propagation through the receiver stack
 /// 4. Provide errors according to BIP-78 JSON error specifications for return
 ///    after conversion into [`JsonReply`]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum ProtocolErrorKind {
+    OriginalPayload,
+    V1Request,
+    V2Session,
+    Other,
+}
+
+impl From<receive::ProtocolErrorKind> for ProtocolErrorKind {
+    fn from(value: receive::ProtocolErrorKind) -> Self {
+        match value {
+            receive::ProtocolErrorKind::OriginalPayload => Self::OriginalPayload,
+            receive::ProtocolErrorKind::V1Request => Self::V1Request,
+            receive::ProtocolErrorKind::V2Session => Self::V2Session,
+            _ => Self::Other,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum PayloadErrorKind {
+    InvalidUtf8,
+    InvalidPsbt,
+    UnsupportedVersion,
+    InvalidSenderFeeRate,
+    InconsistentPsbt,
+    PrevTxOut,
+    MissingPayment,
+    OriginalPsbtNotBroadcastable,
+    InputOwned,
+    InputSeen,
+    PsbtBelowFeeRate,
+    FeeTooHigh,
+    Other,
+}
+
+impl From<receive::PayloadErrorKind> for PayloadErrorKind {
+    fn from(value: receive::PayloadErrorKind) -> Self {
+        match value {
+            receive::PayloadErrorKind::InvalidUtf8 => Self::InvalidUtf8,
+            receive::PayloadErrorKind::InvalidPsbt => Self::InvalidPsbt,
+            receive::PayloadErrorKind::UnsupportedVersion => Self::UnsupportedVersion,
+            receive::PayloadErrorKind::InvalidSenderFeeRate => Self::InvalidSenderFeeRate,
+            receive::PayloadErrorKind::InconsistentPsbt => Self::InconsistentPsbt,
+            receive::PayloadErrorKind::PrevTxOut => Self::PrevTxOut,
+            receive::PayloadErrorKind::MissingPayment => Self::MissingPayment,
+            receive::PayloadErrorKind::OriginalPsbtNotBroadcastable =>
+                Self::OriginalPsbtNotBroadcastable,
+            receive::PayloadErrorKind::InputOwned => Self::InputOwned,
+            receive::PayloadErrorKind::InputSeen => Self::InputSeen,
+            receive::PayloadErrorKind::PsbtBelowFeeRate => Self::PsbtBelowFeeRate,
+            receive::PayloadErrorKind::FeeTooHigh => Self::FeeTooHigh,
+            _ => Self::Other,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum RequestErrorKind {
+    MissingHeader,
+    InvalidContentType,
+    InvalidContentLength,
+    ContentLengthMismatch,
+    Other,
+}
+
+impl From<receive::v1::RequestErrorKind> for RequestErrorKind {
+    fn from(value: receive::v1::RequestErrorKind) -> Self {
+        match value {
+            receive::v1::RequestErrorKind::MissingHeader => Self::MissingHeader,
+            receive::v1::RequestErrorKind::InvalidContentType => Self::InvalidContentType,
+            receive::v1::RequestErrorKind::InvalidContentLength => Self::InvalidContentLength,
+            receive::v1::RequestErrorKind::ContentLengthMismatch => Self::ContentLengthMismatch,
+            _ => Self::Other,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum SessionErrorKind {
+    ParseUrl,
+    Expired,
+    OhttpEncapsulation,
+    Hpke,
+    DirectoryResponse,
+    Other,
+}
+
+impl From<receive::v2::SessionErrorKind> for SessionErrorKind {
+    fn from(value: receive::v2::SessionErrorKind) -> Self {
+        match value {
+            receive::v2::SessionErrorKind::ParseUrl => Self::ParseUrl,
+            receive::v2::SessionErrorKind::Expired => Self::Expired,
+            receive::v2::SessionErrorKind::OhttpEncapsulation => Self::OhttpEncapsulation,
+            receive::v2::SessionErrorKind::Hpke => Self::Hpke,
+            receive::v2::SessionErrorKind::DirectoryResponse => Self::DirectoryResponse,
+            _ => Self::Other,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Object)]
-#[error(transparent)]
-pub struct ProtocolError(#[from] receive::ProtocolError);
+#[error("{message}")]
+pub struct ProtocolError {
+    kind: ProtocolErrorKind,
+    message: String,
+    reply: receive::JsonReply,
+    payload_error: Option<Arc<PayloadError>>,
+    request_error: Option<Arc<RequestError>>,
+    session_error: Option<Arc<SessionError>>,
+}
+
+impl From<receive::ProtocolError> for ProtocolError {
+    fn from(value: receive::ProtocolError) -> Self {
+        let kind = value.kind().into();
+        let message = value.to_string();
+        let reply = receive::JsonReply::from(&value);
+
+        match value {
+            receive::ProtocolError::OriginalPayload(error) => Self {
+                kind,
+                message,
+                reply,
+                payload_error: Some(Arc::new(error.into())),
+                request_error: None,
+                session_error: None,
+            },
+            receive::ProtocolError::V1(error) => Self {
+                kind,
+                message,
+                reply,
+                payload_error: None,
+                request_error: Some(Arc::new(error.into())),
+                session_error: None,
+            },
+            receive::ProtocolError::V2(error) => Self {
+                kind,
+                message,
+                reply,
+                payload_error: None,
+                request_error: None,
+                session_error: Some(Arc::new(error.into())),
+            },
+        }
+    }
+}
+
+#[uniffi::export]
+impl ProtocolError {
+    pub fn kind(&self) -> ProtocolErrorKind { self.kind }
+
+    pub fn message(&self) -> String { self.message.clone() }
+
+    pub fn payload_error(&self) -> Option<Arc<PayloadError>> { self.payload_error.clone() }
+
+    pub fn request_error(&self) -> Option<Arc<RequestError>> { self.request_error.clone() }
+
+    pub fn session_error(&self) -> Option<Arc<SessionError>> { self.session_error.clone() }
+}
 
 /// The standard format for errors that can be replied as JSON.
 ///
@@ -160,13 +316,97 @@ impl From<receive::JsonReply> for JsonReply {
 }
 
 impl From<ProtocolError> for JsonReply {
-    fn from(value: ProtocolError) -> Self { Self((&value.0).into()) }
+    fn from(value: ProtocolError) -> Self { Self(value.reply) }
 }
 
 /// Error that may occur during a v2 session typestate change
 #[derive(Debug, thiserror::Error, uniffi::Object)]
-#[error(transparent)]
-pub struct SessionError(#[from] receive::v2::SessionError);
+#[error("{message}")]
+pub struct SessionError {
+    kind: SessionErrorKind,
+    message: String,
+}
+
+impl From<receive::v2::SessionError> for SessionError {
+    fn from(value: receive::v2::SessionError) -> Self {
+        Self { kind: value.kind().into(), message: value.to_string() }
+    }
+}
+
+#[uniffi::export]
+impl SessionError {
+    pub fn kind(&self) -> SessionErrorKind { self.kind }
+
+    pub fn message(&self) -> String { self.message.clone() }
+}
+
+/// Receiver original payload validation error exposed over FFI.
+#[derive(Debug, thiserror::Error, uniffi::Object)]
+#[error("{message}")]
+pub struct PayloadError {
+    kind: PayloadErrorKind,
+    message: String,
+    supported_versions: Option<Vec<u64>>,
+}
+
+impl From<receive::PayloadError> for PayloadError {
+    fn from(value: receive::PayloadError) -> Self {
+        Self {
+            kind: value.kind().into(),
+            message: value.to_string(),
+            supported_versions: value.supported_versions(),
+        }
+    }
+}
+
+#[uniffi::export]
+impl PayloadError {
+    pub fn kind(&self) -> PayloadErrorKind { self.kind }
+
+    pub fn message(&self) -> String { self.message.clone() }
+
+    pub fn supported_versions(&self) -> Option<Vec<u64>> { self.supported_versions.clone() }
+}
+
+/// Receiver v1 request validation error exposed over FFI.
+#[derive(Debug, thiserror::Error, uniffi::Object)]
+#[error("{message}")]
+pub struct RequestError {
+    kind: RequestErrorKind,
+    message: String,
+    header_name: Option<String>,
+    invalid_content_type: Option<String>,
+    expected_content_length: Option<u64>,
+    actual_content_length: Option<u64>,
+}
+
+impl From<receive::v1::RequestError> for RequestError {
+    fn from(value: receive::v1::RequestError) -> Self {
+        Self {
+            kind: value.kind().into(),
+            message: value.to_string(),
+            header_name: value.header_name().map(str::to_owned),
+            invalid_content_type: value.invalid_content_type().map(str::to_owned),
+            expected_content_length: value.expected_content_length().map(|value| value as u64),
+            actual_content_length: value.actual_content_length().map(|value| value as u64),
+        }
+    }
+}
+
+#[uniffi::export]
+impl RequestError {
+    pub fn kind(&self) -> RequestErrorKind { self.kind }
+
+    pub fn message(&self) -> String { self.message.clone() }
+
+    pub fn header_name(&self) -> Option<String> { self.header_name.clone() }
+
+    pub fn invalid_content_type(&self) -> Option<String> { self.invalid_content_type.clone() }
+
+    pub fn expected_content_length(&self) -> Option<u64> { self.expected_content_length }
+
+    pub fn actual_content_length(&self) -> Option<u64> { self.actual_content_length }
+}
 
 /// Protocol error raised during output substitution.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
@@ -237,3 +477,68 @@ impl From<FfiValidationError> for InputPairError {
 pub struct ReceiverReplayError(
     #[from] payjoin::error::ReplayError<receive::v2::ReceiveSession, receive::v2::SessionEvent>,
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestHeaders {
+        content_type: Option<&'static str>,
+        content_length: Option<String>,
+    }
+
+    impl receive::v1::Headers for TestHeaders {
+        fn get_header(&self, key: &str) -> Option<&str> {
+            match key {
+                "content-type" => self.content_type,
+                "content-length" => self.content_length.as_deref(),
+                _ => None,
+            }
+        }
+    }
+
+    #[test]
+    fn test_receiver_error_exposes_payload_kind() {
+        let body = b"not-a-psbt";
+        let headers = TestHeaders {
+            content_type: Some("text/plain"),
+            content_length: Some(body.len().to_string()),
+        };
+        let error = receive::v1::UncheckedOriginalPayload::from_request(body, "", headers)
+            .expect_err("invalid PSBT should fail");
+
+        let ReceiverError::Protocol(protocol) = ReceiverError::from(error) else {
+            panic!("expected protocol error");
+        };
+
+        assert_eq!(protocol.kind(), ProtocolErrorKind::OriginalPayload);
+        assert_eq!(
+            protocol.payload_error().expect("payload error should be present").kind(),
+            PayloadErrorKind::InvalidPsbt
+        );
+        assert!(protocol.request_error().is_none());
+        assert!(protocol.session_error().is_none());
+    }
+
+    #[test]
+    fn test_receiver_error_exposes_request_details() {
+        let body = b"abc";
+        let headers = TestHeaders {
+            content_type: Some("text/plain"),
+            content_length: Some((body.len() + 1).to_string()),
+        };
+        let error = receive::v1::UncheckedOriginalPayload::from_request(body, "", headers)
+            .expect_err("content length mismatch should fail");
+
+        let ReceiverError::Protocol(protocol) = ReceiverError::from(error) else {
+            panic!("expected protocol error");
+        };
+
+        assert_eq!(protocol.kind(), ProtocolErrorKind::V1Request);
+        let request = protocol.request_error().expect("request error should be present");
+        assert_eq!(request.kind(), RequestErrorKind::ContentLengthMismatch);
+        assert_eq!(request.expected_content_length(), Some((body.len() + 1) as u64));
+        assert_eq!(request.actual_content_length(), Some(body.len() as u64));
+        assert!(protocol.payload_error().is_none());
+    }
+}

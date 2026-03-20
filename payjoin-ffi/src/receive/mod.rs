@@ -3,8 +3,9 @@ use std::sync::{Arc, RwLock};
 
 pub use error::{
     AddressParseError, InputContributionError, InputPairError, JsonReply, OutputSubstitutionError,
-    ProtocolError, PsbtInputError, ReceiverBuilderError, ReceiverError, SelectionError,
-    SessionError,
+    PayloadError, PayloadErrorKind, ProtocolError, ProtocolErrorKind, PsbtInputError,
+    ReceiverBuilderError, ReceiverError, RequestError, RequestErrorKind, SelectionError,
+    SessionError, SessionErrorKind,
 };
 use payjoin::bitcoin::consensus::Decodable;
 use payjoin::bitcoin::psbt::Psbt;

@@ -34,7 +34,7 @@
 mod error;
 use bitcoin::OutPoint;
 pub(crate) use error::InternalRequestError;
-pub use error::RequestError;
+pub use error::{RequestError, RequestErrorKind};
 
 use super::*;
 pub use crate::receive::common::{WantsFeeRange, WantsInputs, WantsOutputs};

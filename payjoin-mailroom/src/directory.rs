@@ -18,7 +18,7 @@ const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
 const POLY1305_TAG_SIZE: usize = 16;
 pub const BHTTP_REQ_BYTES: usize =
     ENCAPSULATED_MESSAGE_BYTES - (CHACHA20_POLY1305_NONCE_LEN + POLY1305_TAG_SIZE);
-const V1_MAX_BUFFER_SIZE: usize = 65536;
+pub(crate) const MAX_PAYLOAD_SIZE: usize = 7168;
 
 const V1_REJECT_RES_JSON: &str =
     r#"{{"errorCode": "original-psbt-rejected ", "message": "Body is not a string"}}"#;
@@ -276,7 +276,7 @@ impl<D: Db> Service<D> {
             .await
             .map_err(|e| HandlerError::InternalServerError(e.into()))?
             .to_bytes();
-        if req.len() > V1_MAX_BUFFER_SIZE {
+        if req.len() > MAX_PAYLOAD_SIZE {
             return Err(HandlerError::PayloadTooLarge);
         }
         match self.db.post_v2_payload(&id, req.into()).await {
@@ -322,7 +322,7 @@ impl<D: Db> Service<D> {
             .await
             .map_err(|e| HandlerError::InternalServerError(e.into()))?
             .to_bytes();
-        if req.len() > V1_MAX_BUFFER_SIZE {
+        if req.len() > MAX_PAYLOAD_SIZE {
             return Err(HandlerError::PayloadTooLarge);
         }
 
@@ -356,6 +356,9 @@ impl<D: Db> Service<D> {
             Ok(bytes) => bytes.to_bytes(),
             Err(_) => return Ok(bad_request_body_res),
         };
+        if body_bytes.len() > MAX_PAYLOAD_SIZE {
+            return Err(HandlerError::PayloadTooLarge);
+        }
         let body_str = match String::from_utf8(body_bytes.to_vec()) {
             Ok(body_str) => body_str,
             Err(_) => return Ok(bad_request_body_res),

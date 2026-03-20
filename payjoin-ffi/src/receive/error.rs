@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use payjoin::receive;
 
+use super::PlainOutPoint;
 use crate::error::{FfiValidationError, ImplementationError};
 use crate::uri::error::IntoUrlError;
 
@@ -168,10 +169,66 @@ impl From<ProtocolError> for JsonReply {
 #[error(transparent)]
 pub struct SessionError(#[from] receive::v2::SessionError);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum OutputSubstitutionErrorKind {
+    DecreasedValueWhenDisabled,
+    ScriptPubKeyChangedWhenDisabled,
+    NotEnoughOutputs,
+    InvalidDrainScript,
+    Other,
+}
+
+impl From<receive::OutputSubstitutionErrorKind> for OutputSubstitutionErrorKind {
+    fn from(value: receive::OutputSubstitutionErrorKind) -> Self {
+        match value {
+            receive::OutputSubstitutionErrorKind::DecreasedValueWhenDisabled =>
+                Self::DecreasedValueWhenDisabled,
+            receive::OutputSubstitutionErrorKind::ScriptPubKeyChangedWhenDisabled =>
+                Self::ScriptPubKeyChangedWhenDisabled,
+            receive::OutputSubstitutionErrorKind::NotEnoughOutputs => Self::NotEnoughOutputs,
+            receive::OutputSubstitutionErrorKind::InvalidDrainScript => Self::InvalidDrainScript,
+            _ => Self::Other,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum InputContributionErrorKind {
+    ValueTooLow,
+    DuplicateInput,
+    Other,
+}
+
+impl From<receive::InputContributionErrorKind> for InputContributionErrorKind {
+    fn from(value: receive::InputContributionErrorKind) -> Self {
+        match value {
+            receive::InputContributionErrorKind::ValueTooLow => Self::ValueTooLow,
+            receive::InputContributionErrorKind::DuplicateInput => Self::DuplicateInput,
+            _ => Self::Other,
+        }
+    }
+}
+
 /// Protocol error raised during output substitution.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
-#[error(transparent)]
-pub struct OutputSubstitutionProtocolError(#[from] receive::OutputSubstitutionError);
+#[error("{message}")]
+pub struct OutputSubstitutionProtocolError {
+    kind: OutputSubstitutionErrorKind,
+    message: String,
+}
+
+impl From<receive::OutputSubstitutionError> for OutputSubstitutionProtocolError {
+    fn from(value: receive::OutputSubstitutionError) -> Self {
+        Self { kind: value.kind().into(), message: value.to_string() }
+    }
+}
+
+#[uniffi::export]
+impl OutputSubstitutionProtocolError {
+    pub fn kind(&self) -> OutputSubstitutionErrorKind { self.kind }
+
+    pub fn message(&self) -> String { self.message.clone() }
+}
 
 /// Error that may occur when output substitution fails.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -199,8 +256,33 @@ pub struct SelectionError(#[from] receive::SelectionError);
 
 /// Error that may occur when input contribution fails.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
-#[error(transparent)]
-pub struct InputContributionError(#[from] receive::InputContributionError);
+#[error("{message}")]
+pub struct InputContributionError {
+    kind: InputContributionErrorKind,
+    message: String,
+    duplicate_input_outpoint: Option<PlainOutPoint>,
+}
+
+impl From<receive::InputContributionError> for InputContributionError {
+    fn from(value: receive::InputContributionError) -> Self {
+        Self {
+            kind: value.kind().into(),
+            message: value.to_string(),
+            duplicate_input_outpoint: value.duplicate_input_outpoint().map(Into::into),
+        }
+    }
+}
+
+#[uniffi::export]
+impl InputContributionError {
+    pub fn kind(&self) -> InputContributionErrorKind { self.kind }
+
+    pub fn message(&self) -> String { self.message.clone() }
+
+    pub fn duplicate_input_outpoint(&self) -> Option<PlainOutPoint> {
+        self.duplicate_input_outpoint.clone()
+    }
+}
 
 /// Error validating a PSBT Input
 #[derive(Debug, thiserror::Error, uniffi::Object)]
@@ -237,3 +319,180 @@ impl From<FfiValidationError> for InputPairError {
 pub struct ReceiverReplayError(
     #[from] payjoin::error::ReplayError<receive::v2::ReceiveSession, receive::v2::SessionEvent>,
 );
+
+#[cfg(all(test, feature = "_test-utils"))]
+mod tests {
+    use std::str::FromStr;
+
+    use payjoin::bitcoin::{Address, Amount, Network, Psbt, ScriptBuf, TxOut};
+    use payjoin::receive::v1::{Headers, UncheckedOriginalPayload};
+    use payjoin_test_utils::{ORIGINAL_PSBT, QUERY_PARAMS, RECEIVER_INPUT_CONTRIBUTION};
+
+    use super::*;
+
+    struct TestHeaders {
+        content_type: Option<&'static str>,
+        content_length: String,
+    }
+
+    impl Headers for TestHeaders {
+        fn get_header(&self, key: &str) -> Option<&str> {
+            match key {
+                "content-type" => self.content_type,
+                "content-length" => Some(self.content_length.as_str()),
+                _ => None,
+            }
+        }
+    }
+
+    fn wants_outputs_from_test_vector() -> payjoin::receive::v1::WantsOutputs {
+        let body = ORIGINAL_PSBT.as_bytes();
+        let headers = TestHeaders {
+            content_type: Some("text/plain"),
+            content_length: body.len().to_string(),
+        };
+        let receiver_address = Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+            .expect("known address should parse")
+            .require_network(Network::Bitcoin)
+            .expect("known address should match network");
+
+        UncheckedOriginalPayload::from_request(body, QUERY_PARAMS, headers)
+            .expect("test vector should parse")
+            .assume_interactive_receiver()
+            .check_inputs_not_owned(&mut |_| Ok(false))
+            .expect("proposal should not spend receiver inputs")
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
+            .expect("proposal should not contain seen inputs")
+            .identify_receiver_outputs(&mut |script| {
+                Ok(Address::from_script(script, Network::Bitcoin)
+                    .expect("known script should decode")
+                    == receiver_address)
+            })
+            .expect("receiver output should be identified")
+    }
+
+    fn wants_inputs_from_test_vector() -> payjoin::receive::v1::WantsInputs {
+        wants_outputs_from_test_vector().commit_outputs()
+    }
+
+    fn receiver_output_from_test_vector() -> TxOut {
+        let receiver_script = Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
+            .expect("known address should parse")
+            .require_network(Network::Bitcoin)
+            .expect("known address should match network")
+            .script_pubkey();
+        let original = Psbt::from_str(ORIGINAL_PSBT).expect("known PSBT should parse");
+
+        original
+            .unsigned_tx
+            .output
+            .iter()
+            .find(|output| output.script_pubkey == receiver_script)
+            .cloned()
+            .expect("test vector should pay the receiver")
+    }
+
+    fn receiver_input_pair() -> payjoin::receive::InputPair {
+        let proposal_psbt =
+            Psbt::from_str(RECEIVER_INPUT_CONTRIBUTION).expect("known PSBT should parse");
+        payjoin::receive::InputPair::new(
+            proposal_psbt.unsigned_tx.input[1].clone(),
+            proposal_psbt.inputs[1].clone(),
+            None,
+        )
+        .expect("test vector input should be valid")
+    }
+
+    fn receiver_input_outpoint() -> PlainOutPoint {
+        let proposal_psbt =
+            Psbt::from_str(RECEIVER_INPUT_CONTRIBUTION).expect("known PSBT should parse");
+        PlainOutPoint::from(proposal_psbt.unsigned_tx.input[1].previous_output)
+    }
+
+    fn wants_inputs_with_minimum_contribution(
+        required_delta: Amount,
+    ) -> payjoin::receive::v1::WantsInputs {
+        let mut receiver_output = receiver_output_from_test_vector();
+        let drain_script = receiver_output.script_pubkey.clone();
+        receiver_output.value += required_delta;
+
+        wants_outputs_from_test_vector()
+            .replace_receiver_outputs(vec![receiver_output], &drain_script)
+            .expect("higher receiver output should be accepted")
+            .commit_outputs()
+    }
+
+    fn low_value_input_pair() -> payjoin::receive::InputPair {
+        let proposal_psbt =
+            Psbt::from_str(RECEIVER_INPUT_CONTRIBUTION).expect("known PSBT should parse");
+        let mut psbt_input = proposal_psbt.inputs[1].clone();
+        let mut witness_utxo =
+            psbt_input.witness_utxo.clone().expect("test vector input should include witness UTXO");
+        witness_utxo.value = Amount::from_sat(123);
+        psbt_input.witness_utxo = Some(witness_utxo);
+
+        payjoin::receive::InputPair::new(
+            proposal_psbt.unsigned_tx.input[1].clone(),
+            psbt_input,
+            None,
+        )
+        .expect("low-value test input should remain structurally valid")
+    }
+
+    #[test]
+    fn test_output_substitution_error_exposes_kind() {
+        let receiver_output = receiver_output_from_test_vector();
+        let missing_drain_script = ScriptBuf::new();
+        let error = wants_outputs_from_test_vector()
+            .replace_receiver_outputs(vec![receiver_output], &missing_drain_script)
+            .expect_err("missing drain script should fail");
+        let OutputSubstitutionError::Protocol(protocol) = OutputSubstitutionError::from(error)
+        else {
+            panic!("expected protocol substitution error");
+        };
+
+        assert_eq!(protocol.kind(), OutputSubstitutionErrorKind::InvalidDrainScript);
+        assert_eq!(
+            protocol.message(),
+            "The provided drain script could not be identified in the provided replacement outputs"
+        );
+    }
+
+    #[test]
+    fn test_input_contribution_error_exposes_duplicate_outpoint() {
+        let input = receiver_input_pair();
+        let contributed = wants_inputs_from_test_vector()
+            .contribute_inputs(vec![input.clone()])
+            .expect("first contribution should succeed");
+        let error = contributed
+            .contribute_inputs(vec![input])
+            .expect_err("duplicate contribution should fail");
+        let error = InputContributionError::from(error);
+        let expected_outpoint = receiver_input_outpoint();
+
+        assert_eq!(error.kind(), InputContributionErrorKind::DuplicateInput);
+        let outpoint =
+            error.duplicate_input_outpoint().expect("duplicate outpoint should be present");
+        assert_eq!(outpoint.txid, expected_outpoint.txid);
+        assert_eq!(outpoint.vout, expected_outpoint.vout);
+        assert_eq!(
+            error.message(),
+            format!("Duplicate input detected: {}:{}", outpoint.txid, outpoint.vout)
+        );
+    }
+
+    #[test]
+    fn test_input_contribution_error_exposes_value_too_low_kind() {
+        let error = wants_inputs_with_minimum_contribution(Amount::from_sat(1_000))
+            .contribute_inputs(vec![low_value_input_pair()])
+            .expect_err("low value contribution should fail");
+        let error = InputContributionError::from(error);
+
+        assert_eq!(error.kind(), InputContributionErrorKind::ValueTooLow);
+        assert!(error.duplicate_input_outpoint().is_none());
+        assert_eq!(
+            error.message(),
+            "Total input value is not enough to cover additional output value"
+        );
+    }
+}

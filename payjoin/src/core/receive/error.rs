@@ -299,10 +299,40 @@ impl std::error::Error for PayloadError {
 
 /// Error that may occur when output substitution fails.
 ///
-/// This is currently opaque type because we aren't sure which variants will stay.
-/// You can only display it.
+/// This type keeps its internal variants private, but exposes a stable
+/// classification via [`OutputSubstitutionError::kind`].
 #[derive(Debug, PartialEq)]
 pub struct OutputSubstitutionError(InternalOutputSubstitutionError);
+
+/// A stable classification for output substitution failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OutputSubstitutionErrorKind {
+    /// Output substitution is disabled and the receiver output value decreased.
+    DecreasedValueWhenDisabled,
+    /// Output substitution is disabled and the receiver output script changed.
+    ScriptPubKeyChangedWhenDisabled,
+    /// Fewer replacement outputs were provided than receiver-owned outputs.
+    NotEnoughOutputs,
+    /// The designated drain script was not present in the replacement outputs.
+    InvalidDrainScript,
+}
+
+impl OutputSubstitutionError {
+    /// Returns the stable classification of the substitution failure.
+    pub fn kind(&self) -> OutputSubstitutionErrorKind {
+        match &self.0 {
+            InternalOutputSubstitutionError::DecreasedValueWhenDisabled =>
+                OutputSubstitutionErrorKind::DecreasedValueWhenDisabled,
+            InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled =>
+                OutputSubstitutionErrorKind::ScriptPubKeyChangedWhenDisabled,
+            InternalOutputSubstitutionError::NotEnoughOutputs =>
+                OutputSubstitutionErrorKind::NotEnoughOutputs,
+            InternalOutputSubstitutionError::InvalidDrainScript =>
+                OutputSubstitutionErrorKind::InvalidDrainScript,
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalOutputSubstitutionError {
@@ -394,10 +424,39 @@ impl From<InternalSelectionError> for SelectionError {
 
 /// Error that may occur when input contribution fails.
 ///
-/// This is currently opaque type because we aren't sure which variants will stay.
-/// You can only display it.
+/// This type keeps its internal variants private, but exposes a stable
+/// classification via [`InputContributionError::kind`].
 #[derive(Debug, PartialEq, Eq)]
 pub struct InputContributionError(InternalInputContributionError);
+
+/// A stable classification for input contribution failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InputContributionErrorKind {
+    /// The contributed inputs did not cover the receiver's additional output value.
+    ValueTooLow,
+    /// The contributed inputs reused an outpoint already present in the transaction.
+    DuplicateInput,
+}
+
+impl InputContributionError {
+    /// Returns the stable classification of the contribution failure.
+    pub fn kind(&self) -> InputContributionErrorKind {
+        match &self.0 {
+            InternalInputContributionError::ValueTooLow => InputContributionErrorKind::ValueTooLow,
+            InternalInputContributionError::DuplicateInput(_) =>
+                InputContributionErrorKind::DuplicateInput,
+        }
+    }
+
+    /// Returns the duplicated outpoint when the failure was caused by reusing an input.
+    pub fn duplicate_input_outpoint(&self) -> Option<bitcoin::OutPoint> {
+        match &self.0 {
+            InternalInputContributionError::DuplicateInput(outpoint) => Some(*outpoint),
+            InternalInputContributionError::ValueTooLow => None,
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalInputContributionError {
@@ -503,5 +562,24 @@ mod tests {
         let json = reply.to_json();
         assert_eq!(json["errorCode"], "original-psbt-rejected");
         assert_eq!(json["message"], "Missing payment.");
+    }
+
+    #[test]
+    fn test_output_substitution_error_kind_accessor() {
+        let error = OutputSubstitutionError(InternalOutputSubstitutionError::InvalidDrainScript);
+
+        assert_eq!(error.kind(), OutputSubstitutionErrorKind::InvalidDrainScript);
+    }
+
+    #[test]
+    fn test_input_contribution_error_duplicate_input_accessor() {
+        let outpoint = "0000000000000000000000000000000000000000000000000000000000000000:3"
+            .parse()
+            .expect("known outpoint should parse");
+        let error =
+            InputContributionError(InternalInputContributionError::DuplicateInput(outpoint));
+
+        assert_eq!(error.kind(), InputContributionErrorKind::DuplicateInput);
+        assert_eq!(error.duplicate_input_outpoint(), Some(outpoint));
     }
 }

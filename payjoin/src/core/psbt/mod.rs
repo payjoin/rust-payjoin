@@ -347,6 +347,12 @@ pub struct PsbtInputsError {
     error: InternalPsbtInputError,
 }
 
+impl PsbtInputsError {
+    pub(crate) fn index(&self) -> usize { self.index }
+
+    pub(crate) fn error_message(&self) -> String { self.error.to_string() }
+}
+
 impl fmt::Display for PsbtInputsError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "invalid PSBT input #{}", self.index)

@@ -229,6 +229,35 @@ class TestValidation(unittest.TestCase):
         with self.assertRaises(payjoin.SenderInputError):
             payjoin.SenderBuilder("not-a-psbt", uri)
 
+    def test_sender_builder_exposes_invalid_original_input_index(self):
+        receiver_persister = InMemoryReceiverPersister(1)
+        receiver = (
+            payjoin.ReceiverBuilder(
+                "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+                "https://example.com",
+                payjoin.OhttpKeys.decode(
+                    bytes.fromhex(
+                        "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"
+                    )
+                ),
+            )
+            .build()
+            .save(receiver_persister)
+        )
+        uri = receiver.pj_uri()
+
+        with self.assertRaises(payjoin.SenderInputError.Build) as ctx:
+            payjoin.SenderBuilder(
+                payjoin.invalid_original_input_psbt(), uri
+            ).build_non_incentivizing(1000)
+
+        error = ctx.exception[0]
+        self.assertEqual(error.invalid_original_input_index(), 0)
+        self.assertEqual(
+            error.invalid_original_input_message(),
+            "invalid previous transaction output",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

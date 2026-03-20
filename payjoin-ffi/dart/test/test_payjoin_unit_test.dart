@@ -268,5 +268,35 @@ void main() {
         throwsA(isA<payjoin.SenderInputException>()),
       );
     });
+
+    test("Validation sender builder exposes invalid original input index", () {
+      final receiverPersister = InMemoryReceiverPersister("1");
+      final receiver = payjoin.ReceiverBuilder(
+        address: "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+        directory: "https://example.com",
+        ohttpKeys: payjoin.OhttpKeys.decode(
+          bytes: Uint8List.fromList(
+            hex.decode(
+              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
+            ),
+          ),
+        ),
+      ).build().save(persister: receiverPersister);
+      final uri = receiver.pjUri();
+
+      try {
+        payjoin.SenderBuilder(
+          psbt: payjoin.invalidOriginalInputPsbt(),
+          uri: uri,
+        ).buildNonIncentivizing(minFeeRate: 1000);
+        fail("expected sender build error");
+      } on payjoin.BuildSenderInputException catch (e) {
+        expect(e.v0.invalidOriginalInputIndex(), 0);
+        expect(
+          e.v0.invalidOriginalInputMessage(),
+          "invalid previous transaction output",
+        );
+      }
+    });
   });
 }

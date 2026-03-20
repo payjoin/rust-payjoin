@@ -1,7 +1,9 @@
 use std::io;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use lazy_static::lazy_static;
+use payjoin::bitcoin::Psbt;
 use payjoin_test_utils::corepc_node::AddressType;
 use payjoin_test_utils::{
     corepc_node, EXAMPLE_URL, INVALID_PSBT, ORIGINAL_PSBT, PAYJOIN_PROPOSAL,
@@ -203,6 +205,14 @@ pub fn original_psbt() -> String { ORIGINAL_PSBT.to_string() }
 
 #[uniffi::export]
 pub fn invalid_psbt() -> String { INVALID_PSBT.to_string() }
+
+#[uniffi::export]
+pub fn invalid_original_input_psbt() -> String {
+    let mut psbt = Psbt::from_str(ORIGINAL_PSBT).expect("original PSBT fixture should parse");
+    psbt.inputs[0].witness_utxo = None;
+    psbt.inputs[0].non_witness_utxo = None;
+    psbt.to_string()
+}
 
 #[uniffi::export]
 pub fn payjoin_proposal() -> String { PAYJOIN_PROPOSAL.to_string() }

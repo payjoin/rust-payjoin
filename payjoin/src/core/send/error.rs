@@ -40,6 +40,26 @@ impl From<crate::psbt::AddressTypeError> for BuildSenderError {
     }
 }
 
+impl BuildSenderError {
+    /// Returns the original PSBT input index when sender construction failed because one input
+    /// was malformed.
+    pub fn invalid_original_input_index(&self) -> Option<usize> {
+        match &self.0 {
+            InternalBuildSenderError::InvalidOriginalInput(error) => Some(error.index()),
+            _ => None,
+        }
+    }
+
+    /// Returns the nested invalid-input message when sender construction failed because one input
+    /// was malformed.
+    pub fn invalid_original_input_message(&self) -> Option<String> {
+        match &self.0 {
+            InternalBuildSenderError::InvalidOriginalInput(error) => Some(error.error_message()),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for BuildSenderError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use InternalBuildSenderError::*;
@@ -403,9 +423,28 @@ impl WellKnownError {
 
 #[cfg(test)]
 mod tests {
+    use payjoin_test_utils::PARSED_ORIGINAL_PSBT;
     use serde_json::json;
 
     use super::*;
+    use crate::psbt::PsbtExt;
+
+    #[test]
+    fn test_build_sender_error_invalid_original_input_accessors() {
+        let mut psbt = PARSED_ORIGINAL_PSBT.clone();
+        psbt.inputs[0].witness_utxo = None;
+        psbt.inputs[0].non_witness_utxo = None;
+
+        let invalid_input = psbt.validate_input_utxos().expect_err("PSBT should be invalid");
+        let error =
+            BuildSenderError::from(InternalBuildSenderError::InvalidOriginalInput(invalid_input));
+
+        assert_eq!(error.invalid_original_input_index(), Some(0));
+        assert_eq!(
+            error.invalid_original_input_message(),
+            Some("invalid previous transaction output".to_string())
+        );
+    }
 
     #[test]
     fn test_parse_json() {

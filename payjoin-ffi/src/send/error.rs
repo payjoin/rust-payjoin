@@ -12,14 +12,41 @@ use crate::error::{FfiValidationError, ImplementationError};
 #[error("Error initializing the sender: {msg}")]
 pub struct BuildSenderError {
     msg: String,
+    invalid_original_input_index: Option<u64>,
+    invalid_original_input_message: Option<String>,
 }
 
 impl From<PsbtParseError> for BuildSenderError {
-    fn from(value: PsbtParseError) -> Self { BuildSenderError { msg: value.to_string() } }
+    fn from(value: PsbtParseError) -> Self {
+        BuildSenderError {
+            msg: value.to_string(),
+            invalid_original_input_index: None,
+            invalid_original_input_message: None,
+        }
+    }
 }
 
 impl From<send::BuildSenderError> for BuildSenderError {
-    fn from(value: send::BuildSenderError) -> Self { BuildSenderError { msg: value.to_string() } }
+    fn from(value: send::BuildSenderError) -> Self {
+        BuildSenderError {
+            msg: value.to_string(),
+            invalid_original_input_index: value
+                .invalid_original_input_index()
+                .map(|index| index as u64),
+            invalid_original_input_message: value.invalid_original_input_message(),
+        }
+    }
+}
+
+#[uniffi::export]
+impl BuildSenderError {
+    pub fn message(&self) -> String { self.msg.clone() }
+
+    pub fn invalid_original_input_index(&self) -> Option<u64> { self.invalid_original_input_index }
+
+    pub fn invalid_original_input_message(&self) -> Option<String> {
+        self.invalid_original_input_message.clone()
+    }
 }
 
 /// FFI-visible PSBT parsing error surfaced at the sender boundary.
@@ -193,5 +220,56 @@ where
             return SenderPersistedError::BuildSenderError(Arc::new(api_err.into()));
         }
         SenderPersistedError::Unexpected
+    }
+}
+
+#[cfg(all(test, feature = "_test-utils"))]
+mod tests {
+    use std::str::FromStr;
+    use std::sync::Arc;
+
+    use payjoin::bitcoin::hex::FromHex;
+
+    use crate::send::{SenderBuilder, SenderInputError};
+    use crate::test_utils::invalid_original_input_psbt;
+    use crate::uri::PjUri;
+
+    #[test]
+    fn test_build_sender_error_exposes_invalid_input_index() {
+        let address =
+            payjoin::bitcoin::Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
+                .expect("address should parse")
+                .assume_checked();
+        let ohttp_keys = payjoin::OhttpKeys::decode(
+            &<Vec<u8> as FromHex>::from_hex(
+                "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
+            )
+            .expect("hex fixture should decode"),
+        )
+        .expect("OHTTP keys should decode");
+        let receiver = payjoin::receive::v2::ReceiverBuilder::new(
+            address,
+            "https://example.com".to_string(),
+            ohttp_keys,
+        )
+        .expect("receiver builder should succeed")
+        .build()
+        .save(&payjoin::persist::NoopSessionPersister::default())
+        .expect("no-op persister should not fail");
+        let uri = Arc::new(PjUri::from(receiver.pj_uri()));
+
+        let error = SenderBuilder::new(invalid_original_input_psbt(), uri)
+            .expect("PSBT should parse")
+            .build_non_incentivizing(1000);
+
+        let Err(SenderInputError::Build(error)) = error else {
+            panic!("expected sender build error");
+        };
+
+        assert_eq!(error.invalid_original_input_index(), Some(0));
+        assert_eq!(
+            error.invalid_original_input_message(),
+            Some("invalid previous transaction output".to_string())
+        );
     }
 }

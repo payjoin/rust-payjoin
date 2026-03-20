@@ -279,6 +279,66 @@ pub enum HpkeError {
     UnexpectedSecp256k1Error,
 }
 
+/// A stable classification for HPKE failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HpkeErrorKind {
+    InvalidPublicKey,
+    Hpke,
+    InvalidKeyLength,
+    PayloadTooLarge,
+    PayloadTooShort,
+    UnexpectedSecp256k1Error,
+}
+
+/// Stable HPKE error details that can be passed across API boundaries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HpkeErrorDetails {
+    kind: HpkeErrorKind,
+    message: String,
+    payload_too_large_actual: Option<usize>,
+    payload_too_large_max: Option<usize>,
+}
+
+impl HpkeErrorDetails {
+    pub fn kind(&self) -> HpkeErrorKind { self.kind }
+
+    pub fn message(&self) -> &str { &self.message }
+
+    pub fn payload_too_large_actual(&self) -> Option<usize> { self.payload_too_large_actual }
+
+    pub fn payload_too_large_max(&self) -> Option<usize> { self.payload_too_large_max }
+}
+
+impl HpkeError {
+    /// Returns the stable classification of the HPKE failure.
+    pub fn kind(&self) -> HpkeErrorKind {
+        match self {
+            Self::InvalidPublicKey => HpkeErrorKind::InvalidPublicKey,
+            Self::Hpke(_) => HpkeErrorKind::Hpke,
+            Self::InvalidKeyLength => HpkeErrorKind::InvalidKeyLength,
+            Self::PayloadTooLarge { .. } => HpkeErrorKind::PayloadTooLarge,
+            Self::PayloadTooShort => HpkeErrorKind::PayloadTooShort,
+            Self::UnexpectedSecp256k1Error => HpkeErrorKind::UnexpectedSecp256k1Error,
+        }
+    }
+
+    /// Returns stable HPKE error details for API consumers.
+    pub fn details(&self) -> HpkeErrorDetails {
+        let (payload_too_large_actual, payload_too_large_max) = match self {
+            Self::PayloadTooLarge { actual, max } => (Some(*actual), Some(*max)),
+            _ => (None, None),
+        };
+
+        HpkeErrorDetails {
+            kind: self.kind(),
+            message: self.to_string(),
+            payload_too_large_actual,
+            payload_too_large_max,
+        }
+    }
+}
+
 impl From<hpke::HpkeError> for HpkeError {
     fn from(value: hpke::HpkeError) -> Self { Self::Hpke(value) }
 }
@@ -350,6 +410,15 @@ mod test {
             let hpke_err: HpkeError = err.into();
             assert_eq!(hpke_err, HpkeError::UnexpectedSecp256k1Error);
         }
+    }
+
+    #[test]
+    fn hpke_error_details_expose_payload_sizes() {
+        let details = HpkeError::PayloadTooLarge { actual: 33, max: 32 }.details();
+
+        assert_eq!(details.kind(), HpkeErrorKind::PayloadTooLarge);
+        assert_eq!(details.payload_too_large_actual(), Some(33));
+        assert_eq!(details.payload_too_large_max(), Some(32));
     }
 
     #[test]

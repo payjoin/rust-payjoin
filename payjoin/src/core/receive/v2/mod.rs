@@ -32,7 +32,7 @@ use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut, Txid};
 pub(crate) use error::InternalSessionError;
-pub use error::SessionError;
+pub use error::{SessionError, SessionErrorKind};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 pub use session::{

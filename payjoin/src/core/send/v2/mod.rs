@@ -30,7 +30,9 @@
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::Address;
-pub use error::{CreateRequestError, EncapsulationError};
+pub use error::{
+    CreateRequestError, CreateRequestErrorKind, EncapsulationError, EncapsulationErrorKind,
+};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
 use ohttp::ClientResponse;
 use serde::{Deserialize, Serialize};

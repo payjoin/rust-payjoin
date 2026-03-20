@@ -60,6 +60,62 @@ pub enum DirectoryResponseError {
     UnexpectedStatusCode(http::StatusCode),
 }
 
+/// A stable classification for OHTTP encapsulation and decapsulation failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OhttpEncapsulationErrorKind {
+    Http,
+    Ohttp,
+    Bhttp,
+    ParseUrl,
+}
+
+/// Stable OHTTP encapsulation error details that can be passed across API boundaries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OhttpEncapsulationErrorDetails {
+    kind: OhttpEncapsulationErrorKind,
+    message: String,
+}
+
+impl OhttpEncapsulationErrorDetails {
+    pub fn kind(&self) -> OhttpEncapsulationErrorKind { self.kind }
+
+    pub fn message(&self) -> &str { &self.message }
+}
+
+/// A stable classification for directory response failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DirectoryResponseErrorKind {
+    InvalidSize,
+    OhttpDecapsulation,
+    UnexpectedStatusCode,
+}
+
+/// Stable directory response error details that can be passed across API boundaries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryResponseErrorDetails {
+    kind: DirectoryResponseErrorKind,
+    message: String,
+    invalid_size: Option<usize>,
+    unexpected_status_code: Option<u16>,
+    ohttp_error: Option<OhttpEncapsulationErrorDetails>,
+}
+
+impl DirectoryResponseErrorDetails {
+    pub fn kind(&self) -> DirectoryResponseErrorKind { self.kind }
+
+    pub fn message(&self) -> &str { &self.message }
+
+    pub fn invalid_size(&self) -> Option<usize> { self.invalid_size }
+
+    pub fn unexpected_status_code(&self) -> Option<u16> { self.unexpected_status_code }
+
+    pub fn ohttp_error(&self) -> Option<&OhttpEncapsulationErrorDetails> {
+        self.ohttp_error.as_ref()
+    }
+}
+
 impl DirectoryResponseError {
     pub(crate) fn is_fatal(&self) -> bool {
         use DirectoryResponseError::*;
@@ -68,6 +124,35 @@ impl DirectoryResponseError {
             OhttpDecapsulation(_) => true,
             InvalidSize(_) => false,
             UnexpectedStatusCode(status_code) => status_code.is_client_error(),
+        }
+    }
+
+    /// Returns the stable classification of the directory response failure.
+    pub fn kind(&self) -> DirectoryResponseErrorKind {
+        match self {
+            Self::InvalidSize(_) => DirectoryResponseErrorKind::InvalidSize,
+            Self::OhttpDecapsulation(_) => DirectoryResponseErrorKind::OhttpDecapsulation,
+            Self::UnexpectedStatusCode(_) => DirectoryResponseErrorKind::UnexpectedStatusCode,
+        }
+    }
+
+    /// Returns stable directory response error details for API consumers.
+    pub fn details(&self) -> DirectoryResponseErrorDetails {
+        DirectoryResponseErrorDetails {
+            kind: self.kind(),
+            message: self.to_string(),
+            invalid_size: match self {
+                Self::InvalidSize(size) => Some(*size),
+                _ => None,
+            },
+            unexpected_status_code: match self {
+                Self::UnexpectedStatusCode(status_code) => Some(status_code.as_u16()),
+                _ => None,
+            },
+            ohttp_error: match self {
+                Self::OhttpDecapsulation(error) => Some(error.details()),
+                _ => None,
+            },
         }
     }
 }
@@ -181,6 +266,23 @@ impl From<bhttp::Error> for OhttpEncapsulationError {
 
 impl From<url::ParseError> for OhttpEncapsulationError {
     fn from(value: url::ParseError) -> Self { Self::ParseUrl(value) }
+}
+
+impl OhttpEncapsulationError {
+    /// Returns the stable classification of the OHTTP failure.
+    pub fn kind(&self) -> OhttpEncapsulationErrorKind {
+        match self {
+            Self::Http(_) => OhttpEncapsulationErrorKind::Http,
+            Self::Ohttp(_) => OhttpEncapsulationErrorKind::Ohttp,
+            Self::Bhttp(_) => OhttpEncapsulationErrorKind::Bhttp,
+            Self::ParseUrl(_) => OhttpEncapsulationErrorKind::ParseUrl,
+        }
+    }
+
+    /// Returns stable OHTTP error details for API consumers.
+    pub fn details(&self) -> OhttpEncapsulationErrorDetails {
+        OhttpEncapsulationErrorDetails { kind: self.kind(), message: self.to_string() }
+    }
 }
 
 impl fmt::Display for OhttpEncapsulationError {
@@ -313,6 +415,27 @@ impl Deref for OhttpKeys {
     type Target = ohttp::KeyConfig;
 
     fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directory_response_details_expose_nested_ohttp_error() {
+        let error = DirectoryResponseError::OhttpDecapsulation(OhttpEncapsulationError::ParseUrl(
+            url::ParseError::EmptyHost,
+        ));
+        let details = error.details();
+
+        assert_eq!(details.kind(), DirectoryResponseErrorKind::OhttpDecapsulation);
+        assert_eq!(
+            details.ohttp_error().expect("nested OHTTP error should be present").kind(),
+            OhttpEncapsulationErrorKind::ParseUrl
+        );
+        assert!(details.invalid_size().is_none());
+        assert!(details.unexpected_status_code().is_none());
+    }
 }
 
 impl DerefMut for OhttpKeys {

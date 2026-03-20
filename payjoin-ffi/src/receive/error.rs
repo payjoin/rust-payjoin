@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use payjoin::receive;
 
-use crate::error::{FfiValidationError, ImplementationError};
+use crate::error::{
+    DirectoryResponseError, FfiValidationError, HpkeError, ImplementationError,
+    OhttpEncapsulationError,
+};
 use crate::uri::error::IntoUrlError;
 
 /// The top-level error type for the payjoin receiver
@@ -164,9 +167,67 @@ impl From<ProtocolError> for JsonReply {
 }
 
 /// Error that may occur during a v2 session typestate change
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum SessionErrorKind {
+    ParseUrl,
+    Expired,
+    OhttpEncapsulation,
+    Hpke,
+    DirectoryResponse,
+    Other,
+}
+
+impl From<receive::v2::SessionErrorKind> for SessionErrorKind {
+    fn from(value: receive::v2::SessionErrorKind) -> Self {
+        match value {
+            receive::v2::SessionErrorKind::ParseUrl => Self::ParseUrl,
+            receive::v2::SessionErrorKind::Expired => Self::Expired,
+            receive::v2::SessionErrorKind::OhttpEncapsulation => Self::OhttpEncapsulation,
+            receive::v2::SessionErrorKind::Hpke => Self::Hpke,
+            receive::v2::SessionErrorKind::DirectoryResponse => Self::DirectoryResponse,
+            _ => Self::Other,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Object)]
-#[error(transparent)]
-pub struct SessionError(#[from] receive::v2::SessionError);
+#[error("{message}")]
+pub struct SessionError {
+    kind: SessionErrorKind,
+    message: String,
+    hpke_error: Option<Arc<HpkeError>>,
+    ohttp_error: Option<Arc<OhttpEncapsulationError>>,
+    directory_response_error: Option<Arc<DirectoryResponseError>>,
+}
+
+impl From<receive::v2::SessionError> for SessionError {
+    fn from(value: receive::v2::SessionError) -> Self {
+        Self {
+            kind: value.kind().into(),
+            message: value.to_string(),
+            hpke_error: value.hpke_error().map(|error| Arc::new(error.into())),
+            ohttp_error: value.ohttp_error().map(|error| Arc::new(error.into())),
+            directory_response_error: value
+                .directory_response_error()
+                .map(|error| Arc::new(error.into())),
+        }
+    }
+}
+
+#[uniffi::export]
+impl SessionError {
+    pub fn kind(&self) -> SessionErrorKind { self.kind }
+
+    pub fn message(&self) -> String { self.message.clone() }
+
+    pub fn hpke_error(&self) -> Option<Arc<HpkeError>> { self.hpke_error.clone() }
+
+    pub fn ohttp_error(&self) -> Option<Arc<OhttpEncapsulationError>> { self.ohttp_error.clone() }
+
+    pub fn directory_response_error(&self) -> Option<Arc<DirectoryResponseError>> {
+        self.directory_response_error.clone()
+    }
+}
 
 /// Protocol error raised during output substitution.
 #[derive(Debug, thiserror::Error, uniffi::Object)]

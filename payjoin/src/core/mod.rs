@@ -31,11 +31,14 @@ pub(crate) mod hpke;
 #[cfg(feature = "v2")]
 pub mod persist;
 #[cfg(feature = "v2")]
-pub use crate::hpke::{HpkeKeyPair, HpkePublicKey};
+pub use crate::hpke::{HpkeErrorDetails, HpkeErrorKind, HpkeKeyPair, HpkePublicKey};
 #[cfg(feature = "v2")]
 pub(crate) mod ohttp;
 #[cfg(feature = "v2")]
-pub use crate::ohttp::OhttpKeys;
+pub use crate::ohttp::{
+    DirectoryResponseErrorDetails, DirectoryResponseErrorKind, OhttpEncapsulationErrorDetails,
+    OhttpEncapsulationErrorKind, OhttpKeys,
+};
 
 #[cfg(feature = "io")]
 #[cfg_attr(docsrs, doc(cfg(feature = "io")))]

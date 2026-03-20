@@ -51,6 +51,9 @@ impl Time {
         buf
     }
 
+    /// Get the UNIX timestamp representation in seconds.
+    pub(crate) fn to_unix_seconds(self) -> u32 { self.0.to_consensus_u32() }
+
     /// Check if the time is in the past.
     pub(crate) fn elapsed(self) -> bool { self <= Self::now() }
 }
@@ -103,4 +106,17 @@ impl TryFrom<SystemTime> for Time {
 impl TryFrom<Duration> for Time {
     type Error = ConversionError;
     fn try_from(val: Duration) -> Result<Self, ConversionError> { Time::from_now(val) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Time;
+
+    #[test]
+    fn test_unix_seconds_round_trip() {
+        let timestamp = 1_700_000_000;
+        let time = Time::from_unix_seconds(timestamp).expect("valid timestamp");
+        assert_eq!(time.to_unix_seconds(), timestamp);
+        assert_eq!(Time::from_bytes(&time.to_bytes()).expect("roundtrip bytes"), time);
+    }
 }

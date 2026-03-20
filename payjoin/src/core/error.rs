@@ -70,6 +70,20 @@ impl<SessionState: Debug, SessionEvent: Debug> From<InternalReplayError<SessionS
 }
 
 #[cfg(feature = "v2")]
+impl<SessionState: Debug, SessionEvent: Debug> ReplayError<SessionState, SessionEvent> {
+    pub fn is_retryable(&self) -> bool {
+        matches!(self.0, InternalReplayError::PersistenceFailure(_))
+    }
+
+    pub fn expired_at_unix_seconds(&self) -> Option<u32> {
+        match &self.0 {
+            InternalReplayError::Expired(expiration) => Some(expiration.to_unix_seconds()),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "v2")]
 #[derive(Debug)]
 pub(crate) enum InternalReplayError<SessionState, SessionEvent> {
     /// No events in the event log
@@ -80,4 +94,25 @@ pub(crate) enum InternalReplayError<SessionState, SessionEvent> {
     Expired(crate::time::Time),
     /// Application storage error
     PersistenceFailure(ImplementationError),
+}
+
+#[cfg(all(test, feature = "v2"))]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use super::*;
+
+    #[test]
+    fn test_replay_error_retryability_and_expiration_metadata() {
+        let expiration =
+            crate::time::Time::try_from(SystemTime::now() - Duration::from_secs(1)).unwrap();
+        let expired: ReplayError<(), ()> = InternalReplayError::Expired(expiration).into();
+        assert!(!expired.is_retryable());
+        assert_eq!(expired.expired_at_unix_seconds(), Some(expiration.to_unix_seconds()));
+
+        let persistence_failure: ReplayError<(), ()> =
+            InternalReplayError::PersistenceFailure(ImplementationError::from("storage")).into();
+        assert!(persistence_failure.is_retryable());
+        assert_eq!(persistence_failure.expired_at_unix_seconds(), None);
+    }
 }

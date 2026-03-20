@@ -17,6 +17,11 @@ impl From<ImplementationError> for payjoin::ImplementationError {
     fn from(value: ImplementationError) -> Self { value.0 }
 }
 
+#[uniffi::export]
+impl ImplementationError {
+    pub fn is_retryable(&self) -> bool { true }
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error("Error de/serializing JSON object: {0}")]
 pub struct SerdeJsonError(#[from] serde_json::Error);

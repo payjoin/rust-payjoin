@@ -22,6 +22,11 @@ impl From<send::BuildSenderError> for BuildSenderError {
     fn from(value: send::BuildSenderError) -> Self { BuildSenderError { msg: value.to_string() } }
 }
 
+#[uniffi::export]
+impl BuildSenderError {
+    pub fn is_retryable(&self) -> bool { false }
+}
+
 /// FFI-visible PSBT parsing error surfaced at the sender boundary.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum PsbtParseError {
@@ -58,15 +63,32 @@ impl From<FfiValidationError> for SenderInputError {
 #[error(transparent)]
 pub struct CreateRequestError(#[from] send::v2::CreateRequestError);
 
+#[uniffi::export]
+impl CreateRequestError {
+    pub fn is_retryable(&self) -> bool { self.0.is_retryable() }
+
+    pub fn expired_at_unix_seconds(&self) -> Option<u32> { self.0.expired_at_unix_seconds() }
+}
+
 /// Error returned for v2-specific payload encapsulation errors.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
 pub struct EncapsulationError(#[from] send::v2::EncapsulationError);
 
+#[uniffi::export]
+impl EncapsulationError {
+    pub fn is_retryable(&self) -> bool { self.0.is_retryable() }
+}
+
 /// Error that may occur when the response from receiver is malformed.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
 pub struct ValidationError(#[from] send::ValidationError);
+
+#[uniffi::export]
+impl ValidationError {
+    pub fn is_retryable(&self) -> bool { self.0.is_retryable() }
+}
 
 /// Represent an error returned by Payjoin receiver.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -109,12 +131,24 @@ impl From<send::ResponseError> for ResponseError {
 #[error(transparent)]
 pub struct WellKnownError(#[from] send::WellKnownError);
 
+#[uniffi::export]
+impl WellKnownError {
+    pub fn is_retryable(&self) -> bool { self.0.is_retryable() }
+}
+
 /// Error that may occur when the sender session event log is replayed
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
 pub struct SenderReplayError(
     #[from] payjoin::error::ReplayError<send::v2::SendSession, send::v2::SessionEvent>,
 );
+
+#[uniffi::export]
+impl SenderReplayError {
+    pub fn is_retryable(&self) -> bool { self.0.is_retryable() }
+
+    pub fn expired_at_unix_seconds(&self) -> Option<u32> { self.0.expired_at_unix_seconds() }
+}
 
 /// Error that may occur during state machine transitions
 #[derive(Debug, thiserror::Error, uniffi::Error)]

@@ -70,6 +70,8 @@ impl DirectoryResponseError {
             UnexpectedStatusCode(status_code) => status_code.is_client_error(),
         }
     }
+
+    pub(crate) fn is_retryable(&self) -> bool { !self.is_fatal() }
 }
 
 impl fmt::Display for DirectoryResponseError {

@@ -55,6 +55,24 @@ impl From<crate::into_url::Error> for CreateRequestError {
     }
 }
 
+impl CreateRequestError {
+    pub fn is_retryable(&self) -> bool {
+        match &self.0 {
+            InternalCreateRequestError::Url(_)
+            | InternalCreateRequestError::Hpke(_)
+            | InternalCreateRequestError::OhttpEncapsulation(_)
+            | InternalCreateRequestError::Expired(_) => false,
+        }
+    }
+
+    pub fn expired_at_unix_seconds(&self) -> Option<u32> {
+        match &self.0 {
+            InternalCreateRequestError::Expired(expiration) => Some(expiration.to_unix_seconds()),
+            _ => None,
+        }
+    }
+}
+
 /// Error returned for v2-specific payload encapsulation errors.
 #[derive(Debug)]
 pub struct EncapsulationError(InternalEncapsulationError);
@@ -96,5 +114,45 @@ impl From<InternalEncapsulationError> for EncapsulationError {
 impl From<InternalEncapsulationError> for super::ResponseError {
     fn from(value: InternalEncapsulationError) -> Self {
         super::InternalValidationError::V2Encapsulation(value.into()).into()
+    }
+}
+
+impl EncapsulationError {
+    pub fn is_retryable(&self) -> bool {
+        match &self.0 {
+            InternalEncapsulationError::Hpke(_) => false,
+            InternalEncapsulationError::DirectoryResponse(error) => error.is_retryable(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use super::*;
+
+    #[test]
+    fn test_create_request_error_exposes_expiration_metadata() {
+        let expiration =
+            Time::try_from(SystemTime::now() - Duration::from_secs(1)).expect("valid timestamp");
+        let error: CreateRequestError = InternalCreateRequestError::Expired(expiration).into();
+
+        assert!(!error.is_retryable());
+        assert_eq!(error.expired_at_unix_seconds(), Some(expiration.to_unix_seconds()));
+    }
+
+    #[test]
+    fn test_encapsulation_error_exposes_retryability() {
+        let retryable: EncapsulationError =
+            InternalEncapsulationError::DirectoryResponse(DirectoryResponseError::InvalidSize(1))
+                .into();
+        assert!(retryable.is_retryable());
+
+        let fatal: EncapsulationError = InternalEncapsulationError::DirectoryResponse(
+            DirectoryResponseError::UnexpectedStatusCode(http::StatusCode::BAD_REQUEST),
+        )
+        .into();
+        assert!(!fatal.is_retryable());
     }
 }

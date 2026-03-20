@@ -84,6 +84,10 @@ impl std::error::Error for BuildSenderError {
     }
 }
 
+impl BuildSenderError {
+    pub fn is_retryable(&self) -> bool { false }
+}
+
 /// Error that may occur when the response from receiver is malformed.
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
@@ -142,6 +146,19 @@ impl std::error::Error for ValidationError {
             Proposal(e) => Some(e),
             #[cfg(feature = "v2")]
             V2Encapsulation(e) => Some(e),
+        }
+    }
+}
+
+impl ValidationError {
+    pub fn is_retryable(&self) -> bool {
+        match &self.0 {
+            InternalValidationError::Parse => false,
+            #[cfg(feature = "v1")]
+            InternalValidationError::ContentTooLarge => false,
+            InternalValidationError::Proposal(_) => false,
+            #[cfg(feature = "v2")]
+            InternalValidationError::V2Encapsulation(error) => error.is_retryable(),
         }
     }
 }
@@ -356,6 +373,14 @@ impl ResponseError {
             None => InternalValidationError::Parse.into(),
         }
     }
+
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::WellKnown(error) => error.is_retryable(),
+            Self::Validation(error) => error.is_retryable(),
+            Self::Unrecognized { .. } => false,
+        }
+    }
 }
 
 /// A well-known error that can be safely displayed to end users.
@@ -399,6 +424,8 @@ impl WellKnownError {
     pub(crate) fn version_unsupported(message: String, supported: Vec<u64>) -> Self {
         Self { code: ErrorCode::VersionUnsupported, message, supported_versions: Some(supported) }
     }
+
+    pub fn is_retryable(&self) -> bool { matches!(self.code, ErrorCode::Unavailable) }
 }
 
 #[cfg(test)]
@@ -434,5 +461,22 @@ mod tests {
             ResponseError::from_json(invalid_json_error),
             ResponseError::Validation(_)
         ));
+    }
+
+    #[test]
+    fn test_response_error_retryability() {
+        assert!(
+            WellKnownError::new(ErrorCode::Unavailable, "retry later".to_string()).is_retryable()
+        );
+        assert!(
+            !WellKnownError::new(ErrorCode::OriginalPsbtRejected, "no".to_string()).is_retryable()
+        );
+        assert!(!BuildSenderError::from(InternalBuildSenderError::NoInputs).is_retryable());
+        assert!(!ResponseError::from(InternalValidationError::Parse).is_retryable());
+        assert!(ResponseError::WellKnown(WellKnownError::new(
+            ErrorCode::Unavailable,
+            "retry later".to_string(),
+        ))
+        .is_retryable());
     }
 }

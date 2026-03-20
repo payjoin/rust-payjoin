@@ -158,6 +158,26 @@ impl error::Error for ProtocolError {
     }
 }
 
+impl ProtocolError {
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::OriginalPayload(_) => false,
+            #[cfg(feature = "v1")]
+            Self::V1(_) => false,
+            #[cfg(feature = "v2")]
+            Self::V2(error) => error.is_retryable(),
+        }
+    }
+
+    pub fn expired_at_unix_seconds(&self) -> Option<u32> {
+        match self {
+            #[cfg(feature = "v2")]
+            Self::V2(error) => error.expired_at_unix_seconds(),
+            _ => None,
+        }
+    }
+}
+
 impl From<InternalPayloadError> for Error {
     fn from(e: InternalPayloadError) -> Self {
         Error::Protocol(ProtocolError::OriginalPayload(e.into()))
@@ -433,6 +453,8 @@ impl From<InternalInputContributionError> for InputContributionError {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime};
+
     use super::*;
     use crate::ImplementationError;
 
@@ -503,5 +525,25 @@ mod tests {
         let json = reply.to_json();
         assert_eq!(json["errorCode"], "original-psbt-rejected");
         assert_eq!(json["message"], "Missing payment.");
+    }
+
+    #[cfg(feature = "v2")]
+    #[test]
+    fn test_protocol_error_exposes_retryability_and_expiration() {
+        let expiration =
+            crate::time::Time::try_from(SystemTime::now() - Duration::from_secs(1)).unwrap();
+        let expired = ProtocolError::V2(crate::receive::v2::SessionError::from(
+            crate::receive::v2::InternalSessionError::Expired(expiration),
+        ));
+        assert!(!expired.is_retryable());
+        assert_eq!(expired.expired_at_unix_seconds(), Some(expiration.to_unix_seconds()));
+
+        let retryable = ProtocolError::V2(crate::receive::v2::SessionError::from(
+            crate::receive::v2::InternalSessionError::DirectoryResponse(
+                crate::ohttp::DirectoryResponseError::InvalidSize(1),
+            ),
+        ));
+        assert!(retryable.is_retryable());
+        assert_eq!(retryable.expired_at_unix_seconds(), None);
     }
 }

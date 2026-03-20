@@ -28,6 +28,11 @@ pub struct UrlParseError(#[from] url::ParseError);
 #[error(transparent)]
 pub struct IntoUrlError(#[from] payjoin::IntoUrlError);
 
+#[uniffi::export]
+impl IntoUrlError {
+    pub fn is_retryable(&self) -> bool { false }
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error("{msg}")]
 pub struct FeeRateError {

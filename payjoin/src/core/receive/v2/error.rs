@@ -73,3 +73,43 @@ impl error::Error for SessionError {
         }
     }
 }
+
+impl SessionError {
+    pub fn is_retryable(&self) -> bool {
+        match &self.0 {
+            InternalSessionError::ParseUrl(_)
+            | InternalSessionError::Expired(_)
+            | InternalSessionError::OhttpEncapsulation(_)
+            | InternalSessionError::Hpke(_) => false,
+            InternalSessionError::DirectoryResponse(error) => error.is_retryable(),
+        }
+    }
+
+    pub fn expired_at_unix_seconds(&self) -> Option<u32> {
+        match &self.0 {
+            InternalSessionError::Expired(expiration) => Some(expiration.to_unix_seconds()),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use super::*;
+
+    #[test]
+    fn test_session_error_exposes_retryability_and_expiration() {
+        let expiration =
+            Time::try_from(SystemTime::now() - Duration::from_secs(1)).expect("valid timestamp");
+        let expired: SessionError = InternalSessionError::Expired(expiration).into();
+        assert!(!expired.is_retryable());
+        assert_eq!(expired.expired_at_unix_seconds(), Some(expiration.to_unix_seconds()));
+
+        let retryable: SessionError =
+            InternalSessionError::DirectoryResponse(DirectoryResponseError::InvalidSize(1)).into();
+        assert!(retryable.is_retryable());
+        assert_eq!(retryable.expired_at_unix_seconds(), None);
+    }
+}

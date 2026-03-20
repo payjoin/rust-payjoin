@@ -139,6 +139,13 @@ impl From<payjoin::bitcoin::address::ParseError> for AddressParseError {
 #[error(transparent)]
 pub struct ProtocolError(#[from] receive::ProtocolError);
 
+#[uniffi::export]
+impl ProtocolError {
+    pub fn is_retryable(&self) -> bool { self.0.is_retryable() }
+
+    pub fn expired_at_unix_seconds(&self) -> Option<u32> { self.0.expired_at_unix_seconds() }
+}
+
 /// The standard format for errors that can be replied as JSON.
 ///
 /// The JSON output includes the following fields:
@@ -167,6 +174,13 @@ impl From<ProtocolError> for JsonReply {
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[error(transparent)]
 pub struct SessionError(#[from] receive::v2::SessionError);
+
+#[uniffi::export]
+impl SessionError {
+    pub fn is_retryable(&self) -> bool { self.0.is_retryable() }
+
+    pub fn expired_at_unix_seconds(&self) -> Option<u32> { self.0.expired_at_unix_seconds() }
+}
 
 /// Protocol error raised during output substitution.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
@@ -237,3 +251,10 @@ impl From<FfiValidationError> for InputPairError {
 pub struct ReceiverReplayError(
     #[from] payjoin::error::ReplayError<receive::v2::ReceiveSession, receive::v2::SessionEvent>,
 );
+
+#[uniffi::export]
+impl ReceiverReplayError {
+    pub fn is_retryable(&self) -> bool { self.0.is_retryable() }
+
+    pub fn expired_at_unix_seconds(&self) -> Option<u32> { self.0.expired_at_unix_seconds() }
+}

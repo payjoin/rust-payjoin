@@ -230,5 +230,101 @@ class TestValidation(unittest.TestCase):
             payjoin.SenderBuilder("not-a-psbt", uri)
 
 
+class TestRetryMetadata(unittest.TestCase):
+    @staticmethod
+    def _ohttp_keys():
+        return payjoin.OhttpKeys.decode(
+            bytes.fromhex(
+                "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"
+            )
+        )
+
+    def _receiver_builder(self, expiration=None):
+        builder = payjoin.ReceiverBuilder(
+            "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+            "https://example.com",
+            self._ohttp_keys(),
+        )
+        if expiration is not None:
+            builder = builder.with_expiration(expiration)
+        return builder
+
+    def test_sender_create_request_exposes_expiration_metadata(self):
+        recv_persister = InMemoryReceiverPersister(10)
+        receiver = self._receiver_builder(expiration=0).build().save(recv_persister)
+        uri = receiver.pj_uri()
+        sender = (
+            payjoin.SenderBuilder(payjoin.original_psbt(), uri)
+            .build_recommended(1000)
+            .save(InMemorySenderPersister(11))
+        )
+
+        with self.assertRaises(payjoin.CreateRequestError) as ctx:
+            sender.create_v2_post_request("https://example.com")
+
+        self.assertFalse(ctx.exception.is_retryable())
+        self.assertIsInstance(ctx.exception.expired_at_unix_seconds(), int)
+
+    def test_receiver_error_exposes_expiration_metadata(self):
+        receiver = (
+            self._receiver_builder(expiration=0)
+            .build()
+            .save(InMemoryReceiverPersister(12))
+        )
+
+        with self.assertRaises(payjoin.ReceiverError.Protocol) as ctx:
+            receiver.create_poll_request("https://example.com")
+
+        protocol_error = ctx.exception[0]
+        self.assertFalse(protocol_error.is_retryable())
+        self.assertIsInstance(protocol_error.expired_at_unix_seconds(), int)
+
+    def test_sender_persisted_error_keeps_retryable_transport_signal(self):
+        recv_persister = InMemoryReceiverPersister(13)
+        receiver = self._receiver_builder().build().save(recv_persister)
+        uri = receiver.pj_uri()
+        sender = (
+            payjoin.SenderBuilder(payjoin.original_psbt(), uri)
+            .build_recommended(1000)
+            .save(InMemorySenderPersister(14))
+        )
+        request = sender.create_v2_post_request("https://example.com")
+        transition = sender.process_response(b"", request.ohttp_ctx)
+
+        with self.assertRaises(payjoin.SenderPersistedError.EncapsulationError) as ctx:
+            transition.save(InMemorySenderPersister(15))
+
+        self.assertTrue(ctx.exception[0].is_retryable())
+
+    def test_replay_errors_expose_expiration_metadata(self):
+        recv_persister = InMemoryReceiverPersister(16)
+        self._receiver_builder(expiration=0).build().save(recv_persister)
+
+        with self.assertRaises(payjoin.ReceiverReplayError) as recv_ctx:
+            payjoin.replay_receiver_event_log(recv_persister)
+
+        self.assertFalse(recv_ctx.exception.is_retryable())
+        self.assertIsInstance(recv_ctx.exception.expired_at_unix_seconds(), int)
+
+        sender_persister = InMemorySenderPersister(17)
+        receiver = (
+            self._receiver_builder(expiration=0)
+            .build()
+            .save(InMemoryReceiverPersister(18))
+        )
+        uri = receiver.pj_uri()
+        (
+            payjoin.SenderBuilder(payjoin.original_psbt(), uri)
+            .build_recommended(1000)
+            .save(sender_persister)
+        )
+
+        with self.assertRaises(payjoin.SenderReplayError) as send_ctx:
+            payjoin.replay_sender_event_log(sender_persister)
+
+        self.assertFalse(send_ctx.exception.is_retryable())
+        self.assertIsInstance(send_ctx.exception.expired_at_unix_seconds(), int)
+
+
 if __name__ == "__main__":
     unittest.main()

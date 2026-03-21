@@ -573,4 +573,77 @@ mod tests {
         assert!(metric_names.contains(&TOTAL_CONNECTIONS), "missing total_connections");
         assert!(metric_names.contains(&ACTIVE_CONNECTIONS), "missing active_connections");
     }
+
+    #[tokio::test]
+    async fn middleware_sanitizes_short_id_in_metrics() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+        use tower::ServiceExt;
+
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone()).build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+
+        let tempdir = tempdir().unwrap();
+        let config = Config::new(
+            "[::]:0".parse().expect("valid listener address"),
+            tempdir.path().to_path_buf(),
+            Duration::from_secs(2),
+            None,
+        );
+
+        let sentinel_tag = generate_sentinel_tag();
+        let metrics = MetricsService::new(Some(provider.clone()));
+        let services = Services {
+            directory: init_directory(&config, sentinel_tag, &metrics).await.unwrap(),
+            relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
+            metrics,
+            #[cfg(feature = "access-control")]
+            geoip: None,
+        };
+
+        let app = build_app(services);
+
+        let short_id = payjoin::directory::ShortId([0u8; 8]).to_string();
+        let uri = format!("/{short_id}");
+        let request = Request::builder().method("GET").uri(&uri).body(Body::empty()).unwrap();
+        let _response = ServiceExt::<Request<Body>>::oneshot(app, request).await.unwrap();
+
+        provider.force_flush().expect("flush failed");
+
+        let finished = exporter.get_finished_metrics().expect("metrics");
+        println!("finished: {:?}", finished);
+        let endpoint_attrs: Vec<String> = finished
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == HTTP_REQUESTS)
+            .flat_map(|m| match m.data() {
+                AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
+                    .data_points()
+                    .flat_map(|dp| dp.attributes())
+                    .filter_map(|kv| {
+                        if kv.key.as_str() == "endpoint" {
+                            Some(kv.value.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                _ => vec![],
+            })
+            .collect();
+
+        println!("endpoint_attrs: {:?}", endpoint_attrs);
+
+        assert!(
+            endpoint_attrs.iter().all(|ep| ep == "/{mailbox}"),
+            "short ID must be sanitized in metrics, got: {endpoint_attrs:?}"
+        );
+        assert!(
+            endpoint_attrs.iter().all(|ep| !ep.contains(&short_id)),
+            "actual short ID value must not appear in metrics"
+        );
+    }
 }

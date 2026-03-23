@@ -8,9 +8,7 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    crane = {
-      url = "github:ipetkov/crane/2510f2cbc3ccd237f700bb213756a8f35c32d8d7";
-    };
+    crane.url = "github:ipetkov/crane";
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -121,6 +119,15 @@
           stable = default;
           nightly = recent;
         };
+
+        vendoredDeps = builtins.mapAttrs (
+          name: _:
+          craneLibVersions.stable.vendorCargoDeps {
+            cargoLock = cargoLock.${name};
+            inherit src;
+          }
+        ) craneLibVersions;
+
         commonArgs = {
           inherit src;
           strictDeps = true;
@@ -139,10 +146,18 @@
           BITCOIND_SKIP_DOWNLOAD = 1;
         };
 
+        # Per-toolchain common args that include pre-vendored deps
+        commonArgsFor =
+          name:
+          commonArgs
+          // {
+            cargoVendorDir = vendoredDeps.${name};
+          };
+
         cargoArtifacts = builtins.mapAttrs (
           name: craneLib:
           craneLib.buildDepsOnly (
-            commonArgs
+            commonArgsFor name
             // {
               name = "workspace-deps-${name}";
               cargoLock = cargoLock.${name};
@@ -169,7 +184,7 @@
               # build packages with MSRV toolchain by default, since the builds are
               # mostly for testing purposes
               craneLibVersions.msrv.buildPackage (
-                commonArgs
+                commonArgsFor "msrv"
                 // craneLibVersions.msrv.crateNameFromCargoToml {
                   cargoToml = builtins.toPath "${./.}/${name}/Cargo.toml";
                 }
@@ -335,7 +350,7 @@
             name: craneLib:
             (pkgs.lib.nameValuePair "payjoin-workspace-nextest-${name}" (
               craneLib.cargoNextest (
-                commonArgs
+                commonArgsFor name
                 // {
                   name = "payjoin-workspace-nextest-${name}";
                   cargoLock = cargoLock.${name};
@@ -343,7 +358,6 @@
                   partitions = 1;
                   partitionType = "count";
                   cargoExtraArgs = "--locked --workspace --all-features --exclude payjoin-fuzz";
-                  NEXTEST_SHOW_PROGRESS = "none";
                   BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
                   NGINX_EXE = nixpkgs.lib.getExe' nginxWithStream "nginx";
                   nativeBuildInputs = [ nginxWithStream ];
@@ -356,7 +370,7 @@
           )
           // {
             payjoin-workspace-machete = craneLibVersions.nightly.mkCargoDerivation (
-              commonArgs
+              commonArgsFor "nightly"
               // {
                 pname = "payjoin-workspace-machete";
                 cargoLock = cargoLock.nightly;
@@ -369,7 +383,7 @@
             );
 
             payjoin-workspace-clippy = craneLibVersions.nightly.cargoClippy (
-              commonArgs
+              commonArgsFor "nightly"
               // {
                 cargoLock = cargoLock.nightly;
                 cargoArtifacts = cargoArtifacts.nightly;
@@ -378,7 +392,7 @@
             );
 
             payjoin-workspace-doc = craneLibVersions.nightly.cargoDoc (
-              commonArgs
+              commonArgsFor "nightly"
               // {
                 cargoLock = cargoLock.nightly;
                 cargoArtifacts = cargoArtifacts.nightly;
@@ -386,7 +400,7 @@
             );
 
             payjoin-workspace-fmt = craneLibVersions.nightly.cargoFmt (
-              commonArgs
+              commonArgsFor "nightly"
               // {
                 inherit src;
                 # cargoLock = cargoLock.nightly;

@@ -84,7 +84,7 @@ async fn fetch_ohttp_keys(
 
         // try cache for this selected relay first
         if let Some(cached) = read_cached_ohttp_keys(&selected_relay) {
-            println!("using Cached keys  for relay: {selected_relay}");
+            tracing::info!("using Cached keys for relay: {selected_relay}");
             if !is_expired(&cached) && cached.relay_url == selected_relay {
                 return Ok(ValidatedOhttpKeys {
                     ohttp_keys: cached.keys,

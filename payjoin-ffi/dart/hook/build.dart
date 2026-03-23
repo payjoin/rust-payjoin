@@ -5,7 +5,7 @@ void main(List<String> args) async {
   await build(args, (input, output) async {
     await RustBuilder(
       assetName: 'uniffi:payjoin_ffi',
-      features: ['_test-utils'],
+      features: ['_test-utils-bitcoind'],
     ).run(input: input, output: output);
   });
 }

@@ -10,6 +10,7 @@ publish = false
 
 [features]
 _test-utils = ["payjoin-ffi/_test-utils"]
+_test-utils-bitcoind = ["payjoin-ffi/_test-utils-bitcoind"]
 
 [lib]
 name = "payjoin_ffi_wrapper"

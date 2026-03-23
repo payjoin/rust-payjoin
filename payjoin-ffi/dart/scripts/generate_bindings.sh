@@ -19,7 +19,7 @@ fi
 
 cd ../
 echo "Generating payjoin dart..."
-cargo build --features dart,_test-utils --profile dev
-cargo run --features dart,_test-utils --profile dev --bin uniffi-bindgen -- --library ../target/debug/$LIBNAME --language dart --out-dir dart/lib/
+cargo build --features dart,_test-utils-bitcoind --profile dev
+cargo run --features dart,_test-utils-bitcoind --profile dev --bin uniffi-bindgen -- --library ../target/debug/$LIBNAME --language dart --out-dir dart/lib/
 
 echo "All done!"

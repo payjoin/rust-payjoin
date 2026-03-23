@@ -19,15 +19,15 @@ uv run python --version
 
 cd ../
 # This is a test script the actual release should not include the test utils feature
-cargo build --features _test-utils --profile dev
-cargo run --features _test-utils --profile dev --bin uniffi-bindgen generate --library ../target/debug/$LIBNAME --language python --out-dir python/src/payjoin/
+cargo build --features _test-utils-bitcoind --profile dev
+cargo run --features _test-utils-bitcoind --profile dev --bin uniffi-bindgen generate --library ../target/debug/$LIBNAME --language python --out-dir python/src/payjoin/
 
 if [[ $OS == "Darwin" ]]; then
     echo "Generating native binaries..."
     rustup target add aarch64-apple-darwin x86_64-apple-darwin
     # This is a test script the actual release should not include the test utils feature
-    cargo build --profile dev --target aarch64-apple-darwin --features _test-utils &
-    cargo build --profile dev --target x86_64-apple-darwin --features _test-utils &
+    cargo build --profile dev --target aarch64-apple-darwin --features _test-utils-bitcoind &
+    cargo build --profile dev --target x86_64-apple-darwin --features _test-utils-bitcoind &
     wait
 
     echo "Building macos fat library"
@@ -39,7 +39,7 @@ else
     echo "Generating native binaries..."
     rustup target add x86_64-unknown-linux-gnu
     # This is a test script the actual release should not include the test utils feature
-    cargo build --profile dev --target x86_64-unknown-linux-gnu --features _test-utils
+    cargo build --profile dev --target x86_64-unknown-linux-gnu --features _test-utils-bitcoind
 
     echo "Copying payjoin_ffi binary"
     cp ../target/x86_64-unknown-linux-gnu/debug/$LIBNAME python/src/payjoin/$LIBNAME

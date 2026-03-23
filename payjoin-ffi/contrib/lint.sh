@@ -2,7 +2,7 @@
 set -e
 
 # Individual features with no defaults.
-features=("_manual-tls" "_test-utils")
+features=("_manual-tls" "_test-utils" "_test-utils-bitcoind")
 
 for feature in "${features[@]}"; do
     # Don't duplicate --all-targets clippy. Clippy end-user code, not tests.

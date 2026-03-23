@@ -40,8 +40,8 @@ Write-Host "Generating payjoin C#..."
 if ($null -ne $env:PAYJOIN_FFI_FEATURES) {
     $payjoinFfiFeatures = $env:PAYJOIN_FFI_FEATURES
 } else {
-    # Keep parity with other language test scripts: include _test-utils by default.
-    $payjoinFfiFeatures = "_test-utils"
+    # Keep parity with other language test scripts: include _test-utils-bitcoind by default.
+    $payjoinFfiFeatures = "_test-utils-bitcoind"
 }
 
 if ($payjoinFfiFeatures) {

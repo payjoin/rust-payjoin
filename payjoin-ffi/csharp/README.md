@@ -56,12 +56,12 @@ dotnet test
 
 Generation uses the Cargo-managed C# generator from `payjoin-ffi/Cargo.toml`.
 
-By default, generation builds `payjoin-ffi` with `_test-utils` enabled to keep parity with other language test scripts. Override via `PAYJOIN_FFI_FEATURES`.
+By default, generation builds `payjoin-ffi` with `_test-utils-bitcoind` enabled to keep parity with other language test scripts. Override via `PAYJOIN_FFI_FEATURES`.
 
 ### Unix shells
 
 ```shell
-export PAYJOIN_FFI_FEATURES=_test-utils     # default behavior
+export PAYJOIN_FFI_FEATURES=_test-utils-bitcoind     # default behavior
 # export PAYJOIN_FFI_FEATURES=""            # build without extra features
 bash ./scripts/generate_bindings.sh
 ```
@@ -69,7 +69,7 @@ bash ./scripts/generate_bindings.sh
 ### PowerShell
 
 ```powershell
-$env:PAYJOIN_FFI_FEATURES = "_test-utils"   # default behavior
+$env:PAYJOIN_FFI_FEATURES = "_test-utils-bitcoind"   # default behavior
 # $env:PAYJOIN_FFI_FEATURES = ""            # build without extra features
 powershell -ExecutionPolicy Bypass -File .\scripts\generate_bindings.ps1
 dotnet build

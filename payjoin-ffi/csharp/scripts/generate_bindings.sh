@@ -22,8 +22,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/../.."
 
 echo "Generating payjoin C#..."
-# Keep parity with other language test scripts: include _test-utils by default.
-PAYJOIN_FFI_FEATURES=${PAYJOIN_FFI_FEATURES:-_test-utils}
+# Keep parity with other language test scripts: include _test-utils-bitcoind by default.
+PAYJOIN_FFI_FEATURES=${PAYJOIN_FFI_FEATURES:-_test-utils-bitcoind}
 GENERATOR_FEATURES="csharp"
 if [[ -n $PAYJOIN_FFI_FEATURES ]]; then
     GENERATOR_FEATURES="$GENERATOR_FEATURES,$PAYJOIN_FFI_FEATURES"

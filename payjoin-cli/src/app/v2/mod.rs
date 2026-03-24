@@ -575,36 +575,32 @@ impl App {
         session: ReceiveSession,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let res = {
-            match session {
-                ReceiveSession::Initialized(proposal) =>
-                    self.read_from_directory(proposal, persister).await,
-                ReceiveSession::UncheckedOriginalPayload(proposal) =>
-                    self.check_proposal(proposal, persister).await,
-                ReceiveSession::MaybeInputsOwned(proposal) =>
-                    self.check_inputs_not_owned(proposal, persister).await,
-                ReceiveSession::MaybeInputsSeen(proposal) =>
-                    self.check_no_inputs_seen_before(proposal, persister).await,
-                ReceiveSession::OutputsUnknown(proposal) =>
-                    self.identify_receiver_outputs(proposal, persister).await,
-                ReceiveSession::WantsOutputs(proposal) =>
-                    self.commit_outputs(proposal, persister).await,
-                ReceiveSession::WantsInputs(proposal) =>
-                    self.contribute_inputs(proposal, persister).await,
-                ReceiveSession::WantsFeeRange(proposal) =>
-                    self.apply_fee_range(proposal, persister).await,
-                ReceiveSession::ProvisionalProposal(proposal) =>
-                    self.finalize_proposal(proposal, persister).await,
-                ReceiveSession::PayjoinProposal(proposal) =>
-                    self.send_payjoin_proposal(proposal, persister).await,
-                ReceiveSession::HasReplyableError(error) =>
-                    self.handle_error(error, persister).await,
-                ReceiveSession::Monitor(proposal) =>
-                    self.monitor_payjoin_proposal(proposal, persister).await,
-                ReceiveSession::Closed(_) => return Err(anyhow!("Session closed")),
-            }
-        };
-        res
+        match session {
+            ReceiveSession::Initialized(proposal) =>
+                self.read_from_directory(proposal, persister).await,
+            ReceiveSession::UncheckedOriginalPayload(proposal) =>
+                self.check_proposal(proposal, persister).await,
+            ReceiveSession::MaybeInputsOwned(proposal) =>
+                self.check_inputs_not_owned(proposal, persister).await,
+            ReceiveSession::MaybeInputsSeen(proposal) =>
+                self.check_no_inputs_seen_before(proposal, persister).await,
+            ReceiveSession::OutputsUnknown(proposal) =>
+                self.identify_receiver_outputs(proposal, persister).await,
+            ReceiveSession::WantsOutputs(proposal) =>
+                self.commit_outputs(proposal, persister).await,
+            ReceiveSession::WantsInputs(proposal) =>
+                self.contribute_inputs(proposal, persister).await,
+            ReceiveSession::WantsFeeRange(proposal) =>
+                self.apply_fee_range(proposal, persister).await,
+            ReceiveSession::ProvisionalProposal(proposal) =>
+                self.finalize_proposal(proposal, persister).await,
+            ReceiveSession::PayjoinProposal(proposal) =>
+                self.send_payjoin_proposal(proposal, persister).await,
+            ReceiveSession::HasReplyableError(error) => self.handle_error(error, persister).await,
+            ReceiveSession::Monitor(proposal) =>
+                self.monitor_payjoin_proposal(proposal, persister).await,
+            ReceiveSession::Closed(_) => Err(anyhow!("Session closed")),
+        }
     }
 
     #[allow(clippy::incompatible_msrv)]

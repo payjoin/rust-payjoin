@@ -41,17 +41,5 @@ jobs:
           version: "0.8.2"
           enable-cache: true
 
-      - name: "uv sync"
-        run: uv sync --all-extras
-
-      - name: "Generate payjoin-ffi.py and binaries"
-        run: bash ./scripts/generate_bindings.sh
-
-      - name: "Build wheel"
-        run: uv build --wheel
-
-      - name: "Install wheel"
-        run: uv run pip install ./dist/*.whl
-
-      - name: "Run tests"
-        run: uv run python -m unittest --verbose
+      - name: "Build and test"
+        run: bash ./contrib/test.sh

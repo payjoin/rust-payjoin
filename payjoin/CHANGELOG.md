@@ -1,29 +1,10 @@
 # Payjoin Changelog
 
-## 1.0.0-rc.2
+## 0.25.0
 
-This release candidate introduces async persistence, WASM target support,
-improved taproot input weight derivation, and various bug fixes.
-
-- Introduce `AsyncSessionPersister` and `replay_event_log_async` (#1235, #1266)
-- Deduplicate PSBT inputs in `contribute_inputs` (#1254)
-- Return error on duplicate input contribution (#1257)
-- Derive P2TR input weight from witness data (#1200)
-- Skip `check_payment` in `Receiver<Monitor>` for non-segwit senders (#1218)
-- Use `web-time` for WASM targets (#1190)
-
-## 1.0.0-rc.1
-
-This release candidate fixes a BIP78 spec compliance bug, and an issue with the BIP77 sender when polling an arbitrary relay via RFC9540.
-It also removes a redundant Sender SessionEvent.
-
-- Fix identify_receiver_outputs (#1168)
-- Use full_relay_url in sender GET request (#1166)
-- Remove `ReceivedProposalPsbt` infavor of session outcome (#1171)
-
-## 1.0.0-rc.0
-
-Introduce monitoring typestates, replyable error handling, and other updates for more robust session lifecycle management.
+Introduce monitoring typestates, replyable error handling, async
+persistence, WASM target support, and other updates for more robust
+session lifecycle management.
 
 Selected Improvements:
 
@@ -52,35 +33,44 @@ Selected Improvements:
 - Improve `receive` error hierarchy (#1031)
 - Separate session replay & protocol operation (#1036)
 
+### Async Persistence and WASM Support
+
+- Introduce `AsyncSessionPersister` and `replay_event_log_async` (#1235, #1266)
+- Use `web-time` for WASM targets (#1190)
+
 ### API and Dependency Refinements
 
 - Depend on `url/serde` with no default features (#1126)
 - Use String type instead of Url on Request Struct (#1122)
-- Remove the url crate dep from payjoin-test-utils (#1111)
 - Remove use of payjoin::Url and url::Url in public methods (#1057)
 - Make `payjoin::uri` module public (#1048)
 - Replace `psbt_with_fee_contributions` with pub fn (#1120)
 - Refactor sender to validate PjParam by version (#901)
-- Replace bitcoind with corepc_node (#1041)
+- Remove `ReceivedProposalPsbt` in favor of session outcome (#1171)
+- Remove sequence param from InputPair constructors
+- Take cert_der by reference in fetch_ohttp_keys_with_cert
 - Bump MSRV to 1.85.0 (#957)
-- Upgrade testcontainers (#970)
 
-### Build, CI, and Workflow Enhancements
+### Bug Fixes
 
-- Run all tests in macOS CI (#1094)
-- Use tracing crate instead of log (#1020)
-- Add Pull Request Review Template (#967)
-- Add bug issue templates (#758, #784)
-- Add Feature Request, Good First Issue, and General Issue Templates (#891)
-- Enforce new AI Disclosure in PR Checklist (#1012)
+- Fix identify_receiver_outputs (#1168)
+- Use full_relay_url in sender GET request (#1166)
+- Deduplicate PSBT inputs in `contribute_inputs` (#1254)
+- Return error on duplicate input contribution (#1257)
+- Derive P2TR input weight from witness data (#1200)
+- Skip `check_payment` in `Receiver<Monitor>` for non-segwit senders (#1218)
+- Add safe catch-all for secp256k1::Error conversion in HpkeError (#1298)
+- Fix `avoid_uih` method comment (#1411)
 
 ### Miscellaneous Cleanups
 
+- Use tracing crate instead of log (#1020)
 - Remove redundant fields from `WantsInputs`, `WantsOutputs`, and `WantsFeeRange` events (#1106, #1102, #1092)
 - Remove mailbox from receiver session context (#1112)
 - Remove extraneous clones and redundant Vec clones in HPKE encrypt functions (#1089, #982, #845)
 - Use `expiration` instead of `expiry` (#1087)
 - Clarify request construction methods for sender and receiver (#814)
+- Take references in crate-internal HPKE API
 
 ## 0.24.0
 

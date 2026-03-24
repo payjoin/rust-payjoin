@@ -55,7 +55,7 @@ opentelemetry-otlp = { version = "0.31", optional = true, features = [
   "reqwest-rustls",
 ] }
 opentelemetry_sdk = "0.31"
-payjoin = { version = "1.0.0-rc.2", features = [
+payjoin = { version = "0.25.0", features = [
   "directory",
 ], default-features = false }
 rand = "0.8"

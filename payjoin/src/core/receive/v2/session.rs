@@ -185,6 +185,7 @@ pub enum SessionStatus {
 /// Represents a piece of information that the receiver has obtained from the session
 /// Each event can be used to transition the receiver state machine to a new state
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum SessionEvent {
     Created(SessionContext),
     RetrievedOriginalPayload { original: OriginalPayload, reply_key: Option<crate::HpkePublicKey> },

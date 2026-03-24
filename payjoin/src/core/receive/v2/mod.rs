@@ -132,6 +132,7 @@ fn short_id_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
 /// This provides type erasure for the receive session state, allowing for the session to be replayed
 /// and the state to be updated with the next event over a uniform interface.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum ReceiveSession {
     Initialized(Receiver<Initialized>),
     UncheckedOriginalPayload(Receiver<UncheckedOriginalPayload>),

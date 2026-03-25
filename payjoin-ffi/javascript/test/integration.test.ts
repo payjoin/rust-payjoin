@@ -702,10 +702,82 @@ async function testIntegrationV2ToV2(): Promise<void> {
     assert.strictEqual(senderBalance, 0.0, "Sender balance should be 0");
 }
 
+/** Calling the WASM-exported fetchOhttpKeysWithCert exercises the wasm.rs code path. */
+async function testWasmFetchOhttpKeys(): Promise<void> {
+    const services = new testUtils.TestServices();
+    services.waitForServicesReady();
+    const relayUrl = services.ohttpRelayUrl();
+    const directoryUrl = services.directoryUrl();
+    const certDer = services.cert();
+
+    // This calls the WASM-compiled fetch_ohttp_keys_with_cert from wasm.rs,
+    // passing the test services' self-signed certificate so the TLS handshake
+    // trusts the local directory.
+    let ohttpKeys;
+    try {
+        ohttpKeys = await payjoin.fetchOhttpKeysWithCert(
+            relayUrl,
+            directoryUrl,
+            certDer.buffer as ArrayBuffer,
+        );
+    } catch (e: any) {
+        // uniffi wraps errors as UniffiThrownObject with an `inner` IoError object.
+        // The inner object exposes the Rust error message via .message().
+        assert.fail(`fetchOhttpKeysWithCert threw: ${e?.inner?.message?.()}`);
+    }
+    assert.ok(
+        ohttpKeys,
+        "WASM fetchOhttpKeysWithCert should return a valid OhttpKeys object",
+    );
+}
+
+async function testWasmFetchOhttpKeysInvalidUrl(): Promise<void> {
+    const services = new testUtils.TestServices();
+    services.waitForServicesReady();
+    const relayUrl = services.ohttpRelayUrl();
+    const directoryUrl = "invalid-url";
+    const certDer = services.cert();
+
+    try {
+        await payjoin.fetchOhttpKeysWithCert(
+            relayUrl,
+            directoryUrl,
+            certDer.buffer as ArrayBuffer,
+        );
+        assert.fail("Should have thrown error");
+    } catch (e: any) {
+        console.debug(`Expected error caught: ${e.inner.message()}`);
+        assert.ok(true);
+    }
+}
+
+async function testWasmFetchOhttpKeysInvalidCert(): Promise<void> {
+    const services = new testUtils.TestServices();
+    services.waitForServicesReady();
+    const relayUrl = services.ohttpRelayUrl();
+    const directoryUrl = services.directoryUrl();
+    const certDer = new Uint8Array([0x00]); // Invalid cert
+
+    try {
+        await payjoin.fetchOhttpKeysWithCert(
+            relayUrl,
+            directoryUrl,
+            certDer.buffer as ArrayBuffer,
+        );
+        assert.fail("Should have thrown error");
+    } catch (e: any) {
+        console.debug(`Expected error caught: ${e.inner.message()}`);
+        assert.ok(true);
+    }
+}
+
 async function runTests(): Promise<void> {
     await uniffiInitAsync();
     testFfiValidation();
     await testIntegrationV2ToV2();
+    await testWasmFetchOhttpKeys();
+    await testWasmFetchOhttpKeysInvalidUrl();
+    await testWasmFetchOhttpKeysInvalidCert();
 }
 
 runTests().catch((error: unknown) => {

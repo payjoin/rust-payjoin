@@ -4,6 +4,7 @@ use std::time::Duration;
 use http::header::ACCEPT;
 use reqwest::{Client, Proxy};
 
+use super::Error;
 use crate::into_url::IntoUrl;
 use crate::OhttpKeys;
 
@@ -71,25 +72,11 @@ async fn parse_ohttp_keys_response(res: reqwest::Response) -> Result<OhttpKeys, 
 
     let body = res.bytes().await?.to_vec();
     OhttpKeys::decode(&body).map_err(|e| {
-        Error::Internal(InternalError(InternalErrorInner::InvalidOhttpKeys(e.to_string())))
+        Error::Internal(super::InternalError(InternalErrorInner::InvalidOhttpKeys(e.to_string())))
     })
 }
-
 #[derive(Debug)]
-#[non_exhaustive]
-pub enum Error {
-    /// When the payjoin directory returns an unexpected status code
-    UnexpectedStatusCode(http::StatusCode),
-    /// Internal errors that should not be pattern matched by users
-    #[doc(hidden)]
-    Internal(InternalError),
-}
-
-#[derive(Debug)]
-pub struct InternalError(InternalErrorInner);
-
-#[derive(Debug)]
-enum InternalErrorInner {
+pub(super) enum InternalErrorInner {
     ParseUrl(crate::into_url::Error),
     Reqwest(reqwest::Error),
     Io(std::io::Error),
@@ -98,38 +85,13 @@ enum InternalErrorInner {
     InvalidOhttpKeys(String),
 }
 
-impl From<url::ParseError> for Error {
-    fn from(value: url::ParseError) -> Self {
-        Self::Internal(InternalError(InternalErrorInner::ParseUrl(value.into())))
-    }
-}
+super::impl_from_error!(url::ParseError, ParseUrl);
 
-macro_rules! impl_from_error {
-    ($from:ty, $to:ident) => {
-        impl From<$from> for Error {
-            fn from(value: $from) -> Self {
-                Self::Internal(InternalError(InternalErrorInner::$to(value)))
-            }
-        }
-    };
-}
-
-impl_from_error!(crate::into_url::Error, ParseUrl);
-impl_from_error!(reqwest::Error, Reqwest);
-impl_from_error!(std::io::Error, Io);
+super::impl_from_error!(crate::into_url::Error, ParseUrl);
+super::impl_from_error!(reqwest::Error, Reqwest);
+super::impl_from_error!(std::io::Error, Io);
 #[cfg(feature = "_manual-tls")]
-impl_from_error!(rustls::Error, Rustls);
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Self::UnexpectedStatusCode(code) => {
-                write!(f, "Unexpected status code from payjoin directory: {code}")
-            }
-            Self::Internal(InternalError(e)) => e.fmt(f),
-        }
-    }
-}
+super::impl_from_error!(rustls::Error, Rustls);
 
 impl std::fmt::Display for InternalErrorInner {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -144,15 +106,6 @@ impl std::fmt::Display for InternalErrorInner {
             }
             #[cfg(feature = "_manual-tls")]
             Rustls(e) => e.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Internal(InternalError(e)) => e.source(),
-            Self::UnexpectedStatusCode(_) => None,
         }
     }
 }
@@ -172,14 +125,6 @@ impl std::error::Error for InternalErrorInner {
     }
 }
 
-impl From<InternalError> for Error {
-    fn from(value: InternalError) -> Self { Self::Internal(value) }
-}
-
-impl From<InternalErrorInner> for Error {
-    fn from(value: InternalErrorInner) -> Self { Self::Internal(InternalError(value)) }
-}
-
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -188,6 +133,7 @@ mod tests {
     use reqwest::Response;
 
     use super::*;
+    use crate::io::InternalError;
 
     fn mock_response(status: StatusCode, body: Vec<u8>) -> Response {
         Response::from(http::response::Response::builder().status(status).body(body).unwrap())

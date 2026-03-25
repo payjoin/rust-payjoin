@@ -652,8 +652,9 @@ dependencies = [
 
 [[package]]
 name = "bitcoind-async-client"
-version = "0.10.1"
-source = "git+https://github.com/benalleng/bitcoind-async-client.git?rev=a6292420de5cfd666d6185c534bea3f22736452b#a6292420de5cfd666d6185c534bea3f22736452b"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe2cbde433d230760d71ccf2bc2eef53ca98b2cd7b31d67a19ad3d466cee67a3"
 dependencies = [
  "base64 0.22.1",
  "bitcoin 0.32.8",

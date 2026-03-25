@@ -8,3 +8,4 @@ mutants.out*
 *.ikm
 *payjoin.sqlite
 data
+.idea

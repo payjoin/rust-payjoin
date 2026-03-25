@@ -67,6 +67,23 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --document-private
 echo "▶  ./contrib/test_local.sh"
 ./contrib/test_local.sh
 
+# -------- 4. lock file verification --------
+changed_tomls=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '(^|/)Cargo\.toml$' || true)
+
+if [ -n "$changed_tomls" ]; then
+    echo "▶  Checking if lockfiles need updating…"
+    ./contrib/update-lock-files.sh
+    stale_locks=$(git diff --name-only -- Cargo-minimal.lock Cargo-recent.lock)
+    if [ -n "$stale_locks" ]; then
+        git checkout -- Cargo-minimal.lock Cargo-recent.lock
+        echo "pre-commit: Cargo.toml changed and lockfiles are stale!"
+        echo "Stale lockfiles:"
+        echo "$stale_locks"
+        echo "Run './contrib/update-lock-files.sh' and stage the lockfiles."
+        exit 1
+    fi
+fi
+
 echo "✓  Pre-commit hook passed"
 ```
 

@@ -3,7 +3,7 @@ rust:
     manifestPath: Cargo.toml
 
 web:
-    features: ["wasm_js"]
+    features: ["wasm_js", "io", "_manual-tls"]
     defaultFeatures: false
     target: nodejs
     manifestPatchFile: wasm-manifest-patch.toml

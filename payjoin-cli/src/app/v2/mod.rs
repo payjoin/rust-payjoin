@@ -503,8 +503,15 @@ impl App {
             self.unwrap_relay_or_else_fetch(Some(&sender.endpoint())).await?.as_str(),
         )?;
         let response = self.post_request(req).await?;
-        println!("Posted original proposal...");
-        let sender = sender.process_response(&response.bytes().await?, ctx).save(persister)?;
+        let response_bytes = response
+            .bytes()
+            .await
+            .map_err(|e| anyhow!("Failed to read response body: {e}"))?;
+        let sender = sender
+            .process_response(&response_bytes, ctx)
+            .save(persister)
+            .map_err(|e| anyhow!("Failed to process proposal response: {e}"))?;
+        println!("Posted original proposal. Awaiting payjoin proposal...");
         self.get_proposed_payjoin_psbt(sender, persister).await
     }
 

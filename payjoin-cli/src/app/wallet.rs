@@ -53,6 +53,13 @@ impl BitcoindWallet {
             conf_target: None,
         };
 
+        // Set locktime to current block height for anti-fee-sniping
+        // This is to follow wallet fingerprinting best practices and set and opinionated
+        // default for external wallet integrations to follow along with
+        let locktime = Some(tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async { self.rpc.get_block_count().await })
+        })? as u32);
+
         // Sync wrapper around async call - use tokio handle to avoid deadlock
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
@@ -66,7 +73,7 @@ impl BitcoindWallet {
                                 amount: v.to_btc(),
                             })
                             .collect::<Vec<_>>(),
-                        None, // locktime
+                        locktime,
                         Some(options),
                         None,
                     )

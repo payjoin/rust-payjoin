@@ -39,6 +39,7 @@ REPOS = [
     "payjoin/multiparty-protocol-docs",
     "payjoin/btsim",
     "payjoin/tx-indexer",
+    "Uniffi-Dart/uniffi-dart",
 ]
 
 REPO_FILTER = " ".join(f"repo:{r}" for r in REPOS)

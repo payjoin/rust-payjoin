@@ -2860,6 +2860,7 @@ dependencies = [
  "hex-conservative 0.1.2",
  "http",
  "http-body-util",
+ "httpdate",
  "hyper",
  "hyper-rustls",
  "hyper-util",

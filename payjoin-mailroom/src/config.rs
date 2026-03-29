@@ -12,6 +12,8 @@ pub struct Config {
     pub storage_dir: PathBuf,
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub timeout: Duration,
+    #[serde(deserialize_with = "deserialize_key_epoch_duration_secs")]
+    pub ohttp_keys_max_age: Option<Duration>,
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub mailbox_ttl: Duration,
     pub v1: Option<V1Config>,
@@ -87,6 +89,7 @@ impl Default for Config {
             listener: "[::]:8080".parse().expect("valid default listener address"),
             storage_dir: PathBuf::from("./data"),
             timeout: Duration::from_secs(30),
+            ohttp_keys_max_age: None, //Some(Duration::from_secs(30)),
             mailbox_ttl: Duration::from_secs(60 * 60 * 24 * 7), // 1 week
             v1: None,
             #[cfg(feature = "telemetry")]
@@ -107,17 +110,42 @@ where
     Ok(Duration::from_secs(secs))
 }
 
+fn deserialize_key_epoch_duration_secs<'de, D>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let secs: Option<u64> = Option::deserialize(deserializer)?;
+    let minimum = crate::directory::ROTATION_GRACE.saturating_mul(4);
+    match secs {
+        None => Ok(None),
+        Some(s) => {
+            let duration = Duration::from_secs(s);
+            if duration <= minimum {
+                return Err(<D::Error as serde::de::Error>::custom(format!(
+                    "ohttp_keys_max_age must be greater than {} seconds when set",
+                    minimum.as_secs()
+                )));
+            }
+            Ok(Some(duration))
+        }
+    }
+}
+
 impl Config {
     pub fn new(
         listener: ListenerAddress,
         storage_dir: PathBuf,
         timeout: Duration,
+        ohttp_keys_max_age: Option<Duration>,
         v1: Option<V1Config>,
     ) -> Self {
         Self {
             listener,
             storage_dir,
             timeout,
+            ohttp_keys_max_age,
             mailbox_ttl: Duration::from_secs(60 * 60 * 24 * 7), // 1 week
             v1,
             #[cfg(feature = "telemetry")]

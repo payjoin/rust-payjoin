@@ -1,14 +1,17 @@
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use axum::body::{Body, Bytes};
-use axum::http::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
+use axum::http::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{Method, Request, Response, StatusCode, Uri};
 use http_body_util::BodyExt;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
+use tokio::sync::RwLock;
 use tracing::{debug, error, trace, warn};
 
 use crate::db::{Db, Error as DbError, SendableError};
@@ -27,6 +30,107 @@ const V1_VERSION_UNSUPPORTED_RES_JSON: &str =
     r#"{"errorCode": "version-unsupported", "supported": [2], "message": "V1 is not supported"}"#;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+// Two-slot OHTTP key set supporting rotation overlap.
+//
+// Key IDs alternate between 0 and 1. Both slots are always populated.
+// The current key is served to new clients; both slots are accepted
+// for decapsulation so that clients with a cached previous key still
+// work during the grace window after a switch.
+#[derive(Debug)]
+struct KeySlot {
+    server: Box<RwLock<ohttp::Server>>,
+}
+
+impl KeySlot {
+    fn new(server: ohttp::Server) -> Self { Self { server: Box::new(RwLock::new(server)) } }
+
+    async fn decapsulate(
+        &self,
+        ohttp_body: &[u8],
+    ) -> std::result::Result<(Vec<u8>, ohttp::ServerResponse), ohttp::Error> {
+        self.server.read().await.decapsulate(ohttp_body)
+    }
+
+    async fn encode(&self) -> std::result::Result<Vec<u8>, ohttp::Error> {
+        self.server.read().await.config().encode()
+    }
+
+    async fn overwrite(&self, server: ohttp::Server) { *self.server.write().await = server; }
+}
+
+#[derive(Debug)]
+struct ActiveKey {
+    key_id: u8,
+    valid_until: Instant,
+    activated_at: SystemTime,
+}
+
+#[derive(Debug)]
+pub struct KeyRotatingServer {
+    keys: [KeySlot; 2],
+    current: RwLock<ActiveKey>,
+}
+
+impl KeyRotatingServer {
+    pub(crate) fn new(
+        slot0: ohttp::Server,
+        slot1: ohttp::Server,
+        current_key_id: u8,
+        valid_until: Instant,
+    ) -> Self {
+        assert!(current_key_id <= 1, "key_id must be 0 or 1");
+        Self {
+            keys: [KeySlot::new(slot0), KeySlot::new(slot1)],
+            current: RwLock::new(ActiveKey {
+                key_id: current_key_id,
+                valid_until,
+                activated_at: SystemTime::now(),
+            }),
+        }
+    }
+
+    pub async fn current_key_id(&self) -> u8 { self.current.read().await.key_id }
+
+    pub async fn valid_until(&self) -> Instant { self.current.read().await.valid_until }
+
+    // Look up the server matching the key_id in an OHTTP message and
+    // decapsulate. The first byte of an OHTTP encapsulated request is the
+    // key identifier (RFC 9458 Section 4.3).
+    pub async fn decapsulate(
+        &self,
+        ohttp_body: &[u8],
+    ) -> std::result::Result<(Vec<u8>, ohttp::ServerResponse), ohttp::Error> {
+        let key_id = ohttp_body.first().copied().ok_or(ohttp::Error::Truncated)? as usize;
+        self.keys.get(key_id).ok_or(ohttp::Error::KeyId)?.decapsulate(ohttp_body).await
+    }
+
+    // Encode the current key's config for serving to clients.
+    pub async fn encode_current(
+        &self,
+    ) -> std::result::Result<(Vec<u8>, Duration, SystemTime), ohttp::Error> {
+        let current = self.current.read().await;
+        let valid_for = current.valid_until.saturating_duration_since(Instant::now());
+        let encoded = self.keys[current.key_id as usize].encode().await?;
+        Ok((encoded, valid_for, current.activated_at))
+    }
+
+    // Flip which key is advertised to new clients and stamp the new expiry.
+    // Anchored to Instant::now() at the moment of the actual switch so that
+    // the next rotation cycle is measured from when the key became active,
+    pub async fn switch(&self, interval: Duration) {
+        let mut current = self.current.write().await;
+        current.key_id = 1 - current.key_id;
+        current.valid_until = Instant::now() + interval;
+        current.activated_at = SystemTime::now()
+    }
+
+    // Replace a slot with fresh key material.
+    pub async fn overwrite(&self, key_id: u8, server: ohttp::Server) {
+        assert!(key_id <= 1, "key_id must be 0 or 1");
+        self.keys[key_id as usize].overwrite(server).await;
+    }
+}
 
 /// Opaque blocklist of Bitcoin addresses stored as script pubkeys.
 ///
@@ -91,7 +195,8 @@ fn parse_address_lines(text: &str) -> std::collections::HashSet<bitcoin::ScriptB
 #[derive(Clone)]
 pub struct Service<D: Db> {
     db: D,
-    ohttp: ohttp::Server,
+    ohttp: Arc<KeyRotatingServer>,
+    ohttp_keys_max_age: Option<Duration>,
     sentinel_tag: SentinelTag,
     v1: Option<V1>,
 }
@@ -117,9 +222,17 @@ where
 }
 
 impl<D: Db> Service<D> {
-    pub fn new(db: D, ohttp: ohttp::Server, sentinel_tag: SentinelTag, v1: Option<V1>) -> Self {
-        Self { db, ohttp, sentinel_tag, v1 }
+    pub fn new(
+        db: D,
+        ohttp: Arc<KeyRotatingServer>,
+        ohttp_keys_max_age: Option<Duration>,
+        sentinel_tag: SentinelTag,
+        v1: Option<V1>,
+    ) -> Self {
+        Self { db, ohttp, ohttp_keys_max_age, sentinel_tag, v1 }
     }
+
+    pub fn ohttp_key_set(&self) -> &Arc<KeyRotatingServer> { &self.ohttp }
 
     async fn serve_request<B>(&self, req: Request<B>) -> Result<Response<Body>>
     where
@@ -200,10 +313,10 @@ impl<D: Db> Service<D> {
             .map_err(|e| HandlerError::BadRequest(anyhow::anyhow!(e.into())))?
             .to_bytes();
 
-        // Decapsulate OHTTP request
         let (bhttp_req, res_ctx) = self
             .ohttp
             .decapsulate(&ohttp_body)
+            .await
             .map_err(|e| HandlerError::OhttpKeyRejection(e.into()))?;
         let mut cursor = std::io::Cursor::new(bhttp_req);
         let req = bhttp::Message::read_bhttp(&mut cursor)
@@ -378,13 +491,30 @@ impl<D: Db> Service<D> {
     }
 
     async fn get_ohttp_keys(&self) -> Result<Response<Body>, HandlerError> {
-        let ohttp_keys = self
+        let (ohttp_keys, valid_for, activated_at) = self
             .ohttp
-            .config()
-            .encode()
+            .encode_current()
+            .await
             .map_err(|e| HandlerError::InternalServerError(e.into()))?;
         let mut res = Response::new(full(ohttp_keys));
         res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/ohttp-keys"));
+
+        // Last-Modified: when this key became the active key
+        res.headers_mut().insert(
+            axum::http::header::LAST_MODIFIED,
+            HeaderValue::from_str(&httpdate::fmt_http_date(activated_at)).expect("valid http-date"),
+        );
+
+        if self.ohttp_keys_max_age.is_some() {
+            res.headers_mut().insert(
+                CACHE_CONTROL,
+                HeaderValue::from_str(&format!(
+                    "public, s-maxage={}, immutable",
+                    valid_for.saturating_add(ROTATION_GRACE).as_secs()
+                ))
+                .expect("valid header value"),
+            );
+        }
         Ok(res)
     }
 
@@ -410,6 +540,67 @@ impl<D: Db> Service<D> {
         res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         Ok(res)
     }
+}
+
+// Grace period after a switch during which the old key is still
+// accepted for decapsulation.
+pub(crate) const ROTATION_GRACE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+// Background task that rotates OHTTP keys on a fixed interval.
+//
+//   1. Sleep until the current key is about to expire (valid_until - ROTATION_GRACE/2).
+//   2. Switch to the standby slot; stamp valid_until = now + interval.
+//   3. Sleep until the old key's grace window has elapsed.
+//   4. Overwrite the old slot with fresh key material for the next cycle.
+pub fn spawn_key_rotation(keyset: Arc<KeyRotatingServer>, keys_dir: PathBuf, interval: Duration) {
+    tokio::spawn(async move {
+        loop {
+            // Sleep until just before the current key expires.
+            let valid_until = keyset.valid_until().await;
+            tracing::info!("Sleeping until {:?}", valid_until);
+            tokio::time::sleep_until(valid_until.into()).await;
+
+            // Capture old key id before switching, then switch.
+            let old_key_id = keyset.current_key_id().await;
+            let new_key_id = 1 - old_key_id;
+
+            // Touch the new active key file *before* overwriting the old slot so
+            // its mtime is newest on disk. On restart,
+            // and derives valid_until from its age.
+            let active_path = keys_dir.join(format!("{new_key_id}.ikm"));
+            let touch_active_key = async {
+                let times = std::fs::FileTimes::new().set_modified(std::time::SystemTime::now());
+                let std_file = tokio::fs::File::open(&active_path).await?.into_std().await;
+                tokio::task::spawn_blocking(move || std_file.set_times(times))
+                    .await
+                    .map_err(std::io::Error::other)?
+            };
+            match touch_active_key.await {
+                Ok(()) => {}
+                Err(e) => tracing::warn!("Failed to change mtime {}: {e}", active_path.display()),
+            }
+
+            // `switch` stamps valid_until = Instant::now() + interval, anchored
+            // to the actual moment the new key goes live.
+            keyset.switch(interval).await;
+
+            tracing::info!("Switched OHTTP serving: From key_id {old_key_id} -> TO {new_key_id}");
+
+            // Wait until the old key's grace window has fully elapsed before
+            // overwriting it, so in-flight clients using the old key still succeed.
+            tokio::time::sleep(ROTATION_GRACE).await;
+
+            let config = crate::key_config::gen_ohttp_server_config_with_id(old_key_id)
+                .expect("OHTTP key generation must not fail");
+            let _ = tokio::fs::remove_file(keys_dir.join(format!("{old_key_id}.ikm"))).await;
+            crate::key_config::persist_key_config(&config, &keys_dir)
+                .await
+                .expect("OHTTP key persistence must not fail");
+
+            keyset.overwrite(old_key_id, config.into_server()).await;
+            tracing::info!("Overwrote OHTTP key_id {old_key_id} with fresh material");
+        }
+    });
 }
 
 fn handle_peek<E: SendableError>(
@@ -485,8 +676,8 @@ impl HandlerError {
             }
             HandlerError::OhttpKeyRejection(e) => {
                 const OHTTP_KEY_REJECTION_RES_JSON: &str = r#"{"type":"https://iana.org/assignments/http-problem-types#ohttp-key", "title": "key identifier unknown"}"#;
-                warn!("Bad request: Key configuration rejected: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST;
+                warn!("Key configuration rejected: {}", e);
+                *res.status_mut() = StatusCode::UNPROCESSABLE_ENTITY;
                 res.headers_mut()
                     .insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 *res.body_mut() = full(OHTTP_KEY_REJECTION_RES_JSON);
@@ -598,9 +789,13 @@ mod tests {
         )
         .await
         .expect("db init");
-        let ohttp: ohttp::Server =
-            crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        Service::new(db, ohttp, SentinelTag::new([0u8; 32]), v1)
+        let c0 = crate::key_config::gen_ohttp_server_config_with_id(0).expect("ohttp config");
+        let c1 = crate::key_config::gen_ohttp_server_config_with_id(1).expect("ohttp config");
+        // valid_until = now + a generous test interval so nothing rotates during tests
+        let valid_until = Instant::now() + Duration::from_secs(3600);
+        let keyset =
+            Arc::new(KeyRotatingServer::new(c0.into_server(), c1.into_server(), 0, valid_until));
+        Service::new(db, keyset, None, SentinelTag::new([0u8; 32]), v1)
     }
 
     /// A valid ShortId encoded as bech32 for use in URL paths.
@@ -838,9 +1033,12 @@ mod tests {
         .await
         .expect("db init");
         let db = MetricsDb::new(db, metrics);
-        let ohttp: ohttp::Server =
-            crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None);
+        let c0 = crate::key_config::gen_ohttp_server_config_with_id(0).expect("ohttp config");
+        let c1 = crate::key_config::gen_ohttp_server_config_with_id(1).expect("ohttp config");
+        let valid_until = Instant::now() + Duration::from_secs(3600);
+        let keyset =
+            Arc::new(KeyRotatingServer::new(c0.into_server(), c1.into_server(), 0, valid_until));
+        let svc = Service::new(db, keyset, None, SentinelTag::new([0u8; 32]), None);
 
         let id = valid_short_id_path();
         let res = svc
@@ -861,7 +1059,7 @@ mod tests {
         use opentelemetry::KeyValue;
         use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
 
-        // This checks that  counter value is 1 as post_mailbox was called once
+        // This checks that counter value is 1 as post_mailbox was called once
         // Also confirms the v2 label is recorded
         match db_metric.data() {
             AggregatedMetrics::U64(MetricData::Sum(sum)) => {

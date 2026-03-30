@@ -12,7 +12,7 @@ As such, contributions are greatly valued, necessary, and impactful: whether it'
 
 ## Communication Channels
 
-Most discussion about Payjoin research and development happens on [Discord](https://discord.gg/X8RRV2VS), or in Github [issues](https://github.com/payjoin/rust-payjoin/issues) or [pull requests](https://github.com/payjoin/rust-payjoin/pulls).
+Most discussion about Payjoin research and development happens on [Discord](https://discord.gg/6rJD9R684h), or in Github [issues](https://github.com/payjoin/rust-payjoin/issues) or [pull requests](https://github.com/payjoin/rust-payjoin/pulls).
 
 ---
 

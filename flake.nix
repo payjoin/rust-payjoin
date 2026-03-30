@@ -132,10 +132,6 @@
           inherit src;
           strictDeps = true;
 
-          # avoid release builds throughout for faster feedback from checks
-          # note that this also affects the built packages
-          CARGO_PROFILE = "crane";
-
           # provide fallback name & version for workspace related derivations
           # this is mainly to silence warnings from crane about providing a stub
           # value overridden in per-crate packages with info from Cargo.toml
@@ -154,12 +150,31 @@
             cargoVendorDir = vendoredDeps.${name};
           };
 
+        # use nix-ci profile for fast checks
+        ciArgsFor =
+          name:
+          commonArgsFor name
+          // {
+            CARGO_PROFILE = "nix-ci";
+          };
+
         cargoArtifacts = builtins.mapAttrs (
           name: craneLib:
           craneLib.buildDepsOnly (
             commonArgsFor name
             // {
               name = "workspace-deps-${name}";
+              cargoLock = cargoLock.${name};
+            }
+          )
+        ) craneLibVersions;
+        # use nix-ci profile for cargo artifacts
+        cargoArtifactsCi = builtins.mapAttrs (
+          name: craneLib:
+          craneLib.buildDepsOnly (
+            ciArgsFor name
+            // {
+              name = "workspace-deps-ci-${name}";
               cargoLock = cargoLock.${name};
             }
           )
@@ -347,16 +362,15 @@
         };
         formatter = treefmtEval.config.build.wrapper;
         checks =
-          packages
-          // (pkgs.lib.mapAttrs' (
+          (pkgs.lib.mapAttrs' (
             name: craneLib:
             (pkgs.lib.nameValuePair "payjoin-workspace-nextest-${name}" (
               craneLib.cargoNextest (
-                commonArgsFor name
+                ciArgsFor name
                 // {
                   name = "payjoin-workspace-nextest-${name}";
                   cargoLock = cargoLock.${name};
-                  cargoArtifacts = cargoArtifacts.${name};
+                  cargoArtifacts = cargoArtifactsCi.${name};
                   partitions = 1;
                   partitionType = "count";
                   cargoExtraArgs = "--locked --workspace --all-features --exclude payjoin-fuzz";
@@ -372,11 +386,11 @@
           )
           // {
             payjoin-workspace-machete = craneLibVersions.nightly.mkCargoDerivation (
-              commonArgsFor "nightly"
+              ciArgsFor "nightly"
               // {
                 pname = "payjoin-workspace-machete";
                 cargoLock = cargoLock.nightly;
-                cargoArtifacts = cargoArtifacts.nightly;
+                cargoArtifacts = cargoArtifactsCi.nightly;
                 nativeBuildInputs = [ pkgs.cargo-machete ];
                 buildPhaseCargoCommand = "";
                 checkPhaseCargoCommand = "cargo machete";
@@ -385,24 +399,24 @@
             );
 
             payjoin-workspace-clippy = craneLibVersions.nightly.cargoClippy (
-              commonArgsFor "nightly"
+              ciArgsFor "nightly"
               // {
                 cargoLock = cargoLock.nightly;
-                cargoArtifacts = cargoArtifacts.nightly;
+                cargoArtifacts = cargoArtifactsCi.nightly;
                 cargoClippyExtraArgs = "--all-targets --all-features --keep-going -- --deny warnings";
               }
             );
 
             payjoin-workspace-doc = craneLibVersions.nightly.cargoDoc (
-              commonArgsFor "nightly"
+              ciArgsFor "nightly"
               // {
                 cargoLock = cargoLock.nightly;
-                cargoArtifacts = cargoArtifacts.nightly;
+                cargoArtifacts = cargoArtifactsCi.nightly;
               }
             );
 
             payjoin-workspace-fmt = craneLibVersions.nightly.cargoFmt (
-              commonArgsFor "nightly"
+              ciArgsFor "nightly"
               // {
                 inherit src;
                 # cargoLock = cargoLock.nightly;
@@ -446,7 +460,17 @@
               [
                 payjoin-workspace-nextest-msrv
               ]
-              ++ pkgs.lib.attrValues packages
+              ++ pkgs.lib.attrValues (
+                builtins.mapAttrs (
+                  _name: pkg:
+                  pkg.overrideAttrs (
+                    final: prev: {
+                      CARGO_PROFILE = "nix-ci";
+                      cargoArtifacts = cargoArtifactsCi.msrv;
+                    }
+                  )
+                ) packages
+              )
             );
 
             maintenance = checkSuite "maintenance" (

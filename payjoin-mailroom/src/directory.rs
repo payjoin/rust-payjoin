@@ -806,4 +806,63 @@ mod tests {
         let html = landing_page_html();
         assert!(!html.contains("{{VERSION_STRING}}"));
     }
+
+    // MetricsDb decorator
+
+    #[tokio::test]
+    async fn post_mailbox_increments_v2_db_entry_metric() {
+        use opentelemetry_sdk::metrics::{
+            InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
+        };
+
+        use crate::db::MetricsDb;
+        use crate::metrics::{MetricsService, DB_ENTRIES};
+
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone()).build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+        let metrics = MetricsService::new(Some(provider.clone()));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = FilesDb::init(Duration::from_millis(100), dir.keep()).await.expect("db init");
+        let db = MetricsDb::new(db, metrics);
+        let ohttp: ohttp::Server =
+            crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
+        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None);
+
+        let id = valid_short_id_path();
+        let res = svc
+            .post_mailbox(&id, Body::from(b"small payload under 65k limit".to_vec()))
+            .await
+            .expect("post_mailbox should succeed");
+        assert_eq!(res.status(), StatusCode::OK);
+
+        provider.force_flush().expect("flush failed");
+        let finished = exporter.get_finished_metrics().expect("metrics");
+        let db_metric = finished
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .find(|m| m.name() == DB_ENTRIES)
+            .expect("missing db_entries_total metric");
+
+        use opentelemetry::KeyValue;
+        use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+
+        // This checks that  counter value is 1 as post_mailbox was called once
+        // Also confirms the v2 label is recorded
+        match db_metric.data() {
+            AggregatedMetrics::U64(MetricData::Sum(sum)) => {
+                let points: Vec<_> = sum.data_points().collect();
+                assert_eq!(points.len(), 1, "expected exactly one data point");
+                assert_eq!(points[0].value(), 1, "expected counter value of 1");
+                let attrs: Vec<_> = points[0].attributes().collect();
+                assert!(
+                    attrs.contains(&&KeyValue::new("version", "2")),
+                    "expected version=2 attribute"
+                );
+            }
+            other => panic!("expected U64 Sum, got {other:?}"),
+        }
+    }
 }

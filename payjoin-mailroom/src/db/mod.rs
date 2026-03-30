@@ -8,6 +8,7 @@ use tower::util::BoxCloneSyncService;
 use tower::{Service, ServiceExt};
 
 pub mod files;
+use crate::metrics::{MetricsService, PayjoinVersion};
 
 pub trait SendableError:
     std::error::Error + std::marker::Send + std::marker::Sync + std::convert::Into<anyhow::Error>
@@ -235,3 +236,55 @@ impl Db for DbServiceAdapter {
 }
 
 pub use files::FilesDb;
+
+/// Db decorator that records write metrics
+#[derive(Clone)]
+pub struct MetricsDb<D: Db> {
+    inner: D,
+    metrics: MetricsService,
+}
+
+impl<D: Db> MetricsDb<D> {
+    pub fn new(inner: D, metrics: MetricsService) -> Self { Self { inner, metrics } }
+}
+
+impl<D: Db> Db for MetricsDb<D> {
+    type OperationalError = D::OperationalError;
+
+    async fn post_v2_payload(
+        &self,
+        mailbox_id: &ShortId,
+        data: Vec<u8>,
+    ) -> Result<Option<()>, Error<Self::OperationalError>> {
+        let result = self.inner.post_v2_payload(mailbox_id, data).await?;
+        if result.is_some() {
+            self.metrics.record_db_entry(PayjoinVersion::Two);
+        }
+        Ok(result)
+    }
+
+    async fn wait_for_v2_payload(
+        &self,
+        mailbox_id: &ShortId,
+    ) -> Result<Arc<Vec<u8>>, Error<Self::OperationalError>> {
+        self.inner.wait_for_v2_payload(mailbox_id).await
+    }
+
+    async fn post_v1_response(
+        &self,
+        mailbox_id: &ShortId,
+        data: Vec<u8>,
+    ) -> Result<(), Error<Self::OperationalError>> {
+        self.inner.post_v1_response(mailbox_id, data).await
+    }
+
+    async fn post_v1_request_and_wait_for_response(
+        &self,
+        mailbox_id: &ShortId,
+        data: Vec<u8>,
+    ) -> Result<Arc<Vec<u8>>, Error<Self::OperationalError>> {
+        let result = self.inner.post_v1_request_and_wait_for_response(mailbox_id, data).await?;
+        self.metrics.record_db_entry(PayjoinVersion::One);
+        Ok(result)
+    }
+}

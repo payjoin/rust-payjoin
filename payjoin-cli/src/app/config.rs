@@ -36,7 +36,14 @@ pub struct V2Config {
     #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
     pub ohttp_relays: Vec<Url>,
-    pub pj_directory: Url,
+    // NOTE: CLI flag --pj-directory still works via backwards compat in resolve_pj_directories.
+    #[serde(deserialize_with = "deserialize_urls_from_strings")]
+    pub pj_directories: Vec<Url>,
+    /// Path to ASmap file (Kartograf format: "103.152.34.0/23 AS14618")
+    /// Generate with: https://github.com/asmap/kartograf
+    pub asmap_path: Option<PathBuf>,
+    /// User's Autonomous System Number for filtering relays and directories
+    pub user_asn: Option<u32>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -270,21 +277,27 @@ fn add_v1_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
 fn add_v2_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     // Set default values
     let config = config
-        .set_default("v2.pj_directory", "https://payjo.in")?
+        .set_default("v2.pj_directories", vec!["https://payjo.in"])?
         .set_default("v2.ohttp_keys", None::<String>)?;
 
     // Override config values with command line arguments if applicable
-    let pj_directory = cli.pj_directory.as_ref().map(|s| s.as_str());
+    let pj_directories =
+        resolve_pj_directories(cli.pj_directories.as_deref(), cli.pj_directory.as_ref());
+
     let ohttp_keys = cli.ohttp_keys.as_ref().map(|p| p.to_string_lossy().into_owned());
     let ohttp_relays = cli
         .ohttp_relays
         .as_ref()
         .map(|urls| urls.iter().map(|url| url.as_str()).collect::<Vec<_>>());
+    let asmap_path = cli.asmap_path.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let user_asn = cli.user_asn;
 
     config
-        .set_override_option("v2.pj_directory", pj_directory)?
+        .set_override_option("v2.pj_directories", pj_directories)?
         .set_override_option("v2.ohttp_keys", ohttp_keys)?
-        .set_override_option("v2.ohttp_relays", ohttp_relays)
+        .set_override_option("v2.ohttp_relays", ohttp_relays)?
+        .set_override_option("v2.asmap_path", asmap_path)?
+        .set_override_option("v2.user_asn", user_asn)
 }
 
 /// Handles configuration overrides based on CLI subcommands
@@ -311,6 +324,8 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
             #[cfg(feature = "v2")]
             pj_directory,
             #[cfg(feature = "v2")]
+            pj_directories,
+            #[cfg(feature = "v2")]
             ohttp_keys,
             ..
         } => {
@@ -319,8 +334,11 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
                 .set_override_option("v1.port", port.map(|p| p.to_string()))?
                 .set_override_option("v1.pj_endpoint", pj_endpoint.as_ref().map(|s| s.as_str()))?;
             #[cfg(feature = "v2")]
+            let pj_directories =
+                resolve_pj_directories(pj_directories.as_deref(), pj_directory.as_ref());
+            #[cfg(feature = "v2")]
             let config = config
-                .set_override_option("v2.pj_directory", pj_directory.as_ref().map(|s| s.as_str()))?
+                .set_override_option("v2.pj_directories", pj_directories)?
                 .set_override_option(
                     "v2.ohttp_keys",
                     ohttp_keys.as_ref().map(|s| s.to_string_lossy().into_owned()),
@@ -354,4 +372,24 @@ where
             })
             .map(Some),
     }
+}
+
+#[cfg(feature = "v2")]
+fn deserialize_urls_from_strings<'de, D>(deserializer: D) -> Result<Vec<Url>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let strings: Vec<String> = Vec::deserialize(deserializer)?;
+    strings.into_iter().map(|s| Url::parse(&s).map_err(serde::de::Error::custom)).collect()
+}
+
+#[cfg(feature = "v2")]
+fn resolve_pj_directories(
+    pj_directories: Option<&[Url]>,
+    pj_directory_fallback: Option<&Url>,
+) -> Option<Vec<String>> {
+    if let Some(urls) = pj_directories {
+        return Some(urls.iter().map(|url| url.to_string()).collect());
+    }
+    pj_directory_fallback.map(|url| vec![url.to_string()])
 }

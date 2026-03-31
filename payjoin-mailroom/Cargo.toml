@@ -47,6 +47,7 @@ hyper-rustls = { version = "0.27.7", default-features = false, features = [
   "ring",
 ] }
 hyper-util = { version = "0.1.16", features = ["client-legacy", "service"] }
+hyperloglogplus = "0.4.1"
 ipnet = { version = "2", optional = true }
 maxminddb = { version = "0.27", optional = true }
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }

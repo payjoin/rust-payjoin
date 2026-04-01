@@ -129,18 +129,28 @@ query($q: String!) {
         id
         title
         url
+        number
+        repository {
+          nameWithOwner
+        }
         author { login }
       }
       ... on Issue {
         id
         title
         url
+        number
+        repository {
+          nameWithOwner
+        }
         author { login }
       }
     }
   }
 }
 """
+# This avoids refetching review history for the same PR multiple times in one run.
+PR_REVIEWS_CACHE = {}
 
 
 def search_issues(query):
@@ -156,12 +166,78 @@ def search_issues(query):
                 "id": node["id"],
                 "title": node["title"],
                 "html_url": node["url"],
+                "number": node["number"],
+                "repository": node["repository"]["nameWithOwner"],
                 "user": {
                     "login": node["author"]["login"] if node.get("author") else ""
                 },
             }
         )
     return items
+
+
+def parse_github_datetime(value):
+    """Parse a GitHub ISO 8601 timestamp into an aware datetime."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def get_paginated(url, params=None):
+    """GET a paginated REST collection and return all items."""
+    items = []
+    next_url = url
+    next_params = params or {}
+    while next_url:
+        for attempt in range(5):
+            resp = requests.get(
+                next_url,
+                headers=HEADERS,
+                params=next_params,
+                timeout=30,
+            )
+            if resp.status_code in {403, 429} or 500 <= resp.status_code < 600:
+                wait = 2**attempt
+                print(
+                    f"REST request failed ({resp.status_code}), retrying in {wait}s..."
+                )
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            break
+        else:
+            resp.raise_for_status()
+        items.extend(resp.json())
+        next_url = resp.links.get("next", {}).get("url")
+        next_params = None
+    return items
+
+
+def get_pull_request_reviews(pr):
+    """Return all submitted reviews for a pull request."""
+    cache_key = (pr["repository"], pr["number"])
+    if cache_key in PR_REVIEWS_CACHE:
+        return PR_REVIEWS_CACHE[cache_key]
+
+    reviews = get_paginated(
+        f"{API}/repos/{pr['repository']}/pulls/{pr['number']}/reviews",
+        {"per_page": 100},
+    )
+    PR_REVIEWS_CACHE[cache_key] = reviews
+    return reviews
+
+
+def latest_reviewed_at(pr, reviewer):
+    """Return the reviewer's latest submitted review timestamp for a PR."""
+    latest = None
+    for review in get_pull_request_reviews(pr):
+        if review.get("user", {}).get("login") != reviewer:
+            continue
+        submitted_at = review.get("submitted_at")
+        if not submitted_at:
+            continue
+        submitted = parse_github_datetime(submitted_at)
+        if latest is None or submitted > latest:
+            latest = submitted
+    return latest
 
 
 def gather_activity(user, since_date):
@@ -171,10 +247,20 @@ def gather_activity(user, since_date):
     # PRs merged (authored)
     merged_prs = search_issues(f"author:{user} type:pr merged:>{since}")
 
-    # PRs reviewed
-    reviewed_prs = search_issues(f"reviewed-by:{user} type:pr updated:>{since}")
-    # Exclude PRs the user authored (already counted above)
-    reviewed_prs = [pr for pr in reviewed_prs if pr["user"]["login"] != user]
+    # PRs reviewed use search  to find candidate PRs then confirm
+    # the reviewer actually submitted a review during the standup window.
+    review_candidates = search_issues(
+        f"reviewed-by:{user} type:pr updated:>{since} sort:updated-desc"
+    )
+    seen_ids = set()
+    reviewed_prs = []
+    for pr in review_candidates:
+        if pr["id"] in seen_ids or pr["user"]["login"] == user:
+            continue
+        reviewed_at = latest_reviewed_at(pr, user)
+        if reviewed_at and reviewed_at > since_date:
+            seen_ids.add(pr["id"])
+            reviewed_prs.append(pr)
 
     # Issues opened
     issues_opened = search_issues(f"author:{user} type:issue created:>{since}")

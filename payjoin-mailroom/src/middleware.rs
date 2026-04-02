@@ -39,7 +39,7 @@ pub async fn track_metrics(
     next: Next,
 ) -> Response {
     let method = req.method().to_string();
-    let path = req.uri().path().to_string();
+    let path = sanitize_short_id(req.uri().path());
 
     let response = next.run(req).await;
     let status = response.status().as_u16();
@@ -47,6 +47,18 @@ pub async fn track_metrics(
     metrics.record_http_request(&path, &method, status);
 
     response
+}
+
+fn sanitize_short_id(path: &str) -> String {
+    // This function ensures that ShortID isn't recorded in the metrics
+    const BECH32_CHARSET: &[u8] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+    match path.strip_prefix('/') {
+        Some(segment)
+            if segment.len() == 13
+                && segment.bytes().all(|b| BECH32_CHARSET.contains(&b.to_ascii_lowercase())) =>
+            "/{mailbox}".to_string(),
+        _ => path.to_string(),
+    }
 }
 
 pub async fn track_connections(

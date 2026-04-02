@@ -25,3 +25,5 @@ This library should compile with any combination of features with Rust 1.85.0.
 
 This project is in active development and currently in its Alpha stage. **Please proceed with caution**, particularly when using real funds.
 We encourage thorough review, testing, and contributions to help improve its stability and security before considering production use.
+
+test

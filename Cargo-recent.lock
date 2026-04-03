@@ -2016,9 +2016,9 @@ dependencies = [
 
 [[package]]
 name = "icu_locale_core"
-version = "2.0.0"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cde2700ccaed3872079a65fb1a78f6c0a36c91570f28755dda67bc8f7d9f00a"
+checksum = "93cca704c2d63cf8a91f5c2c5f88e027940dede132319b85a52939db9758f7e5"
 dependencies = [
  "displaydoc",
  "litemap",
@@ -2785,6 +2785,8 @@ dependencies = [
  "bdk",
  "bitcoin-ohttp",
  "getrandom 0.2.15",
+ "icu_locale_core",
+ "icu_provider",
  "lazy_static",
  "payjoin",
  "payjoin-test-utils",
@@ -5405,9 +5407,9 @@ dependencies = [
 
 [[package]]
 name = "writeable"
-version = "0.6.1"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea2f10b9bb0928dfb1b42b65e1f9e36f7f54dbdf08457afefb38afcdec4fa2bb"
+checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "x509-parser"

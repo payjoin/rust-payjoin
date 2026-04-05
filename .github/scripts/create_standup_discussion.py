@@ -121,6 +121,66 @@ def add_discussion_comment(discussion_id, body):
     )
 
 
+def find_latest_checkin():
+    """Find the most recent Weekly Check-in Discussion."""
+    owner, name = REPO.split("/")
+    data = graphql(
+        """
+        query($owner: String!, $name: String!) {
+          repository(owner: $owner, name: $name) {
+            discussions(first: 10, orderBy: {field: CREATED_AT, direction: DESC}) {
+              nodes {
+                id
+                title
+              }
+            }
+          }
+        }
+        """,
+        {"owner": owner, "name": name},
+    )
+    for discussion in data["repository"]["discussions"]["nodes"]:
+        if discussion["title"].startswith("Weekly Check-in:"):
+            return discussion
+    return None
+
+
+def get_discussion_comments(discussion_id):
+    """Fetch top-level comments for a Discussion."""
+    data = graphql(
+        """
+        query($id: ID!) {
+          node(id: $id) {
+            ... on Discussion {
+              comments(first: 50) {
+                nodes {
+                  body
+                  url
+                }
+              }
+            }
+          }
+        }
+        """,
+        {"id": discussion_id},
+    )
+    return data["node"]["comments"]["nodes"]
+
+
+def get_previous_thread_links():
+    """Map contributors to the previous check-in thread created for them."""
+    discussion = find_latest_checkin()
+    if not discussion:
+        return {}
+
+    links = {}
+    for comment in get_discussion_comments(discussion["id"]):
+        user = next((u for u in CONTRIBUTORS if f"@{u}" in comment["body"]), None)
+        if user:
+            links[user] = comment["url"]
+    return links
+
+
 SEARCH_QUERY = """
 query($q: String!) {
   search(query: $q, type: ISSUE, first: 30) {
@@ -293,7 +353,7 @@ def gather_potential_bottlenecks(user, since_date):
 
 
 def format_contributor_comment(
-    user, merged_prs, reviewed_prs, issues_opened, bottlenecks
+    user, merged_prs, reviewed_prs, issues_opened, bottlenecks, previous_thread_url=None
 ):
     """Format the threaded reply for a contributor."""
     lines = [f"## {user}", "", f"@{user}", ""]
@@ -321,6 +381,16 @@ def format_contributor_comment(
     else:
         lines.append("_No activity found._")
 
+    lines.append("")
+    lines.append("### Last Week")
+    if previous_thread_url:
+        lines.append("")
+        lines.append(
+            f"Review your previous thread: [Last week's thread]({previous_thread_url})"
+        )
+    else:
+        lines.append("_No previous thread found._")
+
     if bottlenecks:
         lines.append("")
         lines.append("_Auto-detected signals:_")
@@ -333,6 +403,7 @@ def main():
     today = datetime.now(timezone.utc)
     week_label = today.strftime("Week of %Y-%m-%d")
     since_date = today - timedelta(days=7)
+    previous_thread_links = get_previous_thread_links()
 
     dry_run = os.environ.get("DRY_RUN")
 
@@ -342,7 +413,12 @@ def main():
         merged_prs, reviewed_prs, issues_opened = gather_activity(user, since_date)
         bottlenecks = gather_potential_bottlenecks(user, since_date)
         comment_body = format_contributor_comment(
-            user, merged_prs, reviewed_prs, issues_opened, bottlenecks
+            user,
+            merged_prs,
+            reviewed_prs,
+            issues_opened,
+            bottlenecks,
+            previous_thread_links.get(user),
         )
         comments.append((user, comment_body))
 

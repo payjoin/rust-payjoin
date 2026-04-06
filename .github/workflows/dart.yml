@@ -1,5 +1,10 @@
 name: Build and Test Dart
 on:
+  workflow_run:
+    workflows: ["Flake maintenance"]
+    types: [requested]
+    branches:
+      - "update_flake_lock_action"
   pull_request:
     paths:
       - payjoin-ffi/**

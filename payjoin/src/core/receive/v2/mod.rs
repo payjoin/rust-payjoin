@@ -55,7 +55,7 @@ use crate::ohttp::{
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
     MaybeFatalOrSuccessTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
-    MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition,
+    MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition, TerminalTransition,
 };
 use crate::receive::{parse_payload, InputPair, OriginalPayload, PsbtContext};
 use crate::time::Time;
@@ -232,20 +232,73 @@ impl ReceiveSession {
 }
 
 mod sealed {
-    pub trait State {}
+    pub trait State {
+        fn fallback_tx(&self) -> Option<bitcoin::Transaction> { None }
+    }
 
     impl State for super::Initialized {}
-    impl State for super::UncheckedOriginalPayload {}
-    impl State for super::MaybeInputsOwned {}
-    impl State for super::MaybeInputsSeen {}
-    impl State for super::OutputsUnknown {}
-    impl State for super::WantsOutputs {}
-    impl State for super::WantsInputs {}
-    impl State for super::WantsFeeRange {}
-    impl State for super::ProvisionalProposal {}
-    impl State for super::PayjoinProposal {}
+
+    impl State for super::UncheckedOriginalPayload {
+        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+            Some(self.original.psbt.clone().extract_tx_unchecked_fee_rate())
+        }
+    }
+
+    impl State for super::MaybeInputsOwned {
+        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+            Some(self.original.psbt.clone().extract_tx_unchecked_fee_rate())
+        }
+    }
+
+    impl State for super::MaybeInputsSeen {
+        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+            Some(self.original.psbt.clone().extract_tx_unchecked_fee_rate())
+        }
+    }
+
+    impl State for super::OutputsUnknown {
+        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+            Some(self.original.psbt.clone().extract_tx_unchecked_fee_rate())
+        }
+    }
+
+    impl State for super::WantsOutputs {
+        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+            Some(self.inner.original_psbt.clone().extract_tx_unchecked_fee_rate())
+        }
+    }
+
+    impl State for super::WantsInputs {
+        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+            Some(self.inner.original_psbt.clone().extract_tx_unchecked_fee_rate())
+        }
+    }
+
+    impl State for super::WantsFeeRange {
+        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+            Some(self.inner.original_psbt.clone().extract_tx_unchecked_fee_rate())
+        }
+    }
+
+    impl State for super::ProvisionalProposal {
+        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+            Some(self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate())
+        }
+    }
+
+    impl State for super::PayjoinProposal {
+        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+            Some(self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate())
+        }
+    }
+
     impl State for super::HasReplyableError {}
-    impl State for super::Monitor {}
+
+    impl State for super::Monitor {
+        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+            Some(self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate())
+        }
+    }
 }
 
 /// Sealed trait for V2 receive session states.
@@ -254,6 +307,8 @@ mod sealed {
 /// This trait is sealed to prevent external implementations. Only types within this crate
 /// can implement this trait, ensuring type safety and protocol integrity.
 pub trait State: sealed::State {}
+
+impl<S: sealed::State> State for S {}
 
 /// A higher-level receiver construct which will be taken through different states through the
 /// protocol workflow.
@@ -283,6 +338,20 @@ impl<State> core::ops::Deref for Receiver<State> {
 
 impl<State> core::ops::DerefMut for Receiver<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
+}
+
+impl<S: State> Receiver<S> {
+    /// Cancel the Payjoin session immediately.
+    ///
+    /// Returns a [`TerminalTransition`] that, once persisted, yields the fallback
+    /// transaction when applicable. The fallback transaction is the sender's original
+    /// transaction that should be broadcast to complete the payment without Payjoin.
+    ///
+    /// This is a terminal transition — the session cannot be used after cancellation.
+    pub fn cancel(self) -> TerminalTransition<SessionEvent, Option<bitcoin::Transaction>> {
+        let fallback = self.state.fallback_tx();
+        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Cancel), fallback)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1829,5 +1898,55 @@ pub mod test {
             Receiver { state: provisional_proposal, session_context: SHARED_CONTEXT.clone() };
         let psbt = receiver.psbt_to_sign();
         assert_eq!(psbt, PARSED_PAYJOIN_PROPOSAL.clone());
+    }
+
+    #[test]
+    fn cancel_returns_expected_fallback() {
+        macro_rules! do_cancel_test {
+            ($state:expr, $expected:expr) => {{
+                let persister = InMemoryTestPersister::<SessionEvent>::default();
+                let fallback = Receiver { state: $state, session_context: SHARED_CONTEXT.clone() }
+                    .cancel()
+                    .save(&persister)
+                    .expect("save should succeed");
+                assert_eq!(fallback, $expected, "cancel from {}", stringify!($state));
+            }};
+        }
+
+        let original =
+            OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params: Params::default() };
+        let expected_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx_unchecked_fee_rate();
+        let psbt_ctx = PsbtContext {
+            original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+            payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+        };
+        let wants_outputs = common::WantsOutputs::new(original.clone(), vec![0]);
+        let wants_inputs = wants_outputs.clone().commit_outputs();
+        let wants_fee_range = wants_inputs.clone().commit_inputs();
+
+        // States without a fallback transaction
+        do_cancel_test!(Initialized {}, None);
+        do_cancel_test!(HasReplyableError { error_reply: mock_err() }, None);
+
+        // States with a fallback transaction
+        do_cancel_test!(
+            UncheckedOriginalPayload { original: original.clone() },
+            Some(expected_tx.clone())
+        );
+        do_cancel_test!(MaybeInputsOwned { original: original.clone() }, Some(expected_tx.clone()));
+        do_cancel_test!(MaybeInputsSeen { original: original.clone() }, Some(expected_tx.clone()));
+        do_cancel_test!(OutputsUnknown { original }, Some(expected_tx.clone()));
+        do_cancel_test!(WantsOutputs { inner: wants_outputs }, Some(expected_tx.clone()));
+        do_cancel_test!(WantsInputs { inner: wants_inputs }, Some(expected_tx.clone()));
+        do_cancel_test!(WantsFeeRange { inner: wants_fee_range }, Some(expected_tx.clone()));
+        do_cancel_test!(
+            ProvisionalProposal { psbt_context: psbt_ctx.clone() },
+            Some(expected_tx.clone())
+        );
+        do_cancel_test!(
+            PayjoinProposal { psbt_context: psbt_ctx.clone() },
+            Some(expected_tx.clone())
+        );
+        do_cancel_test!(Monitor { psbt_context: psbt_ctx }, Some(expected_tx));
     }
 }

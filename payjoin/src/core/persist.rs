@@ -460,6 +460,40 @@ impl<Event, NextState> NextStateTransition<Event, NextState> {
     }
 }
 
+/// A transition that unconditionally terminates the session.
+///
+/// Unlike other transition types, this always succeeds at the protocol level
+/// (the only possible error is from the persister's storage layer).
+/// After saving, the session is closed and no further events can be appended.
+///
+/// The `T` parameter carries a value that is returned after saving without
+/// being persisted. This lets callers receive derived data (e.g. a fallback
+/// transaction) through the same `.save()` call pattern used by every other
+/// transition type.
+pub struct TerminalTransition<Event, T>(Event, T);
+
+impl<Event, T> TerminalTransition<Event, T> {
+    pub(crate) fn new(event: Event, value: T) -> Self { Self(event, value) }
+
+    pub fn save<P>(self, persister: &P) -> Result<T, P::InternalStorageError>
+    where
+        P: SessionPersister<SessionEvent = Event>,
+    {
+        PersistActions::SaveAndClose(self.0).execute(persister)?;
+        Ok(self.1)
+    }
+
+    pub async fn save_async<P>(self, persister: &P) -> Result<T, P::InternalStorageError>
+    where
+        P: AsyncSessionPersister<SessionEvent = Event>,
+        Event: Send,
+        T: Send,
+    {
+        PersistActions::SaveAndClose(self.0).execute_async(persister).await?;
+        Ok(self.1)
+    }
+}
+
 /// A transition that can result in a succession completion, fatal error, or transient error.
 /// The transition can also result in no state change.
 pub enum MaybeFatalOrSuccessTransition<Event, CurrentState, Err> {

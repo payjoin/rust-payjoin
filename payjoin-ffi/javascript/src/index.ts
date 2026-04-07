@@ -1,3 +1,5 @@
+import "./polyfills.js";
+
 // Export the generated bindings to the app.
 export * as payjoin from "./generated/payjoin.js";
 

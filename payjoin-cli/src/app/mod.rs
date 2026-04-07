@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::Result;
 use payjoin::bitcoin::psbt::Psbt;
@@ -9,7 +10,7 @@ use tokio::sync::watch;
 pub mod config;
 pub mod wallet;
 use crate::app::config::Config;
-use crate::app::wallet::BitcoindWallet;
+use crate::app::wallet::PayjoinWallet;
 
 #[cfg(feature = "v1")]
 pub(crate) mod v1;
@@ -21,7 +22,7 @@ pub trait App: Send + Sync {
     async fn new(config: Config) -> Result<Self>
     where
         Self: Sized;
-    fn wallet(&self) -> BitcoindWallet;
+    fn wallet(&self) -> Arc<dyn PayjoinWallet>;
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()>;
     async fn receive_payjoin(&self, amount: Amount) -> Result<()>;
     #[cfg(feature = "v2")]

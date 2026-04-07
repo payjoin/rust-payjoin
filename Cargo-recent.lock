@@ -433,12 +433,12 @@ dependencies = [
  "bip39",
  "bitcoin 0.30.2",
  "core-rpc",
- "electrum-client",
- "esplora-client",
+ "electrum-client 0.18.0",
+ "esplora-client 0.6.0",
  "getrandom 0.2.15",
  "js-sys",
  "log",
- "miniscript",
+ "miniscript 10.2.3",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -455,6 +455,55 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "bdk_chain"
+version = "0.23.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c290eff038799a8ac0c5a82b6160a9ca456baa299a6f22b262c771342d2846c0"
+dependencies = [
+ "bdk_core",
+ "bitcoin 0.32.8",
+ "miniscript 12.3.5",
+ "serde",
+]
+
+[[package]]
+name = "bdk_core"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb3028782f6bf14a6df987244333d34e6b272b5a40a53e4879ec2dfd82275a3a"
+dependencies = [
+ "bitcoin 0.32.8",
+ "hashbrown 0.14.5",
+ "serde",
+]
+
+[[package]]
+name = "bdk_esplora"
+version = "0.22.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83986307ea92997c3d051e8c306af8115a05add601e22acb7c1903008e6b614e"
+dependencies = [
+ "async-trait",
+ "bdk_core",
+ "esplora-client 0.12.3",
+ "futures",
+]
+
+[[package]]
+name = "bdk_wallet"
+version = "3.0.0-rc.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b989a12f0398a844bf22b14a197e2676aea2775aabca52057627f596ad3a0ef"
+dependencies = [
+ "bdk_chain",
+ "bitcoin 0.32.8",
+ "miniscript 12.3.5",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1359,6 +1408,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
+name = "electrsd"
+version = "0.36.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8926868af723c2819807809e54585992aaea0e26a6f5089ac8c2598eaec8d01"
+dependencies = [
+ "bitcoin_hashes 0.14.0",
+ "corepc-client",
+ "corepc-node",
+ "electrum-client 0.24.1",
+ "log",
+ "minreq",
+ "nix 0.25.1",
+ "zip",
+]
+
+[[package]]
 name = "electrum-client"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1375,6 +1440,18 @@ dependencies = [
  "webpki",
  "webpki-roots 0.22.6",
  "winapi",
+]
+
+[[package]]
+name = "electrum-client"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5059f13888a90486e7268bbce59b175f5f76b1c55e5b9c568ceaa42d2b8507c"
+dependencies = [
+ "bitcoin 0.32.8",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1423,6 +1500,21 @@ dependencies = [
  "log",
  "serde",
  "ureq",
+]
+
+[[package]]
+name = "esplora-client"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f19e3ea99dbfbef0c1ec26d83e69de0c579f6aa6aaac4f44597805fcc27e97af"
+dependencies = [
+ "bitcoin 0.32.8",
+ "hex-conservative 0.2.2",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1743,6 +1835,7 @@ checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
  "ahash",
  "allocator-api2",
+ "serde",
 ]
 
 [[package]]
@@ -2376,6 +2469,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
+name = "memoffset"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5aa361d4faea93603064a027415f07bd8e1d5c88c9fbf68bf56a285428fd79ce"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2395,6 +2497,17 @@ checksum = "2e88ef03cc0ce21bcf584da157890b292fc4b69bfeaa4e9d41bbf492da59b22f"
 dependencies = [
  "bitcoin 0.30.2",
  "bitcoin-private",
+ "serde",
+]
+
+[[package]]
+name = "miniscript"
+version = "12.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "487906208f38448e186e3deb02f2b8ef046a9078b0de00bdb28bf4fb9b76951c"
+dependencies = [
+ "bech32 0.11.0",
+ "bitcoin 0.32.8",
  "serde",
 ]
 
@@ -2457,6 +2570,20 @@ dependencies = [
  "serde_urlencoded",
  "similar",
  "tokio",
+]
+
+[[package]]
+name = "nix"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f346ff70e7dbfd675fe90590b92d59ef2de15a8779ae305ebcbfd3f0caf59be4"
+dependencies = [
+ "autocfg",
+ "bitflags 1.3.2",
+ "cfg-if",
+ "libc",
+ "memoffset",
+ "pin-utils",
 ]
 
 [[package]]
@@ -2753,10 +2880,14 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bdk_esplora",
+ "bdk_wallet",
  "bitcoind-async-client",
  "clap 4.5.46",
  "config",
  "dirs",
+ "electrsd",
+ "esplora-client 0.12.3",
  "http-body-util",
  "hyper",
  "hyper-util",

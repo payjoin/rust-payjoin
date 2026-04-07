@@ -20,7 +20,7 @@ use payjoin::{ImplementationError, PjParam, Uri};
 use tokio::sync::watch;
 
 use super::config::Config;
-use super::wallet::BitcoindWallet;
+use super::wallet::{create_wallet, PayjoinWallet};
 use super::App as AppTrait;
 use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, RelayManager};
 use crate::app::{handle_interrupt, http_agent};
@@ -38,7 +38,7 @@ const W_STATUS: usize = 15;
 pub(crate) struct App {
     config: Config,
     db: Arc<Database>,
-    wallet: BitcoindWallet,
+    wallet: Arc<dyn PayjoinWallet>,
     interrupt: watch::Receiver<()>,
     relay_manager: Arc<Mutex<RelayManager>>,
 }
@@ -143,15 +143,13 @@ impl AppTrait for App {
         let relay_manager = Arc::new(Mutex::new(RelayManager::new()));
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
-        let wallet = BitcoindWallet::new(&config.bitcoind).await?;
+        let wallet = create_wallet(&config)?;
         let app = Self { config, db, wallet, interrupt: interrupt_rx, relay_manager };
-        app.wallet()
-            .network()
-            .context("Failed to connect to bitcoind. Check config RPC connection.")?;
+        app.wallet().network().context("Failed to connect to wallet. Check config.")?;
         Ok(app)
     }
 
-    fn wallet(&self) -> BitcoindWallet { self.wallet.clone() }
+    fn wallet(&self) -> Arc<dyn PayjoinWallet> { self.wallet.clone() }
 
     #[allow(clippy::incompatible_msrv)]
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {

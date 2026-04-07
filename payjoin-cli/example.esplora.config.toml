@@ -1,0 +1,47 @@
+##
+## Payjoin config.toml configuration file. Lines beginning with # are comments.
+##
+
+# Common Settings
+# --------------
+
+# The path to the database file
+db_path = "payjoin.sqlite"
+
+# The maximum fee rate that the receiver is willing to pay (in sat/vB)
+max_fee_rate = 2.0
+
+# Wallet Configuration
+# -------------------
+# Choose ONE backend: esplora or bitcoind
+# 
+# Esplora backend (uses bdk_wallet with esplora API - no full node required):
+# [wallet.esplora]
+# descriptor = "wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/84'/1'/0'/0/*)"
+# # Optional: change descriptor (auto-derived if not specified)
+# # change_descriptor = "wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/84'/1'/0'/1/*)"
+# esplora_url = "https://blockstream.info/api"
+# network = "testnet"
+#
+# Bitcoind backend (uses Bitcoin Core RPC - requires full node):
+# [wallet.bitcoind]
+# rpchost = "http://localhost:18443/wallet/payjoin"
+# # Optional: cookie file path (if not using rpcuser/rpcpassword)
+# # cookie = "~/.bitcoin/testnet4/.cookie"
+# # Optional: RPC credentials (if not using cookie)
+# # rpcuser = "user"
+# # rpcpassword = "password"
+
+# Version Configuration
+# -------------------
+# Uncomment ONE of the following version configurations depending on which version you want to use
+
+# Version 1 Configuration
+# [v1]
+# port = 3000
+# pj_endpoint = "https://localhost:3000"
+
+# Version 2 Configuration
+# [v2]
+# pj_directory = "https://payjo.in"
+# ohttp_relays = ["https://pj.benalleng.com", "https://pj.bobspacebkk.com", "https://ohttp.achow101.com"]

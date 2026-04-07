@@ -7,6 +7,8 @@ cargo llvm-cov clean --workspace
 # exclude payjoin-ffi because bindings are tested in their native language and fuzz because these tests are not coverage worthy
 cargo llvm-cov --no-report --workspace --all-features --exclude payjoin-ffi --exclude payjoin-fuzz
 # Explicitly run payjoin-cli v1 e2e tests
-cargo llvm-cov --no-report --package payjoin-cli --no-default-features --features=v1,_manual-tls
+cargo llvm-cov --no-report --package payjoin-cli --no-default-features --features=v1,_manual-tls,bitcoind
+# Explicitly run payjoin-cli esplora tests
+cargo llvm-cov --no-report --package payjoin-cli --no-default-features --features=v1,v2,_manual-tls,esplora
 # generate report without tests
 cargo llvm-cov report --lcov --output-path lcov.info

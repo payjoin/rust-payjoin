@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 set -e
 
-# Individual features with no defaults.
-features=("v1" "v2")
+# Protocol versions and wallet backends are orthogonal; every version must
+# build against every backend, so lint them as a matrix.
+versions=("v1" "v2")
+backends=("bitcoind" "esplora")
 
-for feature in "${features[@]}"; do
-    # Don't duplicate --all-targets clippy. Clilppy end-user code, not tests.
-    cargo clippy --no-default-features --features "$feature" -- -D warnings
+for version in "${versions[@]}"; do
+    for backend in "${backends[@]}"; do
+        # Don't duplicate --all-targets clippy. Clippy end-user code, not tests.
+        cargo clippy --no-default-features --features "$version,$backend" -- -D warnings
+    done
 done

@@ -1,4 +1,7 @@
-#[cfg(feature = "_manual-tls")]
+// The e2e tests drive the CLI with bitcoind RPC args, which only works when
+// bitcoind is the selected backend. Skip them when esplora is enabled
+// (e.g. `--all-features`) since create_wallet then prefers esplora.
+#[cfg(all(feature = "_manual-tls", not(feature = "esplora")))]
 mod e2e {
     use std::process::{ExitStatus, Stdio};
 

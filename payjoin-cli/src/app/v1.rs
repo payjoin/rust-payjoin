@@ -21,7 +21,7 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 
 use super::config::Config;
-use super::wallet::BitcoindWallet;
+use super::wallet::{create_wallet, PayjoinWallet};
 use super::App as AppTrait;
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::Database;
@@ -37,7 +37,7 @@ impl payjoin::receive::v1::Headers for Headers<'_> {
 pub(crate) struct App {
     config: Config,
     db: Arc<Database>,
-    wallet: BitcoindWallet,
+    wallet: Arc<dyn PayjoinWallet>,
     interrupt: watch::Receiver<()>,
 }
 
@@ -47,16 +47,15 @@ impl AppTrait for App {
         let db = Arc::new(Database::create(&config.db_path)?);
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
-        let wallet = BitcoindWallet::new(&config.bitcoind).await?;
+        let wallet = create_wallet(&config)?;
         let app = Self { config, db, wallet, interrupt: interrupt_rx };
-        app.wallet()
-            .network()
-            .context("Failed to connect to bitcoind. Check config RPC connection.")?;
+        app.wallet().network().context("Failed to connect to wallet. Check config.")?;
         Ok(app)
     }
 
-    fn wallet(&self) -> BitcoindWallet { self.wallet.clone() }
+    fn wallet(&self) -> Arc<dyn PayjoinWallet> { self.wallet.clone() }
 
+    #[allow(clippy::incompatible_msrv)]
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
         let uri =
             Uri::try_from(bip21).map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?;
@@ -368,7 +367,7 @@ impl App {
             .map_err(|e| Error::Implementation(ImplementationError::new(e)))?
             .commit_outputs();
 
-        let wants_fee_range = try_contributing_inputs(payjoin.clone(), &self.wallet)
+        let wants_fee_range = try_contributing_inputs(payjoin.clone(), self.wallet.as_ref())
             .map_err(Error::Implementation)?;
         let provisional_payjoin =
             wants_fee_range.apply_fee_range(None, self.config.max_fee_rate)?;
@@ -384,7 +383,7 @@ impl App {
 
 fn try_contributing_inputs(
     payjoin: payjoin::receive::v1::WantsInputs,
-    wallet: &BitcoindWallet,
+    wallet: &dyn PayjoinWallet,
 ) -> Result<payjoin::receive::v1::WantsFeeRange, ImplementationError> {
     let candidate_inputs =
         wallet.list_unspent().map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;

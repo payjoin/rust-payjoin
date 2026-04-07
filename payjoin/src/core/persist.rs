@@ -1,3 +1,27 @@
+//! State machine persistence for payjoin sessions.
+//!
+//! The receiver and senders' v1 and v2 state machines are driven by events. An
+//! event contains all the information to transition into the next state, which
+//! means that the session's full state can be computed by "replaying" the events.
+//! Session history is therefore a recorded as an append only log of events.
+//!
+//! # Backwards and forwards compatibility
+//!
+//! If any new fields are added to events, backwards compatibility must be
+//! maintained, which means that new fields are necessarily `Option<T>`
+//! defaulting to `None`, allowing old event data to be still be processed.
+//! Forward compatibility in general is not appropriate since old state machines
+//! will not know the meaning of the new fields, and ignoring them may lead to a
+//! transition to an invalid state, inconsistent with the state machine of any
+//! later version of the code that persisted this event data.
+//!
+//! If any new event types are added, presumably extending the state machine
+//! with additional transitions and states, the same logic applies: old sessions
+//! will simply not contain this new type of event and therefore only explore
+//! the subgraph of the state machine diagram which corresponds to the older
+//! version of the state machine. New sessions which do contain this event will
+//! not be interpretable by the old code.
+
 use std::fmt;
 
 /// Representation of the actions that the persister should take, if any.

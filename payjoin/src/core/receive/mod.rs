@@ -669,12 +669,12 @@ pub struct PsbtContext {
 
 impl PsbtContext {
     /// Prepare the PSBT by creating a new PSBT and copying only the fields allowed by the [spec](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#senders-payjoin-proposal-checklist)
-    fn prepare_psbt(self, processed_psbt: Psbt) -> Psbt {
+    fn prepare_psbt(self, processed_psbt: &Psbt) -> Psbt {
         tracing::trace!("Original PSBT from callback: {processed_psbt:#?}");
 
         // Create a new PSBT and copy only the allowed fields
         let mut filtered_psbt = Psbt {
-            unsigned_tx: processed_psbt.unsigned_tx,
+            unsigned_tx: processed_psbt.unsigned_tx.clone(),
             version: processed_psbt.version,
             xpub: BTreeMap::new(),
             proprietary: BTreeMap::new(),
@@ -727,33 +727,33 @@ impl PsbtContext {
         sender_input_indexes
     }
 
-    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
-    /// they sign the transaction and broadcast it to the network.
-    ///
-    /// Finalization consists of two steps:
-    ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
-    ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
-    fn finalize_proposal(
-        self,
-        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> Result<Psbt, ImplementationError> {
+    /// Return the payjoin PSBT that is ready for signing
+    fn payjoin_psbt_without_sender_signatures(&self) -> Psbt {
         let mut psbt = self.payjoin_psbt.clone();
         // Remove now-invalid sender signatures before applying the receiver signatures
         for i in self.sender_input_indexes() {
-            tracing::trace!("Clearing sender input {i}");
             psbt.inputs[i].final_script_sig = None;
             psbt.inputs[i].final_script_witness = None;
             psbt.inputs[i].tap_key_sig = None;
         }
-        let finalized_psbt = wallet_process_psbt(&psbt)?;
+        psbt
+    }
+
+    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
+    /// they sign the transaction and broadcast it to the network.
+    ///
+    /// Finalization consists of two steps:
+    ///   1. Validate that signed psbt contains expected inputs and outputs
+    ///   2. Prepare the psbt to be sent to sender
+    fn finalize_proposal(self, signed_psbt: &Psbt) -> Result<Psbt, ImplementationError> {
         let expected_ntxid = self.payjoin_psbt.unsigned_tx.compute_ntxid();
-        let actual_ntxid = finalized_psbt.unsigned_tx.compute_ntxid();
+        let actual_ntxid = signed_psbt.unsigned_tx.compute_ntxid();
         if expected_ntxid != actual_ntxid {
             return Err(ImplementationError::from(
                 format!("Ntxid mismatch: expected {expected_ntxid}, got {actual_ntxid}").as_str(),
             ));
         }
-        let payjoin_proposal = self.prepare_psbt(finalized_psbt);
+        let payjoin_proposal = self.prepare_psbt(signed_psbt);
         Ok(payjoin_proposal)
     }
 }

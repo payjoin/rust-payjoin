@@ -196,6 +196,57 @@ class TestSenderAsyncPersistence(unittest.TestCase):
         asyncio.run(run_test())
 
 
+class TestReceiverCancel(unittest.TestCase):
+    def test_receiver_cancel(self):
+        persister = InMemoryReceiverPersister(1)
+        initialized = (
+            payjoin.ReceiverBuilder(
+                "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+                "https://example.com",
+                payjoin.OhttpKeys.decode(
+                    bytes.fromhex(
+                        "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"
+                    )
+                ),
+            )
+            .build()
+            .save(persister)
+        )
+        cancel_transition = initialized.cancel()
+        fallback_tx = cancel_transition.save(persister)
+        self.assertIsNone(fallback_tx)
+        result = payjoin.replay_receiver_event_log(persister)
+        self.assertTrue(result.state().is_CLOSED())
+
+
+class TestReceiverCancelAsync(unittest.TestCase):
+    def test_receiver_cancel_async(self):
+        import asyncio
+
+        async def run_test():
+            persister = InMemoryReceiverPersisterAsync(1)
+            initialized = await (
+                payjoin.ReceiverBuilder(
+                    "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+                    "https://example.com",
+                    payjoin.OhttpKeys.decode(
+                        bytes.fromhex(
+                            "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"
+                        )
+                    ),
+                )
+                .build()
+                .save_async(persister)
+            )
+            cancel_transition = initialized.cancel()
+            fallback_tx = await cancel_transition.save_async(persister)
+            self.assertIsNone(fallback_tx)
+            result = await payjoin.replay_receiver_event_log_async(persister)
+            self.assertTrue(result.state().is_CLOSED())
+
+        asyncio.run(run_test())
+
+
 class TestValidation(unittest.TestCase):
     def test_receiver_builder_rejects_bad_address(self):
         with self.assertRaises(payjoin.ReceiverBuilderError):

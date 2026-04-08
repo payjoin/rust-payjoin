@@ -1,12 +1,20 @@
 //! Utilities to make work with PSBTs easier
 
+#[cfg(not(feature = "std"))]
+use alloc::boxed::Box;
+#[cfg(not(feature = "std"))]
+use alloc::collections::BTreeMap;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+use core::fmt;
+#[cfg(feature = "std")]
 use std::collections::BTreeMap;
-use std::fmt;
 
 use bitcoin::address::FromScriptError;
 use bitcoin::psbt::Psbt;
 use bitcoin::transaction::InputWeightPrediction;
 use bitcoin::{bip32, psbt, Address, AddressType, Network, TxIn, TxOut, Weight};
+
 /// Shared non-witness weight for txid (32), index (4), and sequence (4) fields.
 /// We only need to add the weight of the txid: 32, index: 4 and sequence: 4 as rust_bitcoin
 /// already accounts for the scriptsig length when calculating InputWeightPrediction
@@ -28,6 +36,7 @@ impl fmt::Display for InconsistentPsbt {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for InconsistentPsbt {}
 
 /// Our Psbt type for validation and utilities
@@ -40,8 +49,8 @@ pub(crate) trait PsbtExt: Sized {
     fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>>;
     fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>>;
     fn input_pairs(&self) -> Box<dyn Iterator<Item = InternalInputPair<'_>> + '_>;
-    // guarantees that length of psbt input matches that of unsigned_tx inputs and same
-    /// thing for outputs.
+    /// guarantees that length of psbt input matches that of unsigned_tx inputs and same thing for
+    /// outputs.
     fn validate(self) -> Result<Self, InconsistentPsbt>;
     fn validate_input_utxos(&self) -> Result<(), PsbtInputsError>;
 }
@@ -196,8 +205,8 @@ impl InternalInputPair<'_> {
                 // redeemScript can be extracted from scriptSig for signed P2SH inputs
                 let redeem_script = if let Some(ref script_sig) = self.psbtin.final_script_sig {
                     script_sig.redeem_script()
-                    // try the PSBT redeem_script field for unsigned inputs.
                 } else {
+                    // try the PSBT redeem_script field for unsigned inputs.
                     self.psbtin.redeem_script.as_ref().map(|script| script.as_ref())
                 };
                 match redeem_script {
@@ -248,6 +257,7 @@ impl InternalInputPair<'_> {
             }
             _ => Err(AddressTypeError::UnknownAddressType.into()),
         }?;
+
         // Lengths of txid, index and sequence: (32, 4, 4).
         let input_weight = iwp.weight() + NON_WITNESS_INPUT_WEIGHT;
         Ok(input_weight)
@@ -271,6 +281,7 @@ impl fmt::Display for PrevTxOutError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for PrevTxOutError {}
 
 #[derive(Debug, PartialEq, Eq)]
@@ -290,16 +301,25 @@ impl fmt::Display for InternalPsbtInputError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::PrevTxOut(_) => write!(f, "invalid previous transaction output"),
-            Self::UnequalTxid => write!(f, "transaction ID of previous transaction doesn't match one specified in input spending it"),
-            Self::SegWitTxOutMismatch => write!(f, "transaction output provided in SegWit UTXO field doesn't match the one in non-SegWit UTXO field"),
+            Self::UnequalTxid => write!(
+                f,
+                "transaction ID of previous transaction doesn't match one specified in input spending it"
+            ),
+            Self::SegWitTxOutMismatch => write!(
+                f,
+                "transaction output provided in SegWit UTXO field doesn't match the one in non-SegWit UTXO field"
+            ),
             Self::AddressType(_) => write!(f, "invalid address type"),
             Self::InvalidScriptPubKey(e) => write!(f, "provided script was not a valid type of {e}"),
             Self::WeightError(e) => write!(f, "{e}"),
-            Self::ProvidedUnnecessaryWeight => write!(f, "weight was provided but can be calculated from available information"),
+            Self::ProvidedUnnecessaryWeight => {
+                write!(f, "weight was provided but can be calculated from available information")
+            }
         }
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for InternalPsbtInputError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -337,6 +357,7 @@ impl fmt::Display for PsbtInputError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{}", self.0) }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for PsbtInputError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.0) }
 }
@@ -353,6 +374,7 @@ impl fmt::Display for PsbtInputsError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for PsbtInputsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.error) }
 }
@@ -376,6 +398,7 @@ impl fmt::Display for AddressTypeError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for AddressTypeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -412,6 +435,7 @@ impl fmt::Display for InputWeightError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for InputWeightError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -421,6 +445,7 @@ impl std::error::Error for InputWeightError {
         }
     }
 }
+
 impl From<AddressTypeError> for InputWeightError {
     fn from(value: AddressTypeError) -> Self { Self::AddressType(value) }
 }

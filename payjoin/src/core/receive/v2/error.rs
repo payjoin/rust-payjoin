@@ -1,7 +1,8 @@
-use core::fmt;
-use std::error;
+use core::{error, fmt};
 
+#[cfg(feature = "v2-std")]
 use crate::hpke::HpkeError;
+#[cfg(feature = "v2-std")]
 use crate::ohttp::{DirectoryResponseError, OhttpEncapsulationError};
 use crate::receive::error::Error;
 use crate::receive::ProtocolError;
@@ -27,13 +28,17 @@ pub(crate) enum InternalSessionError {
     /// Url parsing failed
     ParseUrl(crate::into_url::Error),
     /// The session has expired
+    #[allow(dead_code)]
     Expired(Time),
     /// OHTTP Encapsulation failed
     OhttpEncapsulation(OhttpEncapsulationError),
     /// Hybrid Public Key Encryption failed
     Hpke(HpkeError),
     /// The directory returned a bad response
+    #[allow(dead_code)]
     DirectoryResponse(DirectoryResponseError),
+    #[allow(dead_code)]
+    Implementation(crate::error::ImplementationError),
 }
 
 impl From<OhttpEncapsulationError> for Error {
@@ -56,6 +61,7 @@ impl fmt::Display for SessionError {
             OhttpEncapsulation(e) => write!(f, "OHTTP Encapsulation Error: {e}"),
             Hpke(e) => write!(f, "Hpke decryption failed: {e}"),
             DirectoryResponse(e) => write!(f, "Directory response error: {e}"),
+            Implementation(e) => write!(f, "Implementation error: {e}"),
         }
     }
 }
@@ -70,6 +76,7 @@ impl error::Error for SessionError {
             OhttpEncapsulation(e) => Some(e),
             Hpke(e) => Some(e),
             DirectoryResponse(e) => Some(e),
+            Implementation(e) => Some(e),
         }
     }
 }

@@ -34,23 +34,23 @@ pub struct Cli {
     #[arg(long = "max-fee-rate", short = 'f', help = "The maximum fee rate to accept in sat/vB")]
     pub max_fee_rate: Option<FeeRate>,
 
-    #[cfg(feature = "esplora")]
+    #[cfg(feature = "_esplora")]
     #[arg(long, num_args(1), help = "The wallet descriptor")]
     pub descriptor: Option<String>,
 
-    #[cfg(feature = "esplora")]
+    #[cfg(feature = "_esplora")]
     #[arg(long, num_args(1), help = "The optional change descriptor")]
     pub change_descriptor: Option<String>,
 
-    #[cfg(feature = "esplora")]
+    #[cfg(feature = "_esplora")]
     #[arg(long, num_args(1), help = "The esplora API URL")]
     pub esplora_url: Option<String>,
 
-    #[cfg(feature = "esplora")]
+    #[cfg(feature = "_esplora")]
     #[arg(long, num_args(1), help = "The Bitcoin network to connect to")]
     pub network: Option<String>,
 
-    #[cfg(all(feature = "bitcoind", not(feature = "esplora")))]
+    #[cfg(all(feature = "bitcoind", not(feature = "_esplora")))]
     #[arg(
         long,
         short = 'r',
@@ -59,7 +59,7 @@ pub struct Cli {
     )]
     pub rpchost: Option<Url>,
 
-    #[cfg(all(feature = "bitcoind", not(feature = "esplora")))]
+    #[cfg(all(feature = "bitcoind", not(feature = "_esplora")))]
     #[arg(
         long = "cookie-file",
         short = 'c',
@@ -68,11 +68,11 @@ pub struct Cli {
     )]
     pub cookie_file: Option<PathBuf>,
 
-    #[cfg(all(feature = "bitcoind", not(feature = "esplora")))]
+    #[cfg(all(feature = "bitcoind", not(feature = "_esplora")))]
     #[arg(long = "rpcuser", num_args(1), help = "The username for the bitcoin node")]
     pub rpcuser: Option<String>,
 
-    #[cfg(all(feature = "bitcoind", not(feature = "esplora")))]
+    #[cfg(all(feature = "bitcoind", not(feature = "_esplora")))]
     #[arg(long = "rpcpassword", num_args(1), help = "The password for the bitcoin node")]
     pub rpcpassword: Option<String>,
 

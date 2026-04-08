@@ -34,7 +34,7 @@ pub trait PayjoinWallet: Send + Sync {
     fn network(&self) -> Result<Network>;
 }
 
-#[cfg(feature = "esplora")]
+#[cfg(feature = "_esplora")]
 mod esplora_backend {
     use std::collections::HashMap;
     use std::str::FromStr;
@@ -241,7 +241,7 @@ mod esplora_backend {
     pub use BdkWallet as BdkWalletImpl;
 }
 
-#[cfg(all(feature = "bitcoind", not(feature = "esplora")))]
+#[cfg(all(feature = "bitcoind", not(feature = "_esplora")))]
 mod bitcoind_backend {
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -449,13 +449,13 @@ mod bitcoind_backend {
     pub use BitcoindWallet as BitcoindWalletImpl;
 }
 
-#[cfg(feature = "esplora")]
+#[cfg(feature = "_esplora")]
 pub(crate) fn parse_network(name: Option<&str>) -> Result<Network> {
     use anyhow::anyhow;
     match name {
         // Mainnet currently disabled until an ohttp wrapper is available to encrypt
         // messages. https://github.com/bitcoindevkit/rust-esplora-client/pull/145
-        Some("mainnet") | Some("bitcoin") | None => Err(anyhow!("Mainnet disabled for esplora")),
+        Some("mainnet") | Some("bitcoin") | None => Err(anyhow!("Mainnet disabled for _esplora")),
         Some("testnet") => Ok(Network::Testnet),
         Some("testnet4") => Ok(Network::Testnet4),
         Some("signet") => Ok(Network::Signet),
@@ -471,7 +471,7 @@ pub(crate) fn parse_network(name: Option<&str>) -> Result<Network> {
 /// without a trailing `#checksum`. The checksum is dropped on rewrite —
 /// BDK recomputes it. If the descriptor does not match either shape it is
 /// returned unchanged (BDK will then use the same keychain for both).
-#[cfg(feature = "esplora")]
+#[cfg(feature = "_esplora")]
 pub(crate) fn derive_change_descriptor(descriptor: &str, change: Option<&str>) -> String {
     if let Some(c) = change {
         return c.to_owned();
@@ -490,7 +490,7 @@ pub(crate) fn derive_change_descriptor(descriptor: &str, change: Option<&str>) -
     }
 }
 
-#[cfg(feature = "esplora")]
+#[cfg(feature = "_esplora")]
 pub fn create_wallet(config: &super::config::Config) -> Result<Arc<dyn PayjoinWallet>> {
     use anyhow::anyhow;
 
@@ -518,17 +518,17 @@ pub fn create_wallet(config: &super::config::Config) -> Result<Arc<dyn PayjoinWa
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "esplora")]
+    #[cfg(feature = "_esplora")]
     use super::*;
 
-    #[cfg(feature = "esplora")]
+    #[cfg(feature = "_esplora")]
     #[test]
     fn parse_network_rejects_unknown() {
         let err = parse_network(Some("liquid")).unwrap_err();
         assert!(err.to_string().contains("Unknown network"));
     }
 
-    #[cfg(feature = "esplora")]
+    #[cfg(feature = "_esplora")]
     #[test]
     fn derive_change_descriptor_cases() {
         // Explicit change descriptor overrides any derivation
@@ -563,7 +563,7 @@ mod tests {
         assert_eq!(derive_change_descriptor(receive, change), "wpkh(tprv.../*)");
     }
 
-    #[cfg(feature = "esplora")]
+    #[cfg(feature = "_esplora")]
     #[test]
     fn bdk_wallet_new_rejects_invalid_descriptor() {
         // Constructing a BdkWallet with garbage should fail before any network
@@ -573,7 +573,7 @@ mod tests {
         assert!(res.is_err());
     }
 
-    #[cfg(all(feature = "bitcoind", not(feature = "esplora")))]
+    #[cfg(all(feature = "bitcoind", not(feature = "_esplora")))]
     #[test]
     fn bitcoind_wallet_new_rejects_empty_cookie() {
         use url::Url;
@@ -593,13 +593,13 @@ mod tests {
     }
 }
 
-#[cfg(all(feature = "bitcoind", not(feature = "esplora")))]
+#[cfg(all(feature = "bitcoind", not(feature = "_esplora")))]
 pub fn create_wallet(config: &super::config::Config) -> Result<Arc<dyn PayjoinWallet>> {
     use crate::app::wallet::bitcoind_backend::BitcoindWalletImpl;
     Ok(Arc::new(BitcoindWalletImpl::new(&config.bitcoind)?))
 }
 
-#[cfg(all(not(feature = "esplora"), not(feature = "bitcoind")))]
+#[cfg(all(not(feature = "_esplora"), not(feature = "bitcoind")))]
 pub fn create_wallet(_config: &super::config::Config) -> Result<Arc<dyn PayjoinWallet>> {
     Err(anyhow::anyhow!("No wallet backend enabled. Enable esplora or bitcoind feature."))
 }

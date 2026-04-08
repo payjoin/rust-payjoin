@@ -7,7 +7,7 @@
 //! so they can run in parallel. v2 flows additionally reuse
 //! `payjoin_test_utils::TestServices` for the ohttp relay + directory.
 
-#![cfg(all(feature = "esplora", feature = "v1", feature = "_manual-tls"))]
+#![cfg(all(feature = "_esplora", feature = "v1", feature = "_manual-tls"))]
 
 mod common;
 

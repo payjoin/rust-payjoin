@@ -5,7 +5,7 @@
 //! Their job is to catch regressions in argument parsing, feature gating,
 //! and the missing-config error paths.
 
-#![cfg(feature = "esplora")]
+#![cfg(feature = "_esplora")]
 
 use std::process::Command;
 

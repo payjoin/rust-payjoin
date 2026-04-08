@@ -4,7 +4,7 @@ set -e
 # Protocol versions and wallet backends are orthogonal; every version must
 # build against every backend, so lint them as a matrix.
 versions=("v1" "v2")
-backends=("bitcoind" "esplora")
+backends=("bitcoind" "_esplora")
 
 for version in "${versions[@]}"; do
     for backend in "${backends[@]}"; do

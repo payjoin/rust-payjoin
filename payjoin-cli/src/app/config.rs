@@ -15,7 +15,7 @@ const CONFIG_DIR: &str = "payjoin-cli";
 
 type Builder = config::builder::ConfigBuilder<DefaultState>;
 
-#[cfg(all(feature = "bitcoind", not(feature = "esplora")))]
+#[cfg(all(feature = "bitcoind", not(feature = "_esplora")))]
 #[derive(Debug, Clone, Deserialize)]
 pub struct BitcoindConfig {
     pub rpchost: Url,
@@ -24,7 +24,7 @@ pub struct BitcoindConfig {
     pub rpcpassword: String,
 }
 
-#[cfg(feature = "esplora")]
+#[cfg(feature = "_esplora")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct BdkWalletConfig {
     pub descriptor: Option<String>,
@@ -65,9 +65,9 @@ pub enum VersionConfig {
 pub struct Config {
     pub db_path: PathBuf,
     pub max_fee_rate: Option<FeeRate>,
-    #[cfg(all(feature = "bitcoind", not(feature = "esplora")))]
+    #[cfg(all(feature = "bitcoind", not(feature = "_esplora")))]
     pub bitcoind: BitcoindConfig,
-    #[cfg(feature = "esplora")]
+    #[cfg(feature = "_esplora")]
     pub wallet: Option<BdkWalletConfig>,
     #[serde(skip)]
     pub version: Option<VersionConfig>,
@@ -156,9 +156,9 @@ impl Config {
         let mut config = Config {
             db_path: built_config.get("db_path")?,
             max_fee_rate: built_config.get("max_fee_rate").ok(),
-            #[cfg(all(feature = "bitcoind", not(feature = "esplora")))]
+            #[cfg(all(feature = "bitcoind", not(feature = "_esplora")))]
             bitcoind: built_config.get("bitcoind")?,
-            #[cfg(feature = "esplora")]
+            #[cfg(feature = "_esplora")]
             wallet: built_config.get("wallet").ok(),
             version: None,
             #[cfg(feature = "_manual-tls")]
@@ -240,7 +240,7 @@ impl Config {
 }
 
 /// Set up default values and CLI overrides for wallet settings
-#[cfg(feature = "esplora")]
+#[cfg(feature = "_esplora")]
 fn add_wallet_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     let config = config
         .set_default("wallet.descriptor", None::<String>)?
@@ -260,7 +260,7 @@ fn add_wallet_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigErro
         .set_override_option("wallet.network", network)
 }
 
-#[cfg(all(feature = "bitcoind", not(feature = "esplora")))]
+#[cfg(all(feature = "bitcoind", not(feature = "_esplora")))]
 fn add_wallet_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     let config = config
         .set_default("bitcoind.rpchost", "http://localhost:18443")?
@@ -280,7 +280,7 @@ fn add_wallet_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigErro
         .set_override_option("bitcoind.rpcpassword", rpcpassword)
 }
 
-#[cfg(all(not(feature = "esplora"), not(feature = "bitcoind")))]
+#[cfg(all(not(feature = "_esplora"), not(feature = "bitcoind")))]
 fn add_wallet_defaults(config: Builder, _cli: &Cli) -> Result<Builder, ConfigError> { Ok(config) }
 
 fn add_common_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {

@@ -128,6 +128,12 @@
           }
         ) craneLibVersions;
 
+        # nixpkgs' blockstream-electrs build runs a flaky `test_electrum`
+        # integration test that fails on some sandboxes. Skip its checks.
+        blockstreamElectrs = pkgs.blockstream-electrs.overrideAttrs (_: {
+          doCheck = false;
+        });
+
         commonArgs = {
           inherit src;
           strictDeps = true;
@@ -140,6 +146,8 @@
 
           # tell bitcoind crate not to try to download during build
           BITCOIND_SKIP_DOWNLOAD = 1;
+          # same for electrsd (used in payjoin-cli esplora e2e tests)
+          ELECTRSD_SKIP_DOWNLOAD = 1;
         };
 
         # Per-toolchain common args that include pre-vendored deps
@@ -276,6 +284,8 @@
               ];
             BITCOIND_EXE = pkgs.lib.getExe' pkgs.bitcoind "bitcoind";
             BITCOIND_SKIP_DOWNLOAD = 1;
+            ELECTRS_EXE = pkgs.lib.getExe' blockstreamElectrs "electrs";
+            ELECTRSD_SKIP_DOWNLOAD = 1;
           }
         ) craneLibVersions;
 
@@ -375,8 +385,12 @@
                   partitionType = "count";
                   cargoExtraArgs = "--locked --workspace --all-features --exclude payjoin-fuzz";
                   BITCOIND_EXE = nixpkgs.lib.getExe' pkgs.bitcoind "bitcoind";
+                  ELECTRS_EXE = nixpkgs.lib.getExe' blockstreamElectrs "electrs";
                   NGINX_EXE = nixpkgs.lib.getExe' nginxWithStream "nginx";
-                  nativeBuildInputs = [ nginxWithStream ];
+                  nativeBuildInputs = [
+                    nginxWithStream
+                    blockstreamElectrs
+                  ];
                   doInstallCargoArtifacts = false;
                 }
               )

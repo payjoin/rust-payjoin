@@ -206,7 +206,11 @@ impl From<payjoin::receive::v2::SessionHistory> for ReceiverSessionHistory {
 #[uniffi::export]
 impl ReceiverSessionHistory {
     /// Receiver session Payjoin URI
-    pub fn pj_uri(&self) -> Arc<crate::PjUri> { Arc::new(self.0.pj_uri().into()) }
+    pub fn pj_uri(&self) -> Arc<crate::PjUri> {
+        // SAFETY: pj_uri() returns PjUri<'static> — label and message are None
+        let uri: payjoin::PjUri<'static> = unsafe { core::mem::transmute(self.0.pj_uri()) };
+        Arc::new(uri.into())
+    }
 
     /// Fallback transaction from the session if present
     pub fn fallback_tx(&self) -> Option<Vec<u8>> {

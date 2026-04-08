@@ -1,4 +1,11 @@
+#![allow(unused_imports)]
+use alloc::string::String;
+use alloc::vec::Vec;
+
+#[cfg(any(feature = "v1", feature = "v2-std"))]
 use url::Url;
+
+use crate::alloc::string::ToString;
 #[cfg(feature = "v1")]
 const V1_REQ_CONTENT_TYPE: &str = "text/plain";
 
@@ -34,7 +41,7 @@ impl Request {
     }
 
     /// Construct a new v2 request.
-    #[cfg(feature = "v2")]
+    #[cfg(feature = "v2-std")]
     pub(crate) fn new_v2(
         url: &Url,
         body: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES],

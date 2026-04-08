@@ -1,4 +1,12 @@
+#[cfg(not(feature = "std"))]
+use core::error;
+use core::fmt;
+#[cfg(not(feature = "std"))]
+use core::time::Duration;
+#[cfg(feature = "std")]
+use std::error;
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "std")]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bitcoin::absolute::Time as BitcoinTime;
@@ -16,14 +24,20 @@ pub(crate) struct Time(BitcoinTime);
 
 impl Time {
     /// Specify a time some duration from now (e.g. an expiration time).
+    #[cfg(any(feature = "std", target_arch = "wasm32"))]
     pub(crate) fn from_now(duration: Duration) -> Result<Self, ConversionError> {
         SystemTime::now().checked_add(duration).unwrap_or(UNIX_EPOCH).try_into()
     }
 
     /// Get the current time.
+    #[cfg(any(feature = "std", target_arch = "wasm32"))]
     pub(crate) fn now() -> Self {
         Time::try_from(SystemTime::now()).expect("Current time should always be a valid timestamp")
     }
+
+    /// Check if the time is in the past.
+    #[cfg(any(feature = "std", target_arch = "wasm32"))]
+    pub(crate) fn elapsed(self) -> bool { self <= Self::now() }
 
     /// Create a time value from a u32 UNIX timestamp representation.
     pub(crate) fn from_unix_seconds(seconds: u32) -> Result<Self, ConversionError> {
@@ -45,25 +59,25 @@ impl Time {
     /// Encode as a Bitcoin consensus encoding of u32 UNIX timestamp.
     pub(crate) fn to_bytes(self) -> [u8; 4] {
         let t = self.0.to_consensus_u32();
-
         let mut buf = [0u8; 4];
         t.consensus_encode(&mut &mut buf[..]).expect("encoding should never fail because all valid Time values are encodable and u32 has a known width");
         buf
     }
-
-    /// Check if the time is in the past.
-    pub(crate) fn elapsed(self) -> bool { self <= Self::now() }
+    #[cfg(not(feature = "std"))]
+    pub(crate) fn from_now(_duration: core::time::Duration) -> Result<Self, ConversionError> {
+        Self::from_unix_seconds(0)
+    }
 }
 
 #[derive(Debug)]
 pub struct ConversionError(bitcoin::absolute::ConversionError);
 
-impl std::error::Error for ConversionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
+impl error::Error for ConversionError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> { None }
 }
 
-impl std::fmt::Display for ConversionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
+impl fmt::Display for ConversionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { self.0.fmt(f) }
 }
 
 impl From<bitcoin::absolute::ConversionError> for ConversionError {
@@ -77,12 +91,12 @@ pub(crate) enum ParseTimeError {
     Convert(ConversionError),
 }
 
-impl std::error::Error for ParseTimeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
+impl error::Error for ParseTimeError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> { None }
 }
 
-impl std::fmt::Display for ParseTimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ParseTimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ParseTimeError::*;
 
         match &self {
@@ -93,6 +107,7 @@ impl std::fmt::Display for ParseTimeError {
     }
 }
 
+#[cfg(any(feature = "std", target_arch = "wasm32"))]
 impl TryFrom<SystemTime> for Time {
     type Error = ConversionError;
     fn try_from(val: SystemTime) -> Result<Self, ConversionError> {

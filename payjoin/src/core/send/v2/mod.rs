@@ -27,30 +27,48 @@
 //! as it allows the relay to correlate requests by comparing ciphertexts.
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
+#![allow(unused_imports)]
+
+use alloc::boxed::Box;
+#[cfg(not(feature = "std"))]
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::Address;
 pub use error::{CreateRequestError, EncapsulationError};
 use error::{InternalCreateRequestError, InternalEncapsulationError};
+#[cfg(feature = "v2-std")]
 use ohttp::ClientResponse;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "v2-std")]
 pub use session::{
     replay_event_log, replay_event_log_async, SessionEvent, SessionHistory, SessionOutcome,
     SessionStatus,
 };
+#[cfg(feature = "v2-std")]
 use url::Url;
 
 use super::error::BuildSenderError;
 use super::*;
+#[cfg(feature = "std")]
+use crate::core::uri::PjUri;
 use crate::error::{InternalReplayError, ReplayError};
-use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
+#[cfg(feature = "v2-std")]
+use crate::hpke::decrypt_message_b;
+#[cfg(feature = "v2-std")]
+use crate::hpke::{encrypt_message_a, HpkeSecretKey};
+#[cfg(feature = "v2-std")]
 use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{
     MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
 };
+#[cfg(feature = "v2-std")]
 use crate::uri::v2::PjParam;
 use crate::uri::ShortId;
-use crate::{HpkeKeyPair, IntoUrl, PjUri, Request};
+#[cfg(feature = "v2-std")]
+use crate::{HpkeKeyPair, IntoUrl, Request};
 
 mod error;
 mod session;
@@ -60,6 +78,7 @@ mod session;
 /// This is because all communications with the receiver are end-to-end authenticated. So a
 /// malicious man in the middle can't substitute outputs, only the receiver can.
 /// The receiver can always choose not to substitute outputs, however.
+#[cfg(feature = "v2-std")]
 #[derive(Clone)]
 pub struct SenderBuilder {
     pj_param: crate::uri::v2::PjParam,
@@ -67,11 +86,13 @@ pub struct SenderBuilder {
     psbt_ctx_builder: PsbtContextBuilder,
 }
 
+#[cfg(feature = "v2-std")]
 impl SenderBuilder {
     /// Prepare the context from which to make Sender requests
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`Sender`]
+    #[cfg(feature = "std")]
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {
         match uri.extras.pj_param {
             #[cfg(feature = "v1")]
@@ -193,12 +214,14 @@ mod sealed {
 /// can implement this trait, ensuring type safety and protocol integrity.
 pub trait State: sealed::State {}
 
+#[cfg(feature = "v2-std")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender<State> {
     pub(crate) state: State,
     pub(crate) session_context: SessionContext,
 }
 
+#[cfg(feature = "v2-std")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionContext {
     /// The endpoint in the Payjoin URI
@@ -209,6 +232,7 @@ pub struct SessionContext {
     pub(crate) reply_key: HpkeSecretKey,
 }
 
+#[cfg(feature = "v2-std")]
 impl SessionContext {
     fn full_relay_url(&self, ohttp_relay: impl IntoUrl) -> Result<Url, InternalCreateRequestError> {
         let relay_base = ohttp_relay.into_url().map_err(InternalCreateRequestError::Url)?;
@@ -227,16 +251,19 @@ impl SessionContext {
     }
 }
 
+#[cfg(feature = "v2-std")]
 impl<State> core::ops::Deref for Sender<State> {
     type Target = State;
 
     fn deref(&self) -> &Self::Target { &self.state }
 }
 
+#[cfg(feature = "v2-std")]
 impl<State> core::ops::DerefMut for Sender<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
+#[cfg(feature = "v2-std")]
 impl<State> Sender<State> {
     /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> String { self.session_context.pj_param.endpoint().to_string() }
@@ -246,6 +273,7 @@ impl<State> Sender<State> {
 ///
 /// This provides type erasure for the send session state, allowing the session to be replayed
 /// and the state to be updated with the next event over a uniform interface.
+#[cfg(feature = "v2-std")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SendSession {
     WithReplyKey(Sender<WithReplyKey>),
@@ -253,6 +281,7 @@ pub enum SendSession {
     Closed(SessionOutcome),
 }
 
+#[cfg(feature = "v2-std")]
 impl SendSession {
     fn new(session_context: SessionContext) -> Self {
         SendSession::WithReplyKey(Sender { state: WithReplyKey, session_context })
@@ -284,6 +313,7 @@ impl SendSession {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithReplyKey;
 
+#[cfg(feature = "v2-std")]
 impl Sender<WithReplyKey> {
     fn new(pj_param: PjParam, psbt_ctx: PsbtContext) -> Self {
         Sender {
@@ -309,6 +339,7 @@ impl Sender<WithReplyKey> {
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ClientResponse), CreateRequestError> {
+        #[cfg(feature = "std")]
         if self.session_context.pj_param.expiration().elapsed() {
             return Err(InternalCreateRequestError::Expired(
                 self.session_context.pj_param.expiration(),
@@ -324,8 +355,21 @@ impl Sender<WithReplyKey> {
             self.session_context.psbt_ctx.fee_contribution,
             self.session_context.psbt_ctx.min_fee_rate,
         )?;
-        let (request, ohttp_ctx) = extract_request(&self.session_context, ohttp_relay, body)?;
-        Ok((request, ohttp_ctx))
+
+        #[cfg(all(feature = "std", feature = "v2-ohttp"))]
+        {
+            let (request, ohttp_ctx) = extract_request(&self.session_context, ohttp_relay, body)?;
+            Ok((request, ohttp_ctx))
+        }
+
+        #[cfg(not(all(feature = "std", feature = "v2-ohttp")))]
+        {
+            let _ = (ohttp_relay, body);
+            return Err(InternalCreateRequestError::Implementation(
+                crate::error::ImplementationError::std_required(),
+            )
+            .into());
+        }
     }
 
     /// Processes the response for the initial POST message from the sender
@@ -343,23 +387,39 @@ impl Sender<WithReplyKey> {
         response: &[u8],
         post_ctx: ClientResponse,
     ) -> MaybeFatalTransition<SessionEvent, Sender<PollingForProposal>, EncapsulationError> {
-        match process_post_res(response, post_ctx) {
-            Ok(()) => {}
-            Err(e) =>
-                if e.is_fatal() {
-                    return MaybeFatalTransition::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
-                        InternalEncapsulationError::DirectoryResponse(e).into(),
-                    );
-                } else {
-                    return MaybeFatalTransition::transient(
-                        InternalEncapsulationError::DirectoryResponse(e).into(),
-                    );
-                },
+        #[cfg(all(feature = "std", feature = "v2-ohttp"))]
+        {
+            match process_post_res(response, post_ctx) {
+                Ok(()) => {}
+                Err(e) =>
+                    if e.is_fatal() {
+                        return MaybeFatalTransition::fatal(
+                            SessionEvent::Closed(SessionOutcome::Failure),
+                            InternalEncapsulationError::DirectoryResponse(e).into(),
+                        );
+                    } else {
+                        return MaybeFatalTransition::transient(
+                            InternalEncapsulationError::DirectoryResponse(e).into(),
+                        );
+                    },
+            }
+
+            let sender =
+                Sender { state: PollingForProposal, session_context: self.session_context };
+            MaybeFatalTransition::success(SessionEvent::PostedOriginalPsbt(), sender)
         }
 
-        let sender = Sender { state: PollingForProposal, session_context: self.session_context };
-        MaybeFatalTransition::success(SessionEvent::PostedOriginalPsbt(), sender)
+        #[cfg(not(all(feature = "std", feature = "v2-ohttp")))]
+        {
+            let _ = (response, post_ctx);
+            return MaybeFatalTransition::fatal(
+                SessionEvent::Closed(SessionOutcome::Failure),
+                InternalEncapsulationError::Implementation(
+                    crate::error::ImplementationError::std_required(),
+                )
+                .into(),
+            );
+        }
     }
 
     pub(crate) fn apply_polling_for_proposal(self) -> SendSession {
@@ -370,6 +430,7 @@ impl Sender<WithReplyKey> {
     }
 }
 
+#[cfg(all(feature = "std", feature = "v2-ohttp"))]
 pub(crate) fn extract_request(
     session_context: &SessionContext,
     ohttp_relay: impl IntoUrl,
@@ -395,6 +456,7 @@ pub(crate) fn extract_request(
     Ok((request, ohttp_ctx))
 }
 
+#[cfg(feature = "v2-std")]
 pub(crate) fn serialize_v2_body(
     psbt: &Psbt,
     output_substitution: OutputSubstitution,
@@ -419,13 +481,15 @@ pub(crate) fn serialize_v2_body(
 pub struct PollingForProposal;
 
 impl ResponseError {
-    fn from_slice(bytes: &[u8]) -> Result<Self, serde_json::Error> {
+    #[cfg(not(feature = "v2"))]
+    fn from_slice_v2(bytes: &[u8]) -> Result<Self, serde_json::Error> {
         let trimmed_bytes = bytes.split(|&byte| byte == 0).next().unwrap_or(bytes);
         let value: serde_json::Value = serde_json::from_slice(trimmed_bytes)?;
         Ok(ResponseError::from_json(value))
     }
 }
 
+#[cfg(feature = "v2-std")]
 impl Sender<PollingForProposal> {
     /// Construct an OHTTP Encapsulated HTTP GET request for the Proposal PSBT
     pub fn create_poll_request(
@@ -433,6 +497,7 @@ impl Sender<PollingForProposal> {
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
         // TODO unify with receiver's fn short_id_from_pubkey
+        use crate::ohttp::ohttp_encapsulate;
         let hash = sha256::Hash::hash(
             &HpkeKeyPair::from_secret_key(&self.session_context.reply_key)
                 .public_key()
@@ -476,64 +541,83 @@ impl Sender<PollingForProposal> {
         Sender<PollingForProposal>,
         ResponseError,
     > {
-        let body = match process_get_res(response, ohttp_ctx) {
-            Ok(Some(body)) => body,
-            Ok(None) => return MaybeSuccessTransitionWithNoResults::no_results(self.clone()),
-            Err(e) =>
-                if e.is_fatal() {
-                    return MaybeSuccessTransitionWithNoResults::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
-                        InternalEncapsulationError::DirectoryResponse(e).into(),
-                    );
-                } else {
-                    return MaybeSuccessTransitionWithNoResults::transient(
-                        InternalEncapsulationError::DirectoryResponse(e).into(),
-                    );
-                },
-        };
-
-        let body = match decrypt_message_b(
-            &body,
-            self.session_context.pj_param.receiver_pubkey().clone(),
-            &self.session_context.reply_key,
-        ) {
-            Ok(body) => body,
-            Err(e) =>
-                return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::Closed(SessionOutcome::Failure),
-                    InternalEncapsulationError::Hpke(e).into(),
-                ),
-        };
-
-        if let Ok(resp_err) = ResponseError::from_slice(&body) {
+        #[cfg(not(all(feature = "std", feature = "v2-ohttp")))]
+        {
+            let _ = (response, ohttp_ctx);
             return MaybeSuccessTransitionWithNoResults::fatal(
                 SessionEvent::Closed(SessionOutcome::Failure),
-                resp_err,
+                InternalEncapsulationError::Implementation(
+                    crate::error::ImplementationError::std_required(),
+                )
+                .into(),
             );
         }
 
-        let proposal = match Psbt::deserialize(&body) {
-            Ok(proposal) => proposal,
-            Err(e) =>
-                return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::Closed(SessionOutcome::Failure),
-                    InternalProposalError::Psbt(e).into(),
-                ),
-        };
-        let processed_proposal =
-            match self.session_context.psbt_ctx.clone().process_proposal(proposal) {
-                Ok(processed_proposal) => processed_proposal,
+        #[cfg(all(feature = "std", feature = "v2-ohttp"))]
+        {
+            let body = match process_get_res(response, ohttp_ctx) {
+                Ok(Some(body)) => body,
+                Ok(None) => return MaybeSuccessTransitionWithNoResults::no_results(self.clone()),
                 Err(e) =>
-                    return MaybeSuccessTransitionWithNoResults::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
-                        e.into(),
-                    ),
+                    if e.is_fatal() {
+                        return MaybeSuccessTransitionWithNoResults::fatal(
+                            SessionEvent::Closed(SessionOutcome::Failure),
+                            InternalEncapsulationError::DirectoryResponse(e).into(),
+                        );
+                    } else {
+                        return MaybeSuccessTransitionWithNoResults::transient(
+                            InternalEncapsulationError::DirectoryResponse(e).into(),
+                        );
+                    },
             };
 
-        MaybeSuccessTransitionWithNoResults::success(
-            processed_proposal.clone(),
-            SessionEvent::Closed(SessionOutcome::Success(processed_proposal)),
-        )
+            let body = match decrypt_message_b(
+                &body,
+                self.session_context.pj_param.receiver_pubkey().clone(),
+                &self.session_context.reply_key.clone(),
+            ) {
+                Ok(body) => body,
+                Err(e) => {
+                    return MaybeSuccessTransitionWithNoResults::fatal(
+                        SessionEvent::Closed(SessionOutcome::Failure),
+                        InternalEncapsulationError::Hpke(e).into(),
+                    );
+                }
+            };
+
+            if let Ok(resp_err) = ResponseError::from_slice(&body) {
+                return MaybeSuccessTransitionWithNoResults::fatal(
+                    SessionEvent::Closed(SessionOutcome::Failure),
+                    resp_err,
+                );
+            }
+
+            let proposal = match Psbt::deserialize(&body) {
+                Ok(proposal) => proposal,
+                Err(e) => {
+                    return MaybeSuccessTransitionWithNoResults::fatal(
+                        SessionEvent::Closed(SessionOutcome::Failure),
+                        InternalProposalError::Psbt(e).into(),
+                    );
+                }
+            };
+
+            let processed_proposal =
+                match self.session_context.psbt_ctx.clone().process_proposal(proposal) {
+                    Ok(processed_proposal) => processed_proposal,
+                    Err(e) => {
+                        return MaybeSuccessTransitionWithNoResults::fatal(
+                            SessionEvent::Closed(SessionOutcome::Failure),
+                            e.into(),
+                        );
+                    }
+                };
+
+            MaybeSuccessTransitionWithNoResults::success(
+                processed_proposal.clone(),
+                SessionEvent::Closed(SessionOutcome::Success(processed_proposal)),
+            )
+        }
     }
 }
 

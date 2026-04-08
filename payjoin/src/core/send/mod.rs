@@ -16,14 +16,21 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
+#[cfg(any(feature = "v1", feature = "v2-std"))]
+use alloc::string::ToString;
+use alloc::vec::Vec;
+
 use bitcoin::psbt::Psbt;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
 pub use error::{BuildSenderError, ResponseError, ValidationError, WellKnownError};
+#[allow(unused_imports)]
 pub(crate) use error::{InternalBuildSenderError, InternalProposalError, InternalValidationError};
+#[cfg(any(feature = "v1", feature = "v2-std"))]
 use url::Url;
 
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::{AddressTypeError, PsbtExt, NON_WITNESS_INPUT_WEIGHT};
+#[cfg(any(feature = "v1", feature = "v2-std"))]
 use crate::Version;
 
 // See usize casts
@@ -40,6 +47,7 @@ pub mod v1;
 #[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
 pub mod v2;
 
+#[allow(dead_code)]
 type InternalResult<T> = Result<T, InternalProposalError>;
 
 /// A builder to construct the properties of a `PsbtContext`.
@@ -88,7 +96,7 @@ impl PsbtContextBuilder {
     ) -> Result<PsbtContext, BuildSenderError> {
         // TODO support optional batched payout scripts. This would require a change to
         // build() which now checks for a single payee.
-        let mut payout_scripts = std::iter::once(self.payee.clone());
+        let mut payout_scripts = core::iter::once(self.payee.clone());
 
         // Check if the PSBT is a sweep transaction with only one output that's a payout script and no change
         if self.psbt.unsigned_tx.output.len() == 1
@@ -245,6 +253,7 @@ macro_rules! check_eq {
     };
 }
 
+#[allow(dead_code)]
 fn ensure<T>(condition: bool, error: T) -> Result<(), T> {
     if !condition {
         return Err(error);
@@ -252,6 +261,7 @@ fn ensure<T>(condition: bool, error: T) -> Result<(), T> {
     Ok(())
 }
 
+#[allow(dead_code)]
 impl PsbtContext {
     fn process_proposal(self, mut proposal: Psbt) -> InternalResult<Psbt> {
         self.basic_checks(&proposal)?;
@@ -646,6 +656,7 @@ fn determine_fee_contribution(
     })
 }
 
+#[cfg(any(feature = "v1", feature = "v2-std"))]
 fn serialize_url(
     endpoint: Url,
     output_substitution: OutputSubstitution,
@@ -673,6 +684,8 @@ fn serialize_url(
 
 #[cfg(test)]
 mod test {
+    #![allow(unused_imports)]
+
     use bitcoin::absolute::LockTime;
     use bitcoin::bip32::{DerivationPath, Fingerprint};
     use bitcoin::ecdsa::Signature;
@@ -684,9 +697,11 @@ mod test {
         BoxError, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL,
         PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO,
     };
+    #[cfg(feature = "v2-std")]
     use url::Url;
 
     use super::*;
+    // use crate::core::OutputSubstitution;
     use crate::output_substitution::OutputSubstitution;
     use crate::psbt::PsbtExt;
     use crate::send::{AdditionalFeeContribution, InternalBuildSenderError, InternalProposalError};
@@ -706,6 +721,7 @@ mod test {
         })
     }
 
+    #[cfg(feature = "v1")]
     #[test]
     fn test_restore_original_utxos() -> Result<(), BoxError> {
         let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();
@@ -738,6 +754,7 @@ mod test {
         Ok(())
     }
 
+    #[cfg(feature = "v1")]
     #[test]
     fn test_restore_original_outputs() -> Result<(), BoxError> {
         let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();

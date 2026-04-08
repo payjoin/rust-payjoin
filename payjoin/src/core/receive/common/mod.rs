@@ -2,11 +2,18 @@
 //! This module isn't meant to be exposed publicly, but for v1 and v2
 //! APIs to expose as relevant typestates.
 
-use std::cmp::{max, min};
-use std::collections::HashSet;
+extern crate alloc;
+
+use alloc::collections::BTreeSet as HashSet;
+#[cfg(not(feature = "std"))]
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cmp::{max, min};
 
 use bitcoin::psbt::Psbt;
+#[cfg(feature = "std")]
 use bitcoin::secp256k1::rand::seq::SliceRandom;
+#[cfg(feature = "std")]
 use bitcoin::secp256k1::rand::{self, Rng};
 use bitcoin::{Amount, FeeRate, Script, TxIn, TxOut, Weight};
 use serde::{Deserialize, Serialize};
@@ -87,6 +94,7 @@ impl WantsOutputs {
         let mut payjoin_psbt = self.original_psbt.clone();
         let mut outputs = vec![];
         let mut replacement_outputs: Vec<TxOut> = replacement_outputs.into_iter().collect();
+        #[cfg(feature = "std")]
         let mut rng = rand::thread_rng();
         // Substitute the existing receiver outputs, keeping the sender/receiver output ordering
         for (i, original_output) in self.original_psbt.unsigned_tx.output.iter().enumerate() {
@@ -119,7 +127,10 @@ impl WantsOutputs {
                                     .into(),
                             );
                         }
+                        #[cfg(feature = "std")]
                         let index = rng.gen_range(0..replacement_outputs.len());
+                        #[cfg(not(feature = "std"))]
+                        let index = 0;
                         let txo = replacement_outputs.swap_remove(index);
                         outputs.push(txo);
                     }
@@ -130,7 +141,10 @@ impl WantsOutputs {
             }
         }
         // Insert all remaining outputs at random indices for privacy
+        #[cfg(feature = "std")]
         interleave_shuffle(&mut outputs, &mut replacement_outputs, &mut rng);
+        #[cfg(not(feature = "std"))]
+        interleave_shuffle(&mut outputs, &mut replacement_outputs);
         // Identify the receiver output that will be used for change and fees
         let change_vout = outputs.iter().position(|txo| txo.script_pubkey == *drain_script);
         // Update the payjoin PSBT outputs
@@ -163,15 +177,14 @@ impl WantsOutputs {
 /// maintaining the relative order in `original` but randomly inserting elements from `new`.
 ///
 /// The combined result replaces the contents of `original`.
-fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [T], rng: &mut R) {
-    // Shuffle the substitute_outputs
+#[cfg(feature = "std")]
+fn interleave_shuffle<T: Clone, R: Rng>(original: &mut Vec<T>, new: &mut [T], rng: &mut R) {
     new.shuffle(rng);
-    // Create a new vector to store the combined result
+
     let mut combined = Vec::with_capacity(original.len() + new.len());
-    // Initialize indices
     let mut original_index = 0;
     let mut new_index = 0;
-    // Interleave elements
+
     while original_index < original.len() || new_index < new.len() {
         if original_index < original.len() && (new_index >= new.len() || rng.gen_bool(0.5)) {
             combined.push(original[original_index].clone());
@@ -181,7 +194,13 @@ fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [
             new_index += 1;
         }
     }
+
     *original = combined;
+}
+
+#[cfg(not(feature = "std"))]
+fn interleave_shuffle<T: Clone>(original: &mut Vec<T>, new: &mut [T]) {
+    original.extend_from_slice(new);
 }
 
 /// Typestate for a checked proposal which the receiver may contribute inputs to.
@@ -305,11 +324,15 @@ impl WantsInputs {
         }
 
         // Insert contributions at random indices for privacy
+        #[cfg(feature = "std")]
         let mut rng = rand::thread_rng();
         let mut receiver_input_amount = Amount::ZERO;
         for input_pair in inputs.clone() {
             receiver_input_amount += input_pair.previous_txout().value;
+            #[cfg(feature = "std")]
             let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
+            #[cfg(not(feature = "std"))]
+            let index = self.payjoin_psbt.unsigned_tx.input.len();
             payjoin_psbt.inputs.insert(index, input_pair.psbtin);
             payjoin_psbt
                 .unsigned_tx

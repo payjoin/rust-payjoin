@@ -1,6 +1,11 @@
+#![cfg(any(feature = "v2", feature = "v2-ohttp"))]
+use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use core::error;
 use core::fmt;
+use core::ops::Deref;
+#[cfg(feature = "std")]
 use std::error;
-use std::ops::Deref;
 
 use bitcoin::key::constants::{ELLSWIFT_ENCODING_SIZE, PUBLIC_KEY_SIZE};
 use bitcoin::secp256k1;
@@ -195,13 +200,13 @@ pub fn decrypt_message_a(
     message_a: &[u8],
     receiver_sk: &HpkeSecretKey,
 ) -> Result<(Vec<u8>, HpkePublicKey), HpkeError> {
-    use std::io::{Cursor, Read};
+    if message_a.len() < ELLSWIFT_ENCODING_SIZE {
+        return Err(HpkeError::PayloadTooShort);
+    }
 
-    let mut cursor = Cursor::new(message_a);
+    let (enc_part, ciphertext_part) = message_a.split_at(ELLSWIFT_ENCODING_SIZE);
 
-    let mut enc_bytes = [0u8; ELLSWIFT_ENCODING_SIZE];
-    cursor.read_exact(&mut enc_bytes).map_err(|_| HpkeError::PayloadTooShort)?;
-    let enc = encapped_key_from_ellswift_bytes(&enc_bytes)?;
+    let enc = encapped_key_from_ellswift_bytes(enc_part)?;
 
     let mut decryption_ctx = hpke::setup_receiver::<
         ChaCha20Poly1305,
@@ -209,15 +214,16 @@ pub fn decrypt_message_a(
         SecpK256HkdfSha256,
     >(&OpModeR::Base, &receiver_sk.0, &enc, INFO_A)?;
 
-    let mut ciphertext = Vec::new();
-    cursor.read_to_end(&mut ciphertext).map_err(|_| HpkeError::PayloadTooShort)?;
-    let plaintext = decryption_ctx.open(&ciphertext, &[])?;
+    let plaintext = decryption_ctx.open(ciphertext_part, &[])?;
+
+    if plaintext.len() < PUBLIC_KEY_SIZE {
+        return Err(HpkeError::PayloadTooShort);
+    }
 
     let reply_pk = pubkey_from_compressed_bytes(&plaintext[..PUBLIC_KEY_SIZE])?;
+    let body = plaintext[PUBLIC_KEY_SIZE..].to_vec();
 
-    let body = &plaintext[PUBLIC_KEY_SIZE..];
-
-    Ok((body.to_vec(), reply_pk))
+    Ok((body, reply_pk))
 }
 
 /// Message B is sent from the receiver to the sender containing a Payjoin PSBT payload or an error
@@ -243,6 +249,8 @@ pub fn encrypt_message_b(
     Ok(message_b)
 }
 
+#[cfg(feature = "std")]
+#[allow(dead_code)]
 pub fn decrypt_message_b(
     message_b: &[u8],
     receiver_pk: HpkePublicKey,
@@ -580,5 +588,61 @@ mod test {
         assert_eq!(messages_a[0].len(), messages_b[0].len());
         check_uniformity(messages_a);
         check_uniformity(messages_b);
+    }
+
+    #[test]
+    fn decrypt_message_a_payload_too_short() {
+        let receiver_keypair = HpkeKeyPair::gen_keypair();
+        // Empty payload
+        let result = decrypt_message_a(&[], receiver_keypair.secret_key());
+        assert_eq!(result, Err(HpkeError::PayloadTooShort));
+        // Payload smaller than ELLSWIFT_ENCODING_SIZE
+        let short_payload = vec![0u8; ELLSWIFT_ENCODING_SIZE - 1];
+        let result = decrypt_message_a(&short_payload, receiver_keypair.secret_key());
+        assert_eq!(result, Err(HpkeError::PayloadTooShort));
+    }
+
+    #[test]
+    fn decrypt_message_a_does_not_treat_exact_ellswift_size_as_too_short() {
+        let receiver = HpkeKeyPair::gen_keypair();
+        let message_a = vec![0u8; ELLSWIFT_ENCODING_SIZE];
+
+        let result = decrypt_message_a(&message_a, receiver.secret_key());
+
+        assert!(!matches!(result, Err(HpkeError::PayloadTooShort)), "result = {:?}", result);
+    }
+
+    #[test]
+    fn decrypt_message_a_accepts_plaintext_exactly_public_key_size() {
+        let receiver = HpkeKeyPair::gen_keypair();
+        let reply = HpkeKeyPair::gen_keypair();
+
+        let expected_reply_pk = reply.public_key().clone();
+        let plaintext = expected_reply_pk.to_compressed_bytes().to_vec();
+
+        let mut rng = bitcoin::key::rand::thread_rng();
+
+        let (enc, mut encryption_ctx) =
+            hpke::setup_sender::<ChaCha20Poly1305, HkdfSha256, SecpK256HkdfSha256, _>(
+                &OpModeS::Base,
+                &receiver.public_key().0,
+                INFO_A,
+                &mut rng,
+            )
+            .expect("setup_sender should succeed");
+
+        let ciphertext = encryption_ctx.seal(&plaintext, &[]).expect("seal should succeed");
+
+        let enc_part = ellswift_bytes_from_encapped_key(&enc)
+            .expect("should convert encapped key to ellswift bytes");
+
+        let mut message_a = enc_part.to_vec();
+        message_a.extend_from_slice(&ciphertext);
+
+        let (body, reply_pk) =
+            decrypt_message_a(&message_a, receiver.secret_key()).expect("should decrypt");
+
+        assert!(body.is_empty(), "body = {:?}", body);
+        assert_eq!(reply_pk, expected_reply_pk);
     }
 }

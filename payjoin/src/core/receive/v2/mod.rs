@@ -24,9 +24,14 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
-use std::str::FromStr;
+use alloc::boxed::Box;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use alloc::{format, vec};
+use core::str::FromStr;
 #[cfg(not(target_arch = "wasm32"))]
-use std::time::Duration;
+use core::time::Duration;
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
@@ -35,23 +40,27 @@ pub(crate) use error::InternalSessionError;
 pub use error::SessionError;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
-pub use session::{
-    replay_event_log, replay_event_log_async, SessionEvent, SessionHistory, SessionOutcome,
-    SessionStatus,
-};
+#[cfg(feature = "std")]
+pub use session::replay_event_log_async;
+pub use session::{replay_event_log, SessionEvent, SessionHistory, SessionOutcome, SessionStatus};
 use url::Url;
+
+#[cfg(feature = "std")]
+pub use super::JsonReply as ErrorReply;
+
+#[cfg(not(feature = "std"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErrorReply;
 #[cfg(target_arch = "wasm32")]
 use web_time::Duration;
 
 use super::error::{Error, InputContributionError};
-use super::{
-    common, InternalPayloadError, JsonReply, OutputSubstitutionError, ProtocolError, SelectionError,
-};
+use super::{common, InternalPayloadError, OutputSubstitutionError, ProtocolError, SelectionError};
 use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
-use crate::ohttp::{
-    ohttp_encapsulate, process_get_res, process_post_res, OhttpEncapsulationError, OhttpKeys,
-};
+#[cfg(all(feature = "std", feature = "v2-ohttp"))]
+use crate::ohttp::process_get_res;
+use crate::ohttp::{ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
     MaybeFatalOrSuccessTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
@@ -61,13 +70,50 @@ use crate::receive::{parse_payload, InputPair, OriginalPayload, PsbtContext};
 use crate::time::Time;
 use crate::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
-
 mod error;
 mod session;
 
+#[allow(dead_code)]
 const SUPPORTED_VERSIONS: &[Version] = &[Version::One, Version::Two];
 
 static TWENTY_FOUR_HOURS_DEFAULT_EXPIRATION: Duration = Duration::from_secs(60 * 60 * 24);
+
+#[cfg(feature = "std")]
+pub(crate) use super::JsonReply;
+
+#[cfg(not(feature = "std"))]
+mod json_reply_placeholder {
+    use core::fmt;
+
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct JsonReply {
+        _private: (),
+    }
+
+    impl JsonReply {
+        pub(crate) fn new<D: fmt::Display>(
+            _error_code: crate::error_codes::ErrorCode,
+            _message: D,
+        ) -> Self {
+            Self { _private: () }
+        }
+
+        // pub fn to_json(&self) -> alloc::string::String {
+        //     alloc::string::String::from("{}")
+        // }
+    }
+
+    // impl<E> From<&E> for JsonReply {
+    //     fn from(_: &E) -> Self {
+    //         Self { _private: () }
+    //     }
+    // }
+}
+
+#[cfg(not(feature = "std"))]
+pub(crate) use json_reply_placeholder::JsonReply;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionContext {
@@ -143,6 +189,7 @@ pub enum ReceiveSession {
     WantsFeeRange(Receiver<WantsFeeRange>),
     ProvisionalProposal(Receiver<ProvisionalProposal>),
     PayjoinProposal(Receiver<PayjoinProposal>),
+    #[cfg(feature = "std")]
     HasReplyableError(Receiver<HasReplyableError>),
     Monitor(Receiver<Monitor>),
     Closed(SessionOutcome),
@@ -201,6 +248,7 @@ impl ReceiveSession {
             (_, SessionEvent::Closed(session_outcome)) =>
                 Ok(ReceiveSession::Closed(session_outcome)),
 
+            #[cfg(feature = "std")]
             (session, SessionEvent::GotReplyableError(error)) =>
                 Ok(ReceiveSession::HasReplyableError(Receiver {
                     state: HasReplyableError { error_reply: error.clone() },
@@ -244,6 +292,7 @@ mod sealed {
     impl State for super::WantsFeeRange {}
     impl State for super::ProvisionalProposal {}
     impl State for super::PayjoinProposal {}
+    #[cfg(feature = "std")]
     impl State for super::HasReplyableError {}
     impl State for super::Monitor {}
 }
@@ -362,6 +411,7 @@ impl Receiver<Initialized> {
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), Error> {
+        #[cfg(feature = "std")]
         if self.session_context.expiration.elapsed() {
             return Err(InternalSessionError::Expired(self.session_context.expiration).into());
         }
@@ -433,21 +483,34 @@ impl Receiver<Initialized> {
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> Result<Option<(OriginalPayload, Option<HpkePublicKey>)>, ProtocolError> {
-        let body = match process_get_res(body, context)
-            .map_err(|e| ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()))?
+        #[cfg(all(feature = "std", feature = "v2-ohttp"))]
         {
-            Some(body) => body,
-            None => return Ok(None),
-        };
-        match std::str::from_utf8(&body) {
-            // V1 response bodies are utf8 plaintext
-            Ok(response) =>
-                Ok(Some(self.extract_proposal_from_v1(response).map(|original| (original, None))?)),
-            // V2 response bodies are encrypted binary
-            Err(_) => Ok(Some(
-                self.extract_proposal_from_v2(body)
-                    .map(|(original, reply_key)| (original, Some(reply_key)))?,
-            )),
+            let body: Vec<u8> = match process_get_res(body, context)
+                .map_err(|e| ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()))?
+            {
+                Some(body) => body,
+                None => return Ok(None),
+            };
+
+            match core::str::from_utf8(&body) {
+                // V1 response bodies are utf8 plaintext
+                Ok(response) => Ok(Some(
+                    self.extract_proposal_from_v1(response).map(|original| (original, None))?,
+                )),
+                // V2 response bodies are encrypted binary
+                Err(_) => Ok(Some(
+                    self.extract_proposal_from_v2(body)
+                        .map(|(original, reply_key)| (original, Some(reply_key)))?,
+                )),
+            }
+        }
+
+        #[cfg(not(all(feature = "std", feature = "v2-ohttp")))]
+        {
+            let _ = (body, context);
+            Err(ProtocolError::V2(
+                InternalSessionError::Implementation(ImplementationError::std_required()).into(),
+            ))
         }
     }
 
@@ -464,10 +527,12 @@ impl Receiver<Initialized> {
         ohttp_encapsulate(&self.session_context.ohttp_keys, "GET", fallback_target.as_str(), None)
     }
 
+    #[allow(dead_code)]
     fn extract_proposal_from_v1(self, response: &str) -> Result<OriginalPayload, ProtocolError> {
         self.unchecked_from_payload(response)
     }
 
+    #[allow(dead_code)]
     fn extract_proposal_from_v2(
         self,
         response: Vec<u8>,
@@ -475,11 +540,12 @@ impl Receiver<Initialized> {
         let (payload_bytes, reply_key) =
             decrypt_message_a(&response, self.session_context.receiver_key.secret_key())
                 .map_err(|e| ProtocolError::V2(InternalSessionError::Hpke(e).into()))?;
-        let payload = std::str::from_utf8(&payload_bytes)
+        let payload = core::str::from_utf8(&payload_bytes)
             .map_err(|e| ProtocolError::OriginalPayload(InternalPayloadError::Utf8(e).into()))?;
         self.unchecked_from_payload(payload).map(|p| (p, reply_key))
     }
 
+    #[allow(dead_code)]
     fn unchecked_from_payload(self, payload: &str) -> Result<OriginalPayload, ProtocolError> {
         let (base64, padded_query) = payload.split_once('\n').unwrap_or_default();
         let query = padded_query.trim_matches('\0');
@@ -504,8 +570,9 @@ impl Receiver<Initialized> {
     }
 
     /// Build a V2 Payjoin URI from the receiver's context
-    pub fn pj_uri<'a>(&self) -> crate::PjUri<'a> {
-        pj_uri(&self.session_context, OutputSubstitution::Disabled)
+    #[cfg(feature = "std")]
+    pub fn pj_uri(&self) -> crate::core::uri::PjUri<'static> {
+        build_pj_uri(&self.session_context, OutputSubstitution::Disabled)
     }
 
     pub(crate) fn apply_retrieved_original_payload(
@@ -561,6 +628,7 @@ impl Receiver<UncheckedOriginalPayload> {
     /// This can be used to further prevent probing attacks since the attacker would now need to probe the receiver
     /// with transactions which are both broadcastable and pay high fee. Unrelated to the probing attack scenario,
     /// this parameter also makes operating in a high fee environment easier for the receiver.
+    #[cfg(feature = "std")]
     pub fn check_broadcast_suitability(
         self,
         min_fee_rate: Option<FeeRate>,
@@ -589,6 +657,24 @@ impl Receiver<UncheckedOriginalPayload> {
                 },
                 e,
             ),
+        }
+    }
+
+    #[cfg(not(feature = "std"))]
+    pub fn check_broadcast_suitability(
+        self,
+        min_fee_rate: Option<FeeRate>,
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
+    ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsOwned>, Error> {
+        match self.state.original.check_broadcast_suitability(min_fee_rate, can_broadcast) {
+            Ok(()) => MaybeFatalTransition::success(
+                SessionEvent::CheckedBroadcastSuitability(),
+                Receiver {
+                    state: MaybeInputsOwned { original: self.original.clone() },
+                    session_context: self.session_context,
+                },
+            ),
+            Err(e) => MaybeFatalTransition::transient(e),
         }
     }
 
@@ -1136,25 +1222,42 @@ impl Receiver<PayjoinProposal> {
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
     ) -> MaybeFatalTransition<SessionEvent, Receiver<Monitor>, ProtocolError> {
-        match process_post_res(res, ohttp_context) {
-            Ok(_) => MaybeFatalTransition::success(
-                SessionEvent::PostedPayjoinProposal(),
-                Receiver {
-                    state: Monitor { psbt_context: self.state.psbt_context.clone() },
-                    session_context: self.session_context.clone(),
-                },
-            ),
-            Err(e) =>
-                if e.is_fatal() {
-                    MaybeFatalTransition::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
-                        ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()),
-                    )
-                } else {
-                    MaybeFatalTransition::transient(ProtocolError::V2(
-                        InternalSessionError::DirectoryResponse(e).into(),
-                    ))
-                },
+        #[cfg(all(feature = "std", feature = "v2-ohttp"))]
+        {
+            use crate::ohttp::process_post_res;
+
+            match process_post_res(res, ohttp_context) {
+                Ok(_) => MaybeFatalTransition::success(
+                    SessionEvent::PostedPayjoinProposal(),
+                    Receiver {
+                        state: Monitor { psbt_context: self.state.psbt_context.clone() },
+                        session_context: self.session_context.clone(),
+                    },
+                ),
+                Err(e) =>
+                    if e.is_fatal() {
+                        MaybeFatalTransition::fatal(
+                            SessionEvent::Closed(SessionOutcome::Failure),
+                            ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()),
+                        )
+                    } else {
+                        MaybeFatalTransition::transient(ProtocolError::V2(
+                            InternalSessionError::DirectoryResponse(e).into(),
+                        ))
+                    },
+            }
+        }
+
+        #[cfg(not(all(feature = "std", feature = "v2-ohttp")))]
+        {
+            let _ = (res, ohttp_context);
+            MaybeFatalTransition::fatal(
+                SessionEvent::Closed(SessionOutcome::Failure),
+                ProtocolError::V2(
+                    InternalSessionError::Implementation(ImplementationError::std_required())
+                        .into(),
+                ),
+            )
         }
     }
 
@@ -1166,7 +1269,14 @@ impl Receiver<PayjoinProposal> {
     }
 }
 
+#[cfg(feature = "std")]
 #[derive(Debug, Clone, PartialEq)]
+pub struct HasReplyableError {
+    error_reply: super::JsonReply,
+}
+
+#[cfg(not(feature = "std"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HasReplyableError {
     error_reply: JsonReply,
 }
@@ -1179,6 +1289,7 @@ impl Receiver<HasReplyableError> {
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
         let session_context = &self.session_context;
+        #[cfg(feature = "std")]
         if session_context.expiration.elapsed() {
             return Err(InternalSessionError::Expired(session_context.expiration).into());
         }
@@ -1213,20 +1324,38 @@ impl Receiver<HasReplyableError> {
         res: &[u8],
         ohttp_context: ohttp::ClientResponse,
     ) -> MaybeSuccessTransition<SessionEvent, (), ProtocolError> {
-        match process_post_res(res, ohttp_context) {
-            Ok(_) =>
-                MaybeSuccessTransition::success(SessionEvent::Closed(SessionOutcome::Failure), ()),
-            Err(e) =>
-                if e.is_fatal() {
-                    MaybeSuccessTransition::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
-                        ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()),
-                    )
-                } else {
-                    MaybeSuccessTransition::transient(ProtocolError::V2(
-                        InternalSessionError::DirectoryResponse(e).into(),
-                    ))
-                },
+        #[cfg(all(feature = "std", feature = "v2-ohttp"))]
+        {
+            use crate::ohttp::process_post_res;
+            match process_post_res(res, ohttp_context) {
+                Ok(_) => MaybeSuccessTransition::success(
+                    SessionEvent::Closed(SessionOutcome::Failure),
+                    (),
+                ),
+                Err(e) =>
+                    if e.is_fatal() {
+                        MaybeSuccessTransition::fatal(
+                            SessionEvent::Closed(SessionOutcome::Failure),
+                            ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()),
+                        )
+                    } else {
+                        MaybeSuccessTransition::transient(ProtocolError::V2(
+                            InternalSessionError::DirectoryResponse(e).into(),
+                        ))
+                    },
+            }
+        }
+
+        #[cfg(not(all(feature = "std", feature = "v2-ohttp")))]
+        {
+            let _ = (res, ohttp_context);
+            return MaybeSuccessTransition::fatal(
+                SessionEvent::Closed(SessionOutcome::Failure),
+                ProtocolError::V2(
+                    InternalSessionError::Implementation(ImplementationError::std_required())
+                        .into(),
+                ),
+            );
         }
     }
 }
@@ -1337,11 +1466,16 @@ fn mailbox_endpoint(directory: &Url, id: &ShortId) -> Url {
     url
 }
 
-/// Gets the Payjoin URI from a session context
-pub(crate) fn pj_uri<'a>(
+#[cfg(feature = "std")]
+pub fn pj_uri<'a>(session_context: &'a SessionContext) -> crate::PjUri<'a> {
+    build_pj_uri(session_context, OutputSubstitution::Disabled)
+}
+
+#[cfg(feature = "std")]
+pub(crate) fn build_pj_uri(
     session_context: &SessionContext,
     output_substitution: OutputSubstitution,
-) -> crate::PjUri<'a> {
+) -> crate::PjUri<'static> {
     use crate::uri::PayjoinExtras;
     let pj_param = crate::uri::PjParam::V2(crate::uri::v2::PjParam::new(
         session_context.directory.clone(),
@@ -1353,11 +1487,11 @@ pub(crate) fn pj_uri<'a>(
     let extras = PayjoinExtras { pj_param, output_substitution };
     let mut uri = bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras);
     uri.amount = session_context.amount;
-
-    uri
+    // SAFETY: label and message are None, so no data is actually borrowed
+    unsafe { core::mem::transmute::<crate::PjUri<'_>, crate::PjUri<'static>>(uri) }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub mod test {
     use std::str::FromStr;
 
@@ -1578,6 +1712,7 @@ pub mod test {
         Ok(())
     }
 
+    #[cfg(feature = "v1")]
     #[test]
     fn test_unchecked_proposal_fatal_error() -> Result<(), BoxError> {
         let persister = NoopSessionPersister::default();
@@ -1689,6 +1824,7 @@ pub mod test {
         Ok(())
     }
 
+    #[cfg(feature = "v1")]
     #[test]
     fn test_create_error_request() -> Result<(), BoxError> {
         let mock_err = mock_err();
@@ -1709,6 +1845,7 @@ pub mod test {
         Ok(())
     }
 
+    #[cfg(feature = "v1")]
     #[test]
     fn test_create_error_request_expiration() -> Result<(), BoxError> {
         let now = crate::time::Time::now();
@@ -1829,5 +1966,25 @@ pub mod test {
             Receiver { state: provisional_proposal, session_context: SHARED_CONTEXT.clone() };
         let psbt = receiver.psbt_to_sign();
         assert_eq!(psbt, PARSED_PAYJOIN_PROPOSAL.clone());
+    }
+
+    #[cfg(not(feature = "std"))]
+    #[cfg(test)]
+    mod json_reply_placeholder_tests {
+        use super::json_reply_placeholder::JsonReply;
+        use crate::error_codes::ErrorCode;
+
+        #[test]
+        fn test_json_reply_new() {
+            let reply = JsonReply::new(ErrorCode::Unavailable, "test");
+            assert_eq!(reply.to_json(), "{}");
+        }
+
+        #[test]
+        fn test_json_reply_from() {
+            let val = 42u32;
+            let reply = JsonReply::from(&val);
+            assert_eq!(reply.to_json(), "{}");
+        }
     }
 }

@@ -113,7 +113,7 @@ also provided.
 
 ### Testing
 
-We test a few different features combinations in CI. To run all of the combinations locally, have Docker running and run `contrib/test.sh`.
+We test a few different features combinations in CI. To run all of the combinations locally run `contrib/test.sh`.
 
 If you are adding a new feature please add tests for it.
 

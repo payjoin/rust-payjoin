@@ -51,6 +51,12 @@ async fn fetch_ohttp_keys(
     let payjoin_directory = directory.unwrap_or(config.v2()?.pj_directory.clone());
     let relays = config.v2()?.ohttp_relays.clone();
 
+    if relays.len() < 2 {
+        tracing::warn!(
+            "Only one OHTTP relay configured. Add more ohttp_relays to improve privacy."
+        );
+    }
+
     loop {
         let failed_relays = relay_manager.get_failed_relays();
 

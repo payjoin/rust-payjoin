@@ -179,7 +179,14 @@ impl Config {
                 #[cfg(feature = "v2")]
                 {
                     match built_config.get::<V2Config>("v2") {
-                        Ok(v2) => config.version = Some(VersionConfig::V2(v2)),
+                        Ok(v2) => {
+                            if v2.ohttp_relays.len() < 2 {
+                                tracing::warn!(
+                                    "Only one OHTTP relay is configured. Add more ohttp_relays to improve privacy."
+                                );
+                            }
+                            config.version = Some(VersionConfig::V2(v2))
+                        }
                         Err(e) =>
                             return Err(ConfigError::Message(format!(
                                 "Valid V2 configuration is required for BIP77 mode: {e}"

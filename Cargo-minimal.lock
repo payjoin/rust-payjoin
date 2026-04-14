@@ -476,7 +476,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "16fc24bc615b9fd63148f59b218ea58a444b55762f8845da910e23aca686398b"
 dependencies = [
  "thiserror 1.0.69",
- "url",
 ]
 
 [[package]]

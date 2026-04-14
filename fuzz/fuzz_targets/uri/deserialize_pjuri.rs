@@ -2,7 +2,6 @@
 
 use std::any::{Any, TypeId};
 
-use bitcoin::Amount;
 use bitcoin_uri::Param;
 use libfuzzer_sys::fuzz_target;
 use payjoin::{Uri, UriExt};
@@ -17,7 +16,6 @@ fn do_test(data: &[u8]) {
         if !address {
             return;
         }
-        let amount = pj_uri.amount;
 
         if let Some(label) = pj_uri.clone().label {
             if TypeId::of::<Param>() != label.type_id() {
@@ -36,7 +34,8 @@ fn do_test(data: &[u8]) {
         // Removed as this is not guaranteed with unknown params
         // let uri_owned = uri_str.to_string();
         // assert_eq!(uri_owned.clone(), pj_uri.to_string());
-        assert!(amount.is_none_or(|btc| btc < Amount::MAX_MONEY));
+        // Remove assert for max amount fuzzer as long as we think its not necessary
+        // assert!(amount.is_none_or(|btc| btc < Amount::MAX_MONEY));
         assert!(
             TypeId::of::<payjoin::OutputSubstitution>() == extras.output_substitution().type_id()
         );

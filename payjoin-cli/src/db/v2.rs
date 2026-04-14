@@ -230,14 +230,15 @@ impl Database {
         Ok(HpkePublicKey::from_compressed_bytes(&receiver_pubkey).expect("Valid receiver pubkey"))
     }
 
-    pub(crate) fn get_inactive_send_session_ids(&self) -> Result<Vec<(SessionId, u64)>> {
+    pub(crate) fn get_inactive_send_session_ids(&self) -> Result<Vec<(SessionId, String)>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT session_id, completed_at FROM send_sessions WHERE completed_at IS NOT NULL",
+            "SELECT session_id, strftime('%Y-%m-%d %H:%M:%S', completed_at, 'unixepoch') \
+             FROM send_sessions WHERE completed_at IS NOT NULL",
         )?;
         let session_rows = stmt.query_map([], |row| {
             let session_id: i64 = row.get(0)?;
-            let completed_at: u64 = row.get(1)?;
+            let completed_at: String = row.get(1)?;
             Ok((SessionId(session_id), completed_at))
         })?;
 
@@ -249,14 +250,15 @@ impl Database {
         Ok(session_ids)
     }
 
-    pub(crate) fn get_inactive_recv_session_ids(&self) -> Result<Vec<(SessionId, u64)>> {
+    pub(crate) fn get_inactive_recv_session_ids(&self) -> Result<Vec<(SessionId, String)>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT session_id, completed_at FROM receive_sessions WHERE completed_at IS NOT NULL",
+            "SELECT session_id, strftime('%Y-%m-%d %H:%M:%S', completed_at, 'unixepoch') \
+             FROM receive_sessions WHERE completed_at IS NOT NULL",
         )?;
         let session_rows = stmt.query_map([], |row| {
             let session_id: i64 = row.get(0)?;
-            let completed_at: u64 = row.get(1)?;
+            let completed_at: String = row.get(1)?;
             Ok((SessionId(session_id), completed_at))
         })?;
 

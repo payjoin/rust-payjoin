@@ -96,6 +96,52 @@ fn print_header() {
     );
 }
 
+/// Format a Unix timestamp (seconds since epoch) as `YYYY-MM-DD HH:MM:SS`
+/// using Howard Hinnant's civil_from_days algorithm — no external dependencies.
+fn format_unix_secs(secs: u64) -> String {
+    fn civil_from_days(z: i64) -> (i32, u32, u32) {
+        let z = z + 719_468;
+        let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+        let doe = (z - era * 146_097) as u64;
+        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+        let y = yoe as i64 + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = if m <= 2 { y + 1 } else { y };
+        (y as i32, m as u32, d as u32)
+    }
+
+    let days = (secs / 86_400) as i64;
+    let tod = secs % 86_400;
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        year,
+        month,
+        day,
+        tod / 3600,
+        (tod % 3600) / 60,
+        tod % 60
+    )
+}
+
+/// Reformat error messages that contain a raw `Time(Time(timestamp))` debug repr,
+/// replacing the opaque token with a human-readable UTC datetime.
+fn format_session_error(msg: &str) -> String {
+    const PREFIX: &str = "Session expired at Time(Time(";
+    const SUFFIX: &str = "))";
+    if let Some(rest) = msg.strip_prefix(PREFIX) {
+        if let Some(num_str) = rest.strip_suffix(SUFFIX) {
+            if let Ok(secs) = num_str.parse::<u64>() {
+                return format!("Session expired at {} UTC", format_unix_secs(secs));
+            }
+        }
+    }
+    msg.to_string()
+}
+
 enum Role {
     Sender,
     Receiver,
@@ -113,7 +159,7 @@ struct SessionHistoryRow<Status> {
     session_id: SessionId,
     role: Role,
     status: Status,
-    completed_at: Option<u64>,
+    completed_at: Option<String>,
     error_message: Option<String>,
 }
 
@@ -124,13 +170,7 @@ impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
             "{:<W_ID$} {:<W_ROLE$} {:<W_DONE$} {:<W_STATUS$}",
             self.session_id.to_string(),
             self.role.as_str(),
-            match self.completed_at {
-                None => "Not Completed".to_string(),
-                Some(secs) => {
-                    // TODO: human readable time
-                    secs.to_string()
-                }
-            },
+            self.completed_at.as_deref().unwrap_or("Not Completed"),
             self.error_message.as_deref().unwrap_or(self.status.status_text())
         )
     }
@@ -362,7 +402,7 @@ impl AppTrait for App {
                         role: Role::Sender,
                         status: SendSession::Closed(SenderSessionOutcome::Failure),
                         completed_at: None,
-                        error_message: Some(e.to_string()),
+                        error_message: Some(format_session_error(&e.to_string())),
                     };
                     send_rows.push(row);
                 }
@@ -388,7 +428,7 @@ impl AppTrait for App {
                         role: Role::Receiver,
                         status: ReceiveSession::Closed(ReceiverSessionOutcome::Failure),
                         completed_at: None,
-                        error_message: Some(e.to_string()),
+                        error_message: Some(format_session_error(&e.to_string())),
                     };
                     recv_rows.push(row);
                 }
@@ -415,7 +455,7 @@ impl AppTrait for App {
                             role: Role::Sender,
                             status: SendSession::Closed(SenderSessionOutcome::Failure),
                             completed_at: Some(completed_at),
-                            error_message: Some(e.to_string()),
+                            error_message: Some(format_session_error(&e.to_string())),
                         };
                         send_rows.push(row);
                     }
@@ -443,7 +483,7 @@ impl AppTrait for App {
                             role: Role::Receiver,
                             status: ReceiveSession::Closed(ReceiverSessionOutcome::Failure),
                             completed_at: Some(completed_at),
-                            error_message: Some(e.to_string()),
+                            error_message: Some(format_session_error(&e.to_string())),
                         };
                         recv_rows.push(row);
                     }

@@ -591,7 +591,13 @@ mod tests {
 
     async fn test_service(v1: Option<V1>) -> Service<FilesDb> {
         let dir = tempfile::tempdir().expect("tempdir");
-        let db = FilesDb::init(Duration::from_millis(100), dir.keep()).await.expect("db init");
+        let db = FilesDb::init(
+            Duration::from_millis(100),
+            dir.keep(),
+            Duration::from_secs(60 * 60 * 24 * 7),
+        )
+        .await
+        .expect("db init");
         let ohttp: ohttp::Server =
             crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
         Service::new(db, ohttp, SentinelTag::new([0u8; 32]), v1)
@@ -824,7 +830,13 @@ mod tests {
         let metrics = MetricsService::new(Some(provider.clone()));
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let db = FilesDb::init(Duration::from_millis(100), dir.keep()).await.expect("db init");
+        let db = FilesDb::init(
+            Duration::from_millis(100),
+            dir.keep(),
+            Duration::from_secs(60 * 60 * 24 * 7),
+        )
+        .await
+        .expect("db init");
         let db = MetricsDb::new(db, metrics);
         let ohttp: ohttp::Server =
             crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();

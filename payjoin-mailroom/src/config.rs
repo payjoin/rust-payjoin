@@ -12,6 +12,8 @@ pub struct Config {
     pub storage_dir: PathBuf,
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub timeout: Duration,
+    #[serde(deserialize_with = "deserialize_duration_secs")]
+    pub mailbox_ttl: Duration,
     pub v1: Option<V1Config>,
     #[cfg(feature = "telemetry")]
     pub telemetry: Option<TelemetryConfig>,
@@ -85,6 +87,7 @@ impl Default for Config {
             listener: "[::]:8080".parse().expect("valid default listener address"),
             storage_dir: PathBuf::from("./data"),
             timeout: Duration::from_secs(30),
+            mailbox_ttl: Duration::from_secs(60 * 60 * 24 * 7), // 1 week
             v1: None,
             #[cfg(feature = "telemetry")]
             telemetry: None,
@@ -115,6 +118,7 @@ impl Config {
             listener,
             storage_dir,
             timeout,
+            mailbox_ttl: Duration::from_secs(60 * 60 * 24 * 7), // 1 week
             v1,
             #[cfg(feature = "telemetry")]
             telemetry: None,

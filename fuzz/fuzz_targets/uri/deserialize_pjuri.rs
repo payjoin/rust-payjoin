@@ -31,11 +31,6 @@ fn do_test(data: &[u8]) {
             Ok(res) => res.extras,
             Err(_) => return,
         };
-        // Removed as this is not guaranteed with unknown params
-        // let uri_owned = uri_str.to_string();
-        // assert_eq!(uri_owned.clone(), pj_uri.to_string());
-        // Remove assert for max amount fuzzer as long as we think its not necessary
-        // assert!(amount.is_none_or(|btc| btc < Amount::MAX_MONEY));
         assert!(
             TypeId::of::<payjoin::OutputSubstitution>() == extras.output_substitution().type_id()
         );

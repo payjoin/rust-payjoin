@@ -29,7 +29,7 @@ axum = "0.8"
 axum-server = { version = "0.8", features = [
   "tls-rustls-no-provider",
 ], optional = true }
-bhttp = { version = "0.6.1", features = ["http"] }
+bhttp = { version = "0.6.1" }
 bitcoin = { version = "0.32.7", features = ["base64", "rand-std"] }
 byteorder = "1.5.0"
 bytes = "1.10.1"

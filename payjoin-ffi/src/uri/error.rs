@@ -1,4 +1,5 @@
 #[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display, Eq)]
 #[error("Error parsing the payjoin URI: {msg}")]
 pub struct PjParseError {
     msg: String,
@@ -9,6 +10,7 @@ impl PjParseError {
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display, Eq)]
 #[error("URI doesn't support payjoin: {msg}")]
 pub struct PjNotSupported {
     msg: String,
@@ -21,14 +23,17 @@ impl PjNotSupported {
 }
 
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct UrlParseError(#[from] url::ParseError);
 
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct IntoUrlError(#[from] payjoin::IntoUrlError);
 
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error("{msg}")]
 pub struct FeeRateError {
     msg: String,

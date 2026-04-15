@@ -78,6 +78,7 @@ impl FfiError {
 }
 
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct BoxSendSyncError(#[from] payjoin_test_utils::BoxSendSyncError);
 

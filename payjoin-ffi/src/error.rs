@@ -4,6 +4,7 @@ use std::error;
 ///
 /// e.g. database errors, network failures, wallet errors
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct ImplementationError(#[from] payjoin::ImplementationError);
 
@@ -18,6 +19,7 @@ impl From<ImplementationError> for payjoin::ImplementationError {
 }
 
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error("Error de/serializing JSON object: {0}")]
 pub struct SerdeJsonError(#[from] serde_json::Error);
 

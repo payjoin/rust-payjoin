@@ -2,6 +2,7 @@ pub use error::OhttpError;
 
 pub mod error {
     #[derive(Debug, thiserror::Error, uniffi::Object)]
+    #[uniffi::export(Debug, Display)]
     #[error(transparent)]
     pub struct OhttpError(#[from] ohttp::Error);
 }

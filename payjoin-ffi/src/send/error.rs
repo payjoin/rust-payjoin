@@ -9,6 +9,7 @@ use crate::error::{FfiValidationError, ImplementationError};
 ///
 /// This error is unrecoverable.
 #[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display, Eq)]
 #[error("Error initializing the sender: {msg}")]
 pub struct BuildSenderError {
     msg: String,
@@ -55,16 +56,19 @@ impl From<FfiValidationError> for SenderInputError {
 /// `unwrap()`ing it is thus considered OK in Rust but you may achieve nicer message by displaying
 /// it.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct CreateRequestError(#[from] send::v2::CreateRequestError);
 
 /// Error returned for v2-specific payload encapsulation errors.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct EncapsulationError(#[from] send::v2::EncapsulationError);
 
 /// Error that may occur when the response from receiver is malformed.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct ValidationError(#[from] send::ValidationError);
 
@@ -106,11 +110,13 @@ impl From<send::ResponseError> for ResponseError {
 
 /// A well-known error that can be safely displayed to end users.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct WellKnownError(#[from] send::WellKnownError);
 
 /// Error that may occur when the sender session event log is replayed
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct SenderReplayError(
     #[from] payjoin::error::ReplayError<send::v2::SendSession, send::v2::SessionEvent>,

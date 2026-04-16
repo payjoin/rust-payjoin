@@ -41,7 +41,7 @@ mod test {
             (hrp.as_str().len() + 1) as f32 + (bytes.len() as f32 * 8.0 / 5.0).ceil()
         );
 
-        // TODO assert uppercase
+        // TODO: Add assertion to ensure HRP is uppercase per BIP 173
 
         // should not error
         let corrupted = encoded + "QQPP";

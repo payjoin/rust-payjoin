@@ -2835,7 +2835,6 @@ dependencies = [
 name = "payjoin-fuzz"
 version = "0.0.1"
 dependencies = [
- "bitcoin 0.32.8",
  "bitcoin_uri",
  "home",
  "libfuzzer-sys",

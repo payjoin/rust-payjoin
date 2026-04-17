@@ -36,7 +36,7 @@ thiserror = "2.0.14"
 tokio = { version = "1.47.1", features = ["full"], optional = true }
 uniffi = { version = "0.30.0", features = ["cli"] }
 uniffi-bindgen-cs = { git = "https://github.com/chavic/uniffi-bindgen-cs.git", rev = "878a3d269eacce64beadcd336ade0b7c8da09824", optional = true }
-uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", tag = "v0.1.0+v0.30.0", optional = true }
+uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", rev = "b0157aa", optional = true }
 url = "2.5.4"
 
 # getrandom is ignored here because it's required by the wasm_js feature

@@ -115,6 +115,7 @@ impl From<payjoin::bitcoin::address::ParseError> for ReceiverBuilderError {
 
 /// Error parsing a Bitcoin address.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error("Invalid Bitcoin address: {msg}")]
 pub struct AddressParseError {
     msg: String,
@@ -136,6 +137,7 @@ impl From<payjoin::bitcoin::address::ParseError> for AddressParseError {
 /// 4. Provide errors according to BIP-78 JSON error specifications for return
 ///    after conversion into [`JsonReply`]
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct ProtocolError(#[from] receive::ProtocolError);
 
@@ -149,6 +151,7 @@ pub struct ProtocolError(#[from] receive::ProtocolError);
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Object)]
+#[uniffi::export(Debug, Eq)]
 pub struct JsonReply(receive::JsonReply);
 
 impl From<JsonReply> for receive::JsonReply {
@@ -165,11 +168,13 @@ impl From<ProtocolError> for JsonReply {
 
 /// Error that may occur during a v2 session typestate change
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct SessionError(#[from] receive::v2::SessionError);
 
 /// Protocol error raised during output substitution.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct OutputSubstitutionProtocolError(#[from] receive::OutputSubstitutionError);
 
@@ -194,16 +199,19 @@ impl From<FfiValidationError> for OutputSubstitutionError {
 
 /// Error that may occur when coin selection fails.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct SelectionError(#[from] receive::SelectionError);
 
 /// Error that may occur when input contribution fails.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct InputContributionError(#[from] receive::InputContributionError);
 
 /// Error validating a PSBT Input
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct PsbtInputError(#[from] receive::PsbtInputError);
 
@@ -233,6 +241,7 @@ impl From<FfiValidationError> for InputPairError {
 
 /// Error that may occur when a receiver event log is replayed
 #[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct ReceiverReplayError(
     #[from] payjoin::error::ReplayError<receive::v2::ReceiveSession, receive::v2::SessionEvent>,

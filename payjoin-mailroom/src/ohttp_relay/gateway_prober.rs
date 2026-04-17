@@ -245,6 +245,18 @@ impl Prober {
         None
     }
 
+    fn retry_after_or<B>(res: &hyper::Response<B>, default: Duration) -> Duration {
+        // Only the seconds form of Retry-After is handled (RFC 7231 §7.1.3).
+        // The HTTP-date form is not parsed and silently falls back to `default`.
+        res.headers()
+            .get(hyper::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .map(Duration::from_secs)
+            .map(|d| d.min(MAX_RETRY_AFTER_TTL))
+            .unwrap_or(default)
+    }
+
     /// Probes a target gateway by attempting to send a GET request.
     async fn probe(&self, base_url: &GatewayUri) -> Policy {
         // Create a GET request without a body
@@ -281,11 +293,13 @@ impl Prober {
                     }
                 } else if status == hyper::StatusCode::GATEWAY_TIMEOUT {
                     ttls.http_504_gateway_timeout
+                } else if status == hyper::StatusCode::TOO_MANY_REQUESTS {
+                    Self::retry_after_or(res, ttls.http_4xx)
                 } else if status.is_client_error() {
-                    // TODO handle Retry-After for 429 too many requests
                     ttls.http_4xx
+                } else if status == hyper::StatusCode::SERVICE_UNAVAILABLE {
+                    Self::retry_after_or(res, ttls.http_5xx)
                 } else if status.is_server_error() {
-                    // TODO handle Retry-After for 503 service unavailable
                     ttls.http_5xx
                 } else {
                     ttls.default
@@ -368,6 +382,8 @@ struct TTLConfig {
 
 /// Different probing results/conditions and the time to live when caching that
 /// information.
+/// Maximum TTL allowed from a server-supplied Retry-After header.
+const MAX_RETRY_AFTER_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 impl Default for TTLConfig {
     fn default() -> Self {
         /// A week
@@ -763,5 +779,89 @@ mod tests {
             result[0], MAGIC_BIP77_PURPOSE,
             "the element should be the bip77 opt-in magic string"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_mock_429_retry_after() {
+        let mut server = Server::new_async().await;
+        let url =
+            GatewayUri::from_str(&server.url()).expect("must be able to parse mock server URL");
+        let prober = Prober::default();
+
+        let retry_after_secs = 120u64;
+        let mock_429 = server
+            .mock("GET", RFC_9540_GATEWAY_PATH)
+            .match_query(mockito::Matcher::Regex("^allowed_purposes$".into()))
+            .with_status(429)
+            .with_header("Retry-After", &retry_after_secs.to_string())
+            .create_async()
+            .await;
+
+        let status = prober.check_opt_in(&url).await.expect("probing must succeed");
+        mock_429.assert_async().await;
+        assert!(!status.bip77_allowed, "rate-limited gateway should not be considered opt-in");
+
+        // Advance time by less than Retry-After — should use cached result (no new request)
+        tokio::time::advance(Duration::from_secs(retry_after_secs - 1)).await;
+        let status = prober.check_opt_in(&url).await.expect("cached probe must succeed");
+        assert!(!status.bip77_allowed, "result should still be cached before Retry-After expires");
+
+        // Advance past Retry-After — cache should be expired, new request would be sent
+        tokio::time::advance(Duration::from_secs(2)).await;
+        let mock_429_again = server
+            .mock("GET", RFC_9540_GATEWAY_PATH)
+            .match_query(mockito::Matcher::Regex("^allowed_purposes$".into()))
+            .with_status(429)
+            .with_header("Retry-After", &retry_after_secs.to_string())
+            .create_async()
+            .await;
+        let _ = prober.check_opt_in(&url).await;
+        mock_429_again.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_mock_503_retry_after() {
+        let mut server = Server::new_async().await;
+        let url =
+            GatewayUri::from_str(&server.url()).expect("must be able to parse mock server URL");
+        let prober = Prober::default();
+
+        let mock_503 = server
+            .mock("GET", RFC_9540_GATEWAY_PATH)
+            .match_query(mockito::Matcher::Regex("^allowed_purposes$".into()))
+            .with_status(503)
+            .with_header("Retry-After", "30")
+            .create_async()
+            .await;
+
+        let status = prober.check_opt_in(&url).await.expect("probing must succeed");
+        mock_503.assert_async().await;
+        assert!(!status.bip77_allowed, "unavailable gateway should not be considered opt-in");
+    }
+
+    #[tokio::test]
+    async fn test_mock_429_no_retry_after_uses_default() {
+        let mut server = Server::new_async().await;
+        let url =
+            GatewayUri::from_str(&server.url()).expect("must be able to parse mock server URL");
+        let prober = Prober::default();
+
+        let mock_429 = server
+            .mock("GET", RFC_9540_GATEWAY_PATH)
+            .match_query(mockito::Matcher::Regex("^allowed_purposes$".into()))
+            .with_status(429)
+            .create_async()
+            .await;
+
+        let status = prober.check_opt_in(&url).await.expect("probing must succeed");
+        mock_429.assert_async().await;
+        assert!(
+            !status.bip77_allowed,
+            "rate-limited gateway without Retry-After should not be opt-in"
+        );
+
+        // Should be cached — no new request sent
+        let status = prober.check_opt_in(&url).await.expect("cached probe must succeed");
+        assert!(!status.bip77_allowed, "result should be cached with default TTL");
     }
 }

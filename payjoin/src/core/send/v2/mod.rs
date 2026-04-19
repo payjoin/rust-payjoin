@@ -240,6 +240,11 @@ impl<State> core::ops::DerefMut for Sender<State> {
 impl<State> Sender<State> {
     /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> String { self.session_context.pj_param.endpoint().to_string() }
+
+    /// The receiver's public key from the Payjoin URI
+    pub fn receiver_pubkey(&self) -> &crate::hpke::HpkePublicKey {
+        self.session_context.pj_param.receiver_pubkey()
+    }
 }
 
 /// Represents the various states of a Payjoin send session during the protocol flow.

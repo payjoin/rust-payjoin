@@ -111,6 +111,9 @@ impl SessionContext {
     pub(crate) fn reply_mailbox_id(&self) -> ShortId {
         short_id_from_pubkey(self.reply_key.as_ref().unwrap_or(self.receiver_key.public_key()))
     }
+
+    /// The receiver's public key for this session
+    pub fn receiver_pubkey(&self) -> &HpkePublicKey { self.receiver_key.public_key() }
 }
 
 fn deserialize_address_assume_checked<'de, D>(deserializer: D) -> Result<Address, D::Error>
@@ -285,6 +288,11 @@ impl<State> core::ops::DerefMut for Receiver<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
+impl<State> Receiver<State> {
+    /// The receiver's public key for this session
+    pub fn receiver_pubkey(&self) -> &HpkePublicKey { self.session_context.receiver_pubkey() }
+}
+
 #[derive(Debug, Clone)]
 pub struct ReceiverBuilder(SessionContext);
 
@@ -335,6 +343,18 @@ impl ReceiverBuilder {
     /// Set the maximum effective fee rate the receiver is willing to pay for their own input/output contributions
     pub fn with_max_fee_rate(self, max_fee_rate: FeeRate) -> Self {
         Self(SessionContext { max_fee_rate, ..self.0 })
+    }
+
+    /// Override the generated receiver keypair with a specific keypair.
+    ///
+    /// Added for AS-aware relay selection: the receiver pubkey must
+    /// be known before the session is created to use as a deterministic seed
+    /// shared with the sender.
+    ///
+    /// This is the minimal change to unblock the PoC. Exposing keypair
+    /// on the public API may not be the right long-term design
+    pub fn with_receiver_keypair(self, keypair: HpkeKeyPair) -> Self {
+        Self(SessionContext { receiver_key: keypair, ..self.0 })
     }
 
     pub fn build(self) -> NextStateTransition<SessionEvent, Receiver<Initialized>> {

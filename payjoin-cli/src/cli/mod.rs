@@ -73,8 +73,20 @@ pub struct Cli {
     pub ohttp_keys: Option<PathBuf>,
 
     #[cfg(feature = "v2")]
-    #[arg(long = "pj-directory", help = "The directory to store payjoin requests", value_parser = value_parser!(Url))]
+    #[arg(long = "pj-directory", help = "Single directory to store payjoin requests", value_parser = value_parser!(Url))]
     pub pj_directory: Option<Url>,
+
+    #[cfg(feature = "v2")]
+    #[arg(long = "pj-directories", help = "Comma-separated list of trusted payjoin directories", value_parser = value_parser!(Url), value_delimiter = ',', action = clap::ArgAction::Append)]
+    pub pj_directories: Option<Vec<Url>>,
+
+    #[cfg(feature = "v2")]
+    #[arg(long = "asmap", help = "Path to ASmap file for AS-aware relay selection (Kartograf format)", value_parser = value_parser!(PathBuf))]
+    pub asmap_path: Option<PathBuf>,
+
+    #[cfg(feature = "v2")]
+    #[arg(long = "user-asn", help = "Your ASN for filtering relays (e.g. 28573)")]
+    pub user_asn: Option<u32>,
 
     #[cfg(feature = "_manual-tls")]
     #[arg(long = "root-certificate", help = "Specify a TLS certificate to be added as a root", value_parser = value_parser!(PathBuf))]
@@ -118,9 +130,14 @@ pub enum Commands {
         pj_endpoint: Option<Url>,
 
         #[cfg(feature = "v2")]
-        /// The directory to store payjoin requests
+        /// Single directory to store payjoin requests
         #[arg(long = "pj-directory", value_parser = value_parser!(Url))]
         pj_directory: Option<Url>,
+
+        #[cfg(feature = "v2")]
+        /// Comma-separated list of trusted payjoin directories
+        #[arg(long = "pj-directories", value_parser = value_parser!(Url), value_delimiter = ',', action = clap::ArgAction::Append)]
+        pj_directories: Option<Vec<Url>>,
 
         #[cfg(feature = "v2")]
         /// The path to the ohttp keys file

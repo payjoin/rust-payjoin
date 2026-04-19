@@ -22,11 +22,12 @@ use tokio::sync::watch;
 use super::config::Config;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
-use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, RelayManager};
+use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, RelayManager, RelayRole};
 use crate::app::{handle_interrupt, http_agent};
 use crate::db::v2::{ReceiverPersister, SenderPersister, SessionId};
 use crate::db::Database;
 
+mod asmap;
 mod ohttp;
 
 const W_ID: usize = 12;
@@ -41,6 +42,7 @@ pub(crate) struct App {
     wallet: BitcoindWallet,
     interrupt: watch::Receiver<()>,
     relay_manager: Arc<Mutex<RelayManager>>,
+    asmap: Option<asmap::Asmap>,
 }
 
 trait StatusText {
@@ -144,7 +146,20 @@ impl AppTrait for App {
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
         let wallet = BitcoindWallet::new(&config.bitcoind).await?;
-        let app = Self { config, db, wallet, interrupt: interrupt_rx, relay_manager };
+        let asmap = match config.v2() {
+            Ok(v2) => v2.asmap_path.as_ref().and_then(|path| match asmap::Asmap::from_file(path) {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    tracing::warn!("Failed to load asmap: {e}");
+                    None
+                }
+            }),
+            Err(e) => {
+                tracing::debug!("Not in v2 mode, skipping asmap: {e}");
+                None
+            }
+        };
+        let app = Self { config, db, wallet, interrupt: interrupt_rx, relay_manager, asmap };
         app.wallet()
             .network()
             .context("Failed to connect to bitcoind. Check config RPC connection.")?;
@@ -254,17 +269,29 @@ impl AppTrait for App {
 
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
-        let ohttp_keys =
-            unwrap_ohttp_keys_or_else_fetch(&self.config, None, self.relay_manager.clone())
-                .await?
-                .ohttp_keys;
+
+        let receiver_keypair = payjoin::HpkeKeyPair::gen_keypair();
+        let receiver_pubkey = receiver_keypair.public_key().to_compressed_bytes();
+
+        let validated = unwrap_ohttp_keys_or_else_fetch(
+            &self.config,
+            None,
+            self.relay_manager.clone(),
+            Some(&receiver_pubkey),
+            RelayRole::Receiver,
+            self.asmap.as_ref(),
+        )
+        .await?;
+        let ohttp_keys = validated.ohttp_keys;
+        let directory = validated.directory_url;
+
         let persister = ReceiverPersister::new(self.db.clone())?;
-        let session =
-            ReceiverBuilder::new(address, self.config.v2()?.pj_directory.as_str(), ohttp_keys)?
-                .with_amount(amount)
-                .with_max_fee_rate(self.config.max_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN))
-                .build()
-                .save(&persister)?;
+        let session = ReceiverBuilder::new(address, directory.as_str(), ohttp_keys)?
+            .with_receiver_keypair(receiver_keypair)
+            .with_amount(amount)
+            .with_max_fee_rate(self.config.max_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN))
+            .build()
+            .save(&persister)?;
 
         println!("Receive session established");
         let pj_uri = session.pj_uri();
@@ -499,8 +526,15 @@ impl App {
         sender: Sender<WithReplyKey>,
         persister: &SenderPersister,
     ) -> Result<()> {
+        let receiver_pubkey = sender.receiver_pubkey().to_compressed_bytes();
         let (req, ctx) = sender.create_v2_post_request(
-            self.unwrap_relay_or_else_fetch(Some(&sender.endpoint())).await?.as_str(),
+            self.unwrap_relay_or_else_fetch(
+                Some(&sender.endpoint()),
+                Some(&receiver_pubkey),
+                RelayRole::Sender,
+            )
+            .await?
+            .as_str(),
         )?;
         let response = self.post_request(req).await?;
         println!("Posted original proposal...");
@@ -513,7 +547,14 @@ impl App {
         sender: Sender<PollingForProposal>,
         persister: &SenderPersister,
     ) -> Result<()> {
-        let ohttp_relay = self.unwrap_relay_or_else_fetch(Some(&sender.endpoint())).await?;
+        let receiver_pubkey = sender.receiver_pubkey().to_compressed_bytes();
+        let ohttp_relay = self
+            .unwrap_relay_or_else_fetch(
+                Some(&sender.endpoint()),
+                Some(&receiver_pubkey),
+                RelayRole::Sender,
+            )
+            .await?;
         let mut session = sender.clone();
         // Long poll until we get a response
         loop {
@@ -545,8 +586,15 @@ impl App {
         session: Receiver<Initialized>,
         persister: &ReceiverPersister,
     ) -> Result<Receiver<UncheckedOriginalPayload>> {
-        let ohttp_relay =
-            self.unwrap_relay_or_else_fetch(Some(&session.pj_uri().extras.endpoint())).await?;
+        let endpoint = session.pj_uri().extras.endpoint();
+        let receiver_pubkey = session.receiver_pubkey().to_compressed_bytes();
+        let ohttp_relay = self
+            .unwrap_relay_or_else_fetch(
+                Some(&endpoint),
+                Some(&receiver_pubkey),
+                RelayRole::Receiver,
+            )
+            .await?;
 
         let mut session = session;
         loop {
@@ -747,8 +795,17 @@ impl App {
         proposal: Receiver<PayjoinProposal>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
+        let receiver_pubkey = proposal.receiver_pubkey().to_compressed_bytes();
         let (req, ohttp_ctx) = proposal
-            .create_post_request(self.unwrap_relay_or_else_fetch(None::<&str>).await?.as_str())
+            .create_post_request(
+                self.unwrap_relay_or_else_fetch(
+                    None::<&str>,
+                    Some(&receiver_pubkey),
+                    RelayRole::Receiver,
+                )
+                .await?
+                .as_str(),
+            )
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         let res = self.post_request(req).await?;
         let payjoin_psbt = proposal.psbt().clone();
@@ -813,6 +870,8 @@ impl App {
     async fn unwrap_relay_or_else_fetch(
         &self,
         directory: Option<impl payjoin::IntoUrl>,
+        receiver_pubkey: Option<&[u8; 33]>,
+        role: RelayRole,
     ) -> Result<url::Url> {
         let directory = directory.map(|url| url.into_url()).transpose()?;
         let selected_relay =
@@ -820,9 +879,16 @@ impl App {
         let ohttp_relay = match selected_relay {
             Some(relay) => relay,
             None =>
-                unwrap_ohttp_keys_or_else_fetch(&self.config, directory, self.relay_manager.clone())
-                    .await?
-                    .relay_url,
+                unwrap_ohttp_keys_or_else_fetch(
+                    &self.config,
+                    directory,
+                    self.relay_manager.clone(),
+                    receiver_pubkey,
+                    role,
+                    self.asmap.as_ref(),
+                )
+                .await?
+                .relay_url,
         };
         Ok(ohttp_relay)
     }
@@ -833,8 +899,11 @@ impl App {
         session: Receiver<HasReplyableError>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let (err_req, err_ctx) = session
-            .create_error_request(self.unwrap_relay_or_else_fetch(None::<&str>).await?.as_str())?;
+        let (err_req, err_ctx) = session.create_error_request(
+            self.unwrap_relay_or_else_fetch(None::<&str>, None, RelayRole::Receiver)
+                .await?
+                .as_str(),
+        )?;
 
         let err_response = match self.post_request(err_req).await {
             Ok(response) => response,

@@ -204,6 +204,58 @@ void main() {
     });
   });
 
+  group("Test Receiver Cancel", () {
+    test("Test receiver cancel from initialized", () {
+      var persister = InMemoryReceiverPersister("1");
+      var initialized = payjoin.ReceiverBuilder(
+        address: "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+        directory: "https://example.com",
+        ohttpKeys: payjoin.OhttpKeys.decode(
+          bytes: Uint8List.fromList(
+            hex.decode(
+              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
+            ),
+          ),
+        ),
+      ).build().save(persister: persister);
+      var cancelTransition = initialized.cancel();
+      var fallbackTx = cancelTransition.save(persister: persister);
+      expect(fallbackTx, isNull);
+      final result = payjoin.replayReceiverEventLog(persister: persister);
+      expect(
+        result.state(),
+        isA<payjoin.ClosedReceiveSession>(),
+        reason: "receiver should be in Closed state after cancel",
+      );
+    });
+
+    test("Test receiver cancel async from initialized", () async {
+      var persister = InMemoryReceiverPersisterAsync("1");
+      var initialized = await payjoin.ReceiverBuilder(
+        address: "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+        directory: "https://example.com",
+        ohttpKeys: payjoin.OhttpKeys.decode(
+          bytes: Uint8List.fromList(
+            hex.decode(
+              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
+            ),
+          ),
+        ),
+      ).build().saveAsync(persister: persister);
+      var cancelTransition = initialized.cancel();
+      var fallbackTx = await cancelTransition.saveAsync(persister: persister);
+      expect(fallbackTx, isNull);
+      final result = await payjoin.replayReceiverEventLogAsync(
+        persister: persister,
+      );
+      expect(
+        result.state(),
+        isA<payjoin.ClosedReceiveSession>(),
+        reason: "receiver should be in Closed state after cancel",
+      );
+    });
+  });
+
   group("Test Async Persistence", () {
     test("Test receiver async persistence", () async {
       var persister = InMemoryReceiverPersisterAsync("1");

@@ -31,7 +31,7 @@ use crate::receive::{InternalPayloadError, OriginalPayload, PsbtContext};
 /// Call [`Self::commit_outputs`] to proceed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsOutputs {
-    original_psbt: Psbt,
+    pub(super) original_psbt: Psbt,
     pub(super) payjoin_psbt: Psbt,
     pub(super) params: Params,
     change_vout: usize,

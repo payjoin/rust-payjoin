@@ -389,8 +389,235 @@ mod integration {
         }
     }
 
-    // not all needs v1
-    #[cfg(all(feature = "io", feature = "v2", feature = "v1", feature = "_manual-tls"))]
+    #[cfg(any(feature = "v1", feature = "v2"))]
+    mod test_helpers {
+        use std::collections::HashMap;
+        use std::str::FromStr;
+
+        use bitcoin::policy::DEFAULT_MIN_RELAY_TX_FEE;
+        use bitcoin::psbt::{Input as PsbtInput, Psbt};
+        use bitcoin::{Amount, FeeRate, OutPoint, TxIn, TxOut, Weight};
+        #[cfg(all(feature = "v1", not(feature = "v2")))]
+        use payjoin::receive::v1::build_v1_pj_uri;
+        use payjoin::receive::InputPair;
+        use payjoin::ImplementationError;
+        #[cfg(feature = "v1")]
+        use payjoin::PjUri;
+        #[cfg(not(feature = "v1"))]
+        #[allow(unused_imports)]
+        use payjoin::PjUri;
+        #[cfg(all(feature = "v1", not(feature = "v2")))]
+        use payjoin::{OutputSubstitution, Uri, UriExt};
+        use payjoin_test_utils::corepc_node::vtype::ListUnspentItem;
+        use payjoin_test_utils::{corepc_node, BoxError};
+        use serde_json::json;
+
+        pub(super) const TX_HEADER_LEGACY_WEIGHT: u64 = 40;
+        pub(super) const TX_HEADER_WEIGHT: u64 = 42;
+        pub(super) const P2PKH_INPUT_WEIGHT: u64 = 592;
+        #[cfg(all(feature = "v1", not(feature = "v2")))]
+        const NESTED_P2WPKH_INPUT_WEIGHT: u64 = 364;
+        pub(super) const P2WPKH_INPUT_WEIGHT: u64 = 272;
+        pub(super) const P2TR_INPUT_WEIGHT: u64 = 230;
+        pub(super) const P2WPKH_OUTPUT_WEIGHT: u64 = 124;
+
+        #[cfg(any(feature = "v1", feature = "v2"))]
+        pub(super) fn build_original_psbt(
+            sender: &corepc_node::Client,
+            pj_uri: &PjUri,
+        ) -> Result<Psbt, BoxError> {
+            let mut outputs = HashMap::with_capacity(1);
+            outputs.insert(
+                pj_uri.address.to_string(),
+                pj_uri.amount.unwrap_or(Amount::ONE_BTC).to_btc(),
+            );
+            let options = json!({
+                "lockUnspents": true,
+                "feeRate": Amount::from_sat(DEFAULT_MIN_RELAY_TX_FEE.into()).to_btc(),
+            });
+            let psbt = sender
+                .call::<corepc_node::vtype::WalletCreateFundedPsbt>(
+                    "walletcreatefundedpsbt",
+                    &[
+                        json!(&[] as &[serde_json::Value]),
+                        json!(&outputs),
+                        json!(None as Option<u64>),
+                        json!(options),
+                        json!(Some(true)),
+                    ],
+                )?
+                .psbt;
+            let psbt = sender.wallet_process_psbt(&Psbt::from_str(&psbt)?)?.psbt;
+            Ok(Psbt::from_str(&psbt)?)
+        }
+
+        #[cfg(any(feature = "v1", feature = "v2"))]
+        pub(super) fn extract_pj_tx(
+            sender: &corepc_node::Client,
+            psbt: Psbt,
+        ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
+            let payjoin_psbt = sender.wallet_process_psbt(&psbt)?.psbt;
+            let payjoin_psbt = sender
+                .finalize_psbt(&Psbt::from_str(&payjoin_psbt)?)?
+                .psbt
+                .expect("should contain a PSBT");
+            let payjoin_psbt = Psbt::from_str(&payjoin_psbt)?;
+            tracing::debug!("Sender's Payjoin PSBT: {payjoin_psbt:#?}");
+            Ok(payjoin_psbt.extract_tx()?)
+        }
+
+        #[cfg(any(feature = "v1", feature = "v2"))]
+        pub(super) fn input_pair_from_list_unspent(utxo: ListUnspentItem) -> InputPair {
+            let utxo =
+                utxo.into_model().expect("listunspent utxo should be convertible to model type");
+            let script_pubkey = utxo.script_pubkey.clone();
+            let psbtin = PsbtInput {
+                witness_utxo: Some(TxOut {
+                    value: utxo.amount.to_unsigned().expect("amount should be unsigned"),
+                    script_pubkey: utxo.script_pubkey,
+                }),
+                redeem_script: utxo.redeem_script,
+                ..Default::default()
+            };
+            let txin = TxIn {
+                previous_output: OutPoint { txid: utxo.txid, vout: utxo.vout },
+                ..Default::default()
+            };
+            let expected_weight = if script_pubkey.is_p2tr() {
+                Some(Weight::from_wu(P2TR_INPUT_WEIGHT))
+            } else {
+                None
+            };
+            InputPair::new(txin, psbtin, expected_weight).expect("Input pair should be valid")
+        }
+
+        pub(super) struct HeaderMock(HashMap<String, String>);
+
+        #[cfg(feature = "v1")]
+        impl payjoin::receive::v1::Headers for HeaderMock {
+            fn get_header(&self, key: &str) -> Option<&str> { self.0.get(key).map(|e| e.as_str()) }
+        }
+
+        impl HeaderMock {
+            pub(super) fn new(body: &[u8], content_type: &str) -> Self {
+                let mut h = HashMap::new();
+                h.insert("content-type".to_string(), content_type.to_string());
+                h.insert("content-length".to_string(), body.len().to_string());
+                HeaderMock(h)
+            }
+        }
+
+        #[cfg(feature = "v1")]
+        pub(super) fn handle_v1_pj_request(
+            req: payjoin::Request,
+            headers: impl payjoin::receive::v1::Headers,
+            receiver: &corepc_node::Client,
+            custom_outputs: Option<Vec<TxOut>>,
+            drain_script: Option<&bitcoin::Script>,
+            custom_inputs: Option<Vec<InputPair>>,
+        ) -> Result<String, BoxError> {
+            let proposal = payjoin::receive::v1::UncheckedOriginalPayload::from_request(
+                req.body.as_slice(),
+                url::Url::from_str(&req.url).expect("Could not parse url").query().unwrap_or(""),
+                headers,
+            )?;
+            let proposal = handle_proposal_v1(
+                proposal,
+                receiver,
+                custom_outputs,
+                drain_script,
+                custom_inputs,
+            )?;
+            let psbt = proposal.psbt();
+            tracing::debug!("Receiver's Payjoin proposal PSBT: {psbt:#?}");
+            Ok(psbt.to_string())
+        }
+
+        #[cfg(feature = "v1")]
+        fn handle_proposal_v1(
+            proposal: payjoin::receive::v1::UncheckedOriginalPayload,
+            receiver: &corepc_node::Client,
+            custom_outputs: Option<Vec<TxOut>>,
+            drain_script: Option<&bitcoin::Script>,
+            custom_inputs: Option<Vec<InputPair>>,
+        ) -> Result<payjoin::receive::v1::PayjoinProposal, BoxError> {
+            let proposal = proposal.check_broadcast_suitability(None, |tx| {
+                Ok(receiver
+                    .test_mempool_accept(std::slice::from_ref(tx))
+                    .map_err(ImplementationError::new)?
+                    .0
+                    .first()
+                    .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
+                    .allowed)
+            })?;
+            let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
+            let proposal = proposal.check_inputs_not_owned(&mut |input| {
+                let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
+                    .map_err(ImplementationError::new)?;
+                receiver
+                    .get_address_info(&address)
+                    .map(|info| info.is_mine)
+                    .map_err(ImplementationError::new)
+            })?;
+            let payjoin = proposal
+                .check_no_inputs_seen_before(&mut |_| Ok(false))?
+                .identify_receiver_outputs(&mut |output_script| {
+                    let address =
+                        bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
+                            .map_err(ImplementationError::new)?;
+                    receiver
+                        .get_address_info(&address)
+                        .map(|info| info.is_mine)
+                        .map_err(ImplementationError::new)
+                })?;
+            let payjoin = match custom_outputs {
+                Some(txos) => payjoin.replace_receiver_outputs(
+                    txos,
+                    drain_script.expect("drain_script should be provided with custom_outputs"),
+                )?,
+                None =>
+                    payjoin.substitute_receiver_script(&receiver.new_address()?.script_pubkey())?,
+            }
+            .commit_outputs();
+            let inputs = match custom_inputs {
+                Some(inputs) => inputs,
+                None => {
+                    let candidate_inputs =
+                        receiver.list_unspent()?.0.into_iter().map(input_pair_from_list_unspent);
+                    let selected_input =
+                        payjoin.try_preserving_privacy(candidate_inputs).map_err(|e| {
+                            format!("Failed to make privacy preserving selection: {e:?}")
+                        })?;
+                    vec![selected_input]
+                }
+            };
+            let payjoin = payjoin
+                .contribute_inputs(inputs)
+                .map_err(|e| format!("Failed to contribute inputs: {e:?}"))?
+                .commit_inputs();
+            let payjoin = payjoin.apply_fee_range(
+                Some(FeeRate::BROADCAST_MIN),
+                Some(FeeRate::from_sat_per_vb_unchecked(2)),
+            )?;
+            let payjoin_proposal = payjoin.finalize_proposal(|psbt: &Psbt| {
+                receiver
+                    .call::<corepc_node::vtype::WalletProcessPsbt>(
+                        "walletprocesspsbt",
+                        &[
+                            json!(psbt.to_string()),
+                            json!(None as Option<bool>),
+                            json!(None as Option<&str>),
+                            json!(Some(true)),
+                        ],
+                    )
+                    .map(|res| Psbt::from_str(&res.psbt).expect("psbt should be valid"))
+                    .map_err(ImplementationError::new)
+            })?;
+            Ok(payjoin_proposal)
+        }
+    }
+
+    #[cfg(all(feature = "io", feature = "v2", feature = "_manual-tls"))]
     mod v2 {
         use std::collections::HashMap;
         use std::str::FromStr;
@@ -403,6 +630,7 @@ mod integration {
         use bitcoin::{Address, Amount, FeeRate, Psbt, Transaction, Weight};
         use http::StatusCode;
         use payjoin::persist::{NoopSessionPersister, OptionalTransitionOutcome};
+        #[cfg(feature = "v1")]
         use payjoin::receive::v1::build_v1_pj_uri;
         use payjoin::receive::v2::{
             replay_event_log as replay_receiver_event_log, Monitor, PayjoinProposal,
@@ -411,9 +639,9 @@ mod integration {
         use payjoin::receive::InputPair;
         use payjoin::send::v2::{replay_event_log as replay_sender_event_log, SenderBuilder};
         use payjoin::send::ResponseError;
-        use payjoin::{
-            ImplementationError, OhttpKeys, OutputSubstitution, PjUri, Request, Uri, UriExt,
-        };
+        #[cfg(feature = "v1")]
+        use payjoin::OutputSubstitution;
+        use payjoin::{ImplementationError, OhttpKeys, PjUri, Request, Uri, UriExt};
         use payjoin_test_utils::corepc_node::AddressType;
         use payjoin_test_utils::{
             corepc_node, init_bitcoind_sender_receiver, init_tracing, BoxError, BoxSendSyncError,
@@ -422,7 +650,7 @@ mod integration {
         use reqwest::{Client, Response};
         use serde_json::json;
 
-        use super::v1::*;
+        use super::test_helpers::*;
 
         /// Possible actions the sender can take after receiving the Payjoin proposal from the
         /// receiver.
@@ -1127,6 +1355,7 @@ mod integration {
             Ok((broadcasted_transaction, monitoring_payment))
         }
 
+        #[cfg(all(feature = "v1", feature = "v2"))]
         #[test]
         fn v2_to_v1() -> Result<(), BoxError> {
             init_tracing();
@@ -1188,6 +1417,7 @@ mod integration {
             Ok(())
         }
 
+        #[cfg(all(feature = "v1", feature = "v2"))]
         #[tokio::test]
         async fn v1_to_v2() -> Result<(), BoxSendSyncError> {
             init_tracing();

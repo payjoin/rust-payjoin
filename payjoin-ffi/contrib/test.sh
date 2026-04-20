@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -e
 
-RUST_VERSION=$(rustc --version | awk '{print $2}')
+cd "$(dirname "$0")/.."
 
-if [[ ! $RUST_VERSION =~ ^1\.85\. ]]; then
-    cargo test --package payjoin-ffi --verbose --features=_manual-tls,_test-utils
-else
-    echo "Skipping payjoin-ffi tests for Rust version $RUST_VERSION (MSRV)"
-fi
+cargo test --package payjoin-ffi --verbose --features=_manual-tls,_test-utils
+
+BINDINGS="dart javascript python csharp"
+
+for binding in $BINDINGS; do
+    (
+        cd "$binding"
+        ./contrib/test.sh
+    )
+done

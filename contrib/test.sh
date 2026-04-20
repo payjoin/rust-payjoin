@@ -24,7 +24,7 @@ if [ -f "$LOCKFILE" ]; then
 fi
 
 DEPS="recent minimal"
-CRATES="payjoin payjoin-cli payjoin-ffi payjoin-mailroom"
+CRATES="payjoin payjoin-cli payjoin-mailroom"
 
 for dep in $DEPS; do
     cargo --version

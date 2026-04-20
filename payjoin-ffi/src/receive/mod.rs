@@ -1386,20 +1386,15 @@ impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
         &self,
     ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError> {
         let res = self.callback_persister.load()?;
-        Ok(Box::new(
-            match res
-                .into_iter()
-                .map(|event| {
-                    ReceiverSessionEvent::from_json(event)
-                        .map_err(|e| ForeignError::InternalError(e.to_string()))
-                        .map(|e| e.into())
-                })
-                .collect::<Result<Vec<_>, _>>()
-            {
-                Ok(events) => Box::new(events.into_iter()),
-                Err(e) => return Err(e),
-            },
-        ))
+        let events = res
+            .into_iter()
+            .map(|event| {
+                ReceiverSessionEvent::from_json(event)
+                    .map_err(|e| ForeignError::InternalError(e.to_string()))
+                    .map(|e| e.into())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Box::new(events.into_iter()))
     }
 
     fn close(&self) -> Result<(), Self::InternalStorageError> { self.callback_persister.close() }

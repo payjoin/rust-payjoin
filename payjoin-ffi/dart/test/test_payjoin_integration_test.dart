@@ -5,6 +5,7 @@ import "package:http/http.dart" as http;
 import 'package:test/test.dart';
 import "package:convert/convert.dart";
 
+import "package:payjoin/http.dart" as payjoin_http;
 import "package:payjoin/payjoin.dart" as payjoin;
 import "package:payjoin/test_utils.dart" as test_utils;
 
@@ -400,6 +401,39 @@ Future<payjoin.ReceiveSession?> process_receiver_proposal(
 }
 
 void main() {
+  group('fetchOhttpKeys', () {
+    test(
+      'fetches and decodes keys via relay proxy',
+      () async {
+        final services = test_utils.TestServices.initialize();
+        services.waitForServicesReady();
+        final keys = await payjoin_http.fetchOhttpKeys(
+          ohttpRelayUrl: services.ohttpRelayUrl(),
+          directoryUrl: services.directoryUrl(),
+          certificate: services.cert(),
+        );
+        expect(keys, isA<payjoin.OhttpKeys>());
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+
+    test(
+      'without trusted certificate throws',
+      () async {
+        final services = test_utils.TestServices.initialize();
+        services.waitForServicesReady();
+        await expectLater(
+          payjoin_http.fetchOhttpKeys(
+            ohttpRelayUrl: services.ohttpRelayUrl(),
+            directoryUrl: services.directoryUrl(),
+          ),
+          throwsA(isA<Exception>()),
+        );
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+  });
+
   group('Test integration', () {
     test('FFI validation', () async {
       final tooLargeAmount = 21000000 * 100000000 + 1;

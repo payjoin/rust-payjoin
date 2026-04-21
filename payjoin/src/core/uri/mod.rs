@@ -49,7 +49,7 @@ impl PjParam {
 
     pub fn endpoint(&self) -> String { self.endpoint_url().to_string() }
 
-    pub(crate) fn endpoint_url(&self) -> url::Url {
+    pub(crate) fn endpoint_url(&self) -> crate::core::Url {
         match self {
             #[cfg(feature = "v1")]
             PjParam::V1(url) => url.endpoint(),
@@ -65,12 +65,12 @@ impl std::fmt::Display for PjParam {
         // unfortunately Url normalizes these to be lowercase
         let endpoint = &self.endpoint_url();
         let scheme = endpoint.scheme();
-        let host = endpoint.host_str().expect("host must be set");
+        let host = endpoint.host_str();
         let endpoint_str = self
             .endpoint()
             .as_str()
             .replacen(scheme, &scheme.to_uppercase(), 1)
-            .replacen(host, &host.to_uppercase(), 1);
+            .replacen(&host, &host.to_uppercase(), 1);
         write!(f, "{endpoint_str}")
     }
 }

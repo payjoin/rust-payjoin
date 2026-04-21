@@ -4,9 +4,8 @@ use anyhow::Result;
 use config::builder::DefaultState;
 use config::{ConfigError, File, FileFormat};
 use payjoin::bitcoin::FeeRate;
-use payjoin::Version;
+use payjoin::{Url, Version};
 use serde::Deserialize;
-use url::Url;
 
 use crate::cli::{Cli, Commands};
 use crate::db;
@@ -317,10 +316,16 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
             #[cfg(feature = "v1")]
             let config = config
                 .set_override_option("v1.port", port.map(|p| p.to_string()))?
-                .set_override_option("v1.pj_endpoint", pj_endpoint.as_ref().map(|s| s.as_str()))?;
+                .set_override_option(
+                    "v1.pj_endpoint",
+                    pj_endpoint.clone().map(|s| s.to_string()),
+                )?;
             #[cfg(feature = "v2")]
             let config = config
-                .set_override_option("v2.pj_directory", pj_directory.as_ref().map(|s| s.as_str()))?
+                .set_override_option(
+                    "v2.pj_directory",
+                    pj_directory.clone().map(|s| s.to_string()),
+                )?
                 .set_override_option(
                     "v2.ohttp_keys",
                     ohttp_keys.as_ref().map(|s| s.to_string_lossy().into_owned()),

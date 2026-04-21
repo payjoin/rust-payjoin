@@ -274,6 +274,60 @@ public class CancelTests
         var state = result.State();
         Assert.IsType<ReceiveSession.Closed>(state);
     }
+
+    [Fact]
+    public void SenderCancelFromWithReplyKey()
+    {
+        var receiverPersister = new InMemoryReceiverPersister();
+        var address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
+        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+
+        var receiver = new ReceiverBuilder(address, "https://example.com", ohttpKeys)
+            .Build()
+            .Save(receiverPersister);
+        var uri = receiver.PjUri();
+
+        var senderPersister = new InMemorySenderPersister();
+        var psbt = PayjoinMethods.OriginalPsbt();
+        var withReplyKey = new SenderBuilder(psbt, uri)
+            .BuildRecommended(1000)
+            .Save(senderPersister);
+        var cancelTransition = withReplyKey.Cancel();
+        var fallbackTx = cancelTransition.Save(senderPersister);
+        Assert.NotNull(fallbackTx);
+        Assert.NotEmpty(fallbackTx);
+
+        var result = PayjoinMethods.ReplaySenderEventLog(senderPersister);
+        var state = result.State();
+        Assert.IsType<SendSession.Closed>(state);
+    }
+
+    [Fact]
+    public async Task SenderCancelFromWithReplyKeyAsync()
+    {
+        var receiverPersister = new InMemoryReceiverPersisterAsync();
+        var address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
+        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+
+        var receiver = await new ReceiverBuilder(address, "https://example.com", ohttpKeys)
+            .Build()
+            .SaveAsync(receiverPersister);
+        var uri = receiver.PjUri();
+
+        var senderPersister = new InMemorySenderPersisterAsync();
+        var psbt = PayjoinMethods.OriginalPsbt();
+        var withReplyKey = await new SenderBuilder(psbt, uri)
+            .BuildRecommended(1000)
+            .SaveAsync(senderPersister);
+        var cancelTransition = withReplyKey.Cancel();
+        var fallbackTx = await cancelTransition.SaveAsync(senderPersister);
+        Assert.NotNull(fallbackTx);
+        Assert.NotEmpty(fallbackTx);
+
+        var result = await PayjoinMethods.ReplaySenderEventLogAsync(senderPersister);
+        var state = result.State();
+        Assert.IsType<SendSession.Closed>(state);
+    }
 }
 
 public class ValidationTests

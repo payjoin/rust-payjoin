@@ -256,6 +256,77 @@ void main() {
     });
   });
 
+  group("Test Sender Cancel", () {
+    test("Test sender cancel from with reply key", () {
+      var receiver_persister = InMemoryReceiverPersister("1");
+      var receiver = payjoin.ReceiverBuilder(
+        address: "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+        directory: "https://example.com",
+        ohttpKeys: payjoin.OhttpKeys.decode(
+          bytes: Uint8List.fromList(
+            hex.decode(
+              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
+            ),
+          ),
+        ),
+      ).build().save(persister: receiver_persister);
+      var uri = receiver.pjUri();
+
+      var sender_persister = InMemorySenderPersister("1");
+      var psbt = payjoin.originalPsbt();
+      var withReplyKey = payjoin.SenderBuilder(
+        psbt: psbt,
+        uri: uri,
+      ).buildRecommended(minFeeRate: 1000).save(persister: sender_persister);
+      var cancelTransition = withReplyKey.cancel();
+      var fallbackTx = cancelTransition.save(persister: sender_persister);
+      expect(fallbackTx, isNotNull);
+      expect(fallbackTx.length, greaterThan(0));
+      final result = payjoin.replaySenderEventLog(persister: sender_persister);
+      expect(
+        result.state(),
+        isA<payjoin.ClosedSendSession>(),
+        reason: "sender should be in Closed state after cancel",
+      );
+    });
+
+    test("Test sender cancel async from with reply key", () async {
+      var receiver_persister = InMemoryReceiverPersisterAsync("1");
+      var receiver = await payjoin.ReceiverBuilder(
+        address: "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+        directory: "https://example.com",
+        ohttpKeys: payjoin.OhttpKeys.decode(
+          bytes: Uint8List.fromList(
+            hex.decode(
+              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
+            ),
+          ),
+        ),
+      ).build().saveAsync(persister: receiver_persister);
+      var uri = receiver.pjUri();
+
+      var sender_persister = InMemorySenderPersisterAsync("1");
+      var psbt = payjoin.originalPsbt();
+      var withReplyKey = await payjoin.SenderBuilder(psbt: psbt, uri: uri)
+          .buildRecommended(minFeeRate: 1000)
+          .saveAsync(persister: sender_persister);
+      var cancelTransition = withReplyKey.cancel();
+      var fallbackTx = await cancelTransition.saveAsync(
+        persister: sender_persister,
+      );
+      expect(fallbackTx, isNotNull);
+      expect(fallbackTx.length, greaterThan(0));
+      final result = await payjoin.replaySenderEventLogAsync(
+        persister: sender_persister,
+      );
+      expect(
+        result.state(),
+        isA<payjoin.ClosedSendSession>(),
+        reason: "sender should be in Closed state after cancel",
+      );
+    });
+  });
+
   group("Test Async Persistence", () {
     test("Test receiver async persistence", () async {
       var persister = InMemoryReceiverPersisterAsync("1");

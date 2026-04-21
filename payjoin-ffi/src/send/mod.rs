@@ -51,6 +51,78 @@ macro_rules! impl_save_for_transition {
     };
 }
 
+/// A terminal transition produced by cancelling a sender session.
+#[derive(uniffi::Object)]
+pub struct SenderCancelTransition {
+    transition: RwLock<
+        Option<
+            payjoin::persist::TerminalTransition<
+                payjoin::send::v2::SessionEvent,
+                payjoin::bitcoin::Transaction,
+            >,
+        >,
+    >,
+}
+
+#[uniffi::export]
+impl SenderCancelTransition {
+    /// Persist the cancellation and return the fallback transaction.
+    ///
+    /// The fallback transaction is the consensus-encoded raw transaction bytes of
+    /// the sender's original transaction that should be broadcast to complete the
+    /// payment without Payjoin.
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonSenderSessionPersister>,
+    ) -> Result<Vec<u8>, SenderPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let mut inner = self.transition.write().expect("Lock should not be poisoned");
+        let value = inner.take().expect("Already saved or moved");
+        let fallback = value
+            .save(&adapter)
+            .map_err(|e| SenderPersistedError::from(ImplementationError::new(e)))?;
+        Ok(payjoin::bitcoin::consensus::serialize(&fallback))
+    }
+
+    pub async fn save_async(
+        &self,
+        persister: Arc<dyn JsonSenderSessionPersisterAsync>,
+    ) -> Result<Vec<u8>, SenderPersistedError> {
+        let adapter = AsyncCallbackPersisterAdapter::new(persister);
+        let value = {
+            let mut inner = self.transition.write().expect("Lock should not be poisoned");
+            inner.take().expect("Already saved or moved")
+        };
+        let fallback = value
+            .save_async(&adapter)
+            .await
+            .map_err(|e| SenderPersistedError::from(ImplementationError::new(e)))?;
+        Ok(payjoin::bitcoin::consensus::serialize(&fallback))
+    }
+}
+
+macro_rules! impl_cancel_for_sender {
+    ($ty:ident) => {
+        #[uniffi::export]
+        impl $ty {
+            /// Cancel the Payjoin session immediately.
+            ///
+            /// Returns a [`SenderCancelTransition`] that, once persisted, yields the fallback
+            /// transaction. The fallback transaction is the sender's original transaction
+            /// that should be broadcast to complete the payment without Payjoin.
+            ///
+            /// This is a terminal transition — the session cannot be used after cancellation.
+            pub fn cancel(&self) -> SenderCancelTransition {
+                let transition = self.0.clone().cancel();
+                SenderCancelTransition { transition: RwLock::new(Some(transition)) }
+            }
+        }
+    };
+}
+
+impl_cancel_for_sender!(WithReplyKey);
+impl_cancel_for_sender!(PollingForProposal);
+
 #[derive(uniffi::Object, Debug, Clone)]
 pub struct SenderSessionEvent(payjoin::send::v2::SessionEvent);
 

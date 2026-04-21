@@ -47,6 +47,7 @@ use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{
     MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
+    TerminalTransition,
 };
 use crate::uri::v2::PjParam;
 use crate::uri::ShortId;
@@ -193,6 +194,8 @@ mod sealed {
 /// can implement this trait, ensuring type safety and protocol integrity.
 pub trait State: sealed::State {}
 
+impl<S: sealed::State> State for S {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender<State> {
     pub(crate) state: State,
@@ -240,6 +243,21 @@ impl<State> core::ops::DerefMut for Sender<State> {
 impl<State> Sender<State> {
     /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> String { self.session_context.pj_param.endpoint().to_string() }
+}
+
+impl<S: State> Sender<S> {
+    /// Cancel the Payjoin session immediately.
+    ///
+    /// Returns a [`TerminalTransition`] that, once persisted, yields the fallback
+    /// transaction. The fallback transaction is the sender's original transaction that
+    /// should be broadcast to complete the payment without Payjoin.
+    ///
+    /// This is a terminal transition — the session cannot be used after cancellation.
+    pub fn cancel(self) -> TerminalTransition<SessionEvent, bitcoin::Transaction> {
+        let fallback =
+            self.session_context.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
+        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Cancel), fallback)
+    }
 }
 
 /// Represents the various states of a Payjoin send session during the protocol flow.
@@ -697,5 +715,31 @@ mod test {
             req_ctx.session_context.psbt_ctx.output_substitution,
             OutputSubstitution::Disabled
         );
+    }
+
+    #[test]
+    fn cancel_returns_expected_fallback() -> Result<(), BoxError> {
+        use crate::persist::test_utils::InMemoryTestPersister;
+
+        let expiration =
+            Time::from_now(Duration::from_secs(60)).expect("expiration should be valid");
+        let sender = create_sender_context(expiration)?;
+        let expected_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx_unchecked_fee_rate();
+
+        macro_rules! do_cancel_test {
+            ($state:expr) => {{
+                let persister = InMemoryTestPersister::<SessionEvent>::default();
+                let fallback =
+                    Sender { state: $state, session_context: sender.session_context.clone() }
+                        .cancel()
+                        .save(&persister)
+                        .expect("save should succeed");
+                assert_eq!(fallback, expected_tx, "cancel from {}", stringify!($state));
+            }};
+        }
+
+        do_cancel_test!(WithReplyKey);
+        do_cancel_test!(PollingForProposal);
+        Ok(())
     }
 }

@@ -241,7 +241,7 @@ impl AppTrait for App {
                 };
                 let mut interrupt = self.interrupt.clone();
                 tokio::select! {
-                    _ = self.process_sender_session(sender_state, &persister) => return Ok(()),
+                    res = self.process_sender_session(sender_state, &persister) => return res,
                     _ = interrupt.changed() => {
                         println!("Interrupted. Call `send` with the same arguments to resume this session or `resume` to resume all sessions.");
                         return Err(anyhow!("Interrupted"))
@@ -503,8 +503,8 @@ impl App {
             self.unwrap_relay_or_else_fetch(Some(&sender.endpoint())).await?.as_str(),
         )?;
         let response = self.post_request(req).await?;
-        println!("Posted original proposal...");
         let sender = sender.process_response(&response.bytes().await?, ctx).save(persister)?;
+        println!("Posted original proposal...");
         self.get_proposed_payjoin_psbt(sender, persister).await
     }
 

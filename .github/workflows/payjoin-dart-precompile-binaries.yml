@@ -1,0 +1,95 @@
+name: Precompile Payjoin Dart Binaries
+
+on:
+  workflow_call:
+    secrets:
+      PRECOMPILED_PRIVATE_KEY:
+        required: true
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+env:
+  CRATE_DIR: "native"
+  CRATE_PACKAGE: "payjoin-ffi-wrapper"
+  WORK_DIR: "payjoin-ffi/dart"
+
+jobs:
+  precompile_macos_ios:
+    runs-on: macos-latest
+    env:
+      PRIVATE_KEY: ${{ secrets.PRECOMPILED_PRIVATE_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: 1.85.1
+          override: true
+      - uses: dart-lang/setup-dart@v1
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+      - name: Pub get
+        working-directory: ${{ env.WORK_DIR }}
+        run: dart pub get
+      - name: Precompile (macOS + iOS)
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          set -euo pipefail
+          dart run bin/build_tool.dart precompile-binaries \
+            -v \
+            --os=macos \
+            --manifest-dir="${CRATE_DIR}" \
+            --crate-package="${CRATE_PACKAGE}" \
+            --repository="${GITHUB_REPOSITORY}"
+
+  precompile_android:
+    runs-on: ubuntu-latest
+    env:
+      PRIVATE_KEY: ${{ secrets.PRECOMPILED_PRIVATE_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      ANDROID_NDK_VERSION: "26.3.11579264"
+      ANDROID_MIN_SDK: "23"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: 1.85.1
+          override: true
+      - uses: dart-lang/setup-dart@v1
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install NDK
+        run: |
+          set -euo pipefail
+          sdkmanager --install "ndk;${ANDROID_NDK_VERSION}"
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked --version 3.5.4
+      - name: Pub get
+        working-directory: ${{ env.WORK_DIR }}
+        run: dart pub get
+      - name: Precompile (Android)
+        working-directory: ${{ env.WORK_DIR }}
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        run: |
+          set -euo pipefail
+          ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          dart run bin/build_tool.dart precompile-binaries \
+            -v \
+            --os=android \
+            --manifest-dir="${CRATE_DIR}" \
+            --crate-package="${CRATE_PACKAGE}" \
+            --repository="${GITHUB_REPOSITORY}" \
+            --android-sdk-location="${ANDROID_SDK_ROOT}" \
+            --android-ndk-version="${ANDROID_NDK_VERSION}" \
+            --android-min-sdk-version="${ANDROID_MIN_SDK}"

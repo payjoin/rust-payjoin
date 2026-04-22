@@ -860,13 +860,7 @@ impl App {
             .body(req.body)
             .send()
             .await
-            .map_err(map_reqwest_err)
-    }
-}
-
-fn map_reqwest_err(e: reqwest::Error) -> anyhow::Error {
-    match e.status() {
-        Some(status_code) => anyhow!("HTTP request failed: {} {}", status_code, e),
-        None => anyhow!("No HTTP response: {}", e),
+            .and_then(|r| r.error_for_status())
+            .context("HTTP request failed")
     }
 }

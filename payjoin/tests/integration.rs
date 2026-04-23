@@ -1203,7 +1203,7 @@ mod integration {
             let payjoin = payjoin
                 .apply_fee_range(
                     Some(FeeRate::BROADCAST_MIN),
-                    Some(FeeRate::from_sat_per_vb_unchecked(2)),
+                    Some(FeeRate::from_sat_per_vb_u32(2)),
                 )
                 .save(recv_persister)?;
 
@@ -1564,10 +1564,8 @@ mod integration {
             .contribute_inputs(inputs)
             .map_err(|e| format!("Failed to contribute inputs: {e:?}"))?
             .commit_inputs();
-        let payjoin = payjoin.apply_fee_range(
-            Some(FeeRate::BROADCAST_MIN),
-            Some(FeeRate::from_sat_per_vb_unchecked(2)),
-        )?;
+        let payjoin = payjoin
+            .apply_fee_range(Some(FeeRate::BROADCAST_MIN), Some(FeeRate::from_sat_per_vb_u32(2)))?;
 
         let payjoin_proposal = payjoin.finalize_proposal(|psbt: &Psbt| {
             receiver

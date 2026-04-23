@@ -428,7 +428,7 @@ mod test {
         let mut pj_uri = pj_uri();
         pj_uri.extras.output_substitution = OutputSubstitution::Enabled;
         let sender = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
-            .build_recommended(FeeRate::from_sat_per_vb_unchecked(1))
+            .build_recommended(FeeRate::from_sat_per_vb_u32(1))
             .expect("sender should succeed");
         assert_eq!(sender.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
     }

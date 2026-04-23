@@ -686,7 +686,7 @@ mod tests {
         let mut original_params = original.params.clone();
         assert_eq!(original.psbt_fee_rate().unwrap().to_sat_per_vb_floor(), 2);
         // Specify excessive fee rate in sender params
-        original_params.min_fee_rate = FeeRate::from_sat_per_vb_unchecked(1000);
+        original_params.min_fee_rate = FeeRate::from_sat_per_vb_u32(1000);
         let updated_original = OriginalPayload { psbt: original.psbt, params: original_params };
 
         let proposal_psbt = Psbt::from_str(RECEIVER_INPUT_CONTRIBUTION).unwrap();
@@ -706,15 +706,15 @@ mod tests {
             script_pubkey: payjoin.original_psbt.unsigned_tx.output[0].script_pubkey.clone(),
         };
         payjoin.payjoin_psbt.unsigned_tx.output.push(additional_output);
-        let psbt = payjoin
-            .calculate_psbt_with_fee_range(None, Some(FeeRate::from_sat_per_vb_unchecked(1000)));
+        let psbt =
+            payjoin.calculate_psbt_with_fee_range(None, Some(FeeRate::from_sat_per_vb_u32(1000)));
         assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
-        let psbt = payjoin
-            .calculate_psbt_with_fee_range(None, Some(FeeRate::from_sat_per_vb_unchecked(995)));
+        let psbt =
+            payjoin.calculate_psbt_with_fee_range(None, Some(FeeRate::from_sat_per_vb_u32(995)));
         match psbt {
             Err(InternalPayloadError::FeeTooHigh(proposed, max)) => {
                 assert_eq!(FeeRate::from_str("249630").unwrap(), proposed);
-                assert_eq!(FeeRate::from_sat_per_vb_unchecked(995), max);
+                assert_eq!(FeeRate::from_sat_per_vb_u32(995), max);
             }
             _ => panic!(
                 "Payjoin exceeds receiver fee preference and should error or unexpected error type"

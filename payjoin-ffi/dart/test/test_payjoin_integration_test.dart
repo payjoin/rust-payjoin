@@ -1,4 +1,6 @@
+import "dart:async";
 import "dart:convert";
+import "dart:io";
 import "dart:typed_data";
 
 import "package:http/http.dart" as http;
@@ -400,6 +402,70 @@ Future<payjoin.ReceiveSession?> process_receiver_proposal(
   throw Exception("Unknown receiver state: $receiver");
 }
 
+const _httpsProxyCertPem =
+    '-----BEGIN CERTIFICATE-----\n'
+    'MIIBmDCCAT+gAwIBAgIUZmuZcOJ7AKPKxmXUdl8mALQqLjkwCgYIKoZIzj0EAwIw\n'
+    'FDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDQyMzAyNDYzNloXDTM2MDQyMDAy\n'
+    'NDYzNlowFDESMBAGA1UEAwwJbG9jYWxob3N0MFkwEwYHKoZIzj0CAQYIKoZIzj0D\n'
+    'AQcDQgAEMbQWJrdEdXIX4hHIcRcpMlRY8+YpH9X9e5DkreID6fVh9tRIoqFSURL1\n'
+    'L8q2mLIxLl4W5L4HRJuPkKVCiUI9/qNvMG0wHQYDVR0OBBYEFKih01KF98UDEZg6\n'
+    'FOo4nHUVpKGLMB8GA1UdIwQYMBaAFKih01KF98UDEZg6FOo4nHUVpKGLMA8GA1Ud\n'
+    'EwEB/wQFMAMBAf8wGgYDVR0RBBMwEYIJbG9jYWxob3N0hwR/AAABMAoGCCqGSM49\n'
+    'BAMCA0cAMEQCIGCqHp/SwHSxkOxECoU6qEq+/kapotRRTSe3SsWRjQ38AiBITEBf\n'
+    'j3sL7LkmerQLhWwl7u7UMHb0rBeuFbSmRmxCGA==\n'
+    '-----END CERTIFICATE-----';
+
+const _httpsProxyKeyPem =
+    '-----BEGIN PRIVATE KEY-----\n'
+    'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgUZxLsCYEttJjv9WN\n'
+    '6xUtRwFu40pdAk80R8tgCIlqbhahRANCAAQxtBYmt0R1chfiEchxFykyVFjz5ikf\n'
+    '1f17kOSt4gPp9WH21EiioVJREvUvyraYsjEuXhbkvgdEm4+QpUKJQj3+\n'
+    '-----END PRIVATE KEY-----';
+
+Uint8List _httpsProxyCertDer() => base64.decode(
+  _httpsProxyCertPem.replaceAll(RegExp(r'-----[^-]+-----|\s'), ''),
+);
+
+Future<SecureServerSocket> _startHttpsConnectProxy() async {
+  final ctx = SecurityContext()
+    ..useCertificateChainBytes(utf8.encode(_httpsProxyCertPem))
+    ..usePrivateKeyBytes(utf8.encode(_httpsProxyKeyPem));
+  final server = await SecureServerSocket.bind('localhost', 0, ctx);
+
+  server.listen((client) {
+    final buf = BytesBuilder(copy: false);
+    late StreamSubscription<Uint8List> sub;
+    sub = client.listen((chunk) {
+      buf.add(chunk);
+      final headers = utf8.decode(buf.toBytes());
+      if (!headers.contains('\r\n\r\n')) return;
+      final match = RegExp(r'CONNECT ([^:]+):(\d+)').firstMatch(headers);
+      if (match == null) return client.destroy();
+      sub.pause();
+      Socket.connect(match.group(1)!, int.parse(match.group(2)!))
+          .then((target) {
+            client.add(
+              utf8.encode('HTTP/1.1 200 Connection Established\r\n\r\n'),
+            );
+            sub
+              ..onData(target.add)
+              ..onError((_) => target.destroy());
+            target.listen(
+              client.add,
+              onDone: client.destroy,
+              onError: (_) => client.destroy(),
+            );
+            sub.resume();
+          })
+          .catchError((_) {
+            client.destroy();
+          });
+    }, onError: (_) => client.destroy());
+  });
+
+  return server;
+}
+
 void main() {
   group('fetchOhttpKeys', () {
     test(
@@ -429,6 +495,27 @@ void main() {
           ),
           throwsA(isA<Exception>()),
         );
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+
+    test(
+      'fetches and decodes keys via HTTPS relay proxy (TLS-in-TLS)',
+      () async {
+        final services = test_utils.TestServices.initialize();
+        services.waitForServicesReady();
+        final proxy = await _startHttpsConnectProxy();
+        try {
+          final keys = await payjoin_http.fetchOhttpKeys(
+            ohttpRelayUrl: 'https://localhost:${proxy.port}',
+            directoryUrl: services.directoryUrl(),
+            certificate: services.cert(),
+            relayCertificate: _httpsProxyCertDer(),
+          );
+          expect(keys, isA<payjoin.OhttpKeys>());
+        } finally {
+          await proxy.close();
+        }
       },
       timeout: const Timeout(Duration(minutes: 2)),
     );

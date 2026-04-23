@@ -595,9 +595,9 @@ checksum = "73290177011694f38ec25e165d0387ab7ea749a4b81cd4c80dae5988229f7a57"
 
 [[package]]
 name = "bitcoin-units"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5285c8bcaa25876d07f37e3d30c303f2609179716e11d688f51e8f1fe70063e2"
+checksum = "346568ebaab2918487cea76dd55dae13c27bb618cdb737c952e69eb2017c4118"
 dependencies = [
  "bitcoin-internals 0.3.0",
  "serde",
@@ -2764,6 +2764,7 @@ dependencies = [
  "bitcoin 0.32.8",
  "bitcoin-hpke",
  "bitcoin-ohttp",
+ "bitcoin-units",
  "bitcoin_uri",
  "http",
  "once_cell",

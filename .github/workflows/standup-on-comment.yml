@@ -9,6 +9,7 @@ jobs:
     if: |
       github.event.discussion.category.slug == 'check-ins' &&
       startsWith(github.event.discussion.title, 'Weekly Check-in:') &&
+      github.event.comment.parent_id == null &&
       github.event.comment.user.login != 'payjoin-bot' &&
       contains(github.event.comment.body, '/check-in')
     runs-on: ubuntu-latest

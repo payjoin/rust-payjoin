@@ -169,13 +169,20 @@ impl BitcoindWallet {
     }
 
     /// List unspent UTXOs
+    ///
+    /// Filters out P2TR outputs since taproot inputs are not yet supported by payjoin.
     pub fn list_unspent(&self) -> Result<Vec<InputPair>> {
         let unspent = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
                 .block_on(async { self.rpc.list_unspent(None, None, None, None, None).await })
         })
         .context("Failed to list unspent")?;
-        Ok(unspent.0.into_iter().map(input_pair_from_corepc).collect())
+        Ok(unspent
+            .0
+            .into_iter()
+            .filter(|utxo| !utxo.script_pubkey.is_p2tr())
+            .map(input_pair_from_corepc)
+            .collect())
     }
 
     /// Check if wallet has any spendable UTXOs

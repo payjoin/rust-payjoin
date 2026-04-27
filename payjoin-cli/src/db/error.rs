@@ -6,6 +6,13 @@ use rusqlite::Error as RusqliteError;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
+#[cfg(feature = "v2")]
+#[derive(Debug)]
+pub(crate) enum DuplicateKind {
+    Uri,
+    ReceiverPubkey,
+}
+
 #[derive(Debug)]
 pub(crate) enum Error {
     Rusqlite(RusqliteError),
@@ -14,6 +21,8 @@ pub(crate) enum Error {
     Serialize(serde_json::Error),
     #[cfg(feature = "v2")]
     Deserialize(serde_json::Error),
+    #[cfg(feature = "v2")]
+    DuplicateSendSession(DuplicateKind),
 }
 
 impl fmt::Display for Error {
@@ -25,6 +34,15 @@ impl fmt::Display for Error {
             Error::Serialize(e) => write!(f, "Serialization failed: {e}"),
             #[cfg(feature = "v2")]
             Error::Deserialize(e) => write!(f, "Deserialization failed: {e}"),
+            #[cfg(feature = "v2")]
+            Error::DuplicateSendSession(DuplicateKind::Uri) => {
+                write!(f, "A send session for this URI is already active")
+            }
+            #[cfg(feature = "v2")]
+            Error::DuplicateSendSession(DuplicateKind::ReceiverPubkey) => write!(
+                f,
+                "A send session with this receiver pubkey is already active under a different URI"
+            ),
         }
     }
 }
@@ -38,6 +56,8 @@ impl std::error::Error for Error {
             Error::Serialize(e) => Some(e),
             #[cfg(feature = "v2")]
             Error::Deserialize(e) => Some(e),
+            #[cfg(feature = "v2")]
+            Error::DuplicateSendSession(_) => None,
         }
     }
 }

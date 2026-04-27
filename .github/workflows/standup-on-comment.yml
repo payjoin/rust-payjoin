@@ -1,0 +1,30 @@
+name: Standup On Comment
+
+on:
+  discussion_comment:
+    types: [created]
+
+jobs:
+  respond:
+    if: |
+      github.event.discussion.category.slug == 'check-ins' &&
+      startsWith(github.event.discussion.title, 'Weekly Check-in:') &&
+      github.event.comment.parent_id == null &&
+      github.event.comment.user.login != 'payjoin-bot' &&
+      contains(github.event.comment.body, '/check-in')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests pyyaml
+      - run: python .github/scripts/respond_to_standup_comment.py
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          STANDUP_TOKEN: ${{ secrets.STANDUP_BOT_TOKEN || secrets.STANDUP_TOKEN }}
+          COMMENT_ID: ${{ github.event.comment.node_id }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          DISCUSSION_ID: ${{ github.event.discussion.node_id }}
+          DISCUSSION_CREATED_AT: ${{ github.event.discussion.created_at }}

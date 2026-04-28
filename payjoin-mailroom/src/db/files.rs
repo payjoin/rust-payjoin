@@ -368,6 +368,10 @@ impl Mailboxes {
     }
 
     async fn post_v2(&mut self, id: &ShortId, payload: Vec<u8>) -> Result<Option<()>, Error> {
+        if !self.has_capacity().await? {
+            return Err(Error::OverCapacity);
+        }
+
         let Some(created) = self.persistent_storage.try_insert(id, &payload).await? else {
             return Ok(None);
         };
@@ -392,6 +396,10 @@ impl Mailboxes {
         id: &ShortId,
         payload: Vec<u8>,
     ) -> Result<Option<oneshot::Receiver<Vec<u8>>>, Error> {
+        if !self.has_capacity().await? {
+            return Err(Error::OverCapacity);
+        }
+
         let mut ret = None;
         let payload = Arc::new(payload);
 

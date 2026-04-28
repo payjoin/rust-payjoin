@@ -116,6 +116,11 @@ impl AppTrait for App {
     async fn history(&self) -> Result<()> {
         unimplemented!("history not implemented for v1");
     }
+
+    #[cfg(feature = "v2")]
+    async fn fallback_sender(&self, _session_id: crate::db::v2::SessionId) -> Result<()> {
+        anyhow::bail!("fallback is only supported for v2 (BIP77) sessions")
+    }
 }
 
 impl App {

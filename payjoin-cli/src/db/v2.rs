@@ -9,7 +9,7 @@ use rusqlite::params;
 use super::*;
 
 #[derive(Debug, Clone)]
-pub(crate) struct SessionId(i64);
+pub(crate) struct SessionId(pub(crate) i64);
 
 impl core::ops::Deref for SessionId {
     type Target = i64;
@@ -61,6 +61,8 @@ impl SenderPersister {
     }
 
     pub fn from_id(db: Arc<Database>, id: SessionId) -> Self { Self { db, session_id: id } }
+
+    pub fn session_id(&self) -> SessionId { self.session_id.clone() }
 }
 impl SessionPersister for SenderPersister {
     type SessionEvent = SenderSessionEvent;

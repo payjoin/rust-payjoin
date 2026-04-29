@@ -947,3 +947,95 @@ async fn test_prune() -> std::io::Result<()> {
 
     Ok(())
 }
+
+fn random_id() -> ShortId { ShortId(OsRng.next_u64().to_ne_bytes()) }
+
+fn random_payload() -> Vec<u8> { rand::random::<[u8; 32]>().to_vec() }
+
+#[tokio::test]
+async fn test_capacity_post_v2() -> std::io::Result<()> {
+    let dir = tempfile::tempdir()?;
+
+    let db = FilesDb::init(
+        Duration::from_millis(2),
+        dir.path().to_owned(),
+        Duration::from_secs(60 * 60 * 24 * 7),
+    )
+    .await?;
+
+    db.mailboxes.lock().await.capacity = 3;
+
+    for _ in 1..=3 {
+        db.post_v2_payload(&random_id(), random_payload()).await.unwrap();
+    }
+
+    assert!(matches!(
+        db.post_v2_payload(&random_id(), random_payload()).await,
+        Err(DbError::OverCapacity)
+    ));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_capacity_post_v1_req_and_wait() -> std::io::Result<()> {
+    let dir = tempfile::tempdir()?;
+
+    let db = FilesDb::init(
+        Duration::from_secs(60),
+        dir.path().to_owned(),
+        Duration::from_secs(60 * 60 * 24 * 7),
+    )
+    .await?;
+
+    db.mailboxes.lock().await.capacity = 3;
+
+    for _ in 1..=3 {
+        let db = db.clone();
+        tokio::spawn(async move {
+            let _ = db.post_v1_request_and_wait_for_response(&random_id(), random_payload()).await;
+        });
+    }
+
+    // wait until all tasks start working
+    while db.mailboxes.lock().await.len() < 3 {
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+
+    assert!(matches!(
+        db.post_v1_request_and_wait_for_response(&random_id(), random_payload()).await,
+        Err(DbError::OverCapacity)
+    ));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_capacity_wait_v2() -> std::io::Result<()> {
+    let dir = tempfile::tempdir()?;
+
+    let db = FilesDb::init(
+        Duration::from_secs(60),
+        dir.path().to_owned(),
+        Duration::from_secs(60 * 60 * 24 * 7),
+    )
+    .await?;
+
+    db.mailboxes.lock().await.capacity = 3;
+
+    for _ in 1..=3 {
+        let db = db.clone();
+        tokio::spawn(async move {
+            let _ = db.wait_for_v2_payload(&random_id()).await;
+        });
+    }
+
+    // wait until all tasks start working
+    while db.mailboxes.lock().await.len() < 3 {
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+
+    assert!(matches!(db.wait_for_v2_payload(&random_id()).await, Err(DbError::OverCapacity)));
+
+    Ok(())
+}

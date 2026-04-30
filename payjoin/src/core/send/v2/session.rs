@@ -423,7 +423,9 @@ mod tests {
     #[tokio::test]
     async fn test_replaying_session_with_missing_created_event() {
         let persister = InMemoryTestPersister::<SessionEvent>::default();
-        persister.save_event(SessionEvent::PostedOriginalPsbt());
+        persister
+            .save_event(SessionEvent::PostedOriginalPsbt())
+            .expect("in memory persister save should not fail");
         assert!(!persister.inner.read().expect("session read should succeed").is_closed);
         let err = replay_event_log(&persister).expect_err("session replay should be fail");
         let expected_err: ReplayError<SendSession, SessionEvent> =
@@ -433,7 +435,10 @@ mod tests {
         assert!(persister.inner.read().expect("lock should not be poisoned").is_closed);
 
         let persister = InMemoryAsyncTestPersister::<SessionEvent>::default();
-        persister.save_event(SessionEvent::PostedOriginalPsbt()).await;
+        persister
+            .save_event(SessionEvent::PostedOriginalPsbt())
+            .await
+            .expect("in memory async persister save should not fail");
         assert!(!persister.inner.read().await.is_closed);
         let err =
             replay_event_log_async(&persister).await.expect_err("session replay should be fail");

@@ -550,8 +550,6 @@ mod tests {
     use std::time::Duration;
 
     use payjoin::directory::ShortId;
-    use rand::rngs::OsRng;
-    use rand::RngCore as _;
     use tokio::fs;
 
     use crate::db::files::DiskStorage;
@@ -971,10 +969,6 @@ mod tests {
         Ok(())
     }
 
-    fn random_id() -> ShortId { ShortId(OsRng.next_u64().to_ne_bytes()) }
-
-    fn random_payload() -> Vec<u8> { rand::random::<[u8; 32]>().to_vec() }
-
     #[tokio::test]
     async fn test_capacity_post_v2() -> std::io::Result<()> {
         let dir = tempfile::tempdir()?;
@@ -988,12 +982,12 @@ mod tests {
 
         db.mailboxes.lock().await.capacity = 3;
 
-        for _ in 1..=3 {
-            db.post_v2_payload(&random_id(), random_payload()).await.unwrap();
+        for i in 1..=3 {
+            db.post_v2_payload(&ShortId([i; 8]), b"data".to_vec()).await.unwrap();
         }
 
         assert!(matches!(
-            db.post_v2_payload(&random_id(), random_payload()).await,
+            db.post_v2_payload(&ShortId([0; 8]), b"data".to_vec()).await,
             Err(DbError::OverCapacity)
         ));
 
@@ -1013,11 +1007,12 @@ mod tests {
 
         db.mailboxes.lock().await.capacity = 3;
 
-        for _ in 1..=3 {
+        for i in 1..=3 {
             let db = db.clone();
             tokio::spawn(async move {
-                let _ =
-                    db.post_v1_request_and_wait_for_response(&random_id(), random_payload()).await;
+                let _ = db
+                    .post_v1_request_and_wait_for_response(&ShortId([i; 8]), b"data".to_vec())
+                    .await;
             });
         }
 
@@ -1027,7 +1022,7 @@ mod tests {
         }
 
         assert!(matches!(
-            db.post_v1_request_and_wait_for_response(&random_id(), random_payload()).await,
+            db.post_v1_request_and_wait_for_response(&ShortId([0; 8]), b"data".to_vec()).await,
             Err(DbError::OverCapacity)
         ));
 
@@ -1047,10 +1042,10 @@ mod tests {
 
         db.mailboxes.lock().await.capacity = 3;
 
-        for _ in 1..=3 {
+        for i in 1..=3 {
             let db = db.clone();
             tokio::spawn(async move {
-                let _ = db.wait_for_v2_payload(&random_id()).await;
+                let _ = db.wait_for_v2_payload(&ShortId([i; 8])).await;
             });
         }
 
@@ -1059,7 +1054,10 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
 
-        assert!(matches!(db.wait_for_v2_payload(&random_id()).await, Err(DbError::OverCapacity)));
+        assert!(matches!(
+            db.wait_for_v2_payload(&ShortId([0; 8])).await,
+            Err(DbError::OverCapacity)
+        ));
 
         Ok(())
     }

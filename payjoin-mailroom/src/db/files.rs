@@ -971,6 +971,22 @@ mod tests {
         Ok(())
     }
 
+    async fn assert_all_paths_over_capacity(db: &FilesDb) {
+        let id = ShortId([0; 8]);
+
+        assert!(matches!(
+            db.post_v2_payload(&id, b"data".to_vec()).await,
+            Err(DbError::OverCapacity)
+        ));
+
+        assert!(matches!(
+            db.post_v1_request_and_wait_for_response(&id, b"data".to_vec()).await,
+            Err(DbError::OverCapacity)
+        ));
+
+        assert!(matches!(db.wait_for_v2_payload(&id).await, Err(DbError::OverCapacity)));
+    }
+
     #[tokio::test]
     async fn test_capacity_post_v2() -> std::io::Result<()> {
         let dir = tempfile::tempdir()?;
@@ -988,10 +1004,7 @@ mod tests {
             db.post_v2_payload(&ShortId([i; 8]), b"data".to_vec()).await.unwrap();
         }
 
-        assert!(matches!(
-            db.post_v2_payload(&ShortId([0; 8]), b"data".to_vec()).await,
-            Err(DbError::OverCapacity)
-        ));
+        assert_all_paths_over_capacity(&db).await;
 
         Ok(())
     }
@@ -1023,10 +1036,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
 
-        assert!(matches!(
-            db.post_v1_request_and_wait_for_response(&ShortId([0; 8]), b"data".to_vec()).await,
-            Err(DbError::OverCapacity)
-        ));
+        assert_all_paths_over_capacity(&db).await;
 
         Ok(())
     }
@@ -1056,10 +1066,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
 
-        assert!(matches!(
-            db.wait_for_v2_payload(&ShortId([0; 8])).await,
-            Err(DbError::OverCapacity)
-        ));
+        assert_all_paths_over_capacity(&db).await;
 
         Ok(())
     }

@@ -396,6 +396,8 @@ impl Mailboxes {
         id: &ShortId,
         payload: Vec<u8>,
     ) -> Result<Option<oneshot::Receiver<Vec<u8>>>, Error> {
+        // Edge case: pruning a v2 entry here can make room for this v1 insert,
+        // so v1 writers may see effective capacity of n-1 instead of n.
         if !self.has_capacity().await? {
             return Err(Error::OverCapacity);
         }

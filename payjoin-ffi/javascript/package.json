@@ -2,17 +2,17 @@
     "name": "payjoin",
     "version": "0.1.0",
     "description": "JavaScript/WASM bindings for rust-payjoin",
-    "main": "dist/index.js",
-    "module": "dist/index.js",
-    "types": "dist/index.d.ts",
-    "browser": "dist/index.web.js",
     "scripts": {
-        "ubrn:web": "ubrn build web --and-generate",
+        "ubrn:nodejs": "ubrn build web --config ubrn.nodejs.config.yaml --and-generate",
+        "copy-wasm:nodejs": "cp -r src/nodejs/generated/wasm-bindgen dist/nodejs/generated/",
+        "ubrn:web": "ubrn build web --config ubrn.web.config.yaml --and-generate",
+        "copy-wasm:web": "cp -r src/web/generated/wasm-bindgen dist/web/generated/",
+        "ubrn": "npm run ubrn:nodejs && npm run ubrn:web",
         "compile": "tsc",
-        "copy-wasm": "mkdir -p dist/generated && cp -r src/generated/wasm-bindgen dist/generated/",
-        "build": "npm run ubrn:web && npm run compile && npm run copy-wasm",
+        "copy-wasm": "npm run copy-wasm:nodejs && npm run copy-wasm:web",
+        "build": "npm run ubrn && npm run compile && npm run copy-wasm",
         "build:test-utils": "cd test-utils && npm install && npx @napi-rs/cli build",
-        "clean": "rm -rf rust_modules dist src/generated",
+        "clean": "rm -rf rust_modules dist src/**/*.js src/*/generated/",
         "clean:test-utils": "rm -rf test-utils/target test-utils/index.d.ts test-utils/*.node",
         "test": "tsx --test test/unit.test.ts test/integration.test.ts"
     },
@@ -28,12 +28,20 @@
     "devDependencies": {
         "prettier": "^3.6.2",
         "tsx": "^4.20.6",
-        "typescript": "^5.9.3",
-        "uniffi-bindgen-react-native": "0.30.0-1"
+        "typescript": "^5.9.3"
     },
     "repository": {
         "type": "git",
         "url": "https://github.com/payjoin/rust-payjoin.git",
         "directory": "payjoin-ffi/javascript"
+    },
+    "exports": {
+        ".": "./dist/nodejs/index.js",
+        "./nodejs": "./dist/nodejs/index.js",
+        "./web": "./dist/web/index.js",
+        "./web-vite": "./dist/web/vite.index.js"
+    },
+    "dependencies": {
+        "uniffi-bindgen-react-native": "0.30.0-1"
     }
 }

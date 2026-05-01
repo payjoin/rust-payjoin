@@ -1,6 +1,6 @@
 import { describe, test, before } from "node:test";
 import assert from "node:assert";
-import { payjoin, uniffiInitAsync } from "../dist/index.js";
+import { payjoin, uniffiInitAsync } from "payjoin";
 import * as testUtils from "../test-utils/index.js";
 
 before(async () => {

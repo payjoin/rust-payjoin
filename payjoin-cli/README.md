@@ -75,7 +75,7 @@ rpchost = "http://localhost:18443/wallet/sender"
 
 # For v2, our config also requires a payjoin directory server and OHTTP relay
 [v2]
-pj_directory = "https://payjo.in"
+pj_directories = ["https://payjo.in"]
 ohttp_relays = ["https://pj.benalleng.com", "https://pj.bobspacebkk.com", "https://ohttp.achow101.com"]
 ```
 
@@ -90,7 +90,7 @@ rpchost = "http://localhost:18443/wallet/receiver"
 
 # For v2, our config also requires a payjoin directory server and OHTTP relay
 [v2]
-pj_directory = "https://payjo.in"
+pj_directories = ["https://payjo.in"]
 ohttp_relays = ["https://pj.benalleng.com", "https://pj.bobspacebkk.com", "https://ohttp.achow101.com"]
 ```
 
@@ -137,6 +137,30 @@ Config options can be passed from the command line, or manually edited in a `con
 See the
 [example.config.toml](https://github.com/payjoin/rust-payjoin/blob/fde867b93ede767c9a50913432a73782a94ef40b/payjoin-cli/example.config.toml)
 for inspiration.
+
+`payjoin-cli` also supports optional AS-aware filtering for BIP77 relay
+selection:
+
+```toml
+[v2]
+pj_directories = ["https://payjo.in", "https://backup.example"]
+ohttp_relays = ["https://relay-1.example", "https://relay-2.example"]
+
+[v2.asmap]
+asmap_file = "./ip_asn.dat"
+user_public_ips = ["198.51.100.10"]
+user_asns = [64512]
+```
+
+Build `payjoin-cli` with `--features asmap` to enable the `[v2.asmap]`
+configuration block.
+
+When enabled, directories and relays that resolve into the same ASN as the
+configured user identity are excluded, mixed-ASN hostnames are rejected, and
+relay ordering becomes deterministic from the receiver key embedded in the
+BIP77 URI. This mitigates some AS-level correlation risks, but it does not
+eliminate traffic analysis when sender and receiver already share the same
+network.
 
 ### Asynchronous Operation
 

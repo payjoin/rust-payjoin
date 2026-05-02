@@ -36,6 +36,10 @@ pub struct V2Config {
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
     pub ohttp_relays: Vec<Url>,
     pub pj_directory: Url,
+    /// Lifetime of a receive session from creation, in seconds. When omitted,
+    /// the payjoin crate default applies. Must be in `1..=u32::MAX`.
+    #[serde(default, deserialize_with = "deserialize_session_ttl")]
+    pub session_ttl: Option<u64>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -311,6 +315,8 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
             pj_directory,
             #[cfg(feature = "v2")]
             ohttp_keys,
+            #[cfg(feature = "v2")]
+            session_ttl,
             ..
         } => {
             #[cfg(feature = "v1")]
@@ -329,7 +335,8 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
                 .set_override_option(
                     "v2.ohttp_keys",
                     ohttp_keys.as_ref().map(|s| s.to_string_lossy().into_owned()),
-                )?;
+                )?
+                .set_override_option("v2.session_ttl", session_ttl.map(|s| s.to_string()))?;
             Ok(config)
         }
         #[cfg(feature = "v2")]
@@ -338,6 +345,20 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
         Commands::History => Ok(config),
         #[cfg(feature = "v2")]
         Commands::Fallback { .. } => Ok(config),
+    }
+}
+
+#[cfg(feature = "v2")]
+fn deserialize_session_ttl<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let secs: Option<u64> = Option::deserialize(deserializer)?;
+    match secs {
+        Some(0) => Err(serde::de::Error::custom("session_ttl must be greater than 0")),
+        Some(n) if n > u32::MAX as u64 =>
+            Err(serde::de::Error::custom(format!("session_ttl must be <= {} seconds", u32::MAX))),
+        other => Ok(other),
     }
 }
 

@@ -126,6 +126,11 @@ pub enum Commands {
         /// The path to the ohttp keys file
         #[arg(long = "ohttp-keys", value_parser = value_parser!(PathBuf))]
         ohttp_keys: Option<PathBuf>,
+
+        #[cfg(feature = "v2")]
+        /// Receive session lifetime in seconds (BIP77 mailbox session). Omit for the payjoin crate default.
+        #[arg(long = "session-ttl", value_parser = parse_session_ttl)]
+        session_ttl: Option<u64>,
     },
     /// Resume pending payjoins (BIP77/v2 only)
     #[cfg(feature = "v2")]
@@ -154,4 +159,17 @@ pub fn parse_fee_rate_in_sat_per_vb(s: &str) -> Result<FeeRate, std::num::ParseF
 
 fn parse_boxed_url(s: &str) -> Result<Box<Url>, String> {
     s.parse::<Url>().map(Box::new).map_err(|e| e.to_string())
+}
+
+/// Parse a positive session TTL in seconds, bounded by u32::MAX
+#[cfg(feature = "v2")]
+fn parse_session_ttl(s: &str) -> Result<u64, String> {
+    let secs: u64 = s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+    if secs == 0 {
+        return Err("session TTL must be greater than 0".to_string());
+    }
+    if secs > u32::MAX as u64 {
+        return Err(format!("session TTL must be <= {} seconds", u32::MAX));
+    }
+    Ok(secs)
 }

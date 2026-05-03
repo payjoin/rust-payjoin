@@ -77,16 +77,20 @@ impl UncheckedOriginalPayload {
 /// received from the sender is broadcastable to the network in the case of a payjoin failure.
 ///
 /// The recommended usage of this typestate differs based on whether you are implementing an
-/// interactive (where the receiver takes manual actions to respond to the
-/// payjoin proposal) or a non-interactive (ex. a donation page which automatically generates a new QR code
-/// for each visit) payment receiver. For the latter, you should call [`Self::check_broadcast_suitability`] to check
-/// that the proposal is actually broadcastable (and, optionally, whether the fee rate is above the
-/// minimum limit you have set). These mechanisms protect the receiver against probing attacks, where
-/// a malicious sender can repeatedly send proposals to have the non-interactive receiver reveal the UTXOs
-/// it owns with the proposals it modifies.
+/// a non-interactive payment receiver (ex. a donation page which automatically generates a new QR code
+/// for each visit) or interactive (where the receiver takes manual actions to respond to the
+/// payjoin proposal).
 ///
-/// If you are implementing an interactive payment receiver, then such checks are not necessary, and you
-/// can go ahead with calling [`Self::assume_interactive_receiver`] to move on to the next typestate.
+/// For the former, you should call [`Self::check_broadcast_suitability`]
+/// or [`Self::check_broadcast_suitability_async`] to check that the proposal is actually
+/// broadcastable  (and, optionally, whether the fee rate is above the minimum limit you have set).
+/// These mechanisms protect the receiver against probing attacks, where a malicious sender
+/// can repeatedly send proposals to have the non-interactive receiver reveal the UTXOs
+/// it owns with the proposals it modifies. The difference between the two checks is that
+/// the async version takes an asynchronous `can_broadcast` callback function.
+///
+/// For the latter, such checks are not necessary and you can go ahead with calling
+/// [`Self::assume_interactive_receiver`] to move on to the next typestate.
 #[derive(Debug, Clone)]
 pub struct UncheckedOriginalPayload {
     original: OriginalPayload,
@@ -100,6 +104,9 @@ impl UncheckedOriginalPayload {
     /// as a fallback mechanism in case the payjoin fails. This validation would be equivalent to
     /// `testmempoolaccept` Bitcoin Core RPC call returning `{"allowed": true,...}`.
     ///
+    /// If the `can_broadcast` validation callback needs to be asynchronous
+    /// [`Self::check_broadcast_suitability_async`] should be used instead.
+    ///
     /// Receiver can optionally set a minimum fee rate which will be enforced on the original PSBT in the proposal.
     /// This can be used to further prevent probing attacks since the attacker would now need to probe the receiver
     /// with transactions which are both broadcastable and pay high fee. Unrelated to the probing attack scenario,
@@ -110,6 +117,29 @@ impl UncheckedOriginalPayload {
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsOwned, Error> {
         self.original.check_broadcast_suitability(min_fee_rate, can_broadcast)?;
+        Ok(MaybeInputsOwned { original: self.original })
+    }
+
+    /// Checks that the original PSBT in the proposal can be broadcasted.
+    ///
+    /// If the receiver is a non-interactive payment processor (ex. a donation page which generates
+    /// a new QR code for each visit), then it should make sure that the original PSBT is broadcastable
+    /// as a fallback mechanism in case the payjoin fails. This validation would be equivalent to
+    /// `testmempoolaccept` Bitcoin Core RPC call returning `{"allowed": true,...}`.
+    ///
+    /// Receiver can optionally set a minimum fee rate which will be enforced on the original PSBT in the proposal.
+    /// This can be used to further prevent probing attacks since the attacker would now need to probe the receiver
+    /// with transactions which are both broadcastable and pay high fee. Unrelated to the probing attack scenario,
+    /// this parameter also makes operating in a high fee environment easier for the receiver.
+    pub async fn check_broadcast_suitability_async<F>(
+        self,
+        min_fee_rate: Option<FeeRate>,
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> F,
+    ) -> Result<MaybeInputsOwned, Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        self.original.check_broadcast_suitability_async(min_fee_rate, can_broadcast).await?;
         Ok(MaybeInputsOwned { original: self.original })
     }
 
@@ -128,7 +158,7 @@ impl UncheckedOriginalPayload {
 /// typestate. The receiver can call [`Self::extract_tx_to_schedule_broadcast`]
 /// to extract the signed original PSBT to schedule a fallback in case the Payjoin process fails.
 ///
-/// Call [`Self::check_inputs_not_owned`] to proceed.
+/// Call [`Self::check_inputs_not_owned`] or [`Self::check_inputs_not_owned_async`] to proceed.
 #[derive(Debug, Clone)]
 pub struct MaybeInputsOwned {
     pub(crate) original: OriginalPayload,
@@ -147,6 +177,9 @@ impl MaybeInputsOwned {
     /// Check that the original PSBT has no receiver-owned inputs.
     ///
     /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    ///
+    /// If the `can_broadcast` validation callback needs to be asynchronous
+    /// [`Self::check_inputs_not_owned_async`] should be used instead.
     pub fn check_inputs_not_owned(
         self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
@@ -154,11 +187,25 @@ impl MaybeInputsOwned {
         self.original.check_inputs_not_owned(is_owned)?;
         Ok(MaybeInputsSeen { original: self.original })
     }
+
+    /// Check that the original PSBT has no receiver-owned inputs.
+    ///
+    /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    pub async fn check_inputs_not_owned_async<F>(
+        self,
+        is_owned: &mut impl FnMut(&Script) -> F,
+    ) -> Result<MaybeInputsSeen, Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        self.original.check_inputs_not_owned_async(is_owned).await?;
+        Ok(MaybeInputsSeen { original: self.original })
+    }
 }
 
 /// Typestate to check that the original PSBT has no inputs that the receiver has seen before.
 ///
-/// Call [`Self::check_no_inputs_seen_before`] to proceed.
+/// Call [`Self::check_no_inputs_seen_before`] or [`Self::check_no_inputs_seen_before_async`] to proceed.
 #[derive(Debug, Clone)]
 pub struct MaybeInputsSeen {
     original: OriginalPayload,
@@ -172,11 +219,33 @@ impl MaybeInputsSeen {
     ///    and sending them back to the receiver.
     /// 2. Re-entrant payjoin, where the sender uses the payjoin PSBT of a previous payjoin as the
     ///    original proposal PSBT of the current, new payjoin.
+    ///
+    /// If the `is_known` validation callback needs to be asynchronous
+    /// [`Self::check_no_inputs_seen_before_async`] should be used instead.
     pub fn check_no_inputs_seen_before(
         self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<OutputsUnknown, Error> {
         self.original.check_no_inputs_seen_before(is_known)?;
+        Ok(OutputsUnknown { original: self.original })
+    }
+
+    /// Check that the receiver has never seen the inputs in the original proposal before.
+    ///
+    /// This check prevents the following attacks:
+    /// 1. Probing attacks, where the sender can use the exact same proposal (or with minimal change)
+    ///    to have the receiver reveal their UTXO set by contributing to all proposals with different inputs
+    ///    and sending them back to the receiver.
+    /// 2. Re-entrant payjoin, where the sender uses the payjoin PSBT of a previous payjoin as the
+    ///    original proposal PSBT of the current, new payjoin.
+    pub async fn check_no_inputs_seen_before_async<F>(
+        self,
+        is_known: &mut impl FnMut(&OutPoint) -> F,
+    ) -> Result<OutputsUnknown, Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        self.original.check_no_inputs_seen_before_async(is_known).await?;
         Ok(OutputsUnknown { original: self.original })
     }
 }
@@ -186,7 +255,7 @@ impl MaybeInputsSeen {
 /// The receiver should only accept the original PSBTs from the sender if it actually sends them
 /// money.
 ///
-/// Call [`Self::identify_receiver_outputs`] to proceed.
+/// Call [`Self::identify_receiver_outputs`] or [`Self::identify_receiver_outputs_async`] to proceed.
 #[derive(Debug, Clone)]
 pub struct OutputsUnknown {
     original: OriginalPayload,
@@ -203,12 +272,36 @@ impl OutputsUnknown {
     /// function sets that parameter to None so that it is ignored in subsequent steps of the
     /// receiver flow. This protects the receiver from accidentally subtracting fees from their own
     /// outputs.
+    ///
+    /// If the `is_known` validation callback needs to be asynchronous
+    /// [`Self::identify_receiver_outputs_async`] should be used instead.
     #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<WantsOutputs, Error> {
         self.original.identify_receiver_outputs(is_receiver_output)
+    }
+
+    /// Validates whether the original PSBT contains outputs which pay to the receiver and only
+    /// then proceeds to the next typestate.
+    ///
+    /// Additionally, this function also protects the receiver from accidentally subtracting fees
+    /// from their own outputs: when a sender is sending a proposal,
+    /// they can select an output which they want the receiver to subtract fees from to account for
+    /// the increased transaction size. If a sender specifies a receiver output for this purpose, this
+    /// function sets that parameter to None so that it is ignored in subsequent steps of the
+    /// receiver flow. This protects the receiver from accidentally subtracting fees from their own
+    /// outputs.
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
+    pub async fn identify_receiver_outputs_async<F>(
+        self,
+        is_receiver_output: &mut impl FnMut(&Script) -> F,
+    ) -> Result<WantsOutputs, Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        self.original.identify_receiver_outputs_async(is_receiver_output).await
     }
 }
 
@@ -275,7 +368,8 @@ impl crate::receive::common::WantsFeeRange {
 /// by the receiver. The receiver may sign and finalize the Payjoin proposal which will be sent to
 /// the sender for their signature.
 ///
-/// Call [`Self::finalize_proposal`] to return a finalized [`PayjoinProposal`].
+/// Call [`Self::finalize_proposal`] or [`Self::finalize_proposal_async`] to return a
+/// finalized [`PayjoinProposal`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProvisionalProposal {
     psbt_context: PsbtContext,
@@ -288,6 +382,9 @@ impl ProvisionalProposal {
     /// Finalization consists of two steps:
     ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
     ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
+    ///
+    /// If the `wallet_process_psbt` validation callback needs to be asynchronous
+    /// [`Self::finalize_proposal_async`] should be used instead.
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
@@ -295,6 +392,27 @@ impl ProvisionalProposal {
         let finalized_psbt = self
             .psbt_context
             .finalize_proposal(wallet_process_psbt)
+            .map_err(|e| Error::Implementation(ImplementationError::new(e)))?;
+        Ok(PayjoinProposal { payjoin_psbt: finalized_psbt })
+    }
+
+    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
+    /// they sign the transaction and broadcast it to the network.
+    ///
+    /// Finalization consists of two steps:
+    ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
+    ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
+    pub async fn finalize_proposal_async<F>(
+        self,
+        wallet_process_psbt: impl Fn(&Psbt) -> F,
+    ) -> Result<PayjoinProposal, Error>
+    where
+        F: Future<Output = Result<Psbt, ImplementationError>>,
+    {
+        let finalized_psbt = self
+            .psbt_context
+            .finalize_proposal_async(wallet_process_psbt)
+            .await
             .map_err(|e| Error::Implementation(ImplementationError::new(e)))?;
         Ok(PayjoinProposal { payjoin_psbt: finalized_psbt })
     }
@@ -477,6 +595,37 @@ mod tests {
         assert_eq!(call_count, 4);
     }
 
+    #[tokio::test]
+    async fn test_mutable_receiver_state_closures_async() {
+        let call_count = std::cell::Cell::new(0usize);
+        let maybe_inputs_owned = maybe_inputs_owned_from_test_vector();
+
+        let mock_callback = |ret: bool| {
+            call_count.set(call_count.get() + 1);
+            async move { Ok::<bool, ImplementationError>(ret) }
+        };
+
+        let maybe_inputs_seen =
+            maybe_inputs_owned.check_inputs_not_owned_async(&mut |_| mock_callback(false)).await;
+        assert_eq!(call_count.get(), 1);
+
+        let outputs_unknown = maybe_inputs_seen
+            .map_err(|_| "Check inputs owned closure failed".to_string())
+            .expect("Next receiver state should be accessible")
+            .check_no_inputs_seen_before_async(&mut |_| mock_callback(false))
+            .await;
+        assert_eq!(call_count.get(), 2);
+
+        let _wants_outputs = outputs_unknown
+            .map_err(|_| "Check no inputs seen closure failed".to_string())
+            .expect("Next receiver state should be accessible")
+            .identify_receiver_outputs_async(&mut |_| mock_callback(true))
+            .await;
+        // there are 2 receiver outputs so we should expect this callback to run twice incrementing
+        // call count twice
+        assert_eq!(call_count.get(), 4);
+    }
+
     #[test]
     fn is_output_substitution_disabled() {
         let mut proposal = unchecked_proposal_from_test_vector();
@@ -516,6 +665,36 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn unchecked_proposal_min_fee_async() {
+        let proposal = unchecked_proposal_from_test_vector();
+
+        let min_fee_rate =
+            proposal.original.psbt_fee_rate().expect("Feerate calculation should not fail");
+        let _ = proposal
+            .clone()
+            .check_broadcast_suitability_async(Some(min_fee_rate), |_| async { Ok(true) })
+            .await
+            .expect("Broadcast suitability check with appropriate min_fee_rate should succeed");
+        assert_eq!(proposal.original.psbt_fee_rate().unwrap(), min_fee_rate);
+
+        let min_fee_rate = FeeRate::MAX;
+        let proposal_below_min_fee = proposal
+            .clone()
+            .check_broadcast_suitability_async(Some(min_fee_rate), |_| async { Ok(true) })
+            .await
+            .expect_err("Broadcast suitability with min_fee_rate below minimum should fail");
+        match proposal_below_min_fee {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::PsbtBelowFeeRate(original_fee_rate, min_fee_rate_param),
+            ))) => {
+                assert_eq!(original_fee_rate, proposal.original.psbt_fee_rate().unwrap());
+                assert_eq!(min_fee_rate_param, min_fee_rate);
+            }
+            _ => panic!("Expected PsbtBelowFeeRate error, got: {proposal_below_min_fee:?}"),
+        }
+    }
+
     #[test]
     fn test_finalize_proposal_invalid_payjoin_proposal() {
         let proposal = unchecked_proposal_from_test_vector();
@@ -528,6 +707,32 @@ mod tests {
         };
         let other_psbt = Psbt::from_unsigned_tx(empty_tx).expect("Valid unsigned tx");
         let err = provisional.clone().finalize_proposal(|_| Ok(other_psbt.clone())).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Implementation error: Ntxid mismatch: expected {}, got {}",
+                provisional.psbt_context.payjoin_psbt.unsigned_tx.compute_txid(),
+                other_psbt.unsigned_tx.compute_txid()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_finalize_proposal_invalid_payjoin_proposal_async() {
+        let proposal = unchecked_proposal_from_test_vector();
+        let provisional = provisional_proposal_from_test_vector(proposal);
+        let empty_tx = Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: LockTime::Seconds(Time::MIN),
+            input: vec![],
+            output: vec![],
+        };
+        let other_psbt = Psbt::from_unsigned_tx(empty_tx).expect("Valid unsigned tx");
+        let err = provisional
+            .clone()
+            .finalize_proposal_async(|_| async { Ok(other_psbt.clone()) })
+            .await
+            .unwrap_err();
         assert_eq!(
             err.to_string(),
             format!(

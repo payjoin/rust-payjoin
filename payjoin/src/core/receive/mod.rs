@@ -10,6 +10,7 @@
 //! version 1, refer to the `receive::v1` module documentation after enabling the `v1` feature.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::str::FromStr;
 
 use bitcoin::transaction::InputWeightPrediction;
@@ -351,6 +352,55 @@ impl PsbtContext {
         let payjoin_proposal = self.prepare_psbt(signed_psbt);
         Ok(payjoin_proposal)
     }
+
+    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
+    /// they sign the transaction and broadcast it to the network.
+    ///
+    /// Finalization consists of two steps:
+    ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
+    ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
+    async fn to_sync_wallet_process_psbt<F>(
+        &self,
+        wallet_process_psbt: impl Fn(&Psbt) -> F,
+    ) -> Result<impl Fn(&Psbt) -> Result<Psbt, ImplementationError>, ImplementationError>
+    where
+        F: Future<Output = Result<Psbt, ImplementationError>>,
+    {
+        let psbt = self.psbt_to_sign();
+        let signed_psbt = wallet_process_psbt(&psbt).await?;
+        Ok(move |_: &Psbt| Ok(signed_psbt.clone()))
+    }
+}
+
+pub(crate) async fn compute_async_results<T, F, O>(
+    values: Vec<T>,
+    async_fn: &mut impl FnMut(&T) -> F,
+) -> Result<Vec<(T, O)>, ImplementationError>
+where
+    F: Future<Output = Result<O, ImplementationError>>,
+{
+    let mut results = vec![];
+    for value in values {
+        let result = async_fn(&value).await?;
+        results.push((value, result));
+    }
+    Ok(results)
+}
+
+pub(crate) fn make_sync_fn<T, U, O>(
+    results: Vec<(T, O)>,
+    map: impl Fn(&T) -> &U,
+) -> impl Fn(&U) -> Result<O, ImplementationError>
+where
+    U: PartialEq + ?Sized,
+    O: Clone,
+{
+    move |value| {
+        results
+            .iter()
+            .find_map(|(v, r)| if map(v) == value { Some((*r).clone()) } else { None })
+            .ok_or(ImplementationError::from("All values should exist"))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -368,20 +418,25 @@ impl OriginalPayload {
         Ok(original_psbt_fee / self.psbt.clone().extract_tx_unchecked_fee_rate().weight())
     }
 
+    fn check_min_fee_rate(&self, min_fee_rate: FeeRate) -> Result<(), Error> {
+        let original_psbt_fee_rate = self.psbt_fee_rate()?;
+        if original_psbt_fee_rate < min_fee_rate {
+            return Err(InternalPayloadError::PsbtBelowFeeRate(
+                original_psbt_fee_rate,
+                min_fee_rate,
+            )
+            .into());
+        }
+        Ok(())
+    }
+
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
-        let original_psbt_fee_rate = self.psbt_fee_rate()?;
         if let Some(min_fee_rate) = min_fee_rate {
-            if original_psbt_fee_rate < min_fee_rate {
-                return Err(InternalPayloadError::PsbtBelowFeeRate(
-                    original_psbt_fee_rate,
-                    min_fee_rate,
-                )
-                .into());
-            }
+            self.check_min_fee_rate(min_fee_rate)?
         }
         if can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())
             .map_err(Error::Implementation)?
@@ -392,6 +447,41 @@ impl OriginalPayload {
         }
     }
 
+    pub(crate) async fn to_sync_can_broadcast<F>(
+        &self,
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> F,
+    ) -> Result<impl Fn(&Transaction) -> Result<bool, ImplementationError>, ImplementationError>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        let tx = self.psbt.clone().extract_tx_unchecked_fee_rate();
+        let result = can_broadcast(&tx).await?;
+        Ok(move |_: &Transaction| Ok(result))
+    }
+
+    pub async fn check_broadcast_suitability_async<F>(
+        &self,
+        min_fee_rate: Option<FeeRate>,
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> F,
+    ) -> Result<(), Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        let can_broadcast_sync =
+            self.to_sync_can_broadcast(can_broadcast).await.map_err(Error::Implementation)?;
+        self.check_broadcast_suitability(min_fee_rate, can_broadcast_sync)
+    }
+
+    fn input_scripts(&self) -> Result<Vec<ScriptBuf>, InternalPayloadError> {
+        self.psbt
+            .input_pairs()
+            .map(|input| match input.previous_txout() {
+                Ok(txout) => Ok(txout.script_pubkey.to_owned()),
+                Err(e) => Err(InternalPayloadError::PrevTxOut(e)),
+            })
+            .collect()
+    }
+
     /// Check that the original PSBT has no receiver-owned inputs.
     ///
     /// An attacker can try to spend the receiver's own inputs. This check prevents that.
@@ -399,64 +489,93 @@ impl OriginalPayload {
         &self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
-        let mut err: Result<(), Error> = Ok(());
-        if let Some(e) = self
-            .psbt
-            .input_pairs()
-            .scan(&mut err, |err, input| match input.previous_txout() {
-                Ok(txout) => Some(txout.script_pubkey.to_owned()),
-                Err(e) => {
-                    **err = Err(InternalPayloadError::PrevTxOut(e).into());
-                    None
-                }
-            })
-            .find_map(|script| match is_owned(&script) {
-                Ok(false) => None,
-                Ok(true) => Some(InternalPayloadError::InputOwned(script).into()),
-                Err(e) => Some(Error::Implementation(e)),
-            })
-        {
-            return Err(e);
+        for script in self.input_scripts()? {
+            match is_owned(&script) {
+                Ok(false) => continue,
+                Ok(true) => return Err(InternalPayloadError::InputOwned(script).into()),
+                Err(e) => return Err(Error::Implementation(e)),
+            }
         }
-        err?;
         Ok(())
+    }
+
+    pub(crate) async fn to_sync_is_owned<F>(
+        &self,
+        is_owned: &mut impl FnMut(&Script) -> F,
+    ) -> Result<impl FnMut(&Script) -> Result<bool, ImplementationError>, Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        let results =
+            compute_async_results(self.input_scripts()?, &mut |s: &ScriptBuf| is_owned(s.as_ref()))
+                .await
+                .map_err(Error::Implementation)?;
+        Ok(make_sync_fn(results, |s: &ScriptBuf| s.as_script()))
+    }
+
+    /// Check that the original PSBT has no receiver-owned inputs.
+    ///
+    /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    pub async fn check_inputs_not_owned_async<F>(
+        &self,
+        is_owned: &mut impl FnMut(&Script) -> F,
+    ) -> Result<(), Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        let mut is_owned_sync = self.to_sync_is_owned(is_owned).await?;
+        self.check_inputs_not_owned(&mut is_owned_sync)
+    }
+
+    fn input_outpoints(&self) -> Vec<OutPoint> {
+        self.psbt.input_pairs().map(|input| input.txin.previous_output).collect()
     }
 
     pub fn check_no_inputs_seen_before(
         &self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
-        self.psbt.input_pairs().try_for_each(|input| {
-            match is_known(&input.txin.previous_output) {
-                Ok(false) => Ok::<(), Error>(()),
-                Ok(true) =>  {
-                    tracing::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
-                    Err(InternalPayloadError::InputSeen(input.txin.previous_output))?
-                },
+        for outpoint in self.input_outpoints() {
+            match is_known(&outpoint) {
+                Ok(false) => continue,
+                Ok(true) => {
+                    tracing::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", outpoint);
+                    Err(InternalPayloadError::InputSeen(outpoint))?
+                }
                 Err(e) => Err(Error::Implementation(e))?,
             }
-        })?;
+        }
         Ok(())
     }
 
-    pub fn identify_receiver_outputs(
-        self,
-        is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<common::WantsOutputs, Error> {
-        let owned_vouts: Vec<usize> = self
-            .psbt
-            .unsigned_tx
-            .output
-            .iter()
-            .enumerate()
-            .filter_map(|(vout, txo)| match is_receiver_output(&txo.script_pubkey) {
-                Ok(true) => Some(Ok(vout)),
-                Ok(false) => None,
-                Err(e) => Some(Err(e)),
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::Implementation)?;
+    pub(crate) async fn to_sync_is_known<F>(
+        &self,
+        is_known: &mut impl FnMut(&OutPoint) -> F,
+    ) -> Result<impl FnMut(&OutPoint) -> Result<bool, ImplementationError>, ImplementationError>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        let results = compute_async_results(self.input_outpoints(), is_known).await?;
+        Ok(make_sync_fn(results, |o| o))
+    }
 
+    pub async fn check_no_inputs_seen_before_async<F>(
+        &self,
+        is_known: &mut impl FnMut(&OutPoint) -> F,
+    ) -> Result<(), Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        let mut is_known_sync =
+            self.to_sync_is_known(is_known).await.map_err(Error::Implementation)?;
+        self.check_no_inputs_seen_before(&mut is_known_sync)
+    }
+
+    fn output_scripts(&self) -> Vec<ScriptBuf> {
+        self.psbt.unsigned_tx.output.iter().map(|output| output.script_pubkey.to_owned()).collect()
+    }
+
+    fn process_owned_outputs(self, owned_vouts: Vec<usize>) -> Result<common::WantsOutputs, Error> {
         if owned_vouts.is_empty() {
             return Err(InternalPayloadError::MissingPayment.into());
         }
@@ -472,6 +591,50 @@ impl OriginalPayload {
         }
         let original_payload = OriginalPayload { params, ..self.clone() };
         Ok(common::WantsOutputs::new(original_payload, owned_vouts))
+    }
+
+    pub fn identify_receiver_outputs(
+        self,
+        is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
+    ) -> Result<common::WantsOutputs, Error> {
+        let mut owned_vouts: Vec<usize> = Vec::new();
+        for (vout, script_buf) in self.output_scripts().iter().enumerate() {
+            match is_receiver_output(script_buf) {
+                Ok(true) => owned_vouts.push(vout),
+                Ok(false) => continue,
+                Err(e) => return Err(Error::Implementation(e)),
+            }
+        }
+
+        self.process_owned_outputs(owned_vouts)
+    }
+
+    pub(crate) async fn to_sync_is_receiver_output<F>(
+        &self,
+        is_receiver_output: &mut impl FnMut(&Script) -> F,
+    ) -> Result<impl FnMut(&Script) -> Result<bool, ImplementationError>, ImplementationError>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        let results = compute_async_results(self.output_scripts(), &mut |s: &ScriptBuf| {
+            is_receiver_output(s.as_ref())
+        })
+        .await?;
+        Ok(make_sync_fn(results, |s: &ScriptBuf| s.as_script()))
+    }
+
+    pub async fn identify_receiver_outputs_async<F>(
+        self,
+        is_receiver_output: &mut impl FnMut(&Script) -> F,
+    ) -> Result<common::WantsOutputs, Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        let mut is_receiver_output_sync = self
+            .to_sync_is_receiver_output(is_receiver_output)
+            .await
+            .map_err(Error::Implementation)?;
+        self.identify_receiver_outputs(&mut is_receiver_output_sync)
     }
 }
 

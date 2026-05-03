@@ -39,7 +39,7 @@ pub(crate) trait PsbtExt: Sized {
     ) -> &mut BTreeMap<bip32::Xpub, (bip32::Fingerprint, bip32::DerivationPath)>;
     fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>>;
     fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>>;
-    fn input_pairs(&self) -> Box<dyn Iterator<Item = InternalInputPair<'_>> + '_>;
+    fn input_pairs(&self) -> Box<dyn Iterator<Item = InternalInputPair<'_>> + Send + '_>;
     // guarantees that length of psbt input matches that of unsigned_tx inputs and same
     /// thing for outputs.
     fn validate(self) -> Result<Self, InconsistentPsbt>;
@@ -63,7 +63,7 @@ impl PsbtExt for Psbt {
 
     fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>> { &mut self.unknown }
 
-    fn input_pairs(&self) -> Box<dyn Iterator<Item = InternalInputPair<'_>> + '_> {
+    fn input_pairs(&self) -> Box<dyn Iterator<Item = InternalInputPair<'_>> + Send + '_> {
         Box::new(
             self.unsigned_tx
                 .input

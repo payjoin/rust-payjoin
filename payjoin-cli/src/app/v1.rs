@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
@@ -11,7 +10,7 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use payjoin::bitcoin::psbt::Psbt;
+use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v1::{PayjoinProposal, UncheckedOriginalPayload};
 use payjoin::receive::Error;
@@ -64,6 +63,7 @@ impl AppTrait for App {
         let uri = uri.check_pj_supported().map_err(|_| anyhow!("URI does not support Payjoin"))?;
         let amount = uri.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
         let psbt = self.create_original_psbt(&uri.address, amount, fee_rate)?;
+        let fallback_tx = psbt.clone().extract_tx()?;
         let (req, ctx) = SenderBuilder::new(psbt, uri.clone())
             .build_recommended(fee_rate)
             .with_context(|| "Failed to build payjoin request")?
@@ -71,25 +71,36 @@ impl AppTrait for App {
         let http = http_agent(&self.config)?;
         let body = String::from_utf8(req.body.clone()).unwrap();
         println!("Sending Original PSBT to {}", req.url);
-        let response = http
+        let response = match http
             .post(req.url)
             .header("Content-Type", req.content_type)
             .body(body.clone())
             .send()
             .await
-            .with_context(|| "HTTP request failed")?;
-        let fallback_tx = Psbt::from_str(&body)
-            .map_err(|e| anyhow!("Failed to load PSBT from base64: {}", e))?
-            .extract_tx()?;
-        println!("Fallback transaction txid: {}", fallback_tx.compute_txid());
-        println!(
-            "Fallback transaction hex: {:#}",
-            payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
-        );
-        let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
-            tracing::debug!("Error processing response: {e:?}");
-            anyhow!("Failed to process response {e}")
-        })?;
+        {
+            Ok(response) => response,
+            Err(e) => {
+                tracing::error!("HTTP request failed: {e}");
+                println!("Payjoin failed. To broadcast the fallback transaction, run:");
+                println!(
+                    "  bitcoin-cli -rpcwallet=<wallet> sendrawtransaction {:#}",
+                    serialize_hex(&fallback_tx)
+                );
+                return Err(anyhow!("HTTP request failed: {e}"));
+            }
+        };
+        let psbt = match ctx.process_response(&response.bytes().await?) {
+            Ok(psbt) => psbt,
+            Err(e) => {
+                tracing::error!("Error processing response: {e:?}");
+                println!("Payjoin failed. To broadcast the fallback transaction, run:");
+                println!(
+                    "  bitcoin-cli -rpcwallet=<wallet> sendrawtransaction {:#}",
+                    serialize_hex(&fallback_tx)
+                );
+                return Err(anyhow!("Failed to process response {e}"));
+            }
+        };
 
         self.process_pj_response(psbt)?;
         Ok(())

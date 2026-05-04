@@ -23,7 +23,7 @@
 
 ## About
 
-`payjoin/rust-payjoin` contains multiple crates implementing Payjoin as defined in [BIP 77: Async Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.mediawiki) and [BIP 78: Simple Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0078.md), and associated OHTTP Relay and Payjoin Directory infrastructure.
+`payjoin/rust-payjoin` contains multiple crates implementing Payjoin as defined in [BIP 77: Async Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md) and [BIP 78: Simple Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki), and associated OHTTP Relay and Payjoin Directory infrastructure.
 
 Find the description of each crate below.
 

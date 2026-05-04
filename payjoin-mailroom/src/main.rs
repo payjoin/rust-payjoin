@@ -51,7 +51,7 @@ fn init_tracing_with_telemetry(telemetry: &config::TelemetryConfig) -> SdkMeterP
     // Initialize metric exporter and provider
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_http()
-        .with_endpoint(format!("{}/v1/metrics", &telemetry.endpoint))
+        .with_endpoint(format!("{}/v1/metrics", telemetry.endpoint))
         .with_headers(headers)
         .build()
         .expect("Failed to build OTLP metric exporter");

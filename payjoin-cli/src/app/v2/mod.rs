@@ -180,7 +180,7 @@ impl AppTrait for App {
                 .create_v1_post_request();
                 let http = http_agent(&self.config)?;
                 let body = String::from_utf8(req.body.clone()).unwrap();
-                println!("Sending fallback request to {}", &req.url);
+                println!("Sending fallback request to {}", req.url);
                 let response = http
                     .post(req.url)
                     .header("Content-Type", req.content_type)

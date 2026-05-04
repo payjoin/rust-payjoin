@@ -350,7 +350,7 @@ mod integration {
                     ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
                         .build()
                         .save(&persister)?;
-                println!("session: {:#?}", &session);
+                println!("session: {:#?}", session);
                 // Poll receive request
                 let (req, ctx) =
                     session.create_poll_request(services.ohttp_relay_url().as_str())?;
@@ -806,7 +806,7 @@ mod integration {
                 ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
                     .build()
                     .save(recv_persister)?;
-            println!("session: {:#?}", &session);
+            println!("session: {:#?}", session);
             // Poll receive request
             let (req, ctx) = session.create_poll_request(services.ohttp_relay_url().as_str())?;
             let response = agent

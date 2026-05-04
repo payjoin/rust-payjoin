@@ -368,6 +368,10 @@ impl Mailboxes {
     }
 
     async fn post_v2(&mut self, id: &ShortId, payload: Vec<u8>) -> Result<Option<()>, Error> {
+        if !self.has_capacity().await? {
+            return Err(Error::OverCapacity);
+        }
+
         let Some(created) = self.persistent_storage.try_insert(id, &payload).await? else {
             return Ok(None);
         };
@@ -392,6 +396,12 @@ impl Mailboxes {
         id: &ShortId,
         payload: Vec<u8>,
     ) -> Result<Option<oneshot::Receiver<Vec<u8>>>, Error> {
+        // Edge case: pruning a v2 entry here can make room for this v1 insert,
+        // so v1 writers may see effective capacity of n-1 instead of n.
+        if !self.has_capacity().await? {
+            return Err(Error::OverCapacity);
+        }
+
         let mut ret = None;
         let payload = Arc::new(payload);
 
@@ -536,406 +546,528 @@ impl std::fmt::Display for Error {
 
 impl crate::db::SendableError for Error {}
 
-#[tokio::test]
-async fn test_disk_storage_initialization() -> std::io::Result<()> {
-    let dir = tempfile::tempdir()?;
-    assert!(!dir.path().join("tmp").exists(), "tmp subdirectory should not have been created yet");
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
 
-    let xor_pattern = {
+    use payjoin::directory::ShortId;
+    use tokio::fs;
+
+    use crate::db::files::DiskStorage;
+    use crate::db::{Db as DbTrait, Error as DbError, FilesDb};
+
+    #[tokio::test]
+    async fn test_disk_storage_initialization() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        assert!(
+            !dir.path().join("tmp").exists(),
+            "tmp subdirectory should not have been created yet"
+        );
+
+        let xor_pattern = {
+            let storage = DiskStorage::init(dir.path().to_owned())
+                .await
+                .expect("initializing storage directory should succeed");
+
+            assert!(dir.path().join("tmp").exists(), "tmp subdirectory should have been created");
+            assert!(
+                dir.path().join("xor.dat").exists(),
+                "random obfuscation pattern should have been generated"
+            );
+
+            fs::write(dir.path().join("tmp").join("blah"), "junk").await?;
+
+            storage.xor
+        };
+
+        assert!(
+            dir.path().join("tmp").join("blah").exists(),
+            "temp file should not have been cleared yet"
+        );
         let storage = DiskStorage::init(dir.path().to_owned())
             .await
             .expect("initializing storage directory should succeed");
 
-        assert!(dir.path().join("tmp").exists(), "tmp subdirectory should have been created");
         assert!(
-            dir.path().join("xor.dat").exists(),
-            "random obfuscation pattern should have been generated"
+            !dir.path().join("tmp").join("blah").exists(),
+            "temp file should have been cleared"
         );
 
-        fs::write(dir.path().join("tmp").join("blah"), "junk").await?;
+        assert_eq!(storage.xor, xor_pattern, "xor pattern loaded from file");
 
-        storage.xor
-    };
-
-    assert!(
-        dir.path().join("tmp").join("blah").exists(),
-        "temp file should not have been cleared yet"
-    );
-    let storage = DiskStorage::init(dir.path().to_owned())
-        .await
-        .expect("initializing storage directory should succeed");
-
-    assert!(!dir.path().join("tmp").join("blah").exists(), "temp file should have been cleared");
-
-    assert_eq!(storage.xor, xor_pattern, "xor pattern loaded from file");
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_disk_storage_mailboxes() -> std::io::Result<()> {
-    let dir = tempfile::tempdir()?;
-
-    let storage = DiskStorage::init(dir.path().to_owned())
-        .await
-        .expect("initializing storage directory should succeed");
-
-    let id1 = ShortId::try_from(&(b"12345678")[..]).unwrap();
-    let id2 = ShortId::try_from(&(b"87654321")[..]).unwrap();
-
-    assert!(!storage
-        .contains_key(&id1)
-        .await
-        .expect("checking mailbox existence should not error"));
-    assert!(!storage
-        .contains_key(&id2)
-        .await
-        .expect("checking mailbox existence should not error"));
-    assert!(matches!(storage.get(&id1).await, Ok(None)));
-    assert!(matches!(storage.get(&id2).await, Ok(None)));
-
-    let contents1 = b"OH HAI";
-    let contents2 = b"HI FREN";
-
-    let created1 = storage
-        .try_insert(&id1, contents1)
-        .await
-        .expect("writing should succeed")
-        .expect("writing should return a creation time");
-
-    match storage.get(&id1).await {
-        Ok(Some((got_created, got_contents))) => {
-            assert_eq!(got_created, created1.to_owned());
-            assert_eq!(got_contents, contents1.to_owned());
-        }
-        e => {
-            e.expect("retrieval should work");
-        }
-    };
-
-    assert!(matches!(storage.get(&id2).await, Ok(None)));
-
-    assert!(
-        storage
-            .try_insert(&id1, contents2)
-            .await
-            .expect("writing a second time should not fail with IO error")
-            .is_none(),
-        "writing a second time should be rejected",
-    );
-
-    assert_eq!(
-        storage.try_insert(&id1, contents1).await.expect("idempotent write should not fail"),
-        Some(created1),
-        "idempotent write should have the same creation time",
-    );
-
-    tokio::time::sleep(Duration::from_millis(1)).await;
-
-    let created2 = storage
-        .try_insert(&id2, contents2)
-        .await
-        .expect("writing should succeed")
-        .expect("writing should return a creation time");
-
-    assert!(created1 < created2, "creation times should be ordered as expected");
-
-    assert_eq!(
-        storage.insert_order().await.expect("enumeration should succeed"),
-        vec![(created1, id1), (created2, id2)],
-        "enumeration should return expected keys and creation times",
-    );
-
-    let mut file_contents =
-        fs::read(storage.mailbox_path(&id1)).await.expect("mailbox file should be readable");
-
-    assert_eq!(file_contents.len(), contents1.len(), "file data should have the right length");
-    assert_ne!(file_contents, contents1, "file data should be obfuscated");
-
-    storage.xor_buffer(&mut file_contents[..]);
-    assert_eq!(file_contents, contents1, "deobfuscation should recover contents");
-
-    storage.remove(&id1).await.expect("removing an existing mailbox should succeed");
-    assert!(
-        !storage.contains_key(&id1).await.expect("checking existence should not error"),
-        "mailbox file should no longer exist"
-    );
-    storage.remove(&id1).await.expect("removing a non-existing mailbox should still not error");
-
-    assert_eq!(
-        storage.insert_order().await.expect("enumeration should succeed"),
-        vec![(created2, id2)],
-        "enumeration should return expected keys and creation times",
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_mailbox_storage() -> std::io::Result<()> {
-    let dir = tempfile::tempdir()?;
-
-    let db = FilesDb::init(
-        Duration::from_millis(10),
-        dir.path().to_owned(),
-        Duration::from_secs(60 * 60 * 24 * 7),
-    )
-    .await
-    .expect("initializing mailbox database should succeed");
-
-    let id = ShortId([0u8; 8]);
-    let contents = b"foo bar";
-    db.post_v2_payload(&id, contents.to_vec())
-        .await
-        .expect("posting payload should succeed")
-        .expect("contents should be accepted");
-
-    let res = db.wait_for_v2_payload(&id).await.expect("waiting for payload should succeed");
-    assert_eq!(&res[..], contents, "posted payload should be retrievable");
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_v2_wait() -> std::io::Result<()> {
-    let dir = tempfile::tempdir()?;
-
-    let db = FilesDb::init(
-        Duration::from_millis(1),
-        dir.path().to_owned(),
-        Duration::from_secs(60 * 60 * 24 * 7),
-    )
-    .await
-    .expect("initializing mailbox database should succeed");
-
-    let id = ShortId([0u8; 8]);
-    let contents = b"foo bar";
-
-    match db.wait_for_v2_payload(&id).await {
-        Err(DbError::Timeout(_)) => {}
-        res => panic!("expected timeout, got {res:?}"),
+        Ok(())
     }
 
-    let read_task1 = tokio::spawn({
-        let db = db.clone();
-        async move { db.wait_for_v2_payload(&id).await }
-    });
-    let read_task2 = tokio::spawn({
-        let db = db.clone();
-        async move { db.wait_for_v2_payload(&id).await }
-    });
+    #[tokio::test]
+    async fn test_disk_storage_mailboxes() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
 
-    db.post_v2_payload(&id, contents.to_vec())
+        let storage = DiskStorage::init(dir.path().to_owned())
+            .await
+            .expect("initializing storage directory should succeed");
+
+        let id1 = ShortId::try_from(&(b"12345678")[..]).unwrap();
+        let id2 = ShortId::try_from(&(b"87654321")[..]).unwrap();
+
+        assert!(!storage
+            .contains_key(&id1)
+            .await
+            .expect("checking mailbox existence should not error"));
+        assert!(!storage
+            .contains_key(&id2)
+            .await
+            .expect("checking mailbox existence should not error"));
+        assert!(matches!(storage.get(&id1).await, Ok(None)));
+        assert!(matches!(storage.get(&id2).await, Ok(None)));
+
+        let contents1 = b"OH HAI";
+        let contents2 = b"HI FREN";
+
+        let created1 = storage
+            .try_insert(&id1, contents1)
+            .await
+            .expect("writing should succeed")
+            .expect("writing should return a creation time");
+
+        match storage.get(&id1).await {
+            Ok(Some((got_created, got_contents))) => {
+                assert_eq!(got_created, created1.to_owned());
+                assert_eq!(got_contents, contents1.to_owned());
+            }
+            e => {
+                e.expect("retrieval should work");
+            }
+        };
+
+        assert!(matches!(storage.get(&id2).await, Ok(None)));
+
+        assert!(
+            storage
+                .try_insert(&id1, contents2)
+                .await
+                .expect("writing a second time should not fail with IO error")
+                .is_none(),
+            "writing a second time should be rejected",
+        );
+
+        assert_eq!(
+            storage.try_insert(&id1, contents1).await.expect("idempotent write should not fail"),
+            Some(created1),
+            "idempotent write should have the same creation time",
+        );
+
+        tokio::time::sleep(Duration::from_millis(1)).await;
+
+        let created2 = storage
+            .try_insert(&id2, contents2)
+            .await
+            .expect("writing should succeed")
+            .expect("writing should return a creation time");
+
+        assert!(created1 < created2, "creation times should be ordered as expected");
+
+        assert_eq!(
+            storage.insert_order().await.expect("enumeration should succeed"),
+            vec![(created1, id1), (created2, id2)],
+            "enumeration should return expected keys and creation times",
+        );
+
+        let mut file_contents =
+            fs::read(storage.mailbox_path(&id1)).await.expect("mailbox file should be readable");
+
+        assert_eq!(file_contents.len(), contents1.len(), "file data should have the right length");
+        assert_ne!(file_contents, contents1, "file data should be obfuscated");
+
+        storage.xor_buffer(&mut file_contents[..]);
+        assert_eq!(file_contents, contents1, "deobfuscation should recover contents");
+
+        storage.remove(&id1).await.expect("removing an existing mailbox should succeed");
+        assert!(
+            !storage.contains_key(&id1).await.expect("checking existence should not error"),
+            "mailbox file should no longer exist"
+        );
+        storage.remove(&id1).await.expect("removing a non-existing mailbox should still not error");
+
+        assert_eq!(
+            storage.insert_order().await.expect("enumeration should succeed"),
+            vec![(created2, id2)],
+            "enumeration should return expected keys and creation times",
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_mailbox_storage() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+
+        let db = FilesDb::init(
+            Duration::from_millis(10),
+            dir.path().to_owned(),
+            Duration::from_secs(60 * 60 * 24 * 7),
+        )
         .await
-        .expect("posting payload should succeed")
-        .expect("contents should be accepted");
+        .expect("initializing mailbox database should succeed");
 
-    let res = read_task1
-        .await
-        .expect("joining task should succeed")
-        .expect("waiting for payload should succeed");
-    assert_eq!(&res[..], contents, "posted payload should be retrievable");
-
-    let res = read_task2
-        .await
-        .expect("joining task should succeed")
-        .expect("waiting for payload should succeed");
-    assert_eq!(&res[..], contents, "posted payload should be retrievable");
-
-    assert!(
-        db.post_v2_payload(&id, b"something else".to_vec())
+        let id = ShortId([0u8; 8]);
+        let contents = b"foo bar";
+        db.post_v2_payload(&id, contents.to_vec())
             .await
             .expect("posting payload should succeed")
-            .is_none(),
-        "duplicate POST should be rejected"
-    );
+            .expect("contents should be accepted");
 
-    let res = db.wait_for_v2_payload(&id).await.expect("reading payload should succeed");
-    assert_eq!(&res[..], contents, "posted payload should be retrievable");
+        let res = db.wait_for_v2_payload(&id).await.expect("waiting for payload should succeed");
+        assert_eq!(&res[..], contents, "posted payload should be retrievable");
 
-    Ok(())
-}
+        Ok(())
+    }
 
-#[tokio::test]
-async fn test_v1_wait() -> std::io::Result<()> {
-    let dir = tempfile::tempdir()?;
+    #[tokio::test]
+    async fn test_v2_wait() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
 
-    let db = Arc::new(
-        FilesDb::init(
+        let db = FilesDb::init(
             Duration::from_millis(1),
             dir.path().to_owned(),
             Duration::from_secs(60 * 60 * 24 * 7),
         )
         .await
-        .expect("initializing mailbox database should succeed"),
-    );
+        .expect("initializing mailbox database should succeed");
 
-    let id = ShortId([0u8; 8]);
+        let id = ShortId([0u8; 8]);
+        let contents = b"foo bar";
 
-    let v1_sender_task = tokio::spawn({
-        let db = db.clone();
-        async move { db.post_v1_request_and_wait_for_response(&id, b"request".to_vec()).await }
-    });
+        match db.wait_for_v2_payload(&id).await {
+            Err(DbError::Timeout(_)) => {}
+            res => panic!("expected timeout, got {res:?}"),
+        }
 
-    let res = db.wait_for_v2_payload(&id).await.expect("reading payload should succeed");
-    assert_eq!(&res[..], b"request", "in flight v1 request should be retrievable");
+        let read_task1 = tokio::spawn({
+            let db = db.clone();
+            async move { db.wait_for_v2_payload(&id).await }
+        });
+        let read_task2 = tokio::spawn({
+            let db = db.clone();
+            async move { db.wait_for_v2_payload(&id).await }
+        });
 
-    assert!(
-        matches!(
-            db.post_v1_request_and_wait_for_response(&id, b"different request".to_vec()).await,
-            Err(DbError::OverCapacity),
-        ),
-        "second v1 sender with the same shortid should be rejected while request is in flight",
-    );
+        db.post_v2_payload(&id, contents.to_vec())
+            .await
+            .expect("posting payload should succeed")
+            .expect("contents should be accepted");
 
-    db.post_v1_response(&id, b"response".to_vec()).await.expect("posting payload should succeed");
+        let res = read_task1
+            .await
+            .expect("joining task should succeed")
+            .expect("waiting for payload should succeed");
+        assert_eq!(&res[..], contents, "posted payload should be retrievable");
 
-    let res = v1_sender_task
-        .await
-        .expect("joining task should succeed")
-        .expect("waiting for payload should succeed");
-    assert_eq!(&res[..], b"response", "should be response from v2 receiver");
+        let res = read_task2
+            .await
+            .expect("joining task should succeed")
+            .expect("waiting for payload should succeed");
+        assert_eq!(&res[..], contents, "posted payload should be retrievable");
 
-    assert!(
-        matches!(
-            db.post_v1_response(&id, b"response".to_vec()).await,
-            Err(DbError::V1SenderUnavailable)
-        ),
-        "posting without a v1 sender waiting should fail"
-    );
+        assert!(
+            db.post_v2_payload(&id, b"something else".to_vec())
+                .await
+                .expect("posting payload should succeed")
+                .is_none(),
+            "duplicate POST should be rejected"
+        );
 
-    Ok(())
-}
+        let res = db.wait_for_v2_payload(&id).await.expect("reading payload should succeed");
+        assert_eq!(&res[..], contents, "posted payload should be retrievable");
 
-#[tokio::test]
-async fn test_v1_data_minimization() -> std::io::Result<()> {
-    let dir = tempfile::tempdir()?;
+        Ok(())
+    }
 
-    let db = Arc::new(
-        FilesDb::init(
-            Duration::from_millis(500),
+    #[tokio::test]
+    async fn test_v1_wait() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+
+        let db = Arc::new(
+            FilesDb::init(
+                Duration::from_millis(1),
+                dir.path().to_owned(),
+                Duration::from_secs(60 * 60 * 24 * 7),
+            )
+            .await
+            .expect("initializing mailbox database should succeed"),
+        );
+
+        let id = ShortId([0u8; 8]);
+
+        let v1_sender_task = tokio::spawn({
+            let db = db.clone();
+            async move { db.post_v1_request_and_wait_for_response(&id, b"request".to_vec()).await }
+        });
+
+        let res = db.wait_for_v2_payload(&id).await.expect("reading payload should succeed");
+        assert_eq!(&res[..], b"request", "in flight v1 request should be retrievable");
+
+        assert!(
+            matches!(
+                db.post_v1_request_and_wait_for_response(&id, b"different request".to_vec()).await,
+                Err(DbError::OverCapacity),
+            ),
+            "second v1 sender with the same shortid should be rejected while request is in flight",
+        );
+
+        db.post_v1_response(&id, b"response".to_vec())
+            .await
+            .expect("posting payload should succeed");
+
+        let res = v1_sender_task
+            .await
+            .expect("joining task should succeed")
+            .expect("waiting for payload should succeed");
+        assert_eq!(&res[..], b"response", "should be response from v2 receiver");
+
+        assert!(
+            matches!(
+                db.post_v1_response(&id, b"response".to_vec()).await,
+                Err(DbError::V1SenderUnavailable)
+            ),
+            "posting without a v1 sender waiting should fail"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_v1_data_minimization() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+
+        let db = Arc::new(
+            FilesDb::init(
+                Duration::from_millis(500),
+                dir.path().to_owned(),
+                Duration::from_secs(60 * 60 * 24 * 7),
+            )
+            .await
+            .expect("initializing mailbox database should succeed"),
+        );
+
+        let id = ShortId([0u8; 8]);
+
+        // Spawn v1 sender in background
+        let v1_sender_task = tokio::spawn({
+            let db = db.clone();
+            async move { db.post_v1_request_and_wait_for_response(&id, b"request".to_vec()).await }
+        });
+
+        // Small delay to let v1 request post
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // First read should return the payload
+        let res = db.wait_for_v2_payload(&id).await.expect("first read should succeed");
+        assert_eq!(&res[..], b"request", "first read should return the payload");
+
+        // Subsequent reads should not return the plaintext payload again.
+        assert!(
+            matches!(db.wait_for_v2_payload(&id).await, Err(DbError::AlreadyRead)),
+            "subsequent reads should indicate the payload was already consumed"
+        );
+
+        // Verify the payload was cleared from memory by checking directly
+        {
+            let guard = db.mailboxes.lock().await;
+            let entry = guard.pending_v1.get(&id);
+            assert!(
+                entry.is_none_or(|e| e.payload.is_none()),
+                "v1 payload should have been cleared after first read"
+            );
+        }
+
+        // V1 response flow should still work even after payload was cleared
+        db.post_v1_response(&id, b"response".to_vec())
+            .await
+            .expect("posting response should succeed");
+
+        let res = v1_sender_task
+            .await
+            .expect("joining task should succeed")
+            .expect("v1 sender should get response");
+        assert_eq!(&res[..], b"response", "v1 sender should receive the response");
+
+        Ok(())
+    }
+
+    // Simulate elapsed time deterministically by shifting stored timestamps
+    // backward instead of sleeping. tokio::time::pause() can't be used because
+    // prune compares against SystemTime (timestamps originate from disk).
+    #[tokio::test]
+    async fn test_prune() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+
+        let db = FilesDb::init(
+            Duration::from_millis(2),
             dir.path().to_owned(),
             Duration::from_secs(60 * 60 * 24 * 7),
         )
         .await
-        .expect("initializing mailbox database should succeed"),
-    );
+        .expect("initializing mailbox database should succeed");
 
-    let id = ShortId([0u8; 8]);
+        let ttl = Duration::from_secs(600);
 
-    // Spawn v1 sender in background
-    let v1_sender_task = tokio::spawn({
-        let db = db.clone();
-        async move { db.post_v1_request_and_wait_for_response(&id, b"request".to_vec()).await }
-    });
-
-    // Small delay to let v1 request post
-    tokio::time::sleep(Duration::from_millis(10)).await;
-
-    // First read should return the payload
-    let res = db.wait_for_v2_payload(&id).await.expect("first read should succeed");
-    assert_eq!(&res[..], b"request", "first read should return the payload");
-
-    // Subsequent reads should not return the plaintext payload again.
-    assert!(
-        matches!(db.wait_for_v2_payload(&id).await, Err(DbError::AlreadyRead)),
-        "subsequent reads should indicate the payload was already consumed"
-    );
-
-    // Verify the payload was cleared from memory by checking directly
-    {
-        let guard = db.mailboxes.lock().await;
-        let entry = guard.pending_v1.get(&id);
-        assert!(
-            entry.is_none_or(|e| e.payload.is_none()),
-            "v1 payload should have been cleared after first read"
-        );
-    }
-
-    // V1 response flow should still work even after payload was cleared
-    db.post_v1_response(&id, b"response".to_vec()).await.expect("posting response should succeed");
-
-    let res = v1_sender_task
-        .await
-        .expect("joining task should succeed")
-        .expect("v1 sender should get response");
-    assert_eq!(&res[..], b"response", "v1 sender should receive the response");
-
-    Ok(())
-}
-
-// Simulate elapsed time deterministically by shifting stored timestamps
-// backward instead of sleeping. tokio::time::pause() can't be used because
-// prune compares against SystemTime (timestamps originate from disk).
-#[tokio::test]
-async fn test_prune() -> std::io::Result<()> {
-    let dir = tempfile::tempdir()?;
-
-    let db = FilesDb::init(
-        Duration::from_millis(2),
-        dir.path().to_owned(),
-        Duration::from_secs(60 * 60 * 24 * 7),
-    )
-    .await
-    .expect("initializing mailbox database should succeed");
-
-    let ttl = Duration::from_secs(600);
-
-    {
-        let mut guard = db.mailboxes.lock().await;
-        guard.capacity = 2;
-        guard.ttl = ttl;
-    }
-
-    assert_eq!(db.mailboxes.lock().await.len(), 0);
-    db.prune().await.expect("pruning should not fail");
-    assert_eq!(db.mailboxes.lock().await.len(), 0);
-
-    let id = ShortId([0u8; 8]);
-    let contents = b"fooo";
-
-    // Pending v2 waiter that times out should be cleaned up by prune
-    let read_task1 = tokio::spawn({
-        let db = db.clone();
-        async move { db.wait_for_v2_payload(&id).await }
-    });
-
-    tokio::time::sleep(Duration::from_millis(1)).await;
-    assert_eq!(db.mailboxes.lock().await.len(), 1);
-
-    match read_task1.await.expect("joining should succeed") {
-        Err(DbError::Timeout(_)) => {}
-        res => panic!("expected timeout, got {res:?}"),
-    }
-
-    db.prune().await.expect("pruning should not fail");
-    assert_eq!(db.mailboxes.lock().await.len(), 0);
-
-    // Post a v2 payload — should survive immediate prune (TTL not elapsed)
-    db.post_v2_payload(&id, contents.to_vec())
-        .await
-        .expect("posting payload should succeed")
-        .expect("contents should be accepted");
-
-    assert_eq!(db.mailboxes.lock().await.len(), 1);
-    db.prune().await.expect("pruning should not fail");
-    assert_eq!(db.mailboxes.lock().await.len(), 1);
-
-    // Shift insert timestamps past ttl
-    {
-        let mut guard = db.mailboxes.lock().await;
-        for (ts, _) in guard.insert_order.iter_mut() {
-            *ts -= ttl + Duration::from_secs(1);
+        {
+            let mut guard = db.mailboxes.lock().await;
+            guard.capacity = 2;
+            guard.ttl = ttl;
         }
+
+        assert_eq!(db.mailboxes.lock().await.len(), 0);
+        db.prune().await.expect("pruning should not fail");
+        assert_eq!(db.mailboxes.lock().await.len(), 0);
+
+        let id = ShortId([0u8; 8]);
+        let contents = b"fooo";
+
+        // Pending v2 waiter that times out should be cleaned up by prune
+        let read_task1 = tokio::spawn({
+            let db = db.clone();
+            async move { db.wait_for_v2_payload(&id).await }
+        });
+
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert_eq!(db.mailboxes.lock().await.len(), 1);
+
+        match read_task1.await.expect("joining should succeed") {
+            Err(DbError::Timeout(_)) => {}
+            res => panic!("expected timeout, got {res:?}"),
+        }
+
+        db.prune().await.expect("pruning should not fail");
+        assert_eq!(db.mailboxes.lock().await.len(), 0);
+
+        // Post a v2 payload — should survive immediate prune (TTL not elapsed)
+        db.post_v2_payload(&id, contents.to_vec())
+            .await
+            .expect("posting payload should succeed")
+            .expect("contents should be accepted");
+
+        assert_eq!(db.mailboxes.lock().await.len(), 1);
+        db.prune().await.expect("pruning should not fail");
+        assert_eq!(db.mailboxes.lock().await.len(), 1);
+
+        // Shift insert timestamps past ttl
+        {
+            let mut guard = db.mailboxes.lock().await;
+            for (ts, _) in guard.insert_order.iter_mut() {
+                *ts -= ttl + Duration::from_secs(1);
+            }
+        }
+
+        assert_eq!(db.mailboxes.lock().await.len(), 1);
+        db.prune().await.expect("pruning should not fail");
+        assert_eq!(db.mailboxes.lock().await.len(), 0);
+
+        // Empty db should remain empty after prune
+        db.prune().await.expect("pruning should not fail");
+        assert_eq!(db.mailboxes.lock().await.len(), 0);
+
+        Ok(())
     }
 
-    assert_eq!(db.mailboxes.lock().await.len(), 1);
-    db.prune().await.expect("pruning should not fail");
-    assert_eq!(db.mailboxes.lock().await.len(), 0);
+    async fn assert_all_paths_over_capacity(db: &FilesDb) {
+        let id = ShortId([0; 8]);
 
-    // Empty db should remain empty after prune
-    db.prune().await.expect("pruning should not fail");
-    assert_eq!(db.mailboxes.lock().await.len(), 0);
+        assert!(matches!(
+            db.post_v2_payload(&id, b"data".to_vec()).await,
+            Err(DbError::OverCapacity)
+        ));
 
-    Ok(())
+        assert!(matches!(
+            db.post_v1_request_and_wait_for_response(&id, b"data".to_vec()).await,
+            Err(DbError::OverCapacity)
+        ));
+
+        assert!(matches!(db.wait_for_v2_payload(&id).await, Err(DbError::OverCapacity)));
+    }
+
+    #[tokio::test]
+    async fn test_capacity_post_v2() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+
+        let db = FilesDb::init(
+            Duration::from_millis(2),
+            dir.path().to_owned(),
+            Duration::from_secs(60 * 60 * 24 * 7),
+        )
+        .await?;
+
+        db.mailboxes.lock().await.capacity = 3;
+
+        for i in 1..=3 {
+            db.post_v2_payload(&ShortId([i; 8]), b"data".to_vec()).await.unwrap();
+        }
+
+        assert_all_paths_over_capacity(&db).await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_capacity_post_v1_req_and_wait() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+
+        let db = FilesDb::init(
+            Duration::from_secs(60),
+            dir.path().to_owned(),
+            Duration::from_secs(60 * 60 * 24 * 7),
+        )
+        .await?;
+
+        db.mailboxes.lock().await.capacity = 3;
+
+        for i in 1..=3 {
+            let db = db.clone();
+            tokio::spawn(async move {
+                let _ = db
+                    .post_v1_request_and_wait_for_response(&ShortId([i; 8]), b"data".to_vec())
+                    .await;
+            });
+        }
+
+        // wait until all tasks start working
+        while db.mailboxes.lock().await.len() < 3 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+
+        assert_all_paths_over_capacity(&db).await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_capacity_wait_v2() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+
+        let db = FilesDb::init(
+            Duration::from_secs(60),
+            dir.path().to_owned(),
+            Duration::from_secs(60 * 60 * 24 * 7),
+        )
+        .await?;
+
+        db.mailboxes.lock().await.capacity = 3;
+
+        for i in 1..=3 {
+            let db = db.clone();
+            tokio::spawn(async move {
+                let _ = db.wait_for_v2_payload(&ShortId([i; 8])).await;
+            });
+        }
+
+        // wait until all tasks start working
+        while db.mailboxes.lock().await.len() < 3 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+
+        assert_all_paths_over_capacity(&db).await;
+
+        Ok(())
+    }
 }

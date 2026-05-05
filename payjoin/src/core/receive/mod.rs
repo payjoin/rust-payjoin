@@ -312,6 +312,36 @@ impl PsbtContext {
         sender_input_indexes
     }
 
+    /// Returns payjoin proposal PSBT to be signed
+    ///
+    /// Removes all sender signatures which are received with the original PSBT
+    /// as these signatures are now invalid
+    fn psbt_to_sign(&self) -> Psbt {
+        let mut psbt = self.payjoin_psbt.clone();
+        // Remove now-invalid sender signatures before applying the receiver signatures
+        for i in self.sender_input_indexes() {
+            tracing::trace!("Clearing sender input {i}");
+            psbt.inputs[i].final_script_sig = None;
+            psbt.inputs[i].final_script_witness = None;
+            psbt.inputs[i].tap_key_sig = None;
+        }
+
+        psbt
+    }
+
+    /// Finalizes the signed PSBT and returns payjoin proposal PSBT
+    fn finalize_signed_psbt(self, signed_psbt: Psbt) -> Result<Psbt, ImplementationError> {
+        let expected_ntxid = self.payjoin_psbt.unsigned_tx.compute_ntxid();
+        let actual_ntxid = signed_psbt.unsigned_tx.compute_ntxid();
+        if expected_ntxid != actual_ntxid {
+            return Err(ImplementationError::from(
+                format!("Ntxid mismatch: expected {expected_ntxid}, got {actual_ntxid}").as_str(),
+            ));
+        }
+        let payjoin_proposal = self.prepare_psbt(signed_psbt);
+        Ok(payjoin_proposal)
+    }
+
     /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
     /// they sign the transaction and broadcast it to the network.
     ///
@@ -322,24 +352,9 @@ impl PsbtContext {
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<Psbt, ImplementationError> {
-        let mut psbt = self.payjoin_psbt.clone();
-        // Remove now-invalid sender signatures before applying the receiver signatures
-        for i in self.sender_input_indexes() {
-            tracing::trace!("Clearing sender input {i}");
-            psbt.inputs[i].final_script_sig = None;
-            psbt.inputs[i].final_script_witness = None;
-            psbt.inputs[i].tap_key_sig = None;
-        }
-        let finalized_psbt = wallet_process_psbt(&psbt)?;
-        let expected_ntxid = self.payjoin_psbt.unsigned_tx.compute_ntxid();
-        let actual_ntxid = finalized_psbt.unsigned_tx.compute_ntxid();
-        if expected_ntxid != actual_ntxid {
-            return Err(ImplementationError::from(
-                format!("Ntxid mismatch: expected {expected_ntxid}, got {actual_ntxid}").as_str(),
-            ));
-        }
-        let payjoin_proposal = self.prepare_psbt(finalized_psbt);
-        Ok(payjoin_proposal)
+        let psbt = self.psbt_to_sign();
+        let signed_psbt = wallet_process_psbt(&psbt)?;
+        self.finalize_signed_psbt(signed_psbt)
     }
 }
 

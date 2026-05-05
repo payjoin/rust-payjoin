@@ -689,7 +689,11 @@ mod test {
     use crate::core::Url;
     use crate::output_substitution::OutputSubstitution;
     use crate::psbt::PsbtExt;
+    #[cfg(feature = "v1")]
+    use crate::send::v1::V1Context;
     use crate::send::{AdditionalFeeContribution, InternalBuildSenderError, InternalProposalError};
+    #[cfg(feature = "v1")]
+    use crate::MAX_CONTENT_LENGTH;
 
     /// Creates a PSBT context from the original PSBT test vector from BIP-78
     pub(crate) fn create_psbt_context() -> Result<super::PsbtContext, BoxError> {
@@ -704,6 +708,62 @@ mod test {
             min_fee_rate: FeeRate::ZERO,
             payee,
         })
+    }
+
+    #[test]
+    fn response_len_under_limit_is_not_content_too_large() -> Result<(), BoxError> {
+        let ctx = V1Context { psbt_context: create_psbt_context()? };
+
+        let psbt_str = PARSED_ORIGINAL_PSBT.clone().to_string();
+        assert!(psbt_str.len() < MAX_CONTENT_LENGTH);
+
+        let result = ctx.clone().process_response(psbt_str.as_bytes());
+
+        let err_str = result.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+        assert_ne!(
+            err_str,
+            "The receiver sent an invalid response: The response body is too large"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn response_len_equal_limit_is_not_content_too_large() -> Result<(), BoxError> {
+        let ctx = V1Context { psbt_context: create_psbt_context()? };
+
+        let mut psbt_str = PARSED_ORIGINAL_PSBT.clone().to_string();
+
+        if psbt_str.len() < MAX_CONTENT_LENGTH {
+            psbt_str.push_str(&" ".repeat(MAX_CONTENT_LENGTH - psbt_str.len()));
+        }
+        assert_eq!(psbt_str.len(), MAX_CONTENT_LENGTH);
+
+        let result = ctx.clone().process_response(psbt_str.as_bytes());
+
+        let err_str = result.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+        assert_ne!(
+            err_str,
+            "The receiver sent an invalid response: The response body is too large"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn response_len_over_limit_is_content_too_large() -> Result<(), BoxError> {
+        let ctx = V1Context { psbt_context: create_psbt_context()? };
+
+        let too_long = vec![b'a'; MAX_CONTENT_LENGTH + 1];
+        let result = ctx.process_response(&too_long);
+
+        let err_str = result.unwrap_err().to_string();
+        assert_eq!(
+            err_str,
+            "The receiver sent an invalid response: The response body is too large"
+        );
+
+        Ok(())
     }
 
     #[test]

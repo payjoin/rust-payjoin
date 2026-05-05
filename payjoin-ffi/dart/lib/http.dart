@@ -17,12 +17,15 @@ import 'payjoin.dart' show OhttpKeys;
 /// present, intended for local test setups that use a self-signed directory
 /// certificate; leave unset in production so normal system trust-root
 /// validation applies. [relayCertificate] serves the same purpose for the
-/// relay connection.
+/// relay connection. [timeout] is applied per network phase (TCP connect,
+/// TLS handshake(s), CONNECT exchange, GET); the worst-case wall-clock is
+/// roughly 4× this value.
 Future<OhttpKeys> fetchOhttpKeys({
   required String ohttpRelayUrl,
   required String directoryUrl,
   Uint8List? certificate,
   Uint8List? relayCertificate,
+  Duration timeout = const Duration(seconds: 10),
 }) async {
   final relayUri = Uri.parse(ohttpRelayUrl);
   final keysUrl = Uri.parse(directoryUrl).resolve('/.well-known/ohttp-gateway');
@@ -30,24 +33,34 @@ Future<OhttpKeys> fetchOhttpKeys({
   final destIsHttps = keysUrl.scheme == 'https';
   final destAuthority = '${keysUrl.host}:${keysUrl.port}';
 
-  RawSocket socket = relayIsHttps
-      ? await RawSecureSocket.connect(
-          relayUri.host,
-          relayUri.port,
-          onBadCertificate: _certChecker(relayCertificate),
-        )
-      : await RawSocket.connect(relayUri.host, relayUri.port);
+  RawSocket socket =
+      await (relayIsHttps
+              ? RawSecureSocket.connect(
+                  relayUri.host,
+                  relayUri.port,
+                  onBadCertificate: _certChecker(relayCertificate),
+                )
+              : RawSocket.connect(relayUri.host, relayUri.port))
+          .timeout(
+            timeout,
+            onTimeout: () => throw HttpException('relay connect timeout'),
+          );
 
   try {
-    final tunnelSub = await _openConnectTunnel(socket, destAuthority);
+    final tunnelSub = await _openConnectTunnel(socket, destAuthority, timeout);
 
     if (destIsHttps) {
-      socket = await RawSecureSocket.secure(
-        socket,
-        subscription: tunnelSub,
-        host: keysUrl.host,
-        onBadCertificate: _certChecker(certificate),
-      );
+      socket =
+          await RawSecureSocket.secure(
+            socket,
+            subscription: tunnelSub,
+            host: keysUrl.host,
+            onBadCertificate: _certChecker(certificate),
+          ).timeout(
+            timeout,
+            onTimeout: () =>
+                throw HttpException('directory TLS handshake timeout'),
+          );
     }
 
     final response = await _sendGet(
@@ -55,6 +68,7 @@ Future<OhttpKeys> fetchOhttpKeys({
       keysUrl.path,
       keysUrl.host,
       destIsHttps ? null : tunnelSub,
+      timeout,
     );
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -77,6 +91,7 @@ bool Function(X509Certificate)? _certChecker(Uint8List? der) {
 Future<StreamSubscription<RawSocketEvent>> _openConnectTunnel(
   RawSocket socket,
   String authority,
+  Duration timeout,
 ) async {
   final req = Uint8List.fromList(
     utf8.encode('CONNECT $authority HTTP/1.1\r\nHost: $authority\r\n\r\n'),
@@ -102,7 +117,11 @@ Future<StreamSubscription<RawSocketEvent>> _openConnectTunnel(
           final i = _indexOfCrlfCrlf(buf);
           if (i != -1) {
             socket.readEventsEnabled = false;
-            done.complete(utf8.decode(buf.sublist(0, i)));
+            try {
+              done.complete(latin1.decode(buf.sublist(0, i)));
+            } catch (e) {
+              done.completeError(e);
+            }
           }
         case RawSocketEvent.readClosed:
         case RawSocketEvent.closed:
@@ -117,7 +136,10 @@ Future<StreamSubscription<RawSocketEvent>> _openConnectTunnel(
   socket.writeEventsEnabled = true;
   socket.readEventsEnabled = true;
 
-  final headers = await done.future;
+  final headers = await done.future.timeout(
+    timeout,
+    onTimeout: () => throw HttpException('CONNECT timeout'),
+  );
   final status = headers.split('\r\n').first;
   if (_parseStatusCode(status) != 200) {
     await sub.cancel();
@@ -145,6 +167,7 @@ Future<_Response> _sendGet(
   String path,
   String host,
   StreamSubscription<RawSocketEvent>? existingSub,
+  Duration timeout,
 ) async {
   final req = Uint8List.fromList(
     utf8.encode(
@@ -196,21 +219,113 @@ Future<_Response> _sendGet(
   socket.writeEventsEnabled = true;
   socket.readEventsEnabled = true;
 
-  final responseBytes = await done.future;
+  final responseBytes = await done.future.timeout(
+    timeout,
+    onTimeout: () => throw HttpException('GET timeout'),
+  );
   await sub.cancel();
 
+  return _parseResponse(responseBytes);
+}
+
+const _maxBodyBytes = 1024;
+
+_Response _parseResponse(Uint8List responseBytes) {
   final headerEnd = _indexOfCrlfCrlf(responseBytes);
   if (headerEnd == -1) {
     throw HttpException('Malformed HTTP response');
   }
-  final statusLine = utf8
-      .decode(responseBytes.sublist(0, headerEnd))
-      .split('\r\n')
-      .first;
-  return _Response(
-    _parseStatusCode(statusLine),
-    Uint8List.sublistView(responseBytes, headerEnd + 4),
-  );
+
+  final headerBlock = latin1.decode(responseBytes.sublist(0, headerEnd));
+  final lines = headerBlock.split('\r\n');
+  final statusCode = _parseStatusCode(lines.first);
+
+  final headers = <String, String>{};
+  for (var i = 1; i < lines.length; i++) {
+    final c = lines[i].indexOf(':');
+    if (c <= 0) continue;
+    headers[lines[i].substring(0, c).toLowerCase()] = lines[i]
+        .substring(c + 1)
+        .trim();
+  }
+
+  final hasCL = headers.containsKey('content-length');
+  final hasTE = headers.containsKey('transfer-encoding');
+  if (hasCL && hasTE) {
+    throw HttpException('Content-Length and Transfer-Encoding both set');
+  }
+
+  final bodyStart = headerEnd + 4;
+  final raw = (bodyStart >= responseBytes.length)
+      ? Uint8List(0)
+      : Uint8List.sublistView(responseBytes, bodyStart);
+
+  if (hasCL) {
+    final cl = int.tryParse(headers['content-length']!);
+    if (cl == null || cl < 0) {
+      throw HttpException('Invalid Content-Length');
+    }
+    if (cl > _maxBodyBytes) {
+      throw HttpException('Content-Length exceeds 1 KiB cap');
+    }
+    if (raw.length < cl) {
+      throw HttpException('Short body: expected $cl, got ${raw.length}');
+    }
+    return _Response(statusCode, Uint8List.sublistView(raw, 0, cl));
+  } else if (hasTE) {
+    if (headers['transfer-encoding']!.toLowerCase() != 'chunked') {
+      throw HttpException('Unsupported Transfer-Encoding');
+    }
+    return _Response(statusCode, _decodeSingleChunk(raw));
+  } else {
+    throw HttpException(
+      'No framing header (Content-Length or Transfer-Encoding required)',
+    );
+  }
+}
+
+Uint8List _decodeSingleChunk(Uint8List raw) {
+  // Accepts exactly: <hex-size>\r\n<body>\r\n0\r\n\r\n
+  // Rejects: chunk-extensions, trailers, multi-chunk, body > 1 KiB.
+  final crlf1 = _indexOfCrlf(raw, 0);
+  if (crlf1 == -1) {
+    throw HttpException('Malformed chunk size line');
+  }
+  final sizeLine = latin1.decode(raw.sublist(0, crlf1));
+  if (sizeLine.contains(';')) {
+    throw HttpException('Chunk extensions not supported');
+  }
+  final n = int.tryParse(sizeLine.trim(), radix: 16);
+  if (n == null || n < 0) {
+    throw HttpException('Invalid chunk size');
+  }
+  if (n > _maxBodyBytes) {
+    throw HttpException('Chunk size exceeds 1 KiB cap');
+  }
+  final bodyStart = crlf1 + 2;
+  // Body, then \r\n, then "0\r\n\r\n" — total 5 bytes after the body.
+  if (raw.length < bodyStart + n + 2 + 5) {
+    throw HttpException('Short chunked response');
+  }
+  if (raw[bodyStart + n] != 0x0d || raw[bodyStart + n + 1] != 0x0a) {
+    throw HttpException('Missing chunk terminator');
+  }
+  final term = bodyStart + n + 2;
+  if (raw[term] != 0x30 ||
+      raw[term + 1] != 0x0d ||
+      raw[term + 2] != 0x0a ||
+      raw[term + 3] != 0x0d ||
+      raw[term + 4] != 0x0a) {
+    throw HttpException('Multi-chunk responses or trailers not supported');
+  }
+  return Uint8List.sublistView(raw, bodyStart, bodyStart + n);
+}
+
+int _indexOfCrlf(List<int> bytes, int from) {
+  for (var i = from; i + 1 < bytes.length; i++) {
+    if (bytes[i] == 0x0d && bytes[i + 1] == 0x0a) return i;
+  }
+  return -1;
 }
 
 int _indexOfCrlfCrlf(List<int> bytes) {

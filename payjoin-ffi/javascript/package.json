@@ -13,6 +13,7 @@
         "build": "npm run ubrn:web && npm run compile && npm run copy-wasm",
         "build:test-utils": "cd test-utils && npm install && npx @napi-rs/cli build",
         "clean": "rm -rf rust_modules dist src/generated",
+        "clean:test-utils": "rm -rf test-utils/target test-utils/index.d.ts test-utils/*.node",
         "test": "tsx --test test/unit.test.ts test/integration.test.ts"
     },
     "files": [

@@ -70,7 +70,7 @@ impl AppTrait for App {
             .create_v1_post_request();
         let http = http_agent(&self.config)?;
         let body = String::from_utf8(req.body.clone()).unwrap();
-        println!("Sending fallback request to {}", req.url);
+        println!("Sending Original PSBT to {}", req.url);
         let response = http
             .post(req.url)
             .header("Content-Type", req.content_type)
@@ -81,9 +81,9 @@ impl AppTrait for App {
         let fallback_tx = Psbt::from_str(&body)
             .map_err(|e| anyhow!("Failed to load PSBT from base64: {}", e))?
             .extract_tx()?;
-        println!("Sent fallback transaction txid: {}", fallback_tx.compute_txid());
+        println!("Fallback transaction txid: {}", fallback_tx.compute_txid());
         println!(
-            "Sent fallback transaction hex: {:#}",
+            "Fallback transaction hex: {:#}",
             payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
         );
         let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {

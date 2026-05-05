@@ -47,13 +47,20 @@ Future<OhttpKeys> fetchOhttpKeys({
           );
 
   try {
-    final tunnelSub = await _openConnectTunnel(socket, destAuthority, timeout);
+    final tunnel = await _openConnectTunnel(socket, destAuthority, timeout);
 
     if (destIsHttps) {
+      if (tunnel.leftover.isNotEmpty) {
+        await tunnel.subscription.cancel();
+        throw HttpException(
+          'Relay sent ${tunnel.leftover.length} unexpected bytes after '
+          'CONNECT response, before TLS handshake',
+        );
+      }
       socket =
           await RawSecureSocket.secure(
             socket,
-            subscription: tunnelSub,
+            subscription: tunnel.subscription,
             host: keysUrl.host,
             onBadCertificate: _certChecker(certificate),
           ).timeout(
@@ -67,7 +74,8 @@ Future<OhttpKeys> fetchOhttpKeys({
       socket,
       keysUrl.path,
       keysUrl.host,
-      destIsHttps ? null : tunnelSub,
+      destIsHttps ? null : tunnel.subscription,
+      destIsHttps ? Uint8List(0) : tunnel.leftover,
       timeout,
     );
 
@@ -88,7 +96,13 @@ bool Function(X509Certificate)? _certChecker(Uint8List? der) {
   return (cert) => _bytesEqual(cert.der, der);
 }
 
-Future<StreamSubscription<RawSocketEvent>> _openConnectTunnel(
+class _TunnelResult {
+  final StreamSubscription<RawSocketEvent> subscription;
+  final Uint8List leftover;
+  _TunnelResult(this.subscription, this.leftover);
+}
+
+Future<_TunnelResult> _openConnectTunnel(
   RawSocket socket,
   String authority,
   Duration timeout,
@@ -99,7 +113,8 @@ Future<StreamSubscription<RawSocketEvent>> _openConnectTunnel(
 
   int writePos = 0;
   final buf = <int>[];
-  final done = Completer<String>();
+  // Completes with the index of the CRLFCRLF that ends the response headers.
+  final done = Completer<int>();
   late final StreamSubscription<RawSocketEvent> sub;
 
   sub = socket.listen(
@@ -114,14 +129,19 @@ Future<StreamSubscription<RawSocketEvent>> _openConnectTunnel(
         case RawSocketEvent.read:
           final chunk = socket.read();
           if (chunk != null) buf.addAll(chunk);
+          if (buf.length > _maxResponseBytes) {
+            socket.readEventsEnabled = false;
+            done.completeError(
+              HttpException(
+                'CONNECT response exceeded $_maxResponseBytes bytes',
+              ),
+            );
+            return;
+          }
           final i = _indexOfCrlfCrlf(buf);
           if (i != -1) {
             socket.readEventsEnabled = false;
-            try {
-              done.complete(latin1.decode(buf.sublist(0, i)));
-            } catch (e) {
-              done.completeError(e);
-            }
+            done.complete(i);
           }
         case RawSocketEvent.readClosed:
         case RawSocketEvent.closed:
@@ -136,16 +156,28 @@ Future<StreamSubscription<RawSocketEvent>> _openConnectTunnel(
   socket.writeEventsEnabled = true;
   socket.readEventsEnabled = true;
 
-  final headers = await done.future.timeout(
-    timeout,
-    onTimeout: () => throw HttpException('CONNECT timeout'),
-  );
-  final status = headers.split('\r\n').first;
+  final int headerEnd;
+  try {
+    headerEnd = await done.future.timeout(
+      timeout,
+      onTimeout: () => throw HttpException('CONNECT timeout'),
+    );
+  } catch (_) {
+    await sub.cancel();
+    rethrow;
+  }
+
+  final status = latin1.decode(buf.sublist(0, headerEnd)).split('\r\n').first;
   if (_parseStatusCode(status) != 200) {
     await sub.cancel();
     throw HttpException('CONNECT failed: $status');
   }
-  return sub;
+
+  final leftoverStart = headerEnd + 4;
+  final leftover = leftoverStart < buf.length
+      ? Uint8List.fromList(buf.sublist(leftoverStart))
+      : Uint8List(0);
+  return _TunnelResult(sub, leftover);
 }
 
 int _parseStatusCode(String statusLine) {
@@ -167,6 +199,7 @@ Future<_Response> _sendGet(
   String path,
   String host,
   StreamSubscription<RawSocketEvent>? existingSub,
+  Uint8List initialBuffer,
   Duration timeout,
 ) async {
   final req = Uint8List.fromList(
@@ -180,7 +213,7 @@ Future<_Response> _sendGet(
   );
 
   int writePos = 0;
-  final buf = <int>[];
+  final buf = <int>[...initialBuffer];
   final done = Completer<Uint8List>();
 
   void handler(RawSocketEvent event) {
@@ -194,6 +227,13 @@ Future<_Response> _sendGet(
       case RawSocketEvent.read:
         final chunk = socket.read();
         if (chunk != null) buf.addAll(chunk);
+        if (buf.length > _maxResponseBytes) {
+          socket.readEventsEnabled = false;
+          done.completeError(
+            HttpException('GET response exceeded $_maxResponseBytes bytes'),
+          );
+          return;
+        }
       case RawSocketEvent.readClosed:
       case RawSocketEvent.closed:
         done.complete(Uint8List.fromList(buf));
@@ -229,6 +269,12 @@ Future<_Response> _sendGet(
 }
 
 const _maxBodyBytes = 1024;
+
+// Hard cap on accumulated bytes during the CONNECT and GET reads. Prevents an
+// untrusted relay or directory from forcing unbounded buffer growth before the
+// later body-cap check can fire. Sized well above any plausible legitimate
+// response (headers + a sub-1 KiB OhttpKeys body).
+const _maxResponseBytes = 16 * 1024;
 
 _Response _parseResponse(Uint8List responseBytes) {
   final headerEnd = _indexOfCrlfCrlf(responseBytes);

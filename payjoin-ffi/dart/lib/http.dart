@@ -1,3 +1,19 @@
+// This file hand-rolls an HTTP/1.1 client over RawSocket because dart:io's
+// HttpClient cannot tunnel through an HTTPS proxy. The proxy URL parser
+// rejects the HTTPS scheme outright
+// (https://github.com/dart-lang/sdk/issues/43475).
+//
+// Even where it is accepted, HttpClient does not perform the TLS-in-TLS
+// handshake required to talk through an HTTPS proxy to an HTTPS destination
+// (https://github.com/dart-lang/sdk/issues/43876).
+//
+// This also appears to be unsolved by any dart third-party http library.
+//
+// Thankfully LLMs are undeterred by the insane task of writing an entire
+// HTTP stack from scratch, so here we are. Since this code is pretty much
+// unreviewable by a human, every change to it should be backed by a
+// regression test in test/fetch_ohttp_keys_security_test.dart.
+
 library http;
 
 import 'dart:async';

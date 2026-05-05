@@ -304,7 +304,7 @@ impl ProvisionalProposal {
     /// In some applications the entity that progresses the typestate
     /// is different from the entity that has access to the private keys,
     /// so the PSBT to sign must be accessible to such implementers.
-    pub fn psbt_to_sign(&self) -> Psbt { self.psbt_context.payjoin_psbt.clone() }
+    pub fn psbt_to_sign(&self) -> Psbt { self.psbt_context.psbt_to_sign() }
 }
 
 /// A finalized Payjoin proposal, complete with fees and receiver signatures, that the sender

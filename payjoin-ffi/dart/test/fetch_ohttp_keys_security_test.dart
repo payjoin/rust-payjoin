@@ -111,5 +111,76 @@ void main() {
         await relay.close();
       }
     });
+
+    test('rejects status line with trailing junk after status code', () async {
+      // Without the tightened regex, "HTTP/1.1 2009" would be parsed as 200
+      // and the CONNECT would succeed against this malformed response.
+      final relay = await _startScriptedRelay((client) {
+        client.listen((_) {}, onError: (_) {});
+        client.add(utf8.encode('HTTP/1.1 2009\r\n\r\n'));
+      });
+      try {
+        await expectLater(
+          payjoin_http.fetchOhttpKeys(
+            ohttpRelayUrl: 'http://127.0.0.1:${relay.port}',
+            directoryUrl: 'http://example.invalid/',
+            timeout: const Duration(seconds: 3),
+          ),
+          throwsA(
+            predicate(
+              (e) =>
+                  e is HttpException &&
+                  e.message.contains('Invalid HTTP status line'),
+            ),
+          ),
+        );
+      } finally {
+        await relay.close();
+      }
+    });
+  });
+
+  group('fetchOhttpKeys URL validation', () {
+    test('rejects non-http(s) relay scheme', () async {
+      await expectLater(
+        payjoin_http.fetchOhttpKeys(
+          ohttpRelayUrl: 'file:///tmp/foo',
+          directoryUrl: 'http://example.com/',
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('rejects non-http(s) directory scheme', () async {
+      await expectLater(
+        payjoin_http.fetchOhttpKeys(
+          ohttpRelayUrl: 'http://example.com/',
+          directoryUrl: 'file:///tmp/foo',
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('rejects empty relay host', () async {
+      await expectLater(
+        payjoin_http.fetchOhttpKeys(
+          ohttpRelayUrl: 'http:///pj',
+          directoryUrl: 'http://example.com/',
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('rejects host containing control or unusual characters', () async {
+      // The exact Uri.parse behavior on encoded CR/LF varies, but anything
+      // outside the allowlist (letters/digits/.-_:) must be rejected.
+      await expectLater(
+        payjoin_http.fetchOhttpKeys(
+          ohttpRelayUrl: 'http://exam%0aple.com/',
+          directoryUrl: 'http://example.com/',
+        ),
+        throwsArgumentError,
+      );
+    });
   });
 }

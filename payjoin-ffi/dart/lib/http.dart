@@ -28,7 +28,10 @@ Future<OhttpKeys> fetchOhttpKeys({
   Duration timeout = const Duration(seconds: 10),
 }) async {
   final relayUri = Uri.parse(ohttpRelayUrl);
+  _validateAuthority(relayUri, 'ohttpRelayUrl', ohttpRelayUrl);
   final keysUrl = Uri.parse(directoryUrl).resolve('/.well-known/ohttp-gateway');
+  _validateAuthority(keysUrl, 'directoryUrl', directoryUrl);
+
   final relayIsHttps = relayUri.scheme == 'https';
   final destIsHttps = keysUrl.scheme == 'https';
   final destAuthority = '${keysUrl.host}:${keysUrl.port}';
@@ -94,6 +97,28 @@ Future<OhttpKeys> fetchOhttpKeys({
 bool Function(X509Certificate)? _certChecker(Uint8List? der) {
   if (der == null || der.isEmpty) return null;
   return (cert) => _bytesEqual(cert.der, der);
+}
+
+// Allowlist for Uri.host: ASCII letters/digits, dot, hyphen, underscore, and
+// colon (for IPv6 literals, which Dart returns without surrounding brackets).
+// Defends in depth against header-injection or smuggling via a crafted host
+// that survives Uri.parse.
+final _hostPattern = RegExp(r'^[A-Za-z0-9._\-:]+$');
+
+void _validateAuthority(Uri uri, String paramName, String original) {
+  if (uri.scheme != 'http' && uri.scheme != 'https') {
+    throw ArgumentError.value(
+      original,
+      paramName,
+      'scheme must be http or https',
+    );
+  }
+  if (uri.host.isEmpty || !_hostPattern.hasMatch(uri.host)) {
+    throw ArgumentError.value(original, paramName, 'invalid host');
+  }
+  if (uri.port < 1 || uri.port > 65535) {
+    throw ArgumentError.value(original, paramName, 'invalid port');
+  }
 }
 
 class _TunnelResult {
@@ -181,7 +206,9 @@ Future<_TunnelResult> _openConnectTunnel(
 }
 
 int _parseStatusCode(String statusLine) {
-  final m = RegExp(r'^HTTP/1\.[01] (\d{3})').firstMatch(statusLine);
+  // Anchor on a space or end of line after the status code so a status like
+  // "HTTP/1.1 2009 ..." doesn't get parsed as 200.
+  final m = RegExp(r'^HTTP/1\.[01] (\d{3})(?: |$)').firstMatch(statusLine);
   if (m == null) {
     throw HttpException('Invalid HTTP status line: $statusLine');
   }

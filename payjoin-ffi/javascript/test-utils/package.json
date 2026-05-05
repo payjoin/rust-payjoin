@@ -10,6 +10,6 @@
         "triples": {}
     },
     "devDependencies": {
-        "@napi-rs/cli": "^2.18.0"
+        "@napi-rs/cli": "2.18.0"
     }
 }

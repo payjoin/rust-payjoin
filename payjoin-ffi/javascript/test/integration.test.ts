@@ -1,4 +1,4 @@
-import { payjoin, uniffiInitAsync } from "../dist/index.js";
+import { payjoin, uniffiInitAsync } from "payjoin";
 import * as testUtils from "../test-utils/index.js";
 import assert from "assert";
 

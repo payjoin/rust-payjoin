@@ -5,5 +5,7 @@ rust:
 web:
     features: ["wasm_js"]
     defaultFeatures: false
-    target: nodejs
+    target: web
     manifestPatchFile: wasm-manifest-patch.toml
+    entrypoint: src/web/index.js
+    tsBindings: src/web/generated

@@ -565,7 +565,7 @@ mod test {
     use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, PARSED_ORIGINAL_PSBT, SYMMETRIC};
 
     use super::*;
-    use crate::persist::NoopSessionPersister;
+    use crate::persist::InMemoryPersister;
     use crate::receive::v2::ReceiverBuilder;
     use crate::time::Time;
     use crate::OhttpKeys;
@@ -662,13 +662,13 @@ mod test {
         let pj_uri = ReceiverBuilder::new(address.clone(), directory, ohttp_keys)
             .expect("constructor on test vector should not fail")
             .build()
-            .save(&NoopSessionPersister::default())
+            .save(&InMemoryPersister::default())
             .expect("receiver should succeed")
             .pj_uri();
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_recommended(FeeRate::BROADCAST_MIN)
             .expect("build on test vector should succeed")
-            .save(&NoopSessionPersister::default())
+            .save(&InMemoryPersister::default())
             .expect("sender should succeed");
         // v2 senders may always override the receiver's `pjos` parameter to enable output
         // substitution
@@ -689,7 +689,7 @@ mod test {
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_non_incentivizing(FeeRate::BROADCAST_MIN)
             .expect("build on test vector should succeed")
-            .save(&NoopSessionPersister::default())
+            .save(&InMemoryPersister::default())
             .expect("sender should succeed");
         assert_eq!(
             req_ctx.session_context.psbt_ctx.output_substitution,
@@ -698,7 +698,7 @@ mod test {
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
             .build_with_additional_fee(Amount::ZERO, Some(0), FeeRate::BROADCAST_MIN, false)
             .expect("build on test vector should succeed")
-            .save(&NoopSessionPersister::default())
+            .save(&InMemoryPersister::default())
             .expect("sender should succeed");
         assert_eq!(
             req_ctx.session_context.psbt_ctx.output_substitution,
@@ -709,7 +709,7 @@ mod test {
             .always_disable_output_substitution()
             .build_recommended(FeeRate::BROADCAST_MIN)
             .expect("build on test vector should succeed")
-            .save(&NoopSessionPersister::default())
+            .save(&InMemoryPersister::default())
             .expect("sender should succeed");
         assert_eq!(
             req_ctx.session_context.psbt_ctx.output_substitution,
@@ -719,8 +719,6 @@ mod test {
 
     #[test]
     fn cancel_returns_expected_fallback() -> Result<(), BoxError> {
-        use crate::persist::InMemoryPersister;
-
         let expiration =
             Time::from_now(Duration::from_secs(60)).expect("expiration should be valid");
         let sender = create_sender_context(expiration)?;

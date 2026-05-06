@@ -225,7 +225,7 @@ mod tests {
     use payjoin_test_utils::{BoxError, EXAMPLE_URL};
 
     use super::*;
-    use crate::persist::{InMemoryAsyncPersister, InMemoryPersister, NoopSessionPersister};
+    use crate::persist::{InMemoryAsyncPersister, InMemoryPersister};
     use crate::receive::tests::original_from_test_vector;
     use crate::receive::v2::test::{mock_err, SHARED_CONTEXT};
     use crate::receive::v2::{
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn test_session_event_serialization_roundtrip() {
-        let persister = NoopSessionPersister::<SessionEvent>::default();
+        let persister = InMemoryPersister::<SessionEvent>::default();
 
         let original = original_from_test_vector();
         let unchecked_proposal = unchecked_receiver_from_test_vector();
@@ -490,7 +490,7 @@ mod tests {
 
     #[tokio::test]
     async fn getting_fallback_tx() {
-        let persister = NoopSessionPersister::<SessionEvent>::default();
+        let persister = InMemoryPersister::<SessionEvent>::default();
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
         let original = original_from_test_vector();
@@ -599,7 +599,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_payjoin_proposal() {
-        let persister = NoopSessionPersister::<SessionEvent>::default();
+        let persister = InMemoryPersister::<SessionEvent>::default();
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
 
@@ -675,7 +675,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_fatal_error() {
-        let persister = NoopSessionPersister::<SessionEvent>::default();
+        let persister = InMemoryPersister::<SessionEvent>::default();
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
 
@@ -711,7 +711,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_transient_error() {
-        let persister = NoopSessionPersister::<SessionEvent>::default();
+        let persister = InMemoryPersister::<SessionEvent>::default();
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
 

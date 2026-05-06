@@ -196,7 +196,7 @@ mod integration {
 
         use bitcoin::{Address, Transaction};
         use http::StatusCode;
-        use payjoin::persist::{NoopSessionPersister, OptionalTransitionOutcome};
+        use payjoin::persist::OptionalTransitionOutcome;
         use payjoin::receive::v2::{
             replay_event_log as replay_receiver_event_log, Monitor, PayjoinProposal,
             ReceiveSession, Receiver, ReceiverBuilder, SessionStatus, UncheckedOriginalPayload,
@@ -249,14 +249,14 @@ mod integration {
                 services.wait_for_services_ready().await?;
                 let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")?
                     .assume_checked();
-                let noop_persister = NoopSessionPersister::default();
+                let persister = InMemoryPersister::default();
                 let bad_initializer = ReceiverBuilder::new(
                     mock_address,
                     services.directory_url().as_str(),
                     bad_ohttp_keys,
                 )?
                 .build()
-                .save(&noop_persister)?;
+                .save(&persister)?;
                 let (req, _ctx) =
                     bad_initializer.create_poll_request(services.ohttp_relay_url().as_str())?;
                 agent
@@ -287,8 +287,8 @@ mod integration {
                 let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
                 services.wait_for_services_ready().await?;
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
-                let recv_noop_persister = NoopSessionPersister::default();
-                let send_noop_persister = NoopSessionPersister::default();
+                let recv_persister = InMemoryPersister::default();
+                let send_persister = InMemoryPersister::default();
                 // **********************
                 // Inside the Receiver:
                 let address = receiver.new_address()?;
@@ -297,7 +297,7 @@ mod integration {
                     ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
                         .with_expiration(Duration::from_secs(0))
                         .build()
-                        .save(&recv_noop_persister)?;
+                        .save(&recv_persister)?;
                 match expired_receiver.create_poll_request(services.ohttp_relay_url().as_str()) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
@@ -310,7 +310,7 @@ mod integration {
                 // Test that an expired pj_url errors
                 let expired_req_ctx = SenderBuilder::new(psbt, expired_receiver.pj_uri())
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)?
-                    .save(&send_noop_persister)?;
+                    .save(&send_persister)?;
 
                 match expired_req_ctx.create_v2_post_request(services.ohttp_relay_url().as_str()) {
                     // Internal error types are private, so check against a string
@@ -341,7 +341,7 @@ mod integration {
                 services.wait_for_services_ready().await?;
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let persister = InMemoryPersister::default();
-                let sender_persister = NoopSessionPersister::default();
+                let sender_persister = InMemoryPersister::default();
                 // **********************
                 // Inside the Receiver:
                 let address = receiver.new_address()?;
@@ -992,7 +992,7 @@ mod integration {
                 let agent = services.http_agent();
                 services.wait_for_services_ready().await?;
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
-                let recv_persister = NoopSessionPersister::default();
+                let recv_persister = InMemoryPersister::default();
                 let address = receiver.new_address()?;
                 let session = ReceiverBuilder::new(
                     address,

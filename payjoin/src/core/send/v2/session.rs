@@ -176,7 +176,7 @@ mod tests {
     use super::*;
     use crate::core::Url;
     use crate::output_substitution::OutputSubstitution;
-    use crate::persist::{InMemoryAsyncPersister, InMemoryPersister, NoopSessionPersister};
+    use crate::persist::{InMemoryAsyncPersister, InMemoryPersister};
     use crate::send::v2::{Sender, SenderBuilder, SessionContext, WithReplyKey};
     use crate::send::PsbtContext;
     use crate::time::Time;
@@ -313,7 +313,7 @@ mod tests {
         )
         .build_recommended(FeeRate::BROADCAST_MIN)
         .unwrap()
-        .save(&NoopSessionPersister::default())
+        .save(&InMemoryPersister::default())
         .unwrap();
         let test = SessionHistoryTest {
             events: vec![SessionEvent::Created(Box::new(sender.session_context.clone()))],
@@ -347,7 +347,7 @@ mod tests {
         )
         .build_recommended(FeeRate::BROADCAST_MIN)
         .unwrap()
-        .save(&NoopSessionPersister::default())
+        .save(&InMemoryPersister::default())
         .unwrap();
         sender.session_context.pj_param.expiration =
             Time::from_now(std::time::Duration::from_secs(60)).unwrap();
@@ -383,7 +383,7 @@ mod tests {
         )
         .build_recommended(FeeRate::BROADCAST_MIN)
         .unwrap()
-        .save(&NoopSessionPersister::default())
+        .save(&InMemoryPersister::default())
         .unwrap();
 
         let reply_key = HpkeKeyPair::gen_keypair();

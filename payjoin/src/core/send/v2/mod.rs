@@ -719,7 +719,7 @@ mod test {
 
     #[test]
     fn cancel_returns_expected_fallback() -> Result<(), BoxError> {
-        use crate::persist::test_utils::InMemoryTestPersister;
+        use crate::persist::InMemoryPersister;
 
         let expiration =
             Time::from_now(Duration::from_secs(60)).expect("expiration should be valid");
@@ -728,7 +728,7 @@ mod test {
 
         macro_rules! do_cancel_test {
             ($state:expr) => {{
-                let persister = InMemoryTestPersister::<SessionEvent>::default();
+                let persister = InMemoryPersister::<SessionEvent>::default();
                 let fallback =
                     Sender { state: $state, session_context: sender.session_context.clone() }
                         .cancel()

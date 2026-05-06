@@ -1439,9 +1439,9 @@ pub mod test {
 
     use super::*;
     use crate::output_substitution::OutputSubstitution;
-    use crate::persist::test_utils::InMemoryTestPersister;
     use crate::persist::{
-        NoopSessionPersister, OptionalTransitionOutcome, RejectTransient, Rejection,
+        InMemoryPersister, NoopSessionPersister, OptionalTransitionOutcome, RejectTransient,
+        Rejection,
     };
     use crate::receive::optional_parameters::Params;
     use crate::receive::v2;
@@ -1508,21 +1508,21 @@ pub mod test {
         let original_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("valid tx");
 
         // Nothing was spent, should be in the same state
-        let persister = InMemoryTestPersister::default();
+        let persister = InMemoryPersister::default();
         let res = monitor
             .check_payment(|_| Ok(None))
             .save(&persister)
-            .expect("InMemoryTestPersister shouldn't fail");
+            .expect("InMemoryPersister shouldn't fail");
         assert!(matches!(res, OptionalTransitionOutcome::Stasis(_)));
         assert!(!persister.inner.read().expect("Shouldn't be poisoned").is_closed);
         assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 0);
 
         // Payjoin was broadcasted, should progress to success
-        let persister = InMemoryTestPersister::default();
+        let persister = InMemoryPersister::default();
         let res = monitor
             .check_payment(|_| Ok(Some(payjoin_tx.clone())))
             .save(&persister)
-            .expect("InMemoryTestPersister shouldn't fail");
+            .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
         assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
@@ -1536,7 +1536,7 @@ pub mod test {
         );
 
         // Fallback was broadcasted, should progress to success
-        let persister = InMemoryTestPersister::default();
+        let persister = InMemoryPersister::default();
         let res = monitor
             .check_payment(|txid| {
                 // Emulate if one of the fallback outpoints was double spent
@@ -1547,7 +1547,7 @@ pub mod test {
                 }
             })
             .save(&persister)
-            .expect("InMemoryTestPersister shouldn't fail");
+            .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
         assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
@@ -1573,11 +1573,11 @@ pub mod test {
             session_context: SHARED_CONTEXT.clone(),
         };
 
-        let persister = InMemoryTestPersister::default();
+        let persister = InMemoryPersister::default();
         let res = monitor
             .check_payment(|_| panic!("check_payment should return before this closure is called"))
             .save(&persister)
-            .expect("InMemoryTestPersister shouldn't fail");
+            .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
         assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
@@ -1902,7 +1902,7 @@ pub mod test {
     fn cancel_returns_expected_fallback() {
         macro_rules! do_cancel_test {
             ($state:expr, $expected:expr) => {{
-                let persister = InMemoryTestPersister::<SessionEvent>::default();
+                let persister = InMemoryPersister::<SessionEvent>::default();
                 let fallback = Receiver { state: $state, session_context: SHARED_CONTEXT.clone() }
                     .cancel()
                     .save(&persister)

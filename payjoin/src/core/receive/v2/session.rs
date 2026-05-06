@@ -225,8 +225,7 @@ mod tests {
     use payjoin_test_utils::{BoxError, EXAMPLE_URL};
 
     use super::*;
-    use crate::persist::test_utils::{InMemoryAsyncTestPersister, InMemoryTestPersister};
-    use crate::persist::NoopSessionPersister;
+    use crate::persist::{InMemoryAsyncPersister, InMemoryPersister, NoopSessionPersister};
     use crate::receive::tests::original_from_test_vector;
     use crate::receive::v2::test::{mock_err, SHARED_CONTEXT};
     use crate::receive::v2::{
@@ -342,7 +341,7 @@ mod tests {
     }
 
     fn run_session_history_test(test: &SessionHistoryTest) {
-        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        let persister = InMemoryPersister::<SessionEvent>::default();
         for event in test.events.clone() {
             persister.save_event(event).expect("In memory persister shouldn't fail");
         }
@@ -350,7 +349,7 @@ mod tests {
     }
 
     async fn run_session_history_test_async(test: &SessionHistoryTest) {
-        let persister = InMemoryAsyncTestPersister::<SessionEvent>::default();
+        let persister = InMemoryAsyncPersister::<SessionEvent>::default();
         for event in test.events.clone() {
             persister.save_event(event).await.expect("In memory persister shouldn't fail");
         }
@@ -380,7 +379,7 @@ mod tests {
         let expiration = (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap();
         let session_context = SessionContext { expiration, ..SHARED_CONTEXT.clone() };
 
-        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        let persister = InMemoryPersister::<SessionEvent>::default();
         persister
             .save_event(SessionEvent::Created(session_context.clone()))
             .expect("in memory persister save should not fail");
@@ -389,7 +388,7 @@ mod tests {
             InternalReplayError::Expired(expiration).into();
         assert_eq!(err.to_string(), expected_err.to_string());
 
-        let persister = InMemoryAsyncTestPersister::<SessionEvent>::default();
+        let persister = InMemoryAsyncPersister::<SessionEvent>::default();
         persister
             .save_event(SessionEvent::Created(session_context))
             .await
@@ -402,7 +401,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replaying_session_with_missing_created_event() {
-        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        let persister = InMemoryPersister::<SessionEvent>::default();
         persister
             .save_event(SessionEvent::CheckedBroadcastSuitability())
             .expect("in memory persister save should not fail");
@@ -417,7 +416,7 @@ mod tests {
         assert_eq!(err.to_string(), expected_err.to_string());
         assert!(persister.inner.read().expect("lock should not be poisoned").is_closed);
 
-        let persister = InMemoryAsyncTestPersister::<SessionEvent>::default();
+        let persister = InMemoryAsyncPersister::<SessionEvent>::default();
         persister
             .save_event(SessionEvent::CheckedBroadcastSuitability())
             .await
@@ -526,7 +525,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_contributed_inputs() {
-        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        let persister = InMemoryPersister::<SessionEvent>::default();
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
 

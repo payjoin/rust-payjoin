@@ -176,8 +176,7 @@ mod tests {
     use super::*;
     use crate::core::Url;
     use crate::output_substitution::OutputSubstitution;
-    use crate::persist::test_utils::{InMemoryAsyncTestPersister, InMemoryTestPersister};
-    use crate::persist::NoopSessionPersister;
+    use crate::persist::{InMemoryAsyncPersister, InMemoryPersister, NoopSessionPersister};
     use crate::send::v2::{Sender, SenderBuilder, SessionContext, WithReplyKey};
     use crate::send::PsbtContext;
     use crate::time::Time;
@@ -286,7 +285,7 @@ mod tests {
     }
 
     fn run_session_history_test(test: &SessionHistoryTest) {
-        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        let persister = InMemoryPersister::<SessionEvent>::default();
         for event in test.events.clone() {
             persister.save_event(event).expect("In memory persister shouldn't fail");
         }
@@ -294,7 +293,7 @@ mod tests {
     }
 
     async fn run_session_history_test_async(test: &SessionHistoryTest) {
-        let persister = InMemoryAsyncTestPersister::<SessionEvent>::default();
+        let persister = InMemoryAsyncPersister::<SessionEvent>::default();
         for event in test.events.clone() {
             persister.save_event(event).await.expect("In memory persister shouldn't fail");
         }
@@ -422,7 +421,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replaying_session_with_missing_created_event() {
-        let persister = InMemoryTestPersister::<SessionEvent>::default();
+        let persister = InMemoryPersister::<SessionEvent>::default();
         persister
             .save_event(SessionEvent::PostedOriginalPsbt())
             .expect("in memory persister save should not fail");
@@ -434,7 +433,7 @@ mod tests {
         assert_eq!(err.to_string(), expected_err.to_string());
         assert!(persister.inner.read().expect("lock should not be poisoned").is_closed);
 
-        let persister = InMemoryAsyncTestPersister::<SessionEvent>::default();
+        let persister = InMemoryAsyncPersister::<SessionEvent>::default();
         persister
             .save_event(SessionEvent::PostedOriginalPsbt())
             .await

@@ -205,7 +205,7 @@ mod integration {
         use payjoin::send::ResponseError;
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use payjoin_test_utils::{
-            BoxSendSyncError, InMemoryTestPersister, SessionPersister, TestServices,
+            BoxSendSyncError, InMemoryPersister, SessionPersister, TestServices,
         };
         use reqwest::{Client, Response};
 
@@ -340,7 +340,7 @@ mod integration {
                 let agent = services.http_agent();
                 services.wait_for_services_ready().await?;
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
-                let persister = InMemoryTestPersister::default();
+                let persister = InMemoryPersister::default();
                 let sender_persister = NoopSessionPersister::default();
                 // **********************
                 // Inside the Receiver:
@@ -507,8 +507,8 @@ mod integration {
             let (_bitcoind, sender, receiver) =
                 init_bitcoind_sender_receiver(Some(AddressType::Legacy), Some(AddressType::Legacy))
                     .expect("should be able to initialize the sender and the receiver");
-            let recv_persister = InMemoryTestPersister::default();
-            let send_persister = InMemoryTestPersister::default();
+            let recv_persister = InMemoryPersister::default();
+            let send_persister = InMemoryPersister::default();
 
             let result = tokio::select!(
                 err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
@@ -564,8 +564,8 @@ mod integration {
             let (_bitcoind, sender, receiver) =
                 init_bitcoind_sender_receiver(Some(AddressType::Bech32), Some(AddressType::Bech32))
                     .expect("should be able to initialize the sender and the receiver");
-            let recv_persister = InMemoryTestPersister::default();
-            let send_persister = InMemoryTestPersister::default();
+            let recv_persister = InMemoryPersister::default();
+            let send_persister = InMemoryPersister::default();
 
             let result = tokio::select!(
                 err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
@@ -646,8 +646,8 @@ mod integration {
                 Some(AddressType::Bech32m),
             )
             .expect("should be able to initialize the sender and the receiver");
-            let recv_persister = InMemoryTestPersister::default();
-            let send_persister = InMemoryTestPersister::default();
+            let recv_persister = InMemoryPersister::default();
+            let send_persister = InMemoryPersister::default();
 
             let result = tokio::select!(
                 err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
@@ -719,8 +719,8 @@ mod integration {
             let (_bitcoind, sender, receiver) =
                 init_bitcoind_sender_receiver(Some(AddressType::Bech32), Some(AddressType::Bech32))
                     .expect("should be able to initialize the sender and the receiver");
-            let recv_persister = InMemoryTestPersister::default();
-            let send_persister = InMemoryTestPersister::default();
+            let recv_persister = InMemoryPersister::default();
+            let send_persister = InMemoryPersister::default();
 
             let result = tokio::select!(
                 err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),

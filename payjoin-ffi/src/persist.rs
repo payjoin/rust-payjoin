@@ -14,11 +14,45 @@
 
 use std::sync::Arc;
 
-use payjoin::persist::{InMemoryPersister, SessionPersister};
+use payjoin::persist::{AsyncSessionPersister, InMemoryPersister, SessionPersister};
 
 use crate::error::ForeignError;
-use crate::receive::{JsonReceiverSessionPersister, JsonReceiverSessionPersisterAsync};
-use crate::send::{JsonSenderSessionPersister, JsonSenderSessionPersisterAsync};
+use crate::receive::ReceiverSessionEvent;
+use crate::send::SenderSessionEvent;
+
+/// Session persister that should save and load events as JSON strings.
+#[uniffi::export(with_foreign)]
+pub trait JsonReceiverSessionPersister: Send + Sync {
+    fn save(&self, event: String) -> Result<(), ForeignError>;
+    fn load(&self) -> Result<Vec<String>, ForeignError>;
+    fn close(&self) -> Result<(), ForeignError>;
+}
+
+/// Async session persister that should save and load events as JSON strings.
+#[uniffi::export(with_foreign)]
+#[async_trait::async_trait]
+pub trait JsonReceiverSessionPersisterAsync: Send + Sync {
+    async fn save(&self, event: String) -> Result<(), ForeignError>;
+    async fn load(&self) -> Result<Vec<String>, ForeignError>;
+    async fn close(&self) -> Result<(), ForeignError>;
+}
+
+/// Session persister that should save and load events as JSON strings.
+#[uniffi::export(with_foreign)]
+pub trait JsonSenderSessionPersister: Send + Sync {
+    fn save(&self, event: String) -> Result<(), ForeignError>;
+    fn load(&self) -> Result<Vec<String>, ForeignError>;
+    fn close(&self) -> Result<(), ForeignError>;
+}
+
+/// Async session persister that should save and load events as JSON strings.
+#[uniffi::export(with_foreign)]
+#[async_trait::async_trait]
+pub trait JsonSenderSessionPersisterAsync: Send + Sync {
+    async fn save(&self, event: String) -> Result<(), ForeignError>;
+    async fn load(&self) -> Result<Vec<String>, ForeignError>;
+    async fn close(&self) -> Result<(), ForeignError>;
+}
 
 /// In-memory [`JsonReceiverSessionPersister`] backed by
 /// [`payjoin::persist::InMemoryPersister`].
@@ -151,5 +185,201 @@ impl JsonSenderSessionPersisterAsync for InMemorySenderPersisterAsync {
     async fn close(&self) -> Result<(), ForeignError> {
         self.0.close().expect("InMemoryPersister close is infallible");
         Ok(())
+    }
+}
+
+/// Adapter for the [`JsonReceiverSessionPersister`] trait to use the save and load callbacks.
+pub(crate) struct ReceiverCallbackPersisterAdapter {
+    callback_persister: Arc<dyn JsonReceiverSessionPersister>,
+}
+
+impl ReceiverCallbackPersisterAdapter {
+    pub fn new(callback_persister: Arc<dyn JsonReceiverSessionPersister>) -> Self {
+        Self { callback_persister }
+    }
+}
+
+impl SessionPersister for ReceiverCallbackPersisterAdapter {
+    type SessionEvent = payjoin::receive::v2::SessionEvent;
+    type InternalStorageError = ForeignError;
+
+    fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+        let uni_event: ReceiverSessionEvent = event.into();
+        self.callback_persister
+            .save(uni_event.to_json().map_err(|e| ForeignError::InternalError(e.to_string()))?)
+    }
+
+    fn load(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError> {
+        let res = self.callback_persister.load()?;
+        let events = res
+            .into_iter()
+            .map(|event| {
+                ReceiverSessionEvent::from_json(event)
+                    .map_err(|e| ForeignError::InternalError(e.to_string()))
+                    .map(|e| e.into())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Box::new(events.into_iter()))
+    }
+
+    fn close(&self) -> Result<(), Self::InternalStorageError> { self.callback_persister.close() }
+}
+
+/// Adapter for the [`JsonReceiverSessionPersisterAsync`] trait to use the save and load callbacks.
+pub(crate) struct AsyncReceiverCallbackPersisterAdapter {
+    callback_persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
+}
+
+impl AsyncReceiverCallbackPersisterAdapter {
+    pub fn new(callback_persister: Arc<dyn JsonReceiverSessionPersisterAsync>) -> Self {
+        Self { callback_persister }
+    }
+}
+
+impl AsyncSessionPersister for AsyncReceiverCallbackPersisterAdapter {
+    type SessionEvent = payjoin::receive::v2::SessionEvent;
+    type InternalStorageError = ForeignError;
+
+    fn save_event(
+        &self,
+        event: Self::SessionEvent,
+    ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send {
+        let uni_event: ReceiverSessionEvent = event.into();
+        let persister = self.callback_persister.clone();
+        async move {
+            let json =
+                uni_event.to_json().map_err(|e| ForeignError::InternalError(e.to_string()))?;
+            persister.save(json).await
+        }
+    }
+
+    fn load(
+        &self,
+    ) -> impl std::future::Future<
+        Output = Result<
+            Box<dyn Iterator<Item = Self::SessionEvent> + Send>,
+            Self::InternalStorageError,
+        >,
+    > + Send {
+        let persister = self.callback_persister.clone();
+        async move {
+            let res = persister.load().await?;
+            let events: Vec<_> = res
+                .into_iter()
+                .map(|event| {
+                    ReceiverSessionEvent::from_json(event)
+                        .map_err(|e| ForeignError::InternalError(e.to_string()))
+                        .map(Into::into)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Box::new(events.into_iter()) as Box<dyn Iterator<Item = _> + Send>)
+        }
+    }
+
+    fn close(
+        &self,
+    ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send {
+        let persister = self.callback_persister.clone();
+        async move { persister.close().await }
+    }
+}
+
+/// Adapter for the [`JsonSenderSessionPersister`] trait to use the save and load callbacks.
+pub(crate) struct SenderCallbackPersisterAdapter {
+    callback_persister: Arc<dyn JsonSenderSessionPersister>,
+}
+
+impl SenderCallbackPersisterAdapter {
+    pub fn new(callback_persister: Arc<dyn JsonSenderSessionPersister>) -> Self {
+        Self { callback_persister }
+    }
+}
+
+impl SessionPersister for SenderCallbackPersisterAdapter {
+    type SessionEvent = payjoin::send::v2::SessionEvent;
+    type InternalStorageError = ForeignError;
+
+    fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+        let event: SenderSessionEvent = event.into();
+        self.callback_persister
+            .save(event.to_json().map_err(|e| ForeignError::InternalError(e.to_string()))?)
+    }
+
+    fn load(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError> {
+        let res = self.callback_persister.load()?;
+        let events = res
+            .into_iter()
+            .map(|event| {
+                SenderSessionEvent::from_json(event)
+                    .map_err(|e| ForeignError::InternalError(e.to_string()))
+                    .map(|e| e.into())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Box::new(events.into_iter()))
+    }
+
+    fn close(&self) -> Result<(), Self::InternalStorageError> { self.callback_persister.close() }
+}
+
+/// Adapter for the [`JsonSenderSessionPersisterAsync`] trait to use the save and load callbacks.
+pub(crate) struct AsyncSenderCallbackPersisterAdapter {
+    callback_persister: Arc<dyn JsonSenderSessionPersisterAsync>,
+}
+
+impl AsyncSenderCallbackPersisterAdapter {
+    pub fn new(callback_persister: Arc<dyn JsonSenderSessionPersisterAsync>) -> Self {
+        Self { callback_persister }
+    }
+}
+
+impl AsyncSessionPersister for AsyncSenderCallbackPersisterAdapter {
+    type SessionEvent = payjoin::send::v2::SessionEvent;
+    type InternalStorageError = ForeignError;
+
+    fn save_event(
+        &self,
+        event: Self::SessionEvent,
+    ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send {
+        let uni_event: SenderSessionEvent = event.into();
+        let persister = self.callback_persister.clone();
+        async move {
+            let json =
+                uni_event.to_json().map_err(|e| ForeignError::InternalError(e.to_string()))?;
+            persister.save(json).await
+        }
+    }
+
+    fn load(
+        &self,
+    ) -> impl std::future::Future<
+        Output = Result<
+            Box<dyn Iterator<Item = Self::SessionEvent> + Send>,
+            Self::InternalStorageError,
+        >,
+    > + Send {
+        let persister = self.callback_persister.clone();
+        async move {
+            let res = persister.load().await?;
+            let events: Vec<_> = res
+                .into_iter()
+                .map(|event| {
+                    SenderSessionEvent::from_json(event)
+                        .map_err(|e| ForeignError::InternalError(e.to_string()))
+                        .map(Into::into)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Box::new(events.into_iter()) as Box<dyn Iterator<Item = _> + Send>)
+        }
+    }
+
+    fn close(
+        &self,
+    ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send {
+        let persister = self.callback_persister.clone();
+        async move { persister.close().await }
     }
 }

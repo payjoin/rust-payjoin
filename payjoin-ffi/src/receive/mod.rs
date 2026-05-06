@@ -14,6 +14,10 @@ use payjoin::persist::{MaybeFatalTransition, NextStateTransition};
 use crate::error::ForeignError;
 pub use crate::error::{FfiValidationError, ImplementationError, SerdeJsonError};
 use crate::ohttp::OhttpKeys;
+use crate::persist::{
+    AsyncReceiverCallbackPersisterAdapter, JsonReceiverSessionPersister,
+    JsonReceiverSessionPersisterAsync, ReceiverCallbackPersisterAdapter,
+};
 use crate::receive::error::{ReceiverPersistedError, ReceiverReplayError};
 use crate::uri::error::FeeRateError;
 use crate::validation::{
@@ -33,7 +37,7 @@ macro_rules! impl_save_for_transition {
                 &self,
                 persister: Arc<dyn JsonReceiverSessionPersister>,
             ) -> Result<$next_state, ReceiverPersistedError> {
-                let adapter = CallbackPersisterAdapter::new(persister);
+                let adapter = ReceiverCallbackPersisterAdapter::new(persister);
                 let mut inner = self.0.write().expect("Lock should not be poisoned");
 
                 let value = inner.take().expect("Already saved or moved");
@@ -48,7 +52,7 @@ macro_rules! impl_save_for_transition {
                 &self,
                 persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
             ) -> Result<$next_state, ReceiverPersistedError> {
-                let adapter = AsyncCallbackPersisterAdapter::new(persister);
+                let adapter = AsyncReceiverCallbackPersisterAdapter::new(persister);
                 // Extract value while holding the lock, then drop the guard before await
                 let value = {
                     let mut inner = self.0.write().expect("Lock should not be poisoned");
@@ -89,7 +93,7 @@ impl CancelTransition {
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
     ) -> Result<Option<Vec<u8>>, ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
+        let adapter = ReceiverCallbackPersisterAdapter::new(persister);
         let mut inner = self.transition.write().expect("Lock should not be poisoned");
         let value = inner.take().expect("Already saved or moved");
         let fallback = value
@@ -102,7 +106,7 @@ impl CancelTransition {
         &self,
         persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
     ) -> Result<Option<Vec<u8>>, ReceiverPersistedError> {
-        let adapter = AsyncCallbackPersisterAdapter::new(persister);
+        let adapter = AsyncReceiverCallbackPersisterAdapter::new(persister);
         let value = {
             let mut inner = self.transition.write().expect("Lock should not be poisoned");
             inner.take().expect("Already saved or moved")
@@ -251,7 +255,7 @@ impl ReplayResult {
 pub fn replay_receiver_event_log(
     persister: Arc<dyn JsonReceiverSessionPersister>,
 ) -> Result<ReplayResult, ReceiverReplayError> {
-    let adapter = CallbackPersisterAdapter::new(persister);
+    let adapter = ReceiverCallbackPersisterAdapter::new(persister);
     let (state, session_history) = payjoin::receive::v2::replay_event_log(&adapter)?;
     Ok(ReplayResult { state: state.into(), session_history: session_history.into() })
 }
@@ -260,7 +264,7 @@ pub fn replay_receiver_event_log(
 pub async fn replay_receiver_event_log_async(
     persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
 ) -> Result<ReplayResult, ReceiverReplayError> {
-    let adapter = AsyncCallbackPersisterAdapter::new(persister);
+    let adapter = AsyncReceiverCallbackPersisterAdapter::new(persister);
     let (state, session_history) = payjoin::receive::v2::replay_event_log_async(&adapter).await?;
     Ok(ReplayResult { state: state.into(), session_history: session_history.into() })
 }
@@ -320,7 +324,7 @@ impl InitialReceiveTransition {
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
     ) -> Result<Initialized, ForeignError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
+        let adapter = ReceiverCallbackPersisterAdapter::new(persister);
         let mut inner = self.0.write().expect("Lock should not be poisoned");
 
         let value = inner.take().expect("Already saved or moved");
@@ -333,7 +337,7 @@ impl InitialReceiveTransition {
         &self,
         persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
     ) -> Result<Initialized, ForeignError> {
-        let adapter = AsyncCallbackPersisterAdapter::new(persister);
+        let adapter = AsyncReceiverCallbackPersisterAdapter::new(persister);
         let value = {
             let mut inner = self.0.write().expect("Lock should not be poisoned");
             inner.take().expect("Already saved or moved")
@@ -560,7 +564,7 @@ impl InitializedTransition {
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
     ) -> Result<InitializedTransitionOutcome, ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
+        let adapter = ReceiverCallbackPersisterAdapter::new(persister);
         let mut inner = self.0.write().expect("Lock should not be poisoned");
 
         let value = inner.take().expect("Already saved or moved");
@@ -573,7 +577,7 @@ impl InitializedTransition {
         &self,
         persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
     ) -> Result<InitializedTransitionOutcome, ReceiverPersistedError> {
-        let adapter = AsyncCallbackPersisterAdapter::new(persister);
+        let adapter = AsyncReceiverCallbackPersisterAdapter::new(persister);
         let value = {
             let mut inner = self.0.write().expect("Lock should not be poisoned");
             inner.take().expect("Already saved or moved")
@@ -1310,7 +1314,7 @@ impl HasReplyableErrorTransition {
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
     ) -> Result<(), ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
+        let adapter = ReceiverCallbackPersisterAdapter::new(persister);
         let mut inner = self.0.write().expect("Lock should not be poisoned");
 
         let value = inner.take().expect("Already saved or moved");
@@ -1323,7 +1327,7 @@ impl HasReplyableErrorTransition {
         &self,
         persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
     ) -> Result<(), ReceiverPersistedError> {
-        let adapter = AsyncCallbackPersisterAdapter::new(persister);
+        let adapter = AsyncReceiverCallbackPersisterAdapter::new(persister);
         let value = {
             let mut inner = self.0.write().expect("Lock should not be poisoned");
             inner.take().expect("Already saved or moved")
@@ -1383,7 +1387,7 @@ impl MonitorTransition {
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
     ) -> Result<(), ReceiverPersistedError> {
-        let adapter = CallbackPersisterAdapter::new(persister);
+        let adapter = ReceiverCallbackPersisterAdapter::new(persister);
         let mut inner = self.0.write().expect("Lock should not be poisoned");
 
         let value = inner.take().expect("Already saved or moved");
@@ -1396,7 +1400,7 @@ impl MonitorTransition {
         &self,
         persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
     ) -> Result<(), ReceiverPersistedError> {
-        let adapter = AsyncCallbackPersisterAdapter::new(persister);
+        let adapter = AsyncReceiverCallbackPersisterAdapter::new(persister);
         let value = {
             let mut inner = self.0.write().expect("Lock should not be poisoned");
             inner.take().expect("Already saved or moved")
@@ -1432,120 +1436,5 @@ impl Monitor {
                 .and_then(|buf| buf.map(try_deserialize_tx).transpose())
                 .map_err(|e| ImplementationError::new(e).into())
         })))))
-    }
-}
-
-/// Session persister that should save and load events as JSON strings.
-#[uniffi::export(with_foreign)]
-pub trait JsonReceiverSessionPersister: Send + Sync {
-    fn save(&self, event: String) -> Result<(), ForeignError>;
-    fn load(&self) -> Result<Vec<String>, ForeignError>;
-    fn close(&self) -> Result<(), ForeignError>;
-}
-
-/// Adapter for the [JsonReceiverSessionPersister] trait to use the save and load callbacks.
-struct CallbackPersisterAdapter {
-    callback_persister: Arc<dyn JsonReceiverSessionPersister>,
-}
-
-impl CallbackPersisterAdapter {
-    pub fn new(callback_persister: Arc<dyn JsonReceiverSessionPersister>) -> Self {
-        Self { callback_persister }
-    }
-}
-
-impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
-    type SessionEvent = payjoin::receive::v2::SessionEvent;
-    type InternalStorageError = ForeignError;
-
-    fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
-        let uni_event: ReceiverSessionEvent = event.into();
-        self.callback_persister
-            .save(uni_event.to_json().map_err(|e| ForeignError::InternalError(e.to_string()))?)
-    }
-
-    fn load(
-        &self,
-    ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError> {
-        let res = self.callback_persister.load()?;
-        let events = res
-            .into_iter()
-            .map(|event| {
-                ReceiverSessionEvent::from_json(event)
-                    .map_err(|e| ForeignError::InternalError(e.to_string()))
-                    .map(|e| e.into())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Box::new(events.into_iter()))
-    }
-
-    fn close(&self) -> Result<(), Self::InternalStorageError> { self.callback_persister.close() }
-}
-
-/// Async session persister that should save and load events as JSON strings.
-#[uniffi::export(with_foreign)]
-#[async_trait::async_trait]
-pub trait JsonReceiverSessionPersisterAsync: Send + Sync {
-    async fn save(&self, event: String) -> Result<(), ForeignError>;
-    async fn load(&self) -> Result<Vec<String>, ForeignError>;
-    async fn close(&self) -> Result<(), ForeignError>;
-}
-
-/// Adapter for the [JsonReceiverSessionPersisterAsync] trait to use the save and load callbacks.
-struct AsyncCallbackPersisterAdapter {
-    callback_persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
-}
-
-impl AsyncCallbackPersisterAdapter {
-    pub fn new(callback_persister: Arc<dyn JsonReceiverSessionPersisterAsync>) -> Self {
-        Self { callback_persister }
-    }
-}
-
-impl payjoin::persist::AsyncSessionPersister for AsyncCallbackPersisterAdapter {
-    type SessionEvent = payjoin::receive::v2::SessionEvent;
-    type InternalStorageError = ForeignError;
-
-    fn save_event(
-        &self,
-        event: Self::SessionEvent,
-    ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send {
-        let uni_event: ReceiverSessionEvent = event.into();
-        let persister = self.callback_persister.clone();
-        async move {
-            let json =
-                uni_event.to_json().map_err(|e| ForeignError::InternalError(e.to_string()))?;
-            persister.save(json).await
-        }
-    }
-
-    fn load(
-        &self,
-    ) -> impl std::future::Future<
-        Output = Result<
-            Box<dyn Iterator<Item = Self::SessionEvent> + Send>,
-            Self::InternalStorageError,
-        >,
-    > + Send {
-        let persister = self.callback_persister.clone();
-        async move {
-            let res = persister.load().await?;
-            let events: Vec<_> = res
-                .into_iter()
-                .map(|event| {
-                    ReceiverSessionEvent::from_json(event)
-                        .map_err(|e| ForeignError::InternalError(e.to_string()))
-                        .map(Into::into)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(Box::new(events.into_iter()) as Box<dyn Iterator<Item = _> + Send>)
-        }
-    }
-
-    fn close(
-        &self,
-    ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send {
-        let persister = self.callback_persister.clone();
-        async move { persister.close().await }
     }
 }

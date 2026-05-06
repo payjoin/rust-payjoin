@@ -28,17 +28,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: "Install Rust 1.85.0"
-        uses: dtolnay/rust-toolchain@1.85.0
-
-      - name: Install Dart
-        uses: dart-lang/setup-dart@v1
-        with:
-          sdk: stable
-
-      - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
-
-      - name: "Build and test"
-        run: bash ./contrib/test.sh
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: Build and test
+        run: nix develop --command bash ./contrib/test.sh

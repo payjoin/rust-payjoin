@@ -49,6 +49,9 @@ rpcpassword = "password"
 # Version 2 Configuration
 # [v2]
 # pj_directory = "https://payjo.in"
+# Optional receive session lifetime in seconds (omit for the library default).
+# Must be in 1..=4294967295.
+# session_ttl = 3600
 # ohttp_relays = ["https://pj.benalleng.com", "https://pj.bobspacebkk.com", "https://ohttp.achow101.com", "https://example.com"]
 # # Optional: The HPKE keys which need to be fetched ahead of time from the pj_endpoint
 # # for the payjoin packets to be encrypted.

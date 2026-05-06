@@ -32,6 +32,13 @@ pub trait App: Send + Sync {
     async fn history(&self) -> Result<()>;
     #[cfg(feature = "v2")]
     async fn fallback_sender(&self, session_id: SessionId) -> Result<()>;
+    #[cfg(feature = "v2")]
+    async fn fallback_receiver(&self, session_id: SessionId) -> Result<()>;
+    /// Look up `session_id` in the sender then the receiver table and dispatch
+    /// to [`Self::fallback_sender`] or [`Self::fallback_receiver`] accordingly.
+    /// Errors if the id is not present in either table.
+    #[cfg(feature = "v2")]
+    async fn fallback(&self, session_id: SessionId) -> Result<()>;
 
     fn create_original_psbt(
         &self,

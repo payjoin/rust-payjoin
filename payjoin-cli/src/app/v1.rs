@@ -132,6 +132,16 @@ impl AppTrait for App {
     async fn fallback_sender(&self, _session_id: crate::db::v2::SessionId) -> Result<()> {
         anyhow::bail!("fallback is only supported for v2 (BIP77) sessions")
     }
+
+    #[cfg(feature = "v2")]
+    async fn fallback_receiver(&self, _session_id: crate::db::v2::SessionId) -> Result<()> {
+        anyhow::bail!("fallback is only supported for v2 (BIP77) sessions")
+    }
+
+    #[cfg(feature = "v2")]
+    async fn fallback(&self, _session_id: crate::db::v2::SessionId) -> Result<()> {
+        anyhow::bail!("fallback is only supported for v2 (BIP77) sessions")
+    }
 }
 
 impl App {

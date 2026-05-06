@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
         }
         #[cfg(feature = "v2")]
         Commands::Fallback { session_id } => {
-            app.fallback_sender(SessionId(*session_id)).await?;
+            app.fallback(SessionId(*session_id)).await?;
         }
     };
 

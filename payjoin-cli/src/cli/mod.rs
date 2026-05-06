@@ -134,7 +134,7 @@ pub enum Commands {
     /// Show payjoin session history
     History,
     #[cfg(feature = "v2")]
-    /// Broadcast the original transaction for a sender session (BIP77/v2 only)
+    /// Broadcast the original transaction for a sender or receiver session (BIP77/v2 only)
     Fallback {
         /// The session ID to broadcast the fallback transaction for
         #[arg(required = true)]

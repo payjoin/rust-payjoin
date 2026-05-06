@@ -288,6 +288,26 @@ impl Database {
         }
         Ok(session_ids)
     }
+
+    pub(crate) fn has_send_session(&self, session_id: &SessionId) -> Result<bool> {
+        let conn = self.get_connection()?;
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM send_sessions WHERE session_id = ?1)",
+            params![session_id.0],
+            |row| row.get(0),
+        )?;
+        Ok(exists)
+    }
+
+    pub(crate) fn has_recv_session(&self, session_id: &SessionId) -> Result<bool> {
+        let conn = self.get_connection()?;
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM receive_sessions WHERE session_id = ?1)",
+            params![session_id.0],
+            |row| row.get(0),
+        )?;
+        Ok(exists)
+    }
 }
 
 #[cfg(all(test, feature = "v2"))]

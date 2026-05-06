@@ -352,6 +352,22 @@ impl<S: State> Receiver<S> {
         let fallback = self.state.fallback_tx();
         TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Cancel), fallback)
     }
+
+    /// Close the Payjoin session and record that the fallback transaction was broadcast.
+    ///
+    /// Returns a [`TerminalTransition`] that, once persisted, yields the fallback
+    /// transaction when one is available for the current state. Callers are
+    /// responsible for actually broadcasting the returned transaction; this method
+    /// only updates the persisted session log so the outcome reflects that the
+    /// receiver has fallen back to broadcasting the sender's original transaction.
+    ///
+    /// This is a terminal transition — the session cannot be used after this call.
+    pub fn broadcast_fallback(
+        self,
+    ) -> TerminalTransition<SessionEvent, Option<bitcoin::Transaction>> {
+        let fallback = self.state.fallback_tx();
+        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::FallbackBroadcasted), fallback)
+    }
 }
 
 #[derive(Debug, Clone)]

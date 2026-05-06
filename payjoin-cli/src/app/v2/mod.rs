@@ -9,8 +9,8 @@ use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
     MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
     ProvisionalProposal, ReceiveSession, Receiver, ReceiverBuilder,
-    SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload, WantsFeeRange, WantsInputs,
-    WantsOutputs,
+    SessionEvent as ReceiverSessionEvent, SessionOutcome as ReceiverSessionOutcome,
+    UncheckedOriginalPayload, WantsFeeRange, WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, PollingForProposal, SendSession, Sender,
@@ -508,6 +508,63 @@ impl AppTrait for App {
             tracing::warn!("Failed to close session {session_id} after fallback: {e}");
         }
         Ok(())
+    }
+
+    async fn fallback_receiver(&self, session_id: SessionId) -> Result<()> {
+        let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
+        let (session, history) = replay_receiver_event_log(&persister)?;
+
+        if let ReceiveSession::Closed(outcome) = &session {
+            match outcome {
+                ReceiverSessionOutcome::Success(_)
+                | ReceiverSessionOutcome::PayjoinProposalSent => {
+                    println!(
+                        "Session {session_id} already produced a payjoin proposal. \
+                         Broadcasting the original now would double-spend against it."
+                    );
+                    return Ok(());
+                }
+                ReceiverSessionOutcome::FallbackBroadcasted => {
+                    println!("Session {session_id} already broadcast the fallback transaction.");
+                    return Ok(());
+                }
+                ReceiverSessionOutcome::Failure | ReceiverSessionOutcome::Cancel => {
+                    // Continue to broadcast if a fallback tx is recorded.
+                }
+            }
+        }
+
+        let fallback_tx = history.fallback_tx().ok_or_else(|| {
+            anyhow!(
+                "Session {session_id} has no fallback transaction recorded. \
+                 The sender has not yet posted an Original PSBT to broadcast."
+            )
+        })?;
+        self.wallet().broadcast_tx(&fallback_tx)?;
+        println!("Broadcasted fallback transaction txid: {}", fallback_tx.compute_txid());
+
+        if let Err(e) = persister
+            .save_event(ReceiverSessionEvent::Closed(ReceiverSessionOutcome::FallbackBroadcasted))
+        {
+            tracing::warn!("Failed to record fallback broadcast for session {session_id}: {e}");
+        }
+        if let Err(e) = SessionPersister::close(&persister) {
+            tracing::warn!("Failed to close session {session_id} after fallback: {e}");
+        }
+        Ok(())
+    }
+
+    async fn fallback(&self, session_id: SessionId) -> Result<()> {
+        if self.db.has_send_session(&session_id)? {
+            return self.fallback_sender(session_id).await;
+        }
+        if self.db.has_recv_session(&session_id)? {
+            return self.fallback_receiver(session_id).await;
+        }
+        anyhow::bail!(
+            "No payjoin session with id {session_id} found. Run \
+             `payjoin-cli history` to list known session ids."
+        )
     }
 }
 

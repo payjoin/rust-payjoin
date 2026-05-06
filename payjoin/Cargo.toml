@@ -37,7 +37,6 @@ v2 = ["_core", "hpke", "bhttp", "ohttp", "directory"]
 #[doc = "Functions to fetch OHTTP keys via CONNECT proxy using reqwest. Enables `v2` since only `v2` uses OHTTP."]
 io = ["v2", "reqwest/rustls-tls"]
 _manual-tls = ["rustls"]
-_test-utils = []
 
 [dependencies]
 bhttp = { version = "0.6.1", optional = true }

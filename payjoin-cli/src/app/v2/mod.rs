@@ -166,9 +166,8 @@ impl AppTrait for App {
         match uri.extras.pj_param() {
             #[cfg(feature = "v1")]
             PjParam::V1(pj_param) => {
-                use std::str::FromStr;
-
                 let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
+                let fallback_tx = psbt.clone().extract_tx()?;
                 let (req, ctx) = payjoin::send::v1::SenderBuilder::from_parts(
                     psbt,
                     pj_param,
@@ -181,25 +180,36 @@ impl AppTrait for App {
                 let http = http_agent(&self.config)?;
                 let body = String::from_utf8(req.body.clone()).unwrap();
                 println!("Sending Original PSBT to {}", req.url);
-                let response = http
+                let response = match http
                     .post(req.url)
                     .header("Content-Type", req.content_type)
                     .body(body.clone())
                     .send()
                     .await
-                    .with_context(|| "HTTP request failed")?;
-                let fallback_tx = payjoin::bitcoin::Psbt::from_str(&body)
-                    .map_err(|e| anyhow!("Failed to load PSBT from base64: {}", e))?
-                    .extract_tx()?;
-                println!("Fallback transaction txid: {}", fallback_tx.compute_txid());
-                println!(
-                    "Fallback transaction hex: {:#}",
-                    payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
-                );
-                let psbt = ctx.process_response(&response.bytes().await?).map_err(|e| {
-                    tracing::debug!("Error processing response: {e:?}");
-                    anyhow!("Failed to process response {e}")
-                })?;
+                {
+                    Ok(response) => response,
+                    Err(e) => {
+                        tracing::error!("HTTP request failed: {e}");
+                        println!("Payjoin failed. To broadcast the fallback transaction, run:");
+                        println!(
+                            "  bitcoin-cli -rpcwallet=<wallet> sendrawtransaction {:#}",
+                            payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
+                        );
+                        return Err(anyhow!("HTTP request failed: {e}"));
+                    }
+                };
+                let psbt = match ctx.process_response(&response.bytes().await?) {
+                    Ok(psbt) => psbt,
+                    Err(e) => {
+                        tracing::error!("Error processing response: {e:?}");
+                        println!("Payjoin failed. To broadcast the fallback transaction, run:");
+                        println!(
+                            "  bitcoin-cli -rpcwallet=<wallet> sendrawtransaction {:#}",
+                            payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
+                        );
+                        return Err(anyhow!("Failed to process response {e}"));
+                    }
+                };
 
                 self.process_pj_response(psbt)?;
                 Ok(())
@@ -241,9 +251,21 @@ impl AppTrait for App {
                 };
                 let mut interrupt = self.interrupt.clone();
                 tokio::select! {
-                    res = self.process_sender_session(sender_state, &persister) => return res,
+                    res = self.process_sender_session(sender_state, &persister) => {
+                        match res {
+                            Ok(()) => return Ok(()),
+                            Err(err) => {
+                                let id = persister.session_id();
+                                println!("Session {id} failed. Run `payjoin-cli fallback {id}` to broadcast the original transaction.");
+                                return Err(err);
+                            }
+                        }
+                    },
                     _ = interrupt.changed() => {
-                        println!("Interrupted. Call `send` with the same arguments to resume this session or `resume` to resume all sessions.");
+                        let id = persister.session_id();
+                        println!(
+                            "Session {id} interrupted. Call `send` again to resume, `resume` to resume all sessions, or `payjoin-cli fallback {id}` to broadcast the original transaction."
+                        );
                         return Err(anyhow!("Interrupted"))
                     }
                 }
@@ -461,6 +483,32 @@ impl AppTrait for App {
 
         Ok(())
     }
+
+    async fn fallback_sender(&self, session_id: SessionId) -> Result<()> {
+        let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
+        let (session, history) = replay_sender_event_log(&persister)?;
+
+        if let SendSession::Closed(SenderSessionOutcome::Success(proposal)) = session {
+            let txid = proposal.clone().extract_tx_unchecked_fee_rate().compute_txid();
+            println!(
+                "Session {session_id} already produced payjoin transaction {txid}. \
+                 Broadcasting the original now would double-spend against it. \
+                 If the payjoin tx needs re-broadcast, run \
+                 `bitcoin-cli gettransaction {txid}` to fetch the hex, then \
+                 `bitcoin-cli sendrawtransaction <hex>`."
+            );
+            return Ok(());
+        }
+
+        let fallback_tx = history.fallback_tx();
+        self.wallet().broadcast_tx(&fallback_tx)?;
+        println!("Broadcasted fallback transaction txid: {}", fallback_tx.compute_txid());
+
+        if let Err(e) = SessionPersister::close(&persister) {
+            tracing::warn!("Failed to close session {session_id} after fallback: {e}");
+        }
+        Ok(())
+    }
 }
 
 impl App {
@@ -489,7 +537,14 @@ impl App {
                 self.process_pj_response(proposal)?;
                 return Ok(());
             }
-            _ => return Err(anyhow!("Unexpected sender state")),
+            SendSession::Closed(SenderSessionOutcome::Failure)
+            | SendSession::Closed(SenderSessionOutcome::Cancel) => {
+                let id = persister.session_id();
+                println!(
+                    "Session {id} ended without payjoin. Run `payjoin-cli fallback {id}` to broadcast the original transaction."
+                );
+                return Ok(());
+            }
         }
         Ok(())
     }

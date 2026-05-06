@@ -1,13 +1,15 @@
 #[cfg(feature = "_manual-tls")]
 mod e2e {
     use std::process::{ExitStatus, Stdio};
+    use std::str::FromStr;
 
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
+    use payjoin::bitcoin::Txid;
     use payjoin_test_utils::{init_bitcoind_sender_receiver, BoxError};
     use tempfile::tempdir;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::process::Command;
+    use tokio::process::{Child, Command};
 
     async fn terminate(mut child: tokio::process::Child) -> tokio::io::Result<ExitStatus> {
         let pid = child.id().expect("Failed to get child PID");
@@ -62,6 +64,20 @@ mod e2e {
         }
 
         res
+    }
+
+    async fn send_until_request_timeout(mut cli_sender: Child) -> Result<(), BoxError> {
+        let mut stdout = cli_sender.stdout.take().expect("failed to take stdout of child process");
+        let timeout = tokio::time::Duration::from_secs(35);
+        let res = tokio::time::timeout(
+            timeout,
+            wait_for_stdout_match(&mut stdout, |line| line.contains("No response yet.")),
+        )
+        .await?;
+
+        terminate(cli_sender).await.expect("Failed to kill payjoin-cli initial sender");
+        assert!(res.is_some(), "Fallback send was not detected");
+        Ok(())
     }
 
     #[cfg(feature = "v1")]
@@ -201,7 +217,6 @@ mod e2e {
     async fn send_receive_payjoin_v2() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use payjoin_test_utils::{init_tracing, TestServices};
         use tempfile::TempDir;
-        use tokio::process::Child;
 
         type Result<T> = std::result::Result<T, BoxError>;
 
@@ -382,21 +397,6 @@ mod e2e {
                 .spawn()
                 .expect("Failed to execute payjoin-cli");
             check_resume_has_no_sessions(cli_send_resumer).await?;
-            Ok(())
-        }
-
-        async fn send_until_request_timeout(mut cli_sender: Child) -> Result<()> {
-            let mut stdout =
-                cli_sender.stdout.take().expect("failed to take stdout of child process");
-            let timeout = tokio::time::Duration::from_secs(35);
-            let res = tokio::time::timeout(
-                timeout,
-                wait_for_stdout_match(&mut stdout, |line| line.contains("No response yet.")),
-            )
-            .await?;
-
-            terminate(cli_sender).await.expect("Failed to kill payjoin-cli initial sender");
-            assert!(res.is_some(), "Fallback send was not detected");
             Ok(())
         }
 
@@ -615,6 +615,144 @@ mod e2e {
             terminate(cli_send_v2).await.expect("Failed to kill payjoin-cli v2 sender");
 
             assert!(payjoin_sent, "Expected payjoin completion or fallback transaction");
+
+            Ok(())
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "v2")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn sender_fallback_v2() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use payjoin_test_utils::{init_tracing, TestServices};
+        use tempfile::TempDir;
+
+        type Result<T> = std::result::Result<T, BoxError>;
+
+        init_tracing();
+        let mut services = TestServices::initialize().await?;
+        let temp_dir = tempdir()?;
+
+        let result = tokio::select! {
+            res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {res:?}").into()),
+            res = services.take_directory_handle() => Err(format!("Directory server is long running: {res:?}").into()),
+            res = fallback_cli_async(&services, &temp_dir) => res,
+        };
+
+        assert!(result.is_ok(), "sender_fallback_v2 failed: {:#?}", result.unwrap_err());
+
+        async fn fallback_cli_async(services: &TestServices, temp_dir: &TempDir) -> Result<()> {
+            let sender_db_path = temp_dir.path().join("sender_db");
+            let (bitcoind, sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
+            let cert_path = &temp_dir.path().join("localhost.der");
+            tokio::fs::write(cert_path, services.cert()).await?;
+            services.wait_for_services_ready().await?;
+            let ohttp_keys = services.fetch_ohttp_keys().await?;
+            let ohttp_keys_path = temp_dir.path().join("ohttp_keys");
+            tokio::fs::write(&ohttp_keys_path, ohttp_keys.encode()?).await?;
+
+            let receiver_db_path = temp_dir.path().join("receiver_db");
+            let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
+            let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
+            let cookie_file = &bitcoind.params.cookie_file;
+            let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
+            let directory = &services.directory_url();
+            let ohttp_relay = &services.ohttp_relay_url();
+
+            // Get a BIP21 from a receiver then kill it so the sender can never complete payjoin
+            let cli_receiver = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relay)
+                .arg("receive")
+                .arg(RECEIVE_SATS)
+                .arg("--pj-directory")
+                .arg(directory)
+                .arg("--ohttp-keys")
+                .arg(&ohttp_keys_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli receiver");
+            let bip21 = get_bip21_from_receiver(cli_receiver).await;
+
+            // Start sender and capture the session-id from the hint line, then interrupt
+            let cli_sender = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&sender_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&sender_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relay)
+                .arg("send")
+                .arg(&bip21)
+                .arg("--fee-rate")
+                .arg("1")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli sender");
+
+            send_until_request_timeout(cli_sender).await?;
+
+            // There is only one sender session in progress.
+            let session_id = 1i64;
+            // Ensure the fallback was not broadcast yet
+            let mempool_size =
+                sender.get_mempool_info().expect("should be able to get mempool").unbroadcast_count;
+            assert_eq!(mempool_size, 0, "fallback should not be in mempool");
+
+            // Run `payjoin-cli fallback <session-id>` and assert broadcast
+            let mut cli_fallback = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&sender_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&sender_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relay)
+                .arg("fallback")
+                .arg(session_id.to_string())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli fallback");
+
+            let mut fallback_stdout =
+                cli_fallback.stdout.take().expect("failed to take stdout of fallback");
+            let timeout = tokio::time::Duration::from_secs(10);
+            let broadcast_line = tokio::time::timeout(
+                timeout,
+                wait_for_stdout_match(&mut fallback_stdout, |l| {
+                    l.contains("Broadcasted fallback transaction txid")
+                }),
+            )
+            .await?;
+
+            terminate(cli_fallback).await.expect("Failed to kill payjoin-cli fallback");
+            let subcommand_output = broadcast_line.expect("fallback should broadcast");
+            let fallback_txid = subcommand_output.split_whitespace().nth(4).unwrap_or("");
+            let fallback_txid = Txid::from_str(fallback_txid).expect("valid txid");
+
+            assert!(
+                sender.get_raw_transaction(fallback_txid).is_ok(),
+                "fallback tx should be in the mempool"
+            );
 
             Ok(())
         }

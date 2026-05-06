@@ -133,6 +133,13 @@ pub enum Commands {
     #[cfg(feature = "v2")]
     /// Show payjoin session history
     History,
+    #[cfg(feature = "v2")]
+    /// Broadcast the original transaction for a sender session (BIP77/v2 only)
+    Fallback {
+        /// The session ID to broadcast the fallback transaction for
+        #[arg(required = true)]
+        session_id: i64,
+    },
 }
 
 pub fn parse_amount_in_sat(s: &str) -> Result<Amount, ParseAmountError> {

@@ -14,53 +14,6 @@ late test_utils.BitcoindInstance bitcoind;
 late test_utils.RpcClient receiver;
 late test_utils.RpcClient sender;
 
-class InMemoryReceiverPersister
-    implements payjoin.JsonReceiverSessionPersister {
-  final String id;
-  final List<String> events = [];
-  bool closed = false;
-
-  InMemoryReceiverPersister(this.id);
-
-  @override
-  void save(String event) {
-    events.add(event);
-  }
-
-  @override
-  List<String> load() {
-    return events;
-  }
-
-  @override
-  void close() {
-    closed = true;
-  }
-}
-
-class InMemorySenderPersister implements payjoin.JsonSenderSessionPersister {
-  final String id;
-  final List<String> events = [];
-  bool closed = false;
-
-  InMemorySenderPersister(this.id);
-
-  @override
-  void save(String event) {
-    events.add(event);
-  }
-
-  @override
-  List<String> load() {
-    return events;
-  }
-
-  @override
-  void close() {
-    closed = true;
-  }
-}
-
 class MempoolAcceptanceCallback implements payjoin.CanBroadcast {
   final payjoin.RpcClient connection;
 
@@ -172,7 +125,7 @@ payjoin.Initialized create_receiver_context(
   String address,
   String directory,
   payjoin.OhttpKeys ohttp_keys,
-  InMemoryReceiverPersister persister,
+  payjoin.JsonReceiverSessionPersister persister,
 ) {
   var receiver = payjoin.ReceiverBuilder(
     address: address,
@@ -247,7 +200,7 @@ List<payjoin.InputPair> get_inputs(payjoin.RpcClient rpc_connection) {
 
 Future<payjoin.PayjoinProposalReceiveSession> process_provisional_proposal(
   payjoin.ProvisionalProposal proposal,
-  InMemoryReceiverPersister recv_persister,
+  payjoin.JsonReceiverSessionPersister recv_persister,
 ) async {
   final payjoin_proposal = proposal
       .finalizeProposal(processPsbt: ProcessPsbtCallback(receiver))
@@ -257,7 +210,7 @@ Future<payjoin.PayjoinProposalReceiveSession> process_provisional_proposal(
 
 Future<payjoin.PayjoinProposalReceiveSession> process_wants_fee_range(
   payjoin.WantsFeeRange proposal,
-  InMemoryReceiverPersister recv_persister,
+  payjoin.JsonReceiverSessionPersister recv_persister,
 ) async {
   final wants_fee_range = proposal
       .applyFeeRange(minFeeRateSatPerVb: 1, maxEffectiveFeeRateSatPerVb: 10)
@@ -267,7 +220,7 @@ Future<payjoin.PayjoinProposalReceiveSession> process_wants_fee_range(
 
 Future<payjoin.PayjoinProposalReceiveSession> process_wants_inputs(
   payjoin.WantsInputs proposal,
-  InMemoryReceiverPersister recv_persister,
+  payjoin.JsonReceiverSessionPersister recv_persister,
 ) async {
   final provisional_proposal = proposal
       .contributeInputs(replacementInputs: get_inputs(receiver))
@@ -278,7 +231,7 @@ Future<payjoin.PayjoinProposalReceiveSession> process_wants_inputs(
 
 Future<payjoin.PayjoinProposalReceiveSession> process_wants_outputs(
   payjoin.WantsOutputs proposal,
-  InMemoryReceiverPersister recv_persister,
+  payjoin.JsonReceiverSessionPersister recv_persister,
 ) async {
   final wants_inputs = proposal.commitOutputs().save(persister: recv_persister);
   return await process_wants_inputs(wants_inputs, recv_persister);
@@ -286,7 +239,7 @@ Future<payjoin.PayjoinProposalReceiveSession> process_wants_outputs(
 
 Future<payjoin.PayjoinProposalReceiveSession> process_outputs_unknown(
   payjoin.OutputsUnknown proposal,
-  InMemoryReceiverPersister recv_persister,
+  payjoin.JsonReceiverSessionPersister recv_persister,
 ) async {
   final wants_outputs = proposal
       .identifyReceiverOutputs(
@@ -298,7 +251,7 @@ Future<payjoin.PayjoinProposalReceiveSession> process_outputs_unknown(
 
 Future<payjoin.PayjoinProposalReceiveSession> process_maybe_inputs_seen(
   payjoin.MaybeInputsSeen proposal,
-  InMemoryReceiverPersister recv_persister,
+  payjoin.JsonReceiverSessionPersister recv_persister,
 ) async {
   final outputs_unknown = proposal
       .checkNoInputsSeenBefore(isKnown: CheckInputsNotSeenCallback(receiver))
@@ -308,7 +261,7 @@ Future<payjoin.PayjoinProposalReceiveSession> process_maybe_inputs_seen(
 
 Future<payjoin.PayjoinProposalReceiveSession> process_maybe_inputs_owned(
   payjoin.MaybeInputsOwned proposal,
-  InMemoryReceiverPersister recv_persister,
+  payjoin.JsonReceiverSessionPersister recv_persister,
 ) async {
   final maybe_inputs_owned = proposal
       .checkInputsNotOwned(isOwned: IsScriptOwnedCallback(receiver))
@@ -318,7 +271,7 @@ Future<payjoin.PayjoinProposalReceiveSession> process_maybe_inputs_owned(
 
 Future<payjoin.PayjoinProposalReceiveSession> process_unchecked_proposal(
   payjoin.UncheckedOriginalPayload proposal,
-  InMemoryReceiverPersister recv_persister,
+  payjoin.JsonReceiverSessionPersister recv_persister,
 ) async {
   final unchecked_proposal = proposal
       .checkBroadcastSuitability(
@@ -331,7 +284,7 @@ Future<payjoin.PayjoinProposalReceiveSession> process_unchecked_proposal(
 
 Future<payjoin.ReceiveSession?> retrieve_receiver_proposal(
   payjoin.Initialized receiver,
-  InMemoryReceiverPersister recv_persister,
+  payjoin.JsonReceiverSessionPersister recv_persister,
   String ohttp_relay,
 ) async {
   var agent = http.Client();
@@ -357,7 +310,7 @@ Future<payjoin.ReceiveSession?> retrieve_receiver_proposal(
 
 Future<payjoin.ReceiveSession?> process_receiver_proposal(
   payjoin.ReceiveSession receiver,
-  InMemoryReceiverPersister recv_persister,
+  payjoin.JsonReceiverSessionPersister recv_persister,
   String ohttp_relay,
 ) async {
   if (receiver is payjoin.InitializedReceiveSession) {
@@ -493,7 +446,7 @@ void main() {
       services.waitForServicesReady();
       final directory = services.directoryUrl();
       final ohttpKeys = services.fetchOhttpKeys();
-      final recvPersister = InMemoryReceiverPersister("prim");
+      final recvPersister = payjoin.InMemoryReceiverPersister().asPersister();
       final pjUri = payjoin.ReceiverBuilder(
         address: receiverAddress,
         directory: directory,
@@ -535,8 +488,8 @@ void main() {
 
       // **********************
       // Inside the Receiver:
-      var recv_persister = InMemoryReceiverPersister("1");
-      var sender_persister = InMemorySenderPersister("1");
+      var recv_persister = payjoin.InMemoryReceiverPersister().asPersister();
+      var sender_persister = payjoin.InMemorySenderPersister().asPersister();
       var session = create_receiver_context(
         receiver_address,
         directory,

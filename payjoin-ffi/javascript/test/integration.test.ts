@@ -9,53 +9,6 @@ interface Utxo {
     scriptPubKey: string;
 }
 
-class InMemoryReceiverPersister
-    implements payjoin.JsonReceiverSessionPersister
-{
-    private id: string;
-    private events: string[] = [];
-    private closed: boolean = false;
-    public connection?: testUtils.RpcClient;
-
-    constructor(id: string) {
-        this.id = id;
-    }
-
-    save(event: string): void {
-        this.events.push(event);
-    }
-
-    load(): string[] {
-        return this.events;
-    }
-
-    close(): void {
-        this.closed = true;
-    }
-}
-
-class InMemorySenderPersister implements payjoin.JsonSenderSessionPersister {
-    private id: string;
-    private events: string[] = [];
-    private closed: boolean = false;
-
-    constructor(id: string) {
-        this.id = id;
-    }
-
-    save(event: string): void {
-        this.events.push(event);
-    }
-
-    load(): string[] {
-        return this.events;
-    }
-
-    close(): void {
-        this.closed = true;
-    }
-}
-
 class MempoolAcceptanceCallback implements payjoin.CanBroadcast {
     private connection: testUtils.RpcClient;
 
@@ -174,7 +127,7 @@ function createReceiverContext(
     address: string,
     directory: string,
     ohttpKeys: payjoin.OhttpKeys,
-    persister: InMemoryReceiverPersister,
+    persister: payjoin.JsonReceiverSessionPersister,
 ): payjoin.Initialized {
     const receiver = new payjoin.ReceiverBuilder(address, directory, ohttpKeys)
         .build()
@@ -240,7 +193,7 @@ function getInputs(rpcConnection: testUtils.RpcClient): payjoin.InputPair[] {
 async function processProvisionalProposal(
     proposal: payjoin.ProvisionalProposal,
     receiver: testUtils.RpcClient,
-    recvPersister: InMemoryReceiverPersister,
+    recvPersister: payjoin.JsonReceiverSessionPersister,
 ): Promise<payjoin.PayjoinProposal> {
     const payjoinProposal = proposal
         .finalizeProposal(new ProcessPsbtCallback(receiver))
@@ -251,7 +204,7 @@ async function processProvisionalProposal(
 async function processWantsFeeRange(
     proposal: payjoin.WantsFeeRange,
     receiver: testUtils.RpcClient,
-    recvPersister: InMemoryReceiverPersister,
+    recvPersister: payjoin.JsonReceiverSessionPersister,
 ): Promise<payjoin.PayjoinProposal> {
     const wantsFeeRange = proposal.applyFeeRange(1n, 10n).save(recvPersister);
     return await processProvisionalProposal(
@@ -264,7 +217,7 @@ async function processWantsFeeRange(
 async function processWantsInputs(
     proposal: payjoin.WantsInputs,
     receiver: testUtils.RpcClient,
-    recvPersister: InMemoryReceiverPersister,
+    recvPersister: payjoin.JsonReceiverSessionPersister,
 ): Promise<payjoin.PayjoinProposal> {
     const provisionalProposal = proposal
         .contributeInputs(getInputs(receiver))
@@ -280,7 +233,7 @@ async function processWantsInputs(
 async function processWantsOutputs(
     proposal: payjoin.WantsOutputs,
     receiver: testUtils.RpcClient,
-    recvPersister: InMemoryReceiverPersister,
+    recvPersister: payjoin.JsonReceiverSessionPersister,
 ): Promise<payjoin.PayjoinProposal> {
     const wantsInputs = proposal.commitOutputs().save(recvPersister);
     return await processWantsInputs(wantsInputs, receiver, recvPersister);
@@ -289,7 +242,7 @@ async function processWantsOutputs(
 async function processOutputsUnknown(
     proposal: payjoin.OutputsUnknown,
     receiver: testUtils.RpcClient,
-    recvPersister: InMemoryReceiverPersister,
+    recvPersister: payjoin.JsonReceiverSessionPersister,
 ): Promise<payjoin.PayjoinProposal> {
     const wantsOutputs = proposal
         .identifyReceiverOutputs(new IsScriptOwnedCallback(receiver))
@@ -300,7 +253,7 @@ async function processOutputsUnknown(
 async function processMaybeInputsSeen(
     proposal: payjoin.MaybeInputsSeen,
     receiver: testUtils.RpcClient,
-    recvPersister: InMemoryReceiverPersister,
+    recvPersister: payjoin.JsonReceiverSessionPersister,
 ): Promise<payjoin.PayjoinProposal> {
     const outputsUnknown = proposal
         .checkNoInputsSeenBefore(new CheckInputsNotSeenCallback(receiver))
@@ -311,7 +264,7 @@ async function processMaybeInputsSeen(
 async function processMaybeInputsOwned(
     proposal: payjoin.MaybeInputsOwned,
     receiver: testUtils.RpcClient,
-    recvPersister: InMemoryReceiverPersister,
+    recvPersister: payjoin.JsonReceiverSessionPersister,
 ): Promise<payjoin.PayjoinProposal> {
     const maybeInputsOwned = proposal
         .checkInputsNotOwned(new IsScriptOwnedCallback(receiver))
@@ -326,7 +279,7 @@ async function processMaybeInputsOwned(
 async function processUncheckedProposal(
     proposal: payjoin.UncheckedOriginalPayload,
     receiver: testUtils.RpcClient,
-    recvPersister: InMemoryReceiverPersister,
+    recvPersister: payjoin.JsonReceiverSessionPersister,
 ): Promise<payjoin.PayjoinProposal> {
     const uncheckedProposal = proposal
         .checkBroadcastSuitability(
@@ -343,7 +296,7 @@ async function processUncheckedProposal(
 
 async function retrieveReceiverProposal(
     receiver: payjoin.Initialized,
-    recvPersister: InMemoryReceiverPersister,
+    recvPersister: payjoin.JsonReceiverSessionPersister,
     ohttpRelay: string,
 ): Promise<payjoin.PayjoinProposal | null> {
     const request = receiver.createPollRequest(ohttpRelay);
@@ -384,7 +337,7 @@ async function processReceiverProposal(
         | payjoin.ProvisionalProposal
         | payjoin.PayjoinProposal,
     receiverRpc: testUtils.RpcClient,
-    recvPersister: InMemoryReceiverPersister,
+    recvPersister: payjoin.JsonReceiverSessionPersister,
     ohttpRelay: string,
 ): Promise<payjoin.PayjoinProposal | null> {
     if (receiver instanceof payjoin.Initialized) {
@@ -566,8 +519,8 @@ async function testIntegrationV2ToV2(): Promise<void> {
     const ohttpKeysBytes = services.fetchOhttpKeys();
     const ohttpKeys = payjoin.OhttpKeys.decode(ohttpKeysBytes.buffer);
 
-    const recvPersister = new InMemoryReceiverPersister("1");
-    const senderPersister = new InMemorySenderPersister("1");
+    const recvPersister = new payjoin.InMemoryReceiverPersister().asPersister();
+    const senderPersister = new payjoin.InMemorySenderPersister().asPersister();
     recvPersister.connection = receiver;
 
     const session = createReceiverContext(

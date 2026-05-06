@@ -42,88 +42,6 @@ public class UriTests
     }
 }
 
-public class InMemoryReceiverPersister : JsonReceiverSessionPersister
-{
-    private List<string> _events = new();
-
-    public void Save(string @event)
-    {
-        _events.Add(@event);
-    }
-
-    public string[] Load()
-    {
-        return _events.ToArray();
-    }
-
-    public void Close()
-    {
-        // no-op for tests
-    }
-}
-
-public class InMemorySenderPersister : JsonSenderSessionPersister
-{
-    private List<string> _events = new();
-
-    public void Save(string @event)
-    {
-        _events.Add(@event);
-    }
-
-    public string[] Load()
-    {
-        return _events.ToArray();
-    }
-
-    public void Close()
-    {
-        // no-op for tests
-    }
-}
-
-public class InMemoryReceiverPersisterAsync : JsonReceiverSessionPersisterAsync
-{
-    private readonly List<string> _events = new();
-
-    public Task Save(string @event)
-    {
-        _events.Add(@event);
-        return Task.CompletedTask;
-    }
-
-    public Task<string[]> Load()
-    {
-        return Task.FromResult(_events.ToArray());
-    }
-
-    public Task Close()
-    {
-        return Task.CompletedTask;
-    }
-}
-
-public class InMemorySenderPersisterAsync : JsonSenderSessionPersisterAsync
-{
-    private readonly List<string> _events = new();
-
-    public Task Save(string @event)
-    {
-        _events.Add(@event);
-        return Task.CompletedTask;
-    }
-
-    public Task<string[]> Load()
-    {
-        return Task.FromResult(_events.ToArray());
-    }
-
-    public Task Close()
-    {
-        return Task.CompletedTask;
-    }
-}
-
 public class PersistenceTests
 {
     private static readonly byte[] OhttpKeysData = new byte[]
@@ -141,7 +59,7 @@ public class PersistenceTests
     [Fact]
     public void ReceiverPersistence()
     {
-        var persister = new InMemoryReceiverPersister();
+        var persister = new InMemoryReceiverPersister().AsPersister();
         var address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
         var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
 
@@ -158,7 +76,7 @@ public class PersistenceTests
     [Fact]
     public void SenderPersistence()
     {
-        var receiverPersister = new InMemoryReceiverPersister();
+        var receiverPersister = new InMemoryReceiverPersister().AsPersister();
         var address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
         var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
 
@@ -167,7 +85,7 @@ public class PersistenceTests
             .Save(receiverPersister);
         var uri = receiver.PjUri();
 
-        var senderPersister = new InMemorySenderPersister();
+        var senderPersister = new InMemorySenderPersister().AsPersister();
         var psbt = PayjoinMethods.OriginalPsbt();
         
         var withReplyKey = new SenderBuilder(psbt, uri)
@@ -183,7 +101,7 @@ public class PersistenceTests
     [Fact]
     public async Task ReceiverPersistenceAsync()
     {
-        var persister = new InMemoryReceiverPersisterAsync();
+        var persister = new InMemoryReceiverPersisterAsync().AsPersister();
         var address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
         var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
 
@@ -200,7 +118,7 @@ public class PersistenceTests
     [Fact]
     public async Task SenderPersistenceAsync()
     {
-        var receiverPersister = new InMemoryReceiverPersisterAsync();
+        var receiverPersister = new InMemoryReceiverPersisterAsync().AsPersister();
         var address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
         var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
 
@@ -209,7 +127,7 @@ public class PersistenceTests
             .SaveAsync(receiverPersister);
         var uri = receiver.PjUri();
 
-        var senderPersister = new InMemorySenderPersisterAsync();
+        var senderPersister = new InMemorySenderPersisterAsync().AsPersister();
         var psbt = PayjoinMethods.OriginalPsbt();
 
         var withReplyKey = await new SenderBuilder(psbt, uri)
@@ -240,7 +158,7 @@ public class CancelTests
     [Fact]
     public void ReceiverCancelFromInitialized()
     {
-        var persister = new InMemoryReceiverPersister();
+        var persister = new InMemoryReceiverPersister().AsPersister();
         var address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
         var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
 
@@ -259,7 +177,7 @@ public class CancelTests
     [Fact]
     public async Task ReceiverCancelFromInitializedAsync()
     {
-        var persister = new InMemoryReceiverPersisterAsync();
+        var persister = new InMemoryReceiverPersisterAsync().AsPersister();
         var address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
         var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
 
@@ -278,7 +196,7 @@ public class CancelTests
     [Fact]
     public void SenderCancelFromWithReplyKey()
     {
-        var receiverPersister = new InMemoryReceiverPersister();
+        var receiverPersister = new InMemoryReceiverPersister().AsPersister();
         var address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
         var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
 
@@ -287,7 +205,7 @@ public class CancelTests
             .Save(receiverPersister);
         var uri = receiver.PjUri();
 
-        var senderPersister = new InMemorySenderPersister();
+        var senderPersister = new InMemorySenderPersister().AsPersister();
         var psbt = PayjoinMethods.OriginalPsbt();
         var withReplyKey = new SenderBuilder(psbt, uri)
             .BuildRecommended(1000)
@@ -305,7 +223,7 @@ public class CancelTests
     [Fact]
     public async Task SenderCancelFromWithReplyKeyAsync()
     {
-        var receiverPersister = new InMemoryReceiverPersisterAsync();
+        var receiverPersister = new InMemoryReceiverPersisterAsync().AsPersister();
         var address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
         var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
 
@@ -314,7 +232,7 @@ public class CancelTests
             .SaveAsync(receiverPersister);
         var uri = receiver.PjUri();
 
-        var senderPersister = new InMemorySenderPersisterAsync();
+        var senderPersister = new InMemorySenderPersisterAsync().AsPersister();
         var psbt = PayjoinMethods.OriginalPsbt();
         var withReplyKey = await new SenderBuilder(psbt, uri)
             .BuildRecommended(1000)
@@ -347,7 +265,7 @@ public class ValidationTests
     private static PjUri CreateV2PjUri()
     {
         var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
-        var persister = new InMemoryReceiverPersister();
+        var persister = new InMemoryReceiverPersister().AsPersister();
         using var builder = new ReceiverBuilder("2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK", "https://example.com", ohttpKeys);
         using var transition = builder.Build();
         using var receiver = transition.Save(persister);

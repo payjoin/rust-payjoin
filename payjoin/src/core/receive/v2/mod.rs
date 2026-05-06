@@ -1439,9 +1439,8 @@ pub mod test {
 
     use super::*;
     use crate::output_substitution::OutputSubstitution;
-    use crate::persist::test_utils::InMemoryTestPersister;
     use crate::persist::{
-        NoopSessionPersister, OptionalTransitionOutcome, RejectTransient, Rejection,
+        InMemoryPersister, OptionalTransitionOutcome, RejectTransient, Rejection,
     };
     use crate::receive::optional_parameters::Params;
     use crate::receive::v2;
@@ -1479,7 +1478,7 @@ pub mod test {
     }
 
     pub(crate) fn mock_err() -> JsonReply {
-        let noop_persister = NoopSessionPersister::default();
+        let persister = InMemoryPersister::default();
         let receiver = Receiver {
             state: unchecked_proposal_v2_from_test_vector(),
             session_context: SHARED_CONTEXT.clone(),
@@ -1487,7 +1486,7 @@ pub mod test {
         let error = receiver
             .clone()
             .check_broadcast_suitability(None, |_| Err("mock error".into()))
-            .save(&noop_persister)
+            .save(&persister)
             .expect_err("Server error should be populated with mock error");
         let res = error.api_error().expect("check_broadcast error should propagate to api error");
         JsonReply::from(&res)
@@ -1508,21 +1507,21 @@ pub mod test {
         let original_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("valid tx");
 
         // Nothing was spent, should be in the same state
-        let persister = InMemoryTestPersister::default();
+        let persister = InMemoryPersister::default();
         let res = monitor
             .check_payment(|_| Ok(None))
             .save(&persister)
-            .expect("InMemoryTestPersister shouldn't fail");
+            .expect("InMemoryPersister shouldn't fail");
         assert!(matches!(res, OptionalTransitionOutcome::Stasis(_)));
         assert!(!persister.inner.read().expect("Shouldn't be poisoned").is_closed);
         assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 0);
 
         // Payjoin was broadcasted, should progress to success
-        let persister = InMemoryTestPersister::default();
+        let persister = InMemoryPersister::default();
         let res = monitor
             .check_payment(|_| Ok(Some(payjoin_tx.clone())))
             .save(&persister)
-            .expect("InMemoryTestPersister shouldn't fail");
+            .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
         assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
@@ -1536,7 +1535,7 @@ pub mod test {
         );
 
         // Fallback was broadcasted, should progress to success
-        let persister = InMemoryTestPersister::default();
+        let persister = InMemoryPersister::default();
         let res = monitor
             .check_payment(|txid| {
                 // Emulate if one of the fallback outpoints was double spent
@@ -1547,7 +1546,7 @@ pub mod test {
                 }
             })
             .save(&persister)
-            .expect("InMemoryTestPersister shouldn't fail");
+            .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
         assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
@@ -1573,11 +1572,11 @@ pub mod test {
             session_context: SHARED_CONTEXT.clone(),
         };
 
-        let persister = InMemoryTestPersister::default();
+        let persister = InMemoryPersister::default();
         let res = monitor
             .check_payment(|_| panic!("check_payment should return before this closure is called"))
             .save(&persister)
-            .expect("InMemoryTestPersister shouldn't fail");
+            .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
         assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
@@ -1592,7 +1591,7 @@ pub mod test {
 
     #[test]
     fn test_v2_mutable_receiver_state_closures() {
-        let persister = NoopSessionPersister::default();
+        let persister = InMemoryPersister::default();
         let mut call_count = 0;
         let maybe_inputs_owned = maybe_inputs_owned_v2_from_test_vector();
         let receiver =
@@ -1609,10 +1608,10 @@ pub mod test {
 
         let outputs_unknown = maybe_inputs_seen
             .save(&persister)
-            .expect("Noop persister shouldn't fail")
+            .expect("Persister shouldn't fail")
             .check_no_inputs_seen_before(&mut |_| mock_callback(&mut call_count, false))
             .save(&persister)
-            .expect("Noop persister shouldn't fail");
+            .expect("Persister shouldn't fail");
         assert_eq!(call_count, 2);
 
         let _wants_outputs = outputs_unknown
@@ -1647,7 +1646,7 @@ pub mod test {
 
     #[test]
     fn test_unchecked_proposal_fatal_error() -> Result<(), BoxError> {
-        let persister = NoopSessionPersister::default();
+        let persister = InMemoryPersister::default();
         let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
         let receiver =
             v2::Receiver { state: unchecked_proposal, session_context: SHARED_CONTEXT.clone() };
@@ -1664,7 +1663,7 @@ pub mod test {
 
     #[test]
     fn test_maybe_inputs_seen_transient_error() -> Result<(), BoxError> {
-        let persister = NoopSessionPersister::default();
+        let persister = InMemoryPersister::default();
         let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
         let receiver =
             v2::Receiver { state: unchecked_proposal, session_context: SHARED_CONTEXT.clone() };
@@ -1672,7 +1671,7 @@ pub mod test {
         let maybe_inputs_owned = receiver
             .assume_interactive_receiver()
             .save(&persister)
-            .expect("Noop persister shouldn't fail");
+            .expect("Persister shouldn't fail");
         let maybe_inputs_seen = maybe_inputs_owned.check_inputs_not_owned(&mut |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
@@ -1692,7 +1691,7 @@ pub mod test {
 
     #[test]
     fn test_outputs_unknown_transient_error() -> Result<(), BoxError> {
-        let persister = NoopSessionPersister::default();
+        let persister = InMemoryPersister::default();
         let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
         let receiver =
             v2::Receiver { state: unchecked_proposal, session_context: SHARED_CONTEXT.clone() };
@@ -1700,11 +1699,11 @@ pub mod test {
         let maybe_inputs_owned = receiver
             .assume_interactive_receiver()
             .save(&persister)
-            .expect("Noop persister shouldn't fail");
+            .expect("Persister shouldn't fail");
         let maybe_inputs_seen = maybe_inputs_owned
             .check_inputs_not_owned(&mut |_| Ok(false))
             .save(&persister)
-            .expect("Noop persister shouldn't fail");
+            .expect("Persister shouldn't fail");
         let outputs_unknown = maybe_inputs_seen.check_no_inputs_seen_before(&mut |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
@@ -1723,7 +1722,7 @@ pub mod test {
 
     #[test]
     fn test_wants_outputs_transient_error() -> Result<(), BoxError> {
-        let persister = NoopSessionPersister::default();
+        let persister = InMemoryPersister::default();
         let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
         let receiver =
             v2::Receiver { state: unchecked_proposal, session_context: SHARED_CONTEXT.clone() };
@@ -1731,15 +1730,15 @@ pub mod test {
         let maybe_inputs_owned = receiver
             .assume_interactive_receiver()
             .save(&persister)
-            .expect("Noop persister shouldn't fail");
+            .expect("Persister shouldn't fail");
         let maybe_inputs_seen = maybe_inputs_owned
             .check_inputs_not_owned(&mut |_| Ok(false))
             .save(&persister)
-            .expect("Noop persister should not fail");
+            .expect("Persister should not fail");
         let outputs_unknown = maybe_inputs_seen
             .check_no_inputs_seen_before(&mut |_| Ok(false))
             .save(&persister)
-            .expect("Noop persister should not fail");
+            .expect("Persister should not fail");
         let wants_outputs = outputs_unknown.identify_receiver_outputs(&mut |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
@@ -1799,7 +1798,7 @@ pub mod test {
 
     #[test]
     fn default_max_fee_rate() {
-        let noop_persister = NoopSessionPersister::default();
+        let persister = InMemoryPersister::default();
         let receiver = ReceiverBuilder::new(
             SHARED_CONTEXT.address.clone(),
             SHARED_CONTEXT.directory.as_str(),
@@ -1807,8 +1806,8 @@ pub mod test {
         )
         .expect("constructor on test vector should not fail")
         .build()
-        .save(&noop_persister)
-        .expect("Noop persister shouldn't fail");
+        .save(&persister)
+        .expect("Persister shouldn't fail");
 
         assert_eq!(receiver.session_context.max_fee_rate, FeeRate::BROADCAST_MIN);
 
@@ -1822,14 +1821,14 @@ pub mod test {
         .expect("constructor on test vector should not fail")
         .with_max_fee_rate(non_default_max_fee_rate)
         .build()
-        .save(&noop_persister)
-        .expect("Noop persister shouldn't fail");
+        .save(&persister)
+        .expect("Persister shouldn't fail");
         assert_eq!(receiver.session_context.max_fee_rate, non_default_max_fee_rate);
     }
 
     #[test]
     fn default_expiration() {
-        let noop_persister = NoopSessionPersister::default();
+        let persister = InMemoryPersister::default();
 
         let with_default_expiration = ReceiverBuilder::new(
             SHARED_CONTEXT.address.clone(),
@@ -1838,8 +1837,8 @@ pub mod test {
         )
         .expect("constructor on test vector should not fail")
         .build()
-        .save(&noop_persister)
-        .expect("Noop persister shouldn't fail");
+        .save(&persister)
+        .expect("Persister shouldn't fail");
 
         let short_expiration = Duration::from_secs(60);
         let with_short_expiration = ReceiverBuilder::new(
@@ -1850,8 +1849,8 @@ pub mod test {
         .expect("constructor on test vector should not fail")
         .with_expiration(short_expiration)
         .build()
-        .save(&noop_persister)
-        .expect("Noop persister shouldn't fail");
+        .save(&persister)
+        .expect("Persister shouldn't fail");
 
         assert_ne!(
             with_short_expiration.session_context.expiration,
@@ -1902,7 +1901,7 @@ pub mod test {
     fn cancel_returns_expected_fallback() {
         macro_rules! do_cancel_test {
             ($state:expr, $expected:expr) => {{
-                let persister = InMemoryTestPersister::<SessionEvent>::default();
+                let persister = InMemoryPersister::<SessionEvent>::default();
                 let fallback = Receiver { state: $state, session_context: SHARED_CONTEXT.clone() }
                     .cancel()
                     .save(&persister)

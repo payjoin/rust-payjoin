@@ -808,137 +808,104 @@ pub trait AsyncSessionPersister: Send + Sync {
     ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send;
 }
 
-/// A persister that does nothing
-/// This persister cannot be used to replay a session
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct NoopPersisterEvent;
-
-#[derive(Debug, Clone)]
-pub struct NoopSessionPersister<E = NoopPersisterEvent>(std::marker::PhantomData<E>);
-
-impl<E> Default for NoopSessionPersister<E> {
-    fn default() -> Self { Self(std::marker::PhantomData) }
+/// In-memory session persister for replaying sessions and introspecting events.
+#[derive(Clone)]
+pub struct InMemoryPersister<V> {
+    pub(crate) inner: std::sync::Arc<std::sync::RwLock<InnerStorage<V>>>,
 }
 
-impl<E: 'static> SessionPersister for NoopSessionPersister<E> {
-    type InternalStorageError = std::convert::Infallible;
-    type SessionEvent = E;
+impl<V> Default for InMemoryPersister<V> {
+    fn default() -> Self {
+        Self { inner: std::sync::Arc::new(std::sync::RwLock::new(InnerStorage::default())) }
+    }
+}
 
-    fn save_event(&self, _event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+#[derive(Clone)]
+pub(crate) struct InnerStorage<V> {
+    pub(crate) events: std::sync::Arc<Vec<V>>,
+    pub(crate) is_closed: bool,
+}
+
+impl<V> Default for InnerStorage<V> {
+    fn default() -> Self { Self { events: std::sync::Arc::new(vec![]), is_closed: false } }
+}
+
+impl<V> SessionPersister for InMemoryPersister<V>
+where
+    V: Clone + 'static,
+{
+    type InternalStorageError = std::convert::Infallible;
+    type SessionEvent = V;
+
+    fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+        let mut inner = self.inner.write().expect("Lock should not be poisoned");
+        std::sync::Arc::make_mut(&mut inner.events).push(event);
         Ok(())
     }
 
     fn load(
         &self,
     ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError> {
-        Ok(Box::new(std::iter::empty()))
+        let inner = self.inner.read().expect("Lock should not be poisoned");
+        let events = std::sync::Arc::clone(&inner.events);
+        Ok(Box::new(
+            std::sync::Arc::try_unwrap(events).unwrap_or_else(|arc| (*arc).clone()).into_iter(),
+        ))
     }
 
-    fn close(&self) -> Result<(), Self::InternalStorageError> { Ok(()) }
+    fn close(&self) -> Result<(), Self::InternalStorageError> {
+        let mut inner = self.inner.write().expect("Lock should not be poisoned");
+        inner.is_closed = true;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "_test-utils")]
-pub mod test_utils {
-    use std::sync::{Arc, RwLock};
+#[cfg(test)]
+#[derive(Clone)]
+/// Async in-memory session persister for replaying async sessions and introspecting events.
+pub struct InMemoryAsyncPersister<V> {
+    pub(crate) inner: std::sync::Arc<tokio::sync::RwLock<InnerStorage<V>>>,
+}
 
-    use crate::persist::SessionPersister;
+#[cfg(test)]
+impl<V> Default for InMemoryAsyncPersister<V> {
+    fn default() -> Self {
+        Self { inner: std::sync::Arc::new(tokio::sync::RwLock::new(InnerStorage::default())) }
+    }
+}
 
-    #[derive(Clone)]
-    /// In-memory session persister for testing session replays and introspecting session events
-    pub struct InMemoryTestPersister<V> {
-        pub(crate) inner: Arc<RwLock<InnerStorage<V>>>,
+#[cfg(test)]
+impl<V> AsyncSessionPersister for InMemoryAsyncPersister<V>
+where
+    V: Clone + Send + Sync + 'static,
+{
+    type InternalStorageError = std::convert::Infallible;
+    type SessionEvent = V;
+
+    async fn save_event(
+        &self,
+        event: Self::SessionEvent,
+    ) -> Result<(), Self::InternalStorageError> {
+        let mut inner = self.inner.write().await;
+        std::sync::Arc::make_mut(&mut inner.events).push(event);
+        Ok(())
     }
 
-    impl<V> Default for InMemoryTestPersister<V> {
-        fn default() -> Self { Self { inner: Arc::new(RwLock::new(InnerStorage::default())) } }
-    }
-
-    #[derive(Clone)]
-    pub(crate) struct InnerStorage<V> {
-        pub(crate) events: std::sync::Arc<Vec<V>>,
-        pub(crate) is_closed: bool,
-    }
-
-    impl<V> Default for InnerStorage<V> {
-        fn default() -> Self { Self { events: std::sync::Arc::new(vec![]), is_closed: false } }
-    }
-
-    impl<V> SessionPersister for InMemoryTestPersister<V>
-    where
-        V: Clone + 'static,
+    async fn load(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent> + Send>, Self::InternalStorageError>
     {
-        type InternalStorageError = std::convert::Infallible;
-        type SessionEvent = V;
-
-        fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
-            let mut inner = self.inner.write().expect("Lock should not be poisoned");
-            std::sync::Arc::make_mut(&mut inner.events).push(event);
-            Ok(())
-        }
-
-        fn load(
-            &self,
-        ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError>
-        {
-            let inner = self.inner.read().expect("Lock should not be poisoned");
-            let events = std::sync::Arc::clone(&inner.events);
-            Ok(Box::new(
-                std::sync::Arc::try_unwrap(events).unwrap_or_else(|arc| (*arc).clone()).into_iter(),
-            ))
-        }
-
-        fn close(&self) -> Result<(), Self::InternalStorageError> {
-            let mut inner = self.inner.write().expect("Lock should not be poisoned");
-            inner.is_closed = true;
-            Ok(())
-        }
+        let inner = self.inner.read().await;
+        let events = std::sync::Arc::clone(&inner.events);
+        Ok(Box::new(
+            std::sync::Arc::try_unwrap(events).unwrap_or_else(|arc| (*arc).clone()).into_iter(),
+        ))
     }
 
-    #[cfg(test)]
-    #[derive(Clone)]
-    /// Async in-memory session persister for testing async session replays and introspecting session events
-    pub struct InMemoryAsyncTestPersister<V> {
-        pub(crate) inner: Arc<tokio::sync::RwLock<InnerStorage<V>>>,
-    }
-
-    #[cfg(test)]
-    impl<V> Default for InMemoryAsyncTestPersister<V> {
-        fn default() -> Self {
-            Self { inner: Arc::new(tokio::sync::RwLock::new(InnerStorage::default())) }
-        }
-    }
-
-    #[cfg(test)]
-    impl<V> crate::persist::AsyncSessionPersister for InMemoryAsyncTestPersister<V>
-    where
-        V: Clone + Send + Sync + 'static,
-    {
-        type InternalStorageError = std::convert::Infallible;
-        type SessionEvent = V;
-
-        async fn save_event(
-            &self,
-            event: Self::SessionEvent,
-        ) -> Result<(), Self::InternalStorageError> {
-            let mut inner = self.inner.write().await;
-            Arc::make_mut(&mut inner.events).push(event);
-            Ok(())
-        }
-
-        async fn load(
-            &self,
-        ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent> + Send>, Self::InternalStorageError>
-        {
-            let inner = self.inner.read().await;
-            let events = Arc::clone(&inner.events);
-            Ok(Box::new(Arc::try_unwrap(events).unwrap_or_else(|arc| (*arc).clone()).into_iter()))
-        }
-
-        async fn close(&self) -> Result<(), Self::InternalStorageError> {
-            let mut inner = self.inner.write().await;
-            inner.is_closed = true;
-            Ok(())
-        }
+    async fn close(&self) -> Result<(), Self::InternalStorageError> {
+        let mut inner = self.inner.write().await;
+        inner.is_closed = true;
+        Ok(())
     }
 }
 
@@ -947,7 +914,6 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
-    use crate::persist::test_utils::{InMemoryAsyncTestPersister, InMemoryTestPersister};
 
     type InMemoryTestState = String;
 
@@ -983,7 +949,7 @@ mod tests {
     }
 
     fn verify_sync<SuccessState: std::fmt::Debug + PartialEq, ErrorState: std::error::Error>(
-        persister: &InMemoryTestPersister<InMemoryTestEvent>,
+        persister: &InMemoryPersister<InMemoryTestEvent>,
         result: Result<SuccessState, ErrorState>,
         expected_result: &ExpectedResult<SuccessState, ErrorState>,
     ) {
@@ -1015,7 +981,7 @@ mod tests {
         SuccessState: std::fmt::Debug + PartialEq + Send,
         ErrorState: std::error::Error + Send,
     >(
-        persister: &InMemoryAsyncTestPersister<InMemoryTestEvent>,
+        persister: &InMemoryAsyncPersister<InMemoryTestEvent>,
         result: Result<SuccessState, ErrorState>,
         expected_result: &ExpectedResult<SuccessState, ErrorState>,
     ) {
@@ -1043,11 +1009,11 @@ mod tests {
     macro_rules! run_test_cases {
         ($test_cases:expr) => {
             for test in &$test_cases {
-                let persister = InMemoryTestPersister::default();
+                let persister = InMemoryPersister::default();
                 let result = (test.make_transition)().save(&persister);
                 verify_sync(&persister, result, &test.expected_result);
 
-                let persister = InMemoryAsyncTestPersister::default();
+                let persister = InMemoryAsyncPersister::default();
                 let result = (test.make_transition)().save_async(&persister).await;
                 verify_async(&persister, result, &test.expected_result).await;
             }

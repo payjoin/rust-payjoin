@@ -11,7 +11,7 @@ pub mod test_utils;
 pub mod uri;
 mod validation;
 
-pub use payjoin::persist::NoopSessionPersister;
+pub use payjoin::persist::InMemoryPersister;
 
 pub use crate::ohttp::*;
 pub use crate::output_substitution::*;

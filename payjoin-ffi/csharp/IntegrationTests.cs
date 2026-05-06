@@ -11,25 +11,6 @@ namespace Payjoin.Tests
         private TestServices? _services;
         private HttpClient? _httpClient;
 
-        private sealed class InMemoryReceiverPersister : JsonReceiverSessionPersister
-        {
-            private readonly List<string> _events = new();
-            public RpcClient? Connection { get; set; }
-
-            public void Save(string @event) => _events.Add(@event);
-            public string[] Load() => _events.ToArray();
-            public void Close() { }
-        }
-
-        private sealed class InMemorySenderPersister : JsonSenderSessionPersister
-        {
-            private readonly List<string> _events = new();
-
-            public void Save(string @event) => _events.Add(@event);
-            public string[] Load() => _events.ToArray();
-            public void Close() { }
-        }
-
         private sealed class MempoolAcceptanceCallback : CanBroadcast
         {
             private readonly RpcClient _connection;
@@ -185,7 +166,7 @@ namespace Payjoin.Tests
         private async Task<PayjoinProposal?> RetrieveReceiverProposal(
             Initialized receiver,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister,
+            JsonReceiverSessionPersister recvPersister,
             string ohttpRelay,
             CancellationToken cancellationToken)
         {
@@ -220,7 +201,7 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessUncheckedProposal(
             UncheckedOriginalPayload proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            JsonReceiverSessionPersister recvPersister)
         {
             using var checkedTransition = proposal.CheckBroadcastSuitability(null, new MempoolAcceptanceCallback(receiverRpc));
             using var maybeInputsOwned = checkedTransition.Save(recvPersister);
@@ -231,7 +212,7 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessMaybeInputsOwned(
             MaybeInputsOwned proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            JsonReceiverSessionPersister recvPersister)
         {
             using var transition = proposal.CheckInputsNotOwned(new IsScriptOwnedCallback(receiverRpc));
             using var maybeInputsSeen = transition.Save(recvPersister);
@@ -242,7 +223,7 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessMaybeInputsSeen(
             MaybeInputsSeen proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            JsonReceiverSessionPersister recvPersister)
         {
             using var transition = proposal.CheckNoInputsSeenBefore(new CheckInputsNotSeenCallback());
             using var outputsUnknown = transition.Save(recvPersister);
@@ -253,7 +234,7 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessOutputsUnknown(
             OutputsUnknown proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            JsonReceiverSessionPersister recvPersister)
         {
             using var transition = proposal.IdentifyReceiverOutputs(new IsScriptOwnedCallback(receiverRpc));
             using var wantsOutputs = transition.Save(recvPersister);
@@ -264,7 +245,7 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessWantsOutputs(
             WantsOutputs proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            JsonReceiverSessionPersister recvPersister)
         {
             using var transition = proposal.CommitOutputs();
             using var wantsInputs = transition.Save(recvPersister);
@@ -275,7 +256,7 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessWantsInputs(
             WantsInputs proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            JsonReceiverSessionPersister recvPersister)
         {
             using var contributed = proposal.ContributeInputs(GetInputs(receiverRpc));
             using var transition = contributed.CommitInputs();
@@ -287,7 +268,7 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessWantsFeeRange(
             WantsFeeRange proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            JsonReceiverSessionPersister recvPersister)
         {
             using var transition = proposal.ApplyFeeRange(1, 10);
             using var provisional = transition.Save(recvPersister);
@@ -298,7 +279,7 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessProvisionalProposal(
             ProvisionalProposal proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            JsonReceiverSessionPersister recvPersister)
         {
             using var transition = proposal.FinalizeProposal(new ProcessPsbtCallback(receiverRpc));
             var payjoinProposal = transition.Save(recvPersister);
@@ -437,7 +418,7 @@ namespace Payjoin.Tests
             _services.WaitForServicesReady();
             var ohttpKeys = _services.FetchOhttpKeys();
 
-            var recvPersister = new InMemoryReceiverPersister();
+            var recvPersister = new InMemoryReceiverPersister().AsPersister();
             using var receiverBuilder = new ReceiverBuilder("2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK", directory, ohttpKeys);
             using var receiveTransition = receiverBuilder.Build();
             using var receiver = receiveTransition.Save(recvPersister);
@@ -477,8 +458,8 @@ namespace Payjoin.Tests
 
             var ohttpKeys = _services.FetchOhttpKeys();
 
-            var recvPersister = new InMemoryReceiverPersister { Connection = receiver };
-            var senderPersister = new InMemorySenderPersister();
+            var recvPersister = new InMemoryReceiverPersister().AsPersister();
+            var senderPersister = new InMemorySenderPersister().AsPersister();
 
             using var receiverBuilder = new ReceiverBuilder(receiverAddress, directory, ohttpKeys);
             using var receiveTransition = receiverBuilder.Build();

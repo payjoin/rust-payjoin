@@ -808,35 +808,6 @@ pub trait AsyncSessionPersister: Send + Sync {
     ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send;
 }
 
-/// A persister that does nothing
-/// This persister cannot be used to replay a session
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct NoopPersisterEvent;
-
-#[derive(Debug, Clone)]
-pub struct NoopSessionPersister<E = NoopPersisterEvent>(std::marker::PhantomData<E>);
-
-impl<E> Default for NoopSessionPersister<E> {
-    fn default() -> Self { Self(std::marker::PhantomData) }
-}
-
-impl<E: 'static> SessionPersister for NoopSessionPersister<E> {
-    type InternalStorageError = std::convert::Infallible;
-    type SessionEvent = E;
-
-    fn save_event(&self, _event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
-        Ok(())
-    }
-
-    fn load(
-        &self,
-    ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError> {
-        Ok(Box::new(std::iter::empty()))
-    }
-
-    fn close(&self) -> Result<(), Self::InternalStorageError> { Ok(()) }
-}
-
 /// In-memory session persister for replaying sessions and introspecting events.
 #[derive(Clone)]
 pub struct InMemoryPersister<V> {

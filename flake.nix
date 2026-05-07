@@ -3,6 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -37,6 +38,7 @@
     {
       self,
       nixpkgs,
+      nixpkgs-unstable,
       flake-utils,
       rust-overlay,
       crane,
@@ -57,6 +59,7 @@
           overlays = [
             rust-overlay.overlays.default
             (final: prev: {
+              dart = nixpkgs-unstable.legacyPackages.${system}.dart;
               rustToolchains = {
                 msrv = prev.rust-bin.stable.${msrv-version}.default;
                 stable = prev.rust-bin.stable.latest.default;

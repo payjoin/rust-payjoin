@@ -19,32 +19,13 @@ jobs:
   build-python-and-test:
     name: "Build and test python"
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: payjoin-ffi/python
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - name: "Checkout"
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: "Install Rust 1.85.0"
-        uses: dtolnay/rust-toolchain@1.85.0
-
-      - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-
-      - name: Install a specific version of uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          version: "0.8.2"
-          enable-cache: true
-
-      - name: "Build and test"
-        run: bash ./contrib/test.sh
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: Build and test
+        run: nix develop .#python --command bash ./payjoin-ffi/python/contrib/test.sh

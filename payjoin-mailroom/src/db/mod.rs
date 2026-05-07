@@ -256,6 +256,7 @@ impl<D: Db> Db for MetricsDb<D> {
         mailbox_id: &ShortId,
         data: Vec<u8>,
     ) -> Result<Option<()>, Error<Self::OperationalError>> {
+        self.metrics.record_short_id(mailbox_id);
         let result = self.inner.post_v2_payload(mailbox_id, data).await?;
         if result.is_some() {
             self.metrics.record_db_entry(PayjoinVersion::Two);
@@ -267,6 +268,7 @@ impl<D: Db> Db for MetricsDb<D> {
         &self,
         mailbox_id: &ShortId,
     ) -> Result<Arc<Vec<u8>>, Error<Self::OperationalError>> {
+        self.metrics.record_short_id(mailbox_id);
         self.inner.wait_for_v2_payload(mailbox_id).await
     }
 
@@ -275,6 +277,7 @@ impl<D: Db> Db for MetricsDb<D> {
         mailbox_id: &ShortId,
         data: Vec<u8>,
     ) -> Result<(), Error<Self::OperationalError>> {
+        self.metrics.record_short_id(mailbox_id);
         self.inner.post_v1_response(mailbox_id, data).await
     }
 
@@ -283,6 +286,7 @@ impl<D: Db> Db for MetricsDb<D> {
         mailbox_id: &ShortId,
         data: Vec<u8>,
     ) -> Result<Arc<Vec<u8>>, Error<Self::OperationalError>> {
+        self.metrics.record_short_id(mailbox_id);
         let result = self.inner.post_v1_request_and_wait_for_response(mailbox_id, data).await?;
         self.metrics.record_db_entry(PayjoinVersion::One);
         Ok(result)

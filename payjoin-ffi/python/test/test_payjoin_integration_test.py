@@ -17,38 +17,6 @@ sys.path.insert(
 from pprint import *
 
 
-class InMemoryReceiverSessionEventLog(JsonReceiverSessionPersister):
-    def __init__(self, id):
-        self.id = id
-        self.events = []
-        self.closed = False
-
-    def save(self, event: str):
-        self.events.append(event)
-
-    def load(self):
-        return self.events
-
-    def close(self):
-        self.closed = True
-
-
-class InMemorySenderPersister(JsonSenderSessionPersister):
-    def __init__(self, id):
-        self.id = id
-        self.events = []
-        self.closed = False
-
-    def save(self, event: str):
-        self.events.append(event)
-
-    def load(self):
-        return self.events
-
-    def close(self):
-        self.closed = True
-
-
 class TestPayjoin(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
@@ -101,7 +69,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         directory = services.directory_url()
         ohttp_relay = services.ohttp_relay_url()
         ohttp_keys = await fetch_ohttp_keys(ohttp_relay, directory, services.cert())
-        recv_persister = InMemoryReceiverSessionEventLog(999)
+        recv_persister = InMemoryReceiverPersister().as_persister()
         pj_uri = self.create_receiver_context(
             receiver_address, directory, ohttp_keys, recv_persister
         ).pj_uri()
@@ -117,7 +85,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
     async def process_receiver_proposal(
         self,
         receiver: ReceiveSession,
-        recv_persister: InMemoryReceiverSessionEventLog,
+        recv_persister: JsonReceiverSessionPersister,
         ohttp_relay: str,
     ) -> Optional[ReceiveSession]:
         if receiver.is_INITIALIZED():
@@ -156,7 +124,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         address: str,
         directory: str,
         ohttp_keys: OhttpKeys,
-        recv_persister: InMemoryReceiverSessionEventLog,
+        recv_persister: JsonReceiverSessionPersister,
     ) -> Initialized:
         receiver = (
             ReceiverBuilder(address=address, directory=directory, ohttp_keys=ohttp_keys)
@@ -168,7 +136,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
     async def retrieve_receiver_proposal(
         self,
         receiver: Initialized,
-        recv_persister: InMemoryReceiverSessionEventLog,
+        recv_persister: JsonReceiverSessionPersister,
         ohttp_relay: str,
     ):
         agent = httpx.AsyncClient()
@@ -188,7 +156,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
     async def process_unchecked_proposal(
         self,
         proposal: UncheckedOriginalPayload,
-        recv_persister: InMemoryReceiverSessionEventLog,
+        recv_persister: JsonReceiverSessionPersister,
     ):
         receiver = proposal.check_broadcast_suitability(
             None, MempoolAcceptanceCallback(self.receiver)
@@ -198,7 +166,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
     async def process_maybe_inputs_owned(
         self,
         proposal: MaybeInputsOwned,
-        recv_persister: InMemoryReceiverSessionEventLog,
+        recv_persister: JsonReceiverSessionPersister,
     ):
         maybe_inputs_owned = proposal.check_inputs_not_owned(
             IsScriptOwnedCallback(self.receiver)
@@ -206,7 +174,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         return await self.process_maybe_inputs_seen(maybe_inputs_owned, recv_persister)
 
     async def process_maybe_inputs_seen(
-        self, proposal: MaybeInputsSeen, recv_persister: InMemoryReceiverSessionEventLog
+        self, proposal: MaybeInputsSeen, recv_persister: JsonReceiverSessionPersister
     ):
         outputs_unknown = proposal.check_no_inputs_seen_before(
             CheckInputsNotSeenCallback(self.receiver)
@@ -214,7 +182,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         return await self.process_outputs_unknown(outputs_unknown, recv_persister)
 
     async def process_outputs_unknown(
-        self, proposal: OutputsUnknown, recv_persister: InMemoryReceiverSessionEventLog
+        self, proposal: OutputsUnknown, recv_persister: JsonReceiverSessionPersister
     ):
         wants_outputs = proposal.identify_receiver_outputs(
             IsScriptOwnedCallback(self.receiver)
@@ -222,13 +190,13 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         return await self.process_wants_outputs(wants_outputs, recv_persister)
 
     async def process_wants_outputs(
-        self, proposal: WantsOutputs, recv_persister: InMemoryReceiverSessionEventLog
+        self, proposal: WantsOutputs, recv_persister: JsonReceiverSessionPersister
     ):
         wants_inputs = proposal.commit_outputs().save(recv_persister)
         return await self.process_wants_inputs(wants_inputs, recv_persister)
 
     async def process_wants_inputs(
-        self, proposal: WantsInputs, recv_persister: InMemoryReceiverSessionEventLog
+        self, proposal: WantsInputs, recv_persister: JsonReceiverSessionPersister
     ):
         provisional_proposal = (
             proposal.contribute_inputs(get_inputs(self.receiver))
@@ -238,7 +206,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         return await self.process_wants_fee_range(provisional_proposal, recv_persister)
 
     async def process_wants_fee_range(
-        self, proposal: WantsFeeRange, recv_persister: InMemoryReceiverSessionEventLog
+        self, proposal: WantsFeeRange, recv_persister: JsonReceiverSessionPersister
     ):
         provisional_proposal = proposal.apply_fee_range(1, 10).save(recv_persister)
         return await self.process_provisional_proposal(
@@ -248,7 +216,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
     async def process_provisional_proposal(
         self,
         proposal: ProvisionalProposal,
-        recv_persister: InMemoryReceiverSessionEventLog,
+        recv_persister: JsonReceiverSessionPersister,
     ):
         payjoin_proposal = proposal.finalize_proposal(
             ProcessPsbtCallback(self.receiver)
@@ -269,8 +237,8 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
 
             # **********************
             # Inside the Receiver:
-            recv_persister = InMemoryReceiverSessionEventLog(1)
-            sender_persister = InMemorySenderPersister(1)
+            recv_persister = InMemoryReceiverPersister().as_persister()
+            sender_persister = InMemorySenderPersister().as_persister()
             session = self.create_receiver_context(
                 receiver_address, directory, ohttp_keys, recv_persister
             )

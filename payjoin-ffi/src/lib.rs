@@ -3,6 +3,7 @@
 pub mod error;
 pub mod ohttp;
 pub mod output_substitution;
+pub mod persist;
 pub mod receive;
 pub mod request;
 pub mod send;
@@ -15,6 +16,7 @@ pub use payjoin::persist::InMemoryPersister;
 
 pub use crate::ohttp::*;
 pub use crate::output_substitution::*;
+pub use crate::persist::*;
 pub use crate::receive::*;
 pub use crate::request::Request;
 pub use crate::send::*;

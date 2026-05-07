@@ -7,102 +7,6 @@ before(async () => {
     await uniffiInitAsync();
 });
 
-class InMemoryReceiverPersister {
-    id: number;
-    events: any[];
-    closed: boolean;
-
-    constructor(id: number) {
-        this.id = id;
-        this.events = [];
-        this.closed = false;
-    }
-
-    save(event: any) {
-        this.events.push(event);
-    }
-
-    load() {
-        return this.events;
-    }
-
-    close() {
-        this.closed = true;
-    }
-}
-
-class InMemorySenderPersister {
-    id: number;
-    events: any[];
-    closed: boolean;
-
-    constructor(id: number) {
-        this.id = id;
-        this.events = [];
-        this.closed = false;
-    }
-
-    save(event: any) {
-        this.events.push(event);
-    }
-
-    load() {
-        return this.events;
-    }
-
-    close() {
-        this.closed = true;
-    }
-}
-
-class InMemoryReceiverPersisterAsync {
-    id: number;
-    events: any[];
-    closed: boolean;
-
-    constructor(id: number) {
-        this.id = id;
-        this.events = [];
-        this.closed = false;
-    }
-
-    async save(event: any): Promise<void> {
-        this.events.push(event);
-    }
-
-    async load(): Promise<any[]> {
-        return this.events;
-    }
-
-    async close(): Promise<void> {
-        this.closed = true;
-    }
-}
-
-class InMemorySenderPersisterAsync {
-    id: number;
-    events: any[];
-    closed: boolean;
-
-    constructor(id: number) {
-        this.id = id;
-        this.events = [];
-        this.closed = false;
-    }
-
-    async save(event: any): Promise<void> {
-        this.events.push(event);
-    }
-
-    async load(): Promise<any[]> {
-        return this.events;
-    }
-
-    async close(): Promise<void> {
-        this.closed = true;
-    }
-}
-
 describe("URI tests", () => {
     test("URL encoded payjoin parameter", () => {
         const uri =
@@ -153,7 +57,7 @@ describe("URI tests", () => {
 
 describe("Persistence tests", () => {
     test("receiver persistence", () => {
-        const persister = new InMemoryReceiverPersister(1);
+        const persister = new payjoin.InMemoryReceiverPersister().asPersister();
         const address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
         const ohttpKeys = payjoin.OhttpKeys.decode(
             new Uint8Array([
@@ -186,7 +90,7 @@ describe("Persistence tests", () => {
     });
 
     test("sender persistence", () => {
-        const persister = new InMemoryReceiverPersister(1);
+        const persister = new payjoin.InMemoryReceiverPersister().asPersister();
         const address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
         const ohttpKeys = payjoin.OhttpKeys.decode(
             new Uint8Array([
@@ -210,7 +114,8 @@ describe("Persistence tests", () => {
             .save(persister);
         const uri = receiver.pjUri();
 
-        const senderPersister = new InMemorySenderPersister(1);
+        const senderPersister =
+            new payjoin.InMemorySenderPersister().asPersister();
         const psbt = testUtils.originalPsbt();
         const withReplyKey = new payjoin.SenderBuilder(psbt, uri)
             .buildRecommended(BigInt(1000))
@@ -222,7 +127,7 @@ describe("Persistence tests", () => {
 
 describe("Receiver cancel tests", () => {
     test("receiver cancel from initialized", () => {
-        const persister = new InMemoryReceiverPersister(1);
+        const persister = new payjoin.InMemoryReceiverPersister().asPersister();
         const address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
         const ohttpKeys = payjoin.OhttpKeys.decode(
             new Uint8Array([
@@ -258,7 +163,8 @@ describe("Receiver cancel tests", () => {
     });
 
     test("receiver cancel async from initialized", async () => {
-        const persister = new InMemoryReceiverPersisterAsync(1);
+        const persister =
+            new payjoin.InMemoryReceiverPersisterAsync().asPersister();
         const address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
         const ohttpKeys = payjoin.OhttpKeys.decode(
             new Uint8Array([
@@ -296,7 +202,7 @@ describe("Receiver cancel tests", () => {
 
 describe("Sender cancel tests", () => {
     test("sender cancel from with reply key", () => {
-        const persister = new InMemoryReceiverPersister(1);
+        const persister = new payjoin.InMemoryReceiverPersister().asPersister();
         const address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
         const ohttpKeys = payjoin.OhttpKeys.decode(
             new Uint8Array([
@@ -320,7 +226,8 @@ describe("Sender cancel tests", () => {
             .save(persister);
         const uri = receiver.pjUri();
 
-        const senderPersister = new InMemorySenderPersister(1);
+        const senderPersister =
+            new payjoin.InMemorySenderPersister().asPersister();
         const psbt = testUtils.originalPsbt();
         const withReplyKey = new payjoin.SenderBuilder(psbt, uri)
             .buildRecommended(BigInt(1000))
@@ -344,7 +251,8 @@ describe("Sender cancel tests", () => {
     });
 
     test("sender cancel async from with reply key", async () => {
-        const persister = new InMemoryReceiverPersisterAsync(1);
+        const persister =
+            new payjoin.InMemoryReceiverPersisterAsync().asPersister();
         const address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
         const ohttpKeys = payjoin.OhttpKeys.decode(
             new Uint8Array([
@@ -368,7 +276,8 @@ describe("Sender cancel tests", () => {
             .saveAsync(persister);
         const uri = receiver.pjUri();
 
-        const senderPersister = new InMemorySenderPersisterAsync(1);
+        const senderPersister =
+            new payjoin.InMemorySenderPersisterAsync().asPersister();
         const psbt = testUtils.originalPsbt();
         const withReplyKey = await new payjoin.SenderBuilder(psbt, uri)
             .buildRecommended(BigInt(1000))
@@ -394,7 +303,8 @@ describe("Sender cancel tests", () => {
 
 describe("Async Persistence tests", () => {
     test("receiver async persistence", async () => {
-        const persister = new InMemoryReceiverPersisterAsync(1);
+        const persister =
+            new payjoin.InMemoryReceiverPersisterAsync().asPersister();
         const address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
         const ohttpKeys = payjoin.OhttpKeys.decode(
             new Uint8Array([
@@ -427,7 +337,8 @@ describe("Async Persistence tests", () => {
     });
 
     test("sender async persistence", async () => {
-        const persister = new InMemoryReceiverPersisterAsync(1);
+        const persister =
+            new payjoin.InMemoryReceiverPersisterAsync().asPersister();
         const address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
         const ohttpKeys = payjoin.OhttpKeys.decode(
             new Uint8Array([
@@ -451,7 +362,8 @@ describe("Async Persistence tests", () => {
             .saveAsync(persister);
         const uri = receiver.pjUri();
 
-        const senderPersister = new InMemorySenderPersisterAsync(1);
+        const senderPersister =
+            new payjoin.InMemorySenderPersisterAsync().asPersister();
         const psbt = testUtils.originalPsbt();
         const withReplyKey = await new payjoin.SenderBuilder(psbt, uri)
             .buildRecommended(BigInt(1000))

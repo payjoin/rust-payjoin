@@ -1,5 +1,6 @@
 import unittest
 import payjoin
+from typing import cast, Type
 
 
 class TestURIs(unittest.TestCase):
@@ -320,7 +321,7 @@ class TestSenderCancelAsync(unittest.TestCase):
 
 class TestValidation(unittest.TestCase):
     def test_receiver_builder_rejects_bad_address(self):
-        with self.assertRaises(payjoin.ReceiverBuilderError):
+        with self.assertRaises(cast(Type[Exception], payjoin.ReceiverBuilderError)):
             payjoin.ReceiverBuilder(
                 "not-an-address",
                 "https://example.com",
@@ -332,7 +333,7 @@ class TestValidation(unittest.TestCase):
             )
 
     def test_input_pair_rejects_invalid_outpoint(self):
-        with self.assertRaises(payjoin.InputPairError):
+        with self.assertRaises(cast(Type[Exception], payjoin.InputPairError)):
             txin = payjoin.TxIn(
                 previous_output=payjoin.OutPoint(txid="deadbeef", vout=0),
                 script_sig=bytes(),
@@ -348,7 +349,7 @@ class TestValidation(unittest.TestCase):
         uri = payjoin.Uri.parse(
             "bitcoin:tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4?pj=https://example.com/pj"
         ).check_pj_supported()
-        with self.assertRaises(payjoin.SenderInputError):
+        with self.assertRaises(cast(Type[Exception], payjoin.SenderInputError)):
             payjoin.SenderBuilder("not-a-psbt", uri)
 
 

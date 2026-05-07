@@ -48,9 +48,19 @@ rpcpassword = "password"
 
 # Version 2 Configuration
 # [v2]
-# pj_directory = "https://payjo.in"
+# pj_directories = ["https://payjo.in"]
 # ohttp_relays = ["https://pj.benalleng.com", "https://pj.bobspacebkk.com", "https://ohttp.achow101.com", "https://example.com"]
 # # Optional: The HPKE keys which need to be fetched ahead of time from the pj_endpoint
 # # for the payjoin packets to be encrypted.
 # # These can now be fetched and no longer need to be configured.
 # ohttp_keys = "./path/to/ohttp_keys"
+#
+# # Optional AS-aware relay and directory filtering.
+# # When enabled, payjoin-cli will reject directories/relays that share an
+# # ASN with the configured user identity, and will deterministically order
+# # relay selection from the remaining candidates.
+# # Requires building payjoin-cli with `--features asmap`.
+# [v2.asmap]
+# asmap_file = "./ip_asn.dat"
+# user_public_ips = ["198.51.100.10", "2001:db8::10"]
+# user_asns = [64512]

@@ -1,126 +1,162 @@
 //! OHTTP relay selection and key bootstrapping for the payjoin-cli.
 //!
-//! [`RelayManager`] tracks the currently selected relay and any relays that
-//! have failed, excluding them from future selections for the lifetime of
-//! the [`RelayManager`].
-//!
-//! `fetch_ohttp_keys` selects a relay at random from the configured list,
-//! excluding relays that [`RelayManager`] has marked as failed,
-//! to avoid a fixed contact pattern at the network layer.
-use std::sync::{Arc, Mutex};
+//! [`RelaySession`] owns a relay plan plus the current failover cursor for one
+//! bootstrap, send, or receive flow. Failures advance to the next relay only
+//! within that flow.
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
-use payjoin::Url;
+use reqwest::header::ACCEPT;
+use reqwest::Proxy;
 
+use super::relay_selection::{PinnedUrl, RelayPlan};
 use super::Config;
 
-#[derive(Debug, Clone)]
-pub struct RelayManager {
-    selected_relay: Option<Url>,
-    failed_relays: Vec<Url>,
+#[derive(Debug)]
+pub(crate) enum RelayAttemptError {
+    Retryable(anyhow::Error),
+    Terminal(anyhow::Error),
 }
 
-impl RelayManager {
-    pub fn new() -> Self { RelayManager { selected_relay: None, failed_relays: Vec::new() } }
+pub(crate) fn classify_reqwest_error(
+    err: reqwest::Error,
+    context: &'static str,
+) -> RelayAttemptError {
+    let error = anyhow!("{context}: {err}");
+    if err.is_timeout() || err.is_connect() || err.is_request() {
+        RelayAttemptError::Retryable(error)
+    } else {
+        RelayAttemptError::Terminal(error)
+    }
+}
 
-    pub fn set_selected_relay(&mut self, relay: Url) { self.selected_relay = Some(relay); }
+#[derive(Debug, Clone)]
+pub(crate) struct RelaySession {
+    plan: RelayPlan,
+    current_index: usize,
+}
 
-    pub fn get_selected_relay(&self) -> Option<Url> { self.selected_relay.clone() }
+impl RelaySession {
+    pub(crate) fn new(plan: RelayPlan) -> Self { Self { plan, current_index: 0 } }
 
-    pub fn add_failed_relay(&mut self, relay: Url) { self.failed_relays.push(relay); }
+    pub(crate) fn directory(&self) -> &PinnedUrl { &self.plan.directory }
 
-    pub fn get_failed_relays(&self) -> Vec<Url> { self.failed_relays.clone() }
+    pub(crate) fn current_relay(&self) -> Result<PinnedUrl> {
+        self.plan.relays.get(self.current_index).cloned().ok_or_else(|| {
+            anyhow!("No valid relays available for {}", self.plan.directory.url.as_str())
+        })
+    }
+
+    pub(crate) fn record_failure(&mut self) { self.current_index += 1; }
 }
 
 pub(crate) struct ValidatedOhttpKeys {
     pub(crate) ohttp_keys: payjoin::OhttpKeys,
-    pub(crate) relay_url: Url,
 }
 
 pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
     config: &Config,
-    directory: Option<Url>,
-    relay_manager: Arc<Mutex<RelayManager>>,
+    relay_session: &mut RelaySession,
 ) -> Result<ValidatedOhttpKeys> {
     if let Some(ohttp_keys) = config.v2()?.ohttp_keys.clone() {
         println!("Using OHTTP Keys from config");
-        let validated = fetch_ohttp_keys(config, directory, relay_manager).await?;
-        Ok(ValidatedOhttpKeys { ohttp_keys, relay_url: validated.relay_url })
+        Ok(ValidatedOhttpKeys { ohttp_keys })
     } else {
         println!("Bootstrapping private network transport over Oblivious HTTP");
-        let fetched_keys = fetch_ohttp_keys(config, directory, relay_manager).await?;
+        fetch_ohttp_keys(config, relay_session).await
+    }
+}
 
-        Ok(fetched_keys)
+pub(crate) fn http_client_builder(config: &Config) -> Result<reqwest::ClientBuilder> {
+    #[cfg(feature = "_manual-tls")]
+    {
+        let mut builder = reqwest::ClientBuilder::new().use_rustls_tls().http1_only();
+        if let Some(root_cert_path) = config.root_certificate.as_ref() {
+            let cert_der = std::fs::read(root_cert_path)?;
+            builder = builder
+                .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der.as_slice())?);
+        }
+        Ok(builder)
+    }
+
+    #[cfg(not(feature = "_manual-tls"))]
+    {
+        let _ = config;
+        Ok(reqwest::Client::builder().http1_only())
     }
 }
 
 async fn fetch_ohttp_keys(
     config: &Config,
-    directory: Option<Url>,
-    relay_manager: Arc<Mutex<RelayManager>>,
+    relay_session: &mut RelaySession,
 ) -> Result<ValidatedOhttpKeys> {
-    use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
-    let payjoin_directory = directory.unwrap_or(config.v2()?.pj_directory.clone());
-    let relays = config.v2()?.ohttp_relays.clone();
-
     loop {
-        let failed_relays =
-            relay_manager.lock().expect("Lock should not be poisoned").get_failed_relays();
+        let selected_relay = relay_session.current_relay()?;
 
-        let remaining_relays: Vec<_> =
-            relays.iter().filter(|r| !failed_relays.contains(r)).cloned().collect();
-
-        if remaining_relays.is_empty() {
-            return Err(anyhow!("No valid relays available"));
-        }
-
-        let selected_relay =
-            match remaining_relays.choose(&mut payjoin::bitcoin::key::rand::thread_rng()) {
-                Some(relay) => relay.clone(),
-                None => return Err(anyhow!("Failed to select from remaining relays")),
-            };
-
-        relay_manager
-            .lock()
-            .expect("Lock should not be poisoned")
-            .set_selected_relay(selected_relay.clone());
-
-        let ohttp_keys = {
-            #[cfg(feature = "_manual-tls")]
-            {
-                if let Some(cert_path) = config.root_certificate.as_ref() {
-                    let cert_der = std::fs::read(cert_path)?;
-                    payjoin::io::fetch_ohttp_keys_with_cert(
-                        selected_relay.as_str(),
-                        payjoin_directory.as_str(),
-                        &cert_der,
-                    )
-                    .await
-                } else {
-                    payjoin::io::fetch_ohttp_keys(
-                        selected_relay.as_str(),
-                        payjoin_directory.as_str(),
-                    )
-                    .await
-                }
+        match fetch_ohttp_keys_with_pinned_targets(
+            config,
+            &selected_relay,
+            relay_session.directory(),
+        )
+        .await
+        {
+            Ok(keys) => return Ok(ValidatedOhttpKeys { ohttp_keys: keys }),
+            Err(RelayAttemptError::Retryable(error)) => {
+                tracing::debug!(
+                    "Failed to fetch OHTTP keys via relay {}: {error:?}",
+                    selected_relay.url
+                );
+                relay_session.record_failure();
             }
-            #[cfg(not(feature = "_manual-tls"))]
-            payjoin::io::fetch_ohttp_keys(selected_relay.as_str(), payjoin_directory.as_str()).await
-        };
-
-        match ohttp_keys {
-            Ok(keys) =>
-                return Ok(ValidatedOhttpKeys { ohttp_keys: keys, relay_url: selected_relay }),
-            Err(payjoin::io::Error::UnexpectedStatusCode(e)) => {
-                return Err(payjoin::io::Error::UnexpectedStatusCode(e).into());
-            }
-            Err(e) => {
-                tracing::debug!("Failed to connect to relay: {selected_relay}, {e:?}");
-                relay_manager
-                    .lock()
-                    .expect("Lock should not be poisoned")
-                    .add_failed_relay(selected_relay);
-            }
+            Err(RelayAttemptError::Terminal(error)) => return Err(error),
         }
     }
+}
+
+async fn fetch_ohttp_keys_with_pinned_targets(
+    config: &Config,
+    relay: &PinnedUrl,
+    directory: &PinnedUrl,
+) -> std::result::Result<payjoin::OhttpKeys, RelayAttemptError> {
+    let proxy = Proxy::all(relay.url.as_str()).map_err(|err| {
+        RelayAttemptError::Terminal(anyhow!("Failed to configure OHTTP relay proxy: {err}"))
+    })?;
+    let mut builder = http_client_builder(config)
+        .map_err(|err| RelayAttemptError::Terminal(anyhow!("Failed to build HTTP client: {err}")))?
+        .proxy(proxy);
+
+    if let Some(domain) = relay.domain() {
+        builder = builder.resolve_to_addrs(domain, &relay.socket_addrs);
+    }
+
+    if let Some(directory_domain) = directory.domain() {
+        builder = builder.resolve_to_addrs(directory_domain, &directory.socket_addrs);
+    }
+
+    let client = builder.build().map_err(|err| {
+        RelayAttemptError::Terminal(anyhow!("Failed to build HTTP client: {err}"))
+    })?;
+    let ohttp_keys_url = directory.url.join("/.well-known/ohttp-gateway").map_err(|err| {
+        RelayAttemptError::Terminal(anyhow!("Failed to construct OHTTP key URL: {err}"))
+    })?;
+    let response = client
+        .get(ohttp_keys_url.as_str())
+        .timeout(Duration::from_secs(10))
+        .header(ACCEPT, "application/ohttp-keys")
+        .send()
+        .await
+        .map_err(|err| classify_reqwest_error(err, "Failed to fetch OHTTP keys"))?;
+
+    if !response.status().is_success() {
+        return Err(RelayAttemptError::Terminal(anyhow!(
+            "Unexpected OHTTP key status code {}",
+            response.status()
+        )));
+    }
+
+    let body = response.bytes().await.map_err(|err| {
+        RelayAttemptError::Terminal(anyhow!("Failed to read OHTTP key response body: {err}"))
+    })?;
+    payjoin::OhttpKeys::decode(&body)
+        .map_err(|err| RelayAttemptError::Terminal(anyhow!("Failed to decode OHTTP keys: {err}")))
 }

@@ -1,3 +1,7 @@
+#[cfg(all(feature = "v2", feature = "asmap"))]
+use std::fmt;
+#[cfg(all(feature = "v2", feature = "asmap"))]
+use std::net::IpAddr;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -7,6 +11,8 @@ use payjoin::bitcoin::FeeRate;
 use payjoin::{Url, Version};
 use serde::Deserialize;
 
+#[cfg(all(feature = "v2", feature = "asmap"))]
+use crate::app::v2::asmap::check_standard_asmap;
 use crate::cli::{Cli, Commands};
 use crate::db;
 
@@ -29,24 +35,88 @@ pub struct V1Config {
     pub pj_endpoint: Url,
 }
 
+#[cfg(all(feature = "v2", feature = "asmap"))]
+#[derive(Clone, PartialEq, Eq)]
+pub struct LoadedAsmap {
+    data: Vec<u8>,
+}
+
+#[cfg(all(feature = "v2", feature = "asmap"))]
+impl LoadedAsmap {
+    pub fn new(data: Vec<u8>) -> Self { Self { data } }
+
+    pub fn data(&self) -> &[u8] { &self.data }
+}
+
+#[cfg(all(feature = "v2", feature = "asmap"))]
+impl fmt::Debug for LoadedAsmap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoadedAsmap").field("bytes", &self.data.len()).finish()
+    }
+}
+
+#[cfg(all(feature = "v2", feature = "asmap"))]
+#[derive(Debug, Clone, Deserialize)]
+pub struct AsmapConfig {
+    #[serde(rename = "asmap_file", deserialize_with = "deserialize_loaded_asmap_from_path")]
+    pub asmap: LoadedAsmap,
+    #[serde(default)]
+    pub user_public_ips: Vec<IpAddr>,
+    #[serde(default)]
+    pub user_asns: Vec<u32>,
+}
+
+#[cfg(all(feature = "v2", feature = "asmap"))]
+impl AsmapConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.user_public_ips.is_empty() && self.user_asns.is_empty() {
+            return Err(ConfigError::Message(
+                "v2.asmap requires at least one of user_public_ips or user_asns".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(feature = "v2")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct V2Config {
-    #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
+    #[serde(default, deserialize_with = "deserialize_ohttp_keys_from_path")]
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
     pub ohttp_relays: Vec<Url>,
-    pub pj_directory: Url,
+    #[serde(rename = "pj_directories")]
+    pub trusted_directories: Vec<Url>,
+    #[cfg(feature = "asmap")]
+    #[serde(default)]
+    pub asmap: Option<AsmapConfig>,
+}
+
+#[cfg(feature = "v2")]
+impl V2Config {
+    pub fn trusted_directories(&self) -> &[Url] { &self.trusted_directories }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.trusted_directories.is_empty() {
+            return Err(ConfigError::Message(
+                "At least one v2 trusted directory is required".to_owned(),
+            ));
+        }
+
+        #[cfg(feature = "asmap")]
+        if let Some(asmap) = &self.asmap {
+            asmap.validate()?;
+        }
+
+        Ok(())
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "version")]
+#[derive(Debug, Clone)]
 pub enum VersionConfig {
     #[cfg(feature = "v1")]
-    #[serde(rename = "v1")]
     V1(V1Config),
     #[cfg(feature = "v2")]
-    #[serde(rename = "v2")]
     V2(V2Config),
 }
 
@@ -178,7 +248,7 @@ impl Config {
             Version::Two => {
                 #[cfg(feature = "v2")]
                 {
-                    match built_config.get::<V2Config>("v2") {
+                    match load_v2_config(&built_config) {
                         Ok(v2) => config.version = Some(VersionConfig::V2(v2)),
                         Err(e) =>
                             return Err(ConfigError::Message(format!(
@@ -269,19 +339,20 @@ fn add_v1_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
 fn add_v2_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     // Set default values
     let config = config
-        .set_default("v2.pj_directory", "https://payjo.in")?
+        .set_default("v2.pj_directories", vec!["https://payjo.in"])?
         .set_default("v2.ohttp_keys", None::<String>)?;
 
     // Override config values with command line arguments if applicable
     let pj_directory = cli.pj_directory.as_ref().map(|s| s.as_str());
     let ohttp_keys = cli.ohttp_keys.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let pj_directories = pj_directory.map(|dir| vec![dir]);
     let ohttp_relays = cli
         .ohttp_relays
         .as_ref()
         .map(|urls| urls.iter().map(|url| url.as_str()).collect::<Vec<_>>());
 
     config
-        .set_override_option("v2.pj_directory", pj_directory)?
+        .set_override_option("v2.pj_directories", pj_directories)?
         .set_override_option("v2.ohttp_keys", ohttp_keys)?
         .set_override_option("v2.ohttp_relays", ohttp_relays)
 }
@@ -323,8 +394,8 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
             #[cfg(feature = "v2")]
             let config = config
                 .set_override_option(
-                    "v2.pj_directory",
-                    pj_directory.clone().map(|s| s.to_string()),
+                    "v2.pj_directories",
+                    pj_directory.clone().map(|s| vec![s.to_string()]),
                 )?
                 .set_override_option(
                     "v2.ohttp_keys",
@@ -342,23 +413,65 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
 }
 
 #[cfg(feature = "v2")]
+fn load_v2_config(built_config: &config::Config) -> Result<V2Config, ConfigError> {
+    #[cfg(not(feature = "asmap"))]
+    if built_config.get_table("v2.asmap").is_ok() {
+        return Err(ConfigError::Message(
+            "This build does not include ASMap support. Recompile with --features asmap".to_owned(),
+        ));
+    }
+
+    let v2 = built_config.get::<V2Config>("v2")?;
+    v2.validate()?;
+    Ok(v2)
+}
+
+#[cfg(feature = "v2")]
 fn deserialize_ohttp_keys_from_path<'de, D>(
     deserializer: D,
 ) -> Result<Option<payjoin::OhttpKeys>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let path_str: Option<String> = Option::deserialize(deserializer)?;
-
-    match path_str {
+    let path: Option<PathBuf> = Option::deserialize(deserializer)?;
+    match path {
         None => Ok(None),
-        Some(path) => std::fs::read(path)
-            .map_err(|e| serde::de::Error::custom(format!("Failed to read ohttp_keys file: {e}")))
-            .and_then(|bytes| {
-                payjoin::OhttpKeys::decode(&bytes).map_err(|e| {
-                    serde::de::Error::custom(format!("Failed to decode ohttp keys: {e}"))
-                })
-            })
-            .map(Some),
+        Some(path) => {
+            let bytes = std::fs::read(&path).map_err(|e| {
+                serde::de::Error::custom(format!(
+                    "Failed to read ohttp_keys file {}: {e}",
+                    path.display()
+                ))
+            })?;
+            let keys = payjoin::OhttpKeys::decode(&bytes).map_err(|e| {
+                serde::de::Error::custom(format!(
+                    "Failed to decode ohttp keys from {}: {e}",
+                    path.display()
+                ))
+            })?;
+            Ok(Some(keys))
+        }
     }
+}
+
+#[cfg(all(feature = "v2", feature = "asmap"))]
+fn deserialize_loaded_asmap_from_path<'de, D>(deserializer: D) -> Result<LoadedAsmap, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let path = PathBuf::deserialize(deserializer)?;
+    let asmap_bytes = std::fs::read(&path).map_err(|e| {
+        serde::de::Error::custom(format!(
+            "Failed to read v2.asmap.asmap_file {}: {e}",
+            path.display()
+        ))
+    })?;
+    if !check_standard_asmap(&asmap_bytes) {
+        return Err(serde::de::Error::custom(format!(
+            "v2.asmap.asmap_file {} failed the ASMap sanity check",
+            path.display()
+        )));
+    }
+
+    Ok(LoadedAsmap::new(asmap_bytes))
 }

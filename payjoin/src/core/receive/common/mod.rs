@@ -862,8 +862,7 @@ mod tests {
             .commit_inputs()
             .calculate_psbt_context_with_fee_range(None, None)
             .expect("Contributed inputs should allow for valid fee contributions");
-        let payjoin_proposal =
-            psbt_context.finalize_proposal(|_| Ok(processed_psbt.clone())).expect("Valid psbt");
+        let payjoin_proposal = psbt_context.finalize_proposal(&processed_psbt).expect("Valid psbt");
 
         assert!(payjoin_proposal.xpub.is_empty());
 

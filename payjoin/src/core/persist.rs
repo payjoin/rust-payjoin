@@ -809,25 +809,22 @@ pub trait AsyncSessionPersister: Send + Sync {
 }
 
 /// In-memory session persister for replaying sessions and introspecting events.
-#[derive(Clone)]
+/// Single-owner; not Clone — wrap in `Arc` if you need shared access.
 pub struct InMemoryPersister<V> {
-    pub(crate) inner: std::sync::Arc<std::sync::RwLock<InnerStorage<V>>>,
+    pub(crate) inner: std::sync::Mutex<InnerStorage<V>>,
 }
 
 impl<V> Default for InMemoryPersister<V> {
-    fn default() -> Self {
-        Self { inner: std::sync::Arc::new(std::sync::RwLock::new(InnerStorage::default())) }
-    }
+    fn default() -> Self { Self { inner: std::sync::Mutex::new(InnerStorage::default()) } }
 }
 
-#[derive(Clone)]
 pub(crate) struct InnerStorage<V> {
-    pub(crate) events: std::sync::Arc<Vec<V>>,
+    pub(crate) events: Vec<V>,
     pub(crate) is_closed: bool,
 }
 
 impl<V> Default for InnerStorage<V> {
-    fn default() -> Self { Self { events: std::sync::Arc::new(vec![]), is_closed: false } }
+    fn default() -> Self { Self { events: vec![], is_closed: false } }
 }
 
 impl<V> SessionPersister for InMemoryPersister<V>
@@ -838,40 +835,33 @@ where
     type SessionEvent = V;
 
     fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
-        let mut inner = self.inner.write().expect("Lock should not be poisoned");
-        std::sync::Arc::make_mut(&mut inner.events).push(event);
+        self.inner.lock().expect("Lock should not be poisoned").events.push(event);
         Ok(())
     }
 
     fn load(
         &self,
     ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError> {
-        let inner = self.inner.read().expect("Lock should not be poisoned");
-        let events = std::sync::Arc::clone(&inner.events);
-        Ok(Box::new(
-            std::sync::Arc::try_unwrap(events).unwrap_or_else(|arc| (*arc).clone()).into_iter(),
-        ))
+        let events = self.inner.lock().expect("Lock should not be poisoned").events.clone();
+        Ok(Box::new(events.into_iter()))
     }
 
     fn close(&self) -> Result<(), Self::InternalStorageError> {
-        let mut inner = self.inner.write().expect("Lock should not be poisoned");
-        inner.is_closed = true;
+        self.inner.lock().expect("Lock should not be poisoned").is_closed = true;
         Ok(())
     }
 }
 
 #[cfg(test)]
-#[derive(Clone)]
 /// Async in-memory session persister for replaying async sessions and introspecting events.
+/// Single-owner; not Clone — wrap in `Arc` if you need shared access.
 pub struct InMemoryAsyncPersister<V> {
-    pub(crate) inner: std::sync::Arc<tokio::sync::RwLock<InnerStorage<V>>>,
+    pub(crate) inner: tokio::sync::Mutex<InnerStorage<V>>,
 }
 
 #[cfg(test)]
 impl<V> Default for InMemoryAsyncPersister<V> {
-    fn default() -> Self {
-        Self { inner: std::sync::Arc::new(tokio::sync::RwLock::new(InnerStorage::default())) }
-    }
+    fn default() -> Self { Self { inner: tokio::sync::Mutex::new(InnerStorage::default()) } }
 }
 
 #[cfg(test)]
@@ -886,8 +876,7 @@ where
         &self,
         event: Self::SessionEvent,
     ) -> Result<(), Self::InternalStorageError> {
-        let mut inner = self.inner.write().await;
-        std::sync::Arc::make_mut(&mut inner.events).push(event);
+        self.inner.lock().await.events.push(event);
         Ok(())
     }
 
@@ -895,16 +884,12 @@ where
         &self,
     ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent> + Send>, Self::InternalStorageError>
     {
-        let inner = self.inner.read().await;
-        let events = std::sync::Arc::clone(&inner.events);
-        Ok(Box::new(
-            std::sync::Arc::try_unwrap(events).unwrap_or_else(|arc| (*arc).clone()).into_iter(),
-        ))
+        let events = self.inner.lock().await.events.clone();
+        Ok(Box::new(events.into_iter()))
     }
 
     async fn close(&self) -> Result<(), Self::InternalStorageError> {
-        let mut inner = self.inner.write().await;
-        inner.is_closed = true;
+        self.inner.lock().await.is_closed = true;
         Ok(())
     }
 }
@@ -960,7 +945,7 @@ mod tests {
         }
 
         assert_eq!(
-            persister.inner.read().expect("Lock should not be poisoned").is_closed,
+            persister.inner.lock().expect("Lock should not be poisoned").is_closed,
             expected_result.is_closed
         );
 
@@ -991,7 +976,7 @@ mod tests {
             assert_eq!(event.0, expected_event.0);
         }
 
-        assert_eq!(persister.inner.read().await.is_closed, expected_result.is_closed);
+        assert_eq!(persister.inner.lock().await.is_closed, expected_result.is_closed);
 
         match (&result, &expected_result.error) {
             (Ok(actual), None) => {

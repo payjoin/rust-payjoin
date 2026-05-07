@@ -56,8 +56,9 @@ echo "▶  cargo fmt --check"
 cargo fmt --all -- --check
 
 # -------- 2.1 Project-specific linter --------
-echo "▶  ./contrib/lint.sh"
+echo "▶  workspace lint"
 ./contrib/lint.sh
+(cd payjoin-ffi && ./contrib/lint.sh)
 
 # -------- 2.2 Documentation builder --------
 echo '▶  RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --document-private-items'

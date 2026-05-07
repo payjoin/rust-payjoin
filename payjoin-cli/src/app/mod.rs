@@ -11,6 +11,8 @@ pub mod wallet;
 use crate::app::config::Config;
 use crate::app::wallet::BitcoindWallet;
 #[cfg(feature = "v2")]
+use crate::cli::SessionRef;
+#[cfg(feature = "v2")]
 use crate::db::v2::SessionId;
 
 #[cfg(feature = "v1")]
@@ -34,11 +36,12 @@ pub trait App: Send + Sync {
     async fn fallback_sender(&self, session_id: SessionId) -> Result<()>;
     #[cfg(feature = "v2")]
     async fn fallback_receiver(&self, session_id: SessionId) -> Result<()>;
-    /// Look up `session_id` in the sender then the receiver table and dispatch
-    /// to [`Self::fallback_sender`] or [`Self::fallback_receiver`] accordingly.
-    /// Errors if the id is not present in either table.
+    /// Dispatch `session_ref` to [`Self::fallback_sender`] or
+    /// [`Self::fallback_receiver`] based on the prefix the operator
+    /// supplied. The prefix is authoritative; we do not consult either
+    /// table to guess sides.
     #[cfg(feature = "v2")]
-    async fn fallback(&self, session_id: SessionId) -> Result<()>;
+    async fn fallback(&self, session_ref: SessionRef) -> Result<()>;
 
     fn create_original_psbt(
         &self,

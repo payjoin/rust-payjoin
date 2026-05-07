@@ -8,7 +8,7 @@ use rusqlite::params;
 
 use super::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionId(pub(crate) i64);
 
 impl core::ops::Deref for SessionId {
@@ -287,26 +287,6 @@ impl Database {
             session_ids.push((session_id, completed_at));
         }
         Ok(session_ids)
-    }
-
-    pub(crate) fn has_send_session(&self, session_id: &SessionId) -> Result<bool> {
-        let conn = self.get_connection()?;
-        let exists: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM send_sessions WHERE session_id = ?1)",
-            params![session_id.0],
-            |row| row.get(0),
-        )?;
-        Ok(exists)
-    }
-
-    pub(crate) fn has_recv_session(&self, session_id: &SessionId) -> Result<bool> {
-        let conn = self.get_connection()?;
-        let exists: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM receive_sessions WHERE session_id = ?1)",
-            params![session_id.0],
-            |row| row.get(0),
-        )?;
-        Ok(exists)
     }
 }
 

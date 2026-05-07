@@ -6,6 +6,11 @@ use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::Url;
 use serde::Deserialize;
 
+#[cfg(feature = "v2")]
+pub(crate) mod session_ref;
+#[cfg(feature = "v2")]
+pub(crate) use session_ref::{parse_session_ref, SessionRef};
+
 #[derive(Debug, Clone, Deserialize, Parser)]
 pub struct Flags {
     #[arg(long = "bip77", help = "Use BIP77 (v2) protocol (default)", action = clap::ArgAction::SetTrue)]
@@ -136,9 +141,12 @@ pub enum Commands {
     #[cfg(feature = "v2")]
     /// Broadcast the original transaction for a sender or receiver session (BIP77/v2 only)
     Fallback {
-        /// The session ID to broadcast the fallback transaction for
-        #[arg(required = true)]
-        session_id: i64,
+        /// The session ref to broadcast the fallback transaction for, prefixed
+        /// with `s` for a sender session or `r` for a receiver session
+        /// (e.g. `s1`, `r2`). Sender and receiver session ids auto-increment
+        /// independently, so the prefix is required to disambiguate them.
+        #[arg(required = true, value_parser = parse_session_ref)]
+        session_ref: SessionRef,
     },
 }
 

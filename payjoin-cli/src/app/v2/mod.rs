@@ -24,6 +24,7 @@ use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, RelayManager};
 use crate::app::{handle_interrupt, http_agent};
+use crate::cli::SessionRef;
 use crate::db::v2::{ReceiverPersister, SenderPersister, SessionId};
 use crate::db::Database;
 
@@ -119,10 +120,14 @@ struct SessionHistoryRow<Status> {
 
 impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let session_ref = match self.role {
+            Role::Sender => SessionRef::Send(self.session_id.clone()),
+            Role::Receiver => SessionRef::Recv(self.session_id.clone()),
+        };
         write!(
             f,
             "{:<W_ID$} {:<W_ROLE$} {:<W_DONE$} {:<W_STATUS$}",
-            self.session_id.to_string(),
+            session_ref.to_string(),
             self.role.as_str(),
             match self.completed_at {
                 None => "Not Completed".to_string(),
@@ -255,14 +260,14 @@ impl AppTrait for App {
                         match res {
                             Ok(()) => return Ok(()),
                             Err(err) => {
-                                let id = persister.session_id();
+                                let id = SessionRef::Send(persister.session_id());
                                 println!("Session {id} failed. Run `payjoin-cli fallback {id}` to broadcast the original transaction.");
                                 return Err(err);
                             }
                         }
                     },
                     _ = interrupt.changed() => {
-                        let id = persister.session_id();
+                        let id = SessionRef::Send(persister.session_id());
                         println!(
                             "Session {id} interrupted. Call `send` again to resume, `resume` to resume all sessions, or `payjoin-cli fallback {id}` to broadcast the original transaction."
                         );
@@ -322,7 +327,10 @@ impl AppTrait for App {
                 }
                 Err(e) => {
                     tracing::error!("An error {:?} occurred while replaying receiver session", e);
-                    Self::close_failed_session(&recv_persister, &session_id, "receiver");
+                    Self::close_failed_session(
+                        &recv_persister,
+                        &SessionRef::Recv(session_id.clone()),
+                    );
                 }
             }
         }
@@ -339,7 +347,10 @@ impl AppTrait for App {
                 }
                 Err(e) => {
                     tracing::error!("An error {:?} occurred while replaying Sender session", e);
-                    Self::close_failed_session(&sender_persister, &session_id, "sender");
+                    Self::close_failed_session(
+                        &sender_persister,
+                        &SessionRef::Send(session_id.clone()),
+                    );
                 }
             }
         }
@@ -487,11 +498,12 @@ impl AppTrait for App {
     async fn fallback_sender(&self, session_id: SessionId) -> Result<()> {
         let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
         let (session, history) = replay_sender_event_log(&persister)?;
+        let session_ref = SessionRef::Send(session_id);
 
         if let SendSession::Closed(SenderSessionOutcome::Success(proposal)) = session {
             let txid = proposal.clone().extract_tx_unchecked_fee_rate().compute_txid();
             println!(
-                "Session {session_id} already produced payjoin transaction {txid}. \
+                "Session {session_ref} already produced payjoin transaction {txid}. \
                  Broadcasting the original now would double-spend against it. \
                  If the payjoin tx needs re-broadcast, run \
                  `bitcoin-cli gettransaction {txid}` to fetch the hex, then \
@@ -505,7 +517,7 @@ impl AppTrait for App {
         println!("Broadcasted fallback transaction txid: {}", fallback_tx.compute_txid());
 
         if let Err(e) = SessionPersister::close(&persister) {
-            tracing::warn!("Failed to close session {session_id} after fallback: {e}");
+            tracing::warn!("Failed to close session {session_ref} after fallback: {e}");
         }
         Ok(())
     }
@@ -513,19 +525,20 @@ impl AppTrait for App {
     async fn fallback_receiver(&self, session_id: SessionId) -> Result<()> {
         let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
         let (session, history) = replay_receiver_event_log(&persister)?;
+        let session_ref = SessionRef::Recv(session_id);
 
         if let ReceiveSession::Closed(outcome) = &session {
             match outcome {
                 ReceiverSessionOutcome::Success(_)
                 | ReceiverSessionOutcome::PayjoinProposalSent => {
                     println!(
-                        "Session {session_id} already produced a payjoin proposal. \
+                        "Session {session_ref} already produced a payjoin proposal. \
                          Broadcasting the original now would double-spend against it."
                     );
                     return Ok(());
                 }
                 ReceiverSessionOutcome::FallbackBroadcasted => {
-                    println!("Session {session_id} already broadcast the fallback transaction.");
+                    println!("Session {session_ref} already broadcast the fallback transaction.");
                     return Ok(());
                 }
                 ReceiverSessionOutcome::Failure | ReceiverSessionOutcome::Cancel => {
@@ -536,7 +549,7 @@ impl AppTrait for App {
 
         let fallback_tx = history.fallback_tx().ok_or_else(|| {
             anyhow!(
-                "Session {session_id} has no fallback transaction recorded. \
+                "Session {session_ref} has no fallback transaction recorded. \
                  The sender has not yet posted an Original PSBT to broadcast."
             )
         })?;
@@ -546,37 +559,31 @@ impl AppTrait for App {
         if let Err(e) = persister
             .save_event(ReceiverSessionEvent::Closed(ReceiverSessionOutcome::FallbackBroadcasted))
         {
-            tracing::warn!("Failed to record fallback broadcast for session {session_id}: {e}");
+            tracing::warn!("Failed to record fallback broadcast for session {session_ref}: {e}");
         }
         if let Err(e) = SessionPersister::close(&persister) {
-            tracing::warn!("Failed to close session {session_id} after fallback: {e}");
+            tracing::warn!("Failed to close session {session_ref} after fallback: {e}");
         }
         Ok(())
     }
 
-    async fn fallback(&self, session_id: SessionId) -> Result<()> {
-        if self.db.has_send_session(&session_id)? {
-            return self.fallback_sender(session_id).await;
+    async fn fallback(&self, session_ref: SessionRef) -> Result<()> {
+        match session_ref {
+            SessionRef::Send(id) => self.fallback_sender(id).await,
+            SessionRef::Recv(id) => self.fallback_receiver(id).await,
         }
-        if self.db.has_recv_session(&session_id)? {
-            return self.fallback_receiver(session_id).await;
-        }
-        anyhow::bail!(
-            "No payjoin session with id {session_id} found. Run \
-             `payjoin-cli history` to list known session ids."
-        )
     }
 }
 
 impl App {
-    fn close_failed_session<P>(persister: &P, session_id: &SessionId, role: &str)
+    fn close_failed_session<P>(persister: &P, session_ref: &SessionRef)
     where
         P: SessionPersister,
     {
         if let Err(close_err) = SessionPersister::close(persister) {
-            tracing::error!("Failed to close {} session {}: {:?}", role, session_id, close_err);
+            tracing::error!("Failed to close session {session_ref}: {close_err:?}");
         } else {
-            tracing::error!("Closed failed {} session: {}", role, session_id);
+            tracing::error!("Closed failed session {session_ref}");
         }
     }
 
@@ -596,7 +603,7 @@ impl App {
             }
             SendSession::Closed(SenderSessionOutcome::Failure)
             | SendSession::Closed(SenderSessionOutcome::Cancel) => {
-                let id = persister.session_id();
+                let id = SessionRef::Send(persister.session_id());
                 println!(
                     "Session {id} ended without payjoin. Run `payjoin-cli fallback {id}` to broadcast the original transaction."
                 );

@@ -714,14 +714,15 @@ mod e2e {
 
             send_until_request_timeout(cli_sender).await?;
 
-            // There is only one sender session in progress.
-            let session_id = 1i64;
+            // There is only one sender session in progress; pass the
+            // sender-prefixed ref `s1` rather than a bare numeric id.
+            let session_ref = "s1";
             // Ensure the fallback was not broadcast yet
             let mempool_size =
                 sender.get_mempool_info().expect("should be able to get mempool").unbroadcast_count;
             assert_eq!(mempool_size, 0, "fallback should not be in mempool");
 
-            // Run `payjoin-cli fallback <session-id>` and assert broadcast
+            // Run `payjoin-cli fallback <session-ref>` and assert broadcast
             let mut cli_fallback = Command::new(payjoin_cli)
                 .arg("--root-certificate")
                 .arg(cert_path)
@@ -734,7 +735,7 @@ mod e2e {
                 .arg("--ohttp-relays")
                 .arg(ohttp_relay)
                 .arg("fallback")
-                .arg(session_id.to_string())
+                .arg(session_ref)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()
@@ -900,8 +901,9 @@ mod e2e {
                 .unbroadcast_count;
             assert_eq!(mempool_size, 0, "fallback should not be in mempool yet");
 
-            // The receiver session is the only one in the receiver DB.
-            let session_id = 1i64;
+            // The receiver session is the only one in the receiver DB; pass
+            // the receiver-prefixed ref `r1` rather than a bare numeric id.
+            let session_ref = "r1";
 
             let mut cli_fallback = Command::new(payjoin_cli)
                 .arg("--root-certificate")
@@ -915,7 +917,7 @@ mod e2e {
                 .arg("--ohttp-relays")
                 .arg(ohttp_relay)
                 .arg("fallback")
-                .arg(session_id.to_string())
+                .arg(session_ref)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()

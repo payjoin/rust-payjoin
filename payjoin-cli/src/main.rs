@@ -6,9 +6,6 @@ use cli::{Cli, Commands};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
-#[cfg(feature = "v2")]
-use crate::db::v2::SessionId;
-
 mod app;
 mod cli;
 mod db;
@@ -79,8 +76,8 @@ async fn main() -> Result<()> {
             app.history().await?;
         }
         #[cfg(feature = "v2")]
-        Commands::Fallback { session_id } => {
-            app.fallback(SessionId(*session_id)).await?;
+        Commands::Fallback { session_ref } => {
+            app.fallback(session_ref.clone()).await?;
         }
     };
 

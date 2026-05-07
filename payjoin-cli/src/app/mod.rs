@@ -66,17 +66,17 @@ pub trait App: Send + Sync {
     }
 }
 
-#[cfg(feature = "_manual-tls")]
+#[cfg(all(feature = "v1", feature = "_manual-tls"))]
 fn http_agent(config: &Config) -> Result<reqwest::Client> {
     Ok(http_agent_builder(config.root_certificate.as_ref())?.build()?)
 }
 
-#[cfg(not(feature = "_manual-tls"))]
+#[cfg(all(feature = "v1", not(feature = "_manual-tls")))]
 fn http_agent(_config: &Config) -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder().http1_only().build()?)
 }
 
-#[cfg(feature = "_manual-tls")]
+#[cfg(all(feature = "v1", feature = "_manual-tls"))]
 fn http_agent_builder(
     root_cert_path: Option<&std::path::PathBuf>,
 ) -> Result<reqwest::ClientBuilder> {

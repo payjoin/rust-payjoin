@@ -17,6 +17,15 @@ fi
 
 uv run python --version
 
+# rustup target add is a no-op against a nix-provided toolchain
+# (no rustup home, targets baked into the nix derivation instead).
+ensure_target() {
+    if command -v rustup >/dev/null 2>&1 &&
+        rustup show active-toolchain >/dev/null 2>&1; then
+        rustup target add "$@"
+    fi
+}
+
 cd ../
 # This is a test script the actual release should not include the test utils feature
 cargo build --features _test-utils --profile dev
@@ -24,7 +33,7 @@ cargo run --features _test-utils --profile dev --bin uniffi-bindgen generate --l
 
 if [[ $OS == "Darwin" ]]; then
     echo "Generating native binaries..."
-    rustup target add aarch64-apple-darwin x86_64-apple-darwin
+    ensure_target aarch64-apple-darwin x86_64-apple-darwin
     # This is a test script the actual release should not include the test utils feature
     cargo build --profile dev --target aarch64-apple-darwin --features _test-utils &
     cargo build --profile dev --target x86_64-apple-darwin --features _test-utils &
@@ -37,7 +46,7 @@ if [[ $OS == "Darwin" ]]; then
 
 else
     echo "Generating native binaries..."
-    rustup target add x86_64-unknown-linux-gnu
+    ensure_target x86_64-unknown-linux-gnu
     # This is a test script the actual release should not include the test utils feature
     cargo build --profile dev --target x86_64-unknown-linux-gnu --features _test-utils
 

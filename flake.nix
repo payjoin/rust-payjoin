@@ -86,6 +86,17 @@
                   "rustfmt"
                   "llvm-tools-preview"
                 ];
+                # Targets needed by payjoin-ffi/python/scripts/generate_bindings.sh
+                # so cargo can build per-arch artifacts under nix (rustup target add
+                # is a no-op against a nix-provided toolchain).
+                targets =
+                  pkgs.lib.optionals pkgs.stdenv.isDarwin [
+                    "aarch64-apple-darwin"
+                    "x86_64-apple-darwin"
+                  ]
+                  ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+                    "x86_64-unknown-linux-gnu"
+                  ];
               }
             )
             {
@@ -306,22 +317,27 @@
 
         pythonDevShell = pkgs.mkShell {
           name = "python-dev";
-          packages = [
-            pythonVenv
-            pkgs.uv
-            rustVersions.msrv
-          ]
-          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-            pkgs.pkg-config
-            pkgs.openssl
-            pkgs.clang
-          ];
+          packages =
+            with pkgs;
+            [
+              pythonVenv
+              uv
+              rustVersions.msrv
+              bzip2 # needed for some machines to have access to libzip at runtime
+            ]
+            ++ lib.optionals pkgs.stdenv.isLinux [
+              pkg-config
+              openssl
+              clang
+            ];
 
           env = {
             # Prevent uv from downloading Python or managing the venv itself, nix provides both;
             UV_NO_SYNC = "1";
             UV_PYTHON_DOWNLOADS = "never";
           };
+          BITCOIND_EXE = pkgs.lib.getExe' pkgs.bitcoind "bitcoind";
+          BITCOIND_SKIP_DOWNLOAD = 1;
 
           shellHook = ''
             # to avoid host/global Python path leaking into the Nix env

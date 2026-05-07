@@ -791,8 +791,8 @@ mod integration {
             sender_final_action: SenderFinalAction,
         ) -> Result<(Transaction, Receiver<Monitor>), BoxError>
         where
-            R: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent> + Clone,
-            S: SessionPersister<SessionEvent = payjoin::send::v2::SessionEvent> + Clone,
+            R: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
+            S: SessionPersister<SessionEvent = payjoin::send::v2::SessionEvent>,
         {
             let agent = services.http_agent();
             services.wait_for_services_ready().await?;

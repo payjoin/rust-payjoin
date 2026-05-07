@@ -425,26 +425,26 @@ mod tests {
         persister
             .save_event(SessionEvent::PostedOriginalPsbt())
             .expect("in memory persister save should not fail");
-        assert!(!persister.inner.read().expect("session read should succeed").is_closed);
+        assert!(!persister.inner.lock().expect("session read should succeed").is_closed);
         let err = replay_event_log(&persister).expect_err("session replay should be fail");
         let expected_err: ReplayError<SendSession, SessionEvent> =
             InternalReplayError::InvalidEvent(Box::new(SessionEvent::PostedOriginalPsbt()), None)
                 .into();
         assert_eq!(err.to_string(), expected_err.to_string());
-        assert!(persister.inner.read().expect("lock should not be poisoned").is_closed);
+        assert!(persister.inner.lock().expect("lock should not be poisoned").is_closed);
 
         let persister = InMemoryAsyncPersister::<SessionEvent>::default();
         persister
             .save_event(SessionEvent::PostedOriginalPsbt())
             .await
             .expect("in memory async persister save should not fail");
-        assert!(!persister.inner.read().await.is_closed);
+        assert!(!persister.inner.lock().await.is_closed);
         let err =
             replay_event_log_async(&persister).await.expect_err("session replay should be fail");
         let expected_err: ReplayError<SendSession, SessionEvent> =
             InternalReplayError::InvalidEvent(Box::new(SessionEvent::PostedOriginalPsbt()), None)
                 .into();
         assert_eq!(err.to_string(), expected_err.to_string());
-        assert!(persister.inner.read().await.is_closed);
+        assert!(persister.inner.lock().await.is_closed);
     }
 }

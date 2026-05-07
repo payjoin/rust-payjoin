@@ -102,8 +102,6 @@ bool Function(X509Certificate)? _secureSocketCertificateCallback(
   return (cert) => _bytesEqual(cert.der, certificate);
 }
 
-final _hostPattern = RegExp(r'^[A-Za-z0-9._\-:]+$');
-
 void _validateUrl(Uri uri, String parameter, String source) {
   if (uri.scheme != 'http' && uri.scheme != 'https') {
     throw ArgumentError.value(
@@ -112,13 +110,26 @@ void _validateUrl(Uri uri, String parameter, String source) {
       'scheme must be http or https',
     );
   }
-  if (uri.host.isEmpty || !_hostPattern.hasMatch(uri.host)) {
+  if (uri.userInfo.isNotEmpty || !_isValidHost(uri, source)) {
     throw ArgumentError.value(source, parameter, 'invalid host');
   }
   final port = _port(uri);
   if (port < 1 || port > 65535) {
     throw ArgumentError.value(source, parameter, 'invalid port');
   }
+}
+
+final _domainHostPattern = RegExp(r'^[A-Za-z0-9.-]+$');
+
+bool _isValidHost(Uri uri, String source) {
+  final host = uri.host;
+  if (host.isEmpty) return false;
+  if (_domainHostPattern.hasMatch(host)) return true;
+  if (!host.contains(':')) return false;
+
+  final authorityStart = source.indexOf('://');
+  if (authorityStart == -1) return false;
+  return source.startsWith('[', authorityStart + 3);
 }
 
 int _port(Uri uri) {

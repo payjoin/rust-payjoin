@@ -227,5 +227,43 @@ void main() {
         throwsArgumentError,
       );
     });
+
+    test('rejects underscore in domain hosts', () async {
+      await expectLater(
+        payjoin_http.fetchOhttpKeys(
+          ohttpRelayUrl: 'http://bad_host.example',
+          directoryUrl: 'https://example.com',
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('rejects userinfo in URLs', () async {
+      await expectLater(
+        payjoin_http.fetchOhttpKeys(
+          ohttpRelayUrl: 'http://user@example.com',
+          directoryUrl: 'https://example.com',
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('accepts bracketed IPv6 relay hosts', () async {
+      final directory = await _startSecureDirectory(_contentLengthResponse());
+      final relay = await ServerSocket.bind(InternetAddress.loopbackIPv6, 0);
+      relay.listen(_handleConnectProxyClient);
+      try {
+        final keys = await payjoin_http.fetchOhttpKeys(
+          ohttpRelayUrl: 'http://[::1]:${relay.port}',
+          directoryUrl: 'https://localhost:${directory.port}',
+          certificate: _localhostCertDer(),
+          timeout: const Duration(seconds: 2),
+        );
+        expect(keys, isA<payjoin.OhttpKeys>());
+      } finally {
+        await relay.close();
+        await directory.close();
+      }
+    });
   });
 }

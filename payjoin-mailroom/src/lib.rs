@@ -235,7 +235,7 @@ async fn init_directory(
     let db = crate::db::MetricsDb::new(crate::db::DbServiceAdapter::new(files_db), metrics.clone());
 
     let ohttp_keys_dir = config.storage_dir.join("ohttp-keys");
-    let ohttp_config = init_ohttp_config(&ohttp_keys_dir)?;
+    let keyset = init_ohttp_keyset(&ohttp_keys_dir, config.ohttp_keys_max_age).await?;
 
     let v1 = if config.v1.is_some() {
         #[cfg(feature = "access-control")]
@@ -246,7 +246,19 @@ async fn init_directory(
     } else {
         None
     };
-    Ok(crate::directory::Service::new(db, ohttp_config.into(), sentinel_tag, v1))
+    let service =
+        crate::directory::Service::new(db, keyset, config.ohttp_keys_max_age, sentinel_tag, v1);
+
+    if let Some(max_age) = config.ohttp_keys_max_age {
+        crate::directory::spawn_key_rotation(
+            service.ohttp_key_set().clone(),
+            ohttp_keys_dir,
+            max_age,
+        );
+        info!("OHTTP key rotation enabled: interval={}s", max_age.as_secs());
+    }
+
+    Ok(service)
 }
 
 #[cfg(feature = "access-control")]
@@ -343,18 +355,80 @@ async fn load_address_cache(
     }
 }
 
-fn init_ohttp_config(
+async fn init_ohttp_keyset(
     ohttp_keys_dir: &std::path::Path,
-) -> anyhow::Result<crate::key_config::ServerKeyConfig> {
-    std::fs::create_dir_all(ohttp_keys_dir)?;
-    match crate::key_config::read_server_config(ohttp_keys_dir) {
-        Ok(config) => Ok(config),
-        Err(_) => {
-            let config = crate::key_config::gen_ohttp_server_config()?;
-            crate::key_config::persist_new_key_config(config.clone(), ohttp_keys_dir)?;
-            Ok(config)
+    interval: Option<std::time::Duration>,
+) -> anyhow::Result<std::sync::Arc<crate::directory::KeyRotatingServer>> {
+    tokio::fs::create_dir_all(ohttp_keys_dir).await?;
+
+    // Ensure both key files exist, generating any that are missing.
+    for key_id in [0u8, 1] {
+        let path = crate::key_config::key_path_for_id(ohttp_keys_dir, key_id);
+        if !path.exists() {
+            let config = crate::key_config::gen_ohttp_server_config_with_id(key_id)?;
+            crate::key_config::persist_key_config(&config, ohttp_keys_dir).await?;
+            info!("Generated missing OHTTP key_id {key_id}");
         }
     }
+
+    // Read both keys with their mtimes.
+    let sys_now = std::time::SystemTime::now();
+    let mut candidates: Vec<(crate::key_config::ServerKeyConfig, std::time::Duration)> =
+        Vec::with_capacity(2);
+
+    for key_id in [0u8, 1] {
+        let path = crate::key_config::key_path_for_id(ohttp_keys_dir, key_id);
+        let mtime = std::fs::metadata(&path)?.modified()?;
+        let age = sys_now.duration_since(mtime).expect("mtime is in the future");
+        let config = crate::key_config::read_server_config_for_id(ohttp_keys_dir, key_id)?;
+        candidates.push((config, age));
+    }
+
+    // Oldest mtime (largest age) first — the active key is always the older one.
+    candidates.sort_by_key(|(_, age)| std::cmp::Reverse(*age));
+
+    let now = std::time::Instant::now();
+    let (current_key_id, current_age) = if let Some(ivl) = interval {
+        // Walk oldest-first, take the first key that hasn't expired.
+        match candidates.iter().find(|(_, age)| *age < ivl) {
+            Some((cfg, age)) => (cfg.key_id(), *age),
+            None => {
+                // Both expired — regenerate both and start fresh with key_id=0.
+                candidates.clear();
+                for key_id in [0u8, 1] {
+                    let path = crate::key_config::key_path_for_id(ohttp_keys_dir, key_id);
+                    let _ = tokio::fs::remove_file(&path).await;
+                    let config = crate::key_config::gen_ohttp_server_config_with_id(key_id)?;
+                    crate::key_config::persist_key_config(&config, ohttp_keys_dir).await?;
+                    candidates.push((config, std::time::Duration::ZERO));
+                    info!("Regenerated expired OHTTP key_id {key_id}");
+                }
+                (0u8, std::time::Duration::ZERO)
+            }
+        }
+    } else {
+        // No interval — oldest key is always current, never expires.
+        (candidates[0].0.key_id(), candidates[0].1)
+    };
+
+    info!("Active OHTTP key_id={current_key_id}, age={current_age:?}");
+
+    let mut slots: [Option<ohttp::Server>; 2] = [None, None];
+    for (cfg, _) in candidates {
+        let key_id = cfg.key_id();
+        slots[key_id as usize] = Some(cfg.into_server());
+    }
+
+    let slot0 = slots[0].take().expect("slot 0 missing after init");
+    let slot1 = slots[1].take().expect("slot 1 missing after init");
+    let valid_until = match interval {
+        Some(ivl) => now + ivl.saturating_sub(current_age),
+        None => now + std::time::Duration::from_secs(60 * 60 * 24 * 365 * 10),
+    };
+
+    let keyset =
+        crate::directory::KeyRotatingServer::new(slot0, slot1, current_key_id, valid_until);
+    Ok(std::sync::Arc::new(keyset))
 }
 
 fn build_app(services: Services) -> Router {
@@ -426,7 +500,7 @@ fn is_relay_request(req: &axum::extract::Request) -> bool {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
     use axum_server::tls_rustls::RustlsConfig;
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
@@ -438,6 +512,22 @@ mod tests {
     use super::*;
     use crate::metrics::{ACTIVE_CONNECTIONS, HTTP_REQUESTS, TOTAL_CONNECTIONS};
 
+    /// Helper to set the mtime of a key file to a specific SystemTime.
+    fn set_mtime(path: &std::path::Path, time: SystemTime) {
+        let file = std::fs::File::open(path).expect("open file");
+        let times = std::fs::FileTimes::new().set_modified(time);
+        file.set_times(times).expect("set mtime");
+    }
+
+    /// Helper to create both key files in a directory.
+    async fn create_both_keys(dir: &std::path::Path) {
+        for key_id in [0u8, 1] {
+            let config =
+                crate::key_config::gen_ohttp_server_config_with_id(key_id).expect("gen config");
+            crate::key_config::persist_key_config(&config, dir).await.expect("persist");
+        }
+    }
+
     async fn start_service(
         cert_der: Vec<u8>,
         key_der: Vec<u8>,
@@ -447,6 +537,7 @@ mod tests {
             "[::]:0".parse().expect("valid listener address"),
             tempdir.path().to_path_buf(),
             Duration::from_secs(2),
+            None,
             None,
         );
 
@@ -544,6 +635,7 @@ mod tests {
             tempdir.path().to_path_buf(),
             Duration::from_secs(2),
             None,
+            None,
         );
 
         let sentinel_tag = generate_sentinel_tag();
@@ -592,6 +684,7 @@ mod tests {
             "[::]:0".parse().expect("valid listener address"),
             tempdir.path().to_path_buf(),
             Duration::from_secs(2),
+            None,
             None,
         );
 
@@ -647,5 +740,111 @@ mod tests {
             endpoint_attrs.iter().all(|ep| !ep.contains(&short_id)),
             "actual short ID value must not appear in metrics"
         );
+    }
+
+    #[tokio::test]
+    async fn both_keys_expired_regenerates_and_uses_key_id_0() {
+        let dir = tempdir().expect("tempdir");
+        let interval = Duration::from_secs(7 * 24 * 3600); // 7 days
+
+        create_both_keys(dir.path()).await;
+
+        // Set both mtimes to 8 days ago — both expired.
+        let eight_days_ago = SystemTime::now() - Duration::from_secs(8 * 24 * 3600);
+        set_mtime(&crate::key_config::key_path_for_id(dir.path(), 0), eight_days_ago);
+        set_mtime(&crate::key_config::key_path_for_id(dir.path(), 1), eight_days_ago);
+
+        let keyset = init_ohttp_keyset(dir.path(), Some(interval)).await.expect("init keyset");
+
+        assert_eq!(keyset.current_key_id().await, 0);
+        // valid_until should be ~7 days from now
+        let remaining =
+            keyset.valid_until().await.saturating_duration_since(std::time::Instant::now());
+        assert!(remaining > Duration::from_secs(6 * 24 * 3600), "remaining={remaining:?}");
+        assert!(remaining <= interval, "remaining={remaining:?}");
+    }
+
+    #[tokio::test]
+    async fn one_valid_one_expired_uses_valid_key() {
+        let dir = tempdir().expect("tempdir");
+        let interval = Duration::from_secs(7 * 24 * 3600);
+
+        create_both_keys(dir.path()).await;
+
+        // key_id=0: 3 days old — valid, should be selected (older mtime).
+        // key_id=1: 8 days old — expired.
+        // After sort by age descending: key_id=1 (8d) is index 0, key_id=0 (3d) is index 1.
+        // key_id=1 is checked first, expired, then key_id=0 is checked, valid — selected.
+        let three_days_ago = SystemTime::now() - Duration::from_secs(3 * 24 * 3600);
+        let eight_days_ago = SystemTime::now() - Duration::from_secs(8 * 24 * 3600);
+        set_mtime(&crate::key_config::key_path_for_id(dir.path(), 0), three_days_ago);
+        set_mtime(&crate::key_config::key_path_for_id(dir.path(), 1), eight_days_ago);
+
+        let keyset = init_ohttp_keyset(dir.path(), Some(interval)).await.expect("init keyset");
+
+        assert_eq!(keyset.current_key_id().await, 0);
+        // ~4 days remaining
+        let remaining =
+            keyset.valid_until().await.saturating_duration_since(std::time::Instant::now());
+        assert!(remaining > Duration::from_secs(3 * 24 * 3600), "remaining={remaining:?}");
+        assert!(remaining < interval, "remaining={remaining:?}");
+    }
+
+    #[tokio::test]
+    async fn two_valid_keys_uses_older_mtime() {
+        let dir = tempdir().expect("tempdir");
+        let interval = Duration::from_secs(7 * 24 * 3600);
+
+        create_both_keys(dir.path()).await;
+
+        // key_id=0: 5 days old — valid, older mtime -> should be selected as active.
+        // key_id=1: 1 day old  — valid, newer mtime -> standby.
+        let five_days_ago = SystemTime::now() - Duration::from_secs(5 * 24 * 3600);
+        let one_day_ago = SystemTime::now() - Duration::from_secs(24 * 3600);
+        set_mtime(&crate::key_config::key_path_for_id(dir.path(), 0), five_days_ago);
+        set_mtime(&crate::key_config::key_path_for_id(dir.path(), 1), one_day_ago);
+
+        let keyset = init_ohttp_keyset(dir.path(), Some(interval)).await.expect("init keyset");
+
+        assert_eq!(keyset.current_key_id().await, 0);
+        // ~2 days remaining
+        let remaining =
+            keyset.valid_until().await.saturating_duration_since(std::time::Instant::now());
+        assert!(remaining > Duration::from_secs(24 * 3600), "remaining={remaining:?}");
+        assert!(remaining < Duration::from_secs(3 * 24 * 3600), "remaining={remaining:?}");
+    }
+
+    #[tokio::test]
+    async fn no_interval_uses_oldest_key_never_expires() {
+        let dir = tempdir().expect("tempdir");
+
+        create_both_keys(dir.path()).await;
+
+        let five_days_ago = SystemTime::now() - Duration::from_secs(5 * 24 * 3600);
+        let one_day_ago = SystemTime::now() - Duration::from_secs(24 * 3600);
+        set_mtime(&crate::key_config::key_path_for_id(dir.path(), 0), five_days_ago);
+        set_mtime(&crate::key_config::key_path_for_id(dir.path(), 1), one_day_ago);
+
+        let keyset = init_ohttp_keyset(dir.path(), None).await.expect("init keyset");
+
+        assert_eq!(keyset.current_key_id().await, 0);
+        // valid_until should be ~10 years out
+        let remaining =
+            keyset.valid_until().await.saturating_duration_since(std::time::Instant::now());
+        assert!(remaining > Duration::from_secs(365 * 24 * 3600), "should be far future");
+    }
+
+    #[tokio::test]
+    async fn missing_keys_are_generated_on_init() {
+        let dir = tempdir().expect("tempdir");
+        let interval = Duration::from_secs(7 * 24 * 3600);
+
+        // Don't create any keys — init should generate them.
+        let keyset = init_ohttp_keyset(dir.path(), Some(interval)).await.expect("init keyset");
+
+        assert_eq!(keyset.current_key_id().await, 0);
+        let remaining =
+            keyset.valid_until().await.saturating_duration_since(std::time::Instant::now());
+        assert!(remaining > Duration::from_secs(6 * 24 * 3600), "remaining={remaining:?}");
     }
 }

@@ -258,6 +258,17 @@ impl<S: State> Sender<S> {
             self.session_context.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
         TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Cancel), fallback)
     }
+
+    pub fn fallback(
+        self,
+        broadcast: impl Fn(&bitcoin::Transaction) -> (),
+    ) -> TerminalTransition<SessionEvent, bitcoin::Txid> {
+        let fallback_tx =
+            self.session_context.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
+        let txid = fallback_tx.compute_txid();
+        broadcast(&fallback_tx);
+        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::FallbackBroadcasted), txid)
+    }
 }
 
 /// Represents the various states of a Payjoin send session during the protocol flow.

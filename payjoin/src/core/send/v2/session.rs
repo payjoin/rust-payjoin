@@ -131,6 +131,7 @@ impl SessionHistory {
             Some(SessionEvent::Closed(outcome)) => match outcome {
                 SessionOutcome::Success(_) => SessionStatus::Completed,
                 SessionOutcome::Failure | SessionOutcome::Cancel => SessionStatus::Failed,
+                SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
             },
             _ => SessionStatus::Active,
         }
@@ -145,6 +146,7 @@ pub enum SessionStatus {
     Active,
     Failed,
     Completed,
+    FallbackBroadcasted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -166,6 +168,8 @@ pub enum SessionOutcome {
     Failure,
     /// Payjoin was cancelled by the user
     Cancel,
+    /// Fallback transaction was broadcasted
+    FallbackBroadcasted,
 }
 
 #[cfg(test)]

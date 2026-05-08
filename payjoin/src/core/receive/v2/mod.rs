@@ -352,6 +352,16 @@ impl<S: State> Receiver<S> {
         let fallback = self.state.fallback_tx();
         TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Cancel), fallback)
     }
+
+    pub fn fallback(
+        self,
+        broadcast: impl Fn(&bitcoin::Transaction) -> (),
+    ) -> TerminalTransition<SessionEvent, bitcoin::Txid> {
+        let fallback_tx = self.state.fallback_tx().unwrap();
+        broadcast(&fallback_tx);
+        let txid = fallback_tx.compute_txid();
+        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::FallbackBroadcasted), txid)
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -56,6 +56,7 @@ impl StatusText for SendSession {
                 SenderSessionOutcome::Failure => "Session failure",
                 SenderSessionOutcome::Success(_) => "Session success",
                 SenderSessionOutcome::Cancel => "Session cancelled",
+                SenderSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
             },
         }
     }
@@ -486,26 +487,32 @@ impl AppTrait for App {
 
     async fn fallback_sender(&self, session_id: SessionId) -> Result<()> {
         let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
-        let (session, history) = replay_sender_event_log(&persister)?;
+        let (session, _) = replay_sender_event_log(&persister)?;
+        let broadcast = |tx: &payjoin::bitcoin::Transaction| {
+            let txid = tx.compute_txid();
+            println!("Broadcasted fallback transaction txid: {txid}");
+            self.wallet().broadcast_tx(tx).unwrap();
+        };
 
-        if let SendSession::Closed(SenderSessionOutcome::Success(proposal)) = session {
-            let txid = proposal.clone().extract_tx_unchecked_fee_rate().compute_txid();
-            println!(
-                "Session {session_id} already produced payjoin transaction {txid}. \
+        match session {
+            SendSession::WithReplyKey(sender) => {
+                sender.fallback(broadcast).save(&persister)?;
+            }
+            SendSession::PollingForProposal(sender) => {
+                sender.fallback(broadcast).save(&persister)?;
+            }
+            SendSession::Closed(SenderSessionOutcome::Success(proposal)) => {
+                let txid = proposal.clone().extract_tx_unchecked_fee_rate().compute_txid();
+                println!(
+                    "Session {session_id} already produced payjoin transaction {txid}. \
                  Broadcasting the original now would double-spend against it. \
                  If the payjoin tx needs re-broadcast, run \
                  `bitcoin-cli gettransaction {txid}` to fetch the hex, then \
                  `bitcoin-cli sendrawtransaction <hex>`."
-            );
-            return Ok(());
-        }
-
-        let fallback_tx = history.fallback_tx();
-        self.wallet().broadcast_tx(&fallback_tx)?;
-        println!("Broadcasted fallback transaction txid: {}", fallback_tx.compute_txid());
-
-        if let Err(e) = SessionPersister::close(&persister) {
-            tracing::warn!("Failed to close session {session_id} after fallback: {e}");
+                );
+                return Ok(());
+            }
+            _ => return Err(anyhow!("TODO")),
         }
         Ok(())
     }
@@ -543,6 +550,11 @@ impl App {
                 println!(
                     "Session {id} ended without payjoin. Run `payjoin-cli fallback {id}` to broadcast the original transaction."
                 );
+                return Ok(());
+            }
+            SendSession::Closed(SenderSessionOutcome::FallbackBroadcasted) => {
+                let id = persister.session_id();
+                println!("Session {id} ended with fallback broadcasted.");
                 return Ok(());
             }
         }

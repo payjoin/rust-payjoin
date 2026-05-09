@@ -13,3 +13,7 @@ doc/api/
 # Auto-generated bindings
 lib/payjoin.dart
 lib/bitcoin.dart
+
+# Auto-generated precompiled binaries
+precompiled_build/
+precompiled_upload/

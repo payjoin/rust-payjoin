@@ -491,6 +491,7 @@ describe("Validation", () => {
                     txid: "deadbeef",
                     vout: 0,
                 }),
+                // @ts-ignore
                 scriptSig: new Uint8Array([]),
                 sequence: 0,
                 witness: [],
@@ -508,7 +509,9 @@ describe("Validation", () => {
         assert.throws(() => {
             new payjoin.SenderBuilder(
                 "not-a-psbt",
-                "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX",
+                payjoin.Uri.parse(
+                    "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX",
+                ).checkPjSupported(),
             );
         });
     });

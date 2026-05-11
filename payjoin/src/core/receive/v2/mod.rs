@@ -24,6 +24,7 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
+use std::future::Future;
 use std::str::FromStr;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
@@ -608,23 +609,30 @@ pub struct UncheckedOriginalPayload {
 /// received from the sender is broadcastable to the network in the case of a payjoin failure.
 ///
 /// The recommended usage of this typestate differs based on whether you are implementing an
-/// interactive (where the receiver takes manual actions to respond to the
-/// payjoin proposal) or a non-interactive (ex. a donation page which automatically generates a new QR code
-/// for each visit) payment receiver. For the latter, you should call [`Receiver<UncheckedOriginalPayload>::check_broadcast_suitability`] to check
-/// that the proposal is actually broadcastable (and, optionally, whether the fee rate is above the
-/// minimum limit you have set). These mechanisms protect the receiver against probing attacks, where
-/// a malicious sender can repeatedly send proposals to have the non-interactive receiver reveal the UTXOs
-/// it owns with the proposals it modifies.
+/// a non-interactive payment receiver (ex. a donation page which automatically generates a new QR code
+/// for each visit) or interactive (where the receiver takes manual actions to respond to the
+/// payjoin proposal).
 ///
-/// If you are implementing an interactive payment receiver, then such checks are not necessary, and you
-/// can go ahead with calling [`Receiver<UncheckedOriginalPayload>::assume_interactive_receiver`] to move on to the next typestate.
+/// For the former, you should call [`Receiver<UncheckedOriginalPayload>::check_broadcast_suitability`]
+/// or [`Receiver<UncheckedOriginalPayload>::check_broadcast_suitability_async`] to check that the
+/// proposal is actually broadcastable  (and, optionally, whether the fee rate is above the minimum
+/// limit you have set). These mechanisms protect the receiver against probing attacks, where a malicious
+/// sender can repeatedly send proposals to have the non-interactive receiver reveal the UTXOs
+/// it owns with the proposals it modifies. The difference between the two checks is that
+/// the async version takes an asynchronous `can_broadcast` callback function.
+///
+/// For the latter, such checks are not necessary and you can go ahead with calling
+/// [`Receiver<UncheckedOriginalPayload>::assume_interactive_receiver`] to move on to the next typestate.
 impl Receiver<UncheckedOriginalPayload> {
     /// Checks that the original PSBT in the proposal can be broadcasted.
     ///
     /// If the receiver is a non-interactive payment processor (ex. a donation page which generates
     /// a new QR code for each visit), then it should make sure that the original PSBT is broadcastable
     /// as a fallback mechanism in case the payjoin fails. This validation would be equivalent to
-    /// `testmempoolaccept` RPC call returning `{"allowed": true,...}`.
+    /// `testmempoolaccept` Bitcoin Core RPC call returning `{"allowed": true,...}`.
+    ///
+    /// If the `can_broadcast` validation callback needs to be asynchronous
+    /// [`Receiver<UncheckedOriginalPayload>::check_broadcast_suitability_async`] should be used instead.
     ///
     /// Receiver can optionally set a minimum fee rate which will be enforced on the original PSBT in the proposal.
     /// This can be used to further prevent probing attacks since the attacker would now need to probe the receiver
@@ -641,6 +649,56 @@ impl Receiver<UncheckedOriginalPayload> {
         Receiver<HasReplyableError>,
     > {
         match self.state.original.check_broadcast_suitability(min_fee_rate, can_broadcast) {
+            Ok(()) => MaybeFatalTransition::success(
+                SessionEvent::CheckedBroadcastSuitability(),
+                Receiver {
+                    state: MaybeInputsOwned { original: self.original.clone() },
+                    session_context: self.session_context,
+                },
+            ),
+            Err(Error::Implementation(e)) =>
+                MaybeFatalTransition::transient(Error::Implementation(e)),
+            Err(e) => MaybeFatalTransition::replyable_error(
+                SessionEvent::GotReplyableError((&e).into()),
+                Receiver {
+                    state: HasReplyableError { error_reply: (&e).into() },
+                    session_context: self.session_context,
+                },
+                e,
+            ),
+        }
+    }
+
+    /// Checks that the original PSBT in the proposal can be broadcasted.
+    ///
+    /// If the receiver is a non-interactive payment processor (ex. a donation page which generates
+    /// a new QR code for each visit), then it should make sure that the original PSBT is broadcastable
+    /// as a fallback mechanism in case the payjoin fails. This validation would be equivalent to
+    /// `testmempoolaccept` RPC call returning `{"allowed": true,...}`.
+    ///
+    /// Receiver can optionally set a minimum fee rate which will be enforced on the original PSBT in the proposal.
+    /// This can be used to further prevent probing attacks since the attacker would now need to probe the receiver
+    /// with transactions which are both broadcastable and pay high fee. Unrelated to the probing attack scenario,
+    /// this parameter also makes operating in a high fee environment easier for the receiver.
+    pub async fn check_broadcast_suitability_async<F>(
+        self,
+        min_fee_rate: Option<FeeRate>,
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> F,
+    ) -> MaybeFatalTransition<
+        SessionEvent,
+        Receiver<MaybeInputsOwned>,
+        Error,
+        Receiver<HasReplyableError>,
+    >
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        match self
+            .state
+            .original
+            .check_broadcast_suitability_async(min_fee_rate, can_broadcast)
+            .await
+        {
             Ok(()) => MaybeFatalTransition::success(
                 SessionEvent::CheckedBroadcastSuitability(),
                 Receiver {
@@ -697,7 +755,8 @@ pub struct MaybeInputsOwned {
 /// typestate. The receiver can call [`Receiver<MaybeInputsOwned>::extract_tx_to_schedule_broadcast`]
 /// to extract the signed original PSBT to schedule a fallback in case the Payjoin process fails.
 ///
-/// Call [`Receiver<MaybeInputsOwned>::check_inputs_not_owned`] to proceed.
+/// Call [`Receiver<MaybeInputsOwned>::check_inputs_not_owned`] or
+/// [`Receiver<MaybeInputsOwned>::check_inputs_not_owned_async`] to proceed.
 impl Receiver<MaybeInputsOwned> {
     /// Extracts the original transaction received from the sender.
     ///
@@ -711,6 +770,9 @@ impl Receiver<MaybeInputsOwned> {
     /// Check that the original PSBT has no receiver-owned inputs.
     ///
     /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    ///
+    /// If the `can_broadcast` validation callback needs to be asynchronous
+    /// [`Receiver<MaybeInputsOwned>::check_inputs_not_owned_async`] should be used instead.
     pub fn check_inputs_not_owned(
         self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
@@ -721,30 +783,62 @@ impl Receiver<MaybeInputsOwned> {
         Receiver<HasReplyableError>,
     > {
         match self.state.original.check_inputs_not_owned(is_owned) {
-            Ok(inner) => inner,
+            Ok(()) => MaybeFatalTransition::success(
+                SessionEvent::CheckedInputsNotOwned(),
+                Receiver {
+                    state: MaybeInputsSeen { original: self.original.clone() },
+                    session_context: self.session_context,
+                },
+            ),
             Err(e) => match e {
-                Error::Implementation(_) => {
-                    return MaybeFatalTransition::transient(e);
-                }
-                _ => {
-                    return MaybeFatalTransition::replyable_error(
-                        SessionEvent::GotReplyableError((&e).into()),
-                        Receiver {
-                            state: HasReplyableError { error_reply: (&e).into() },
-                            session_context: self.session_context,
-                        },
-                        e,
-                    );
-                }
+                Error::Implementation(_) => MaybeFatalTransition::transient(e),
+                _ => MaybeFatalTransition::replyable_error(
+                    SessionEvent::GotReplyableError((&e).into()),
+                    Receiver {
+                        state: HasReplyableError { error_reply: (&e).into() },
+                        session_context: self.session_context,
+                    },
+                    e,
+                ),
             },
-        };
-        MaybeFatalTransition::success(
-            SessionEvent::CheckedInputsNotOwned(),
-            Receiver {
-                state: MaybeInputsSeen { original: self.original.clone() },
-                session_context: self.session_context,
+        }
+    }
+
+    /// Check that the original PSBT has no receiver-owned inputs.
+    ///
+    /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    pub async fn check_inputs_not_owned_async<F>(
+        self,
+        is_owned: &mut impl FnMut(&Script) -> F,
+    ) -> MaybeFatalTransition<
+        SessionEvent,
+        Receiver<MaybeInputsSeen>,
+        Error,
+        Receiver<HasReplyableError>,
+    >
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        match self.state.original.check_inputs_not_owned_async(is_owned).await {
+            Ok(()) => MaybeFatalTransition::success(
+                SessionEvent::CheckedInputsNotOwned(),
+                Receiver {
+                    state: MaybeInputsSeen { original: self.original.clone() },
+                    session_context: self.session_context,
+                },
+            ),
+            Err(e) => match e {
+                Error::Implementation(_) => MaybeFatalTransition::transient(e),
+                _ => MaybeFatalTransition::replyable_error(
+                    SessionEvent::GotReplyableError((&e).into()),
+                    Receiver {
+                        state: HasReplyableError { error_reply: (&e).into() },
+                        session_context: self.session_context,
+                    },
+                    e,
+                ),
             },
-        )
+        }
     }
 
     pub(crate) fn apply_checked_inputs_not_owned(self) -> ReceiveSession {
@@ -763,7 +857,8 @@ pub struct MaybeInputsSeen {
 
 /// Typestate to check that the original PSBT has no inputs that the receiver has seen before.
 ///
-/// Call [`Receiver<MaybeInputsSeen>::check_no_inputs_seen_before`] to proceed.
+/// Call [`Receiver<MaybeInputsSeen>::check_no_inputs_seen_before`] or
+/// [`Receiver<MaybeInputsSeen>::check_no_inputs_seen_before_async`] to proceed.
 impl Receiver<MaybeInputsSeen> {
     /// Check that the receiver has never seen the inputs in the original proposal before.
     ///
@@ -773,6 +868,9 @@ impl Receiver<MaybeInputsSeen> {
     ///    and sending them back to the receiver.
     /// 2. Re-entrant payjoin, where the sender uses the payjoin PSBT of a previous payjoin as the
     ///    original proposal PSBT of the current, new payjoin.
+    ///
+    /// If the `is_known` validation callback needs to be asynchronous
+    /// [`Receiver<MaybeInputsSeen>::check_no_inputs_seen_before_async`] should be used instead.
     pub fn check_no_inputs_seen_before(
         self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
@@ -783,30 +881,67 @@ impl Receiver<MaybeInputsSeen> {
         Receiver<HasReplyableError>,
     > {
         match self.state.original.check_no_inputs_seen_before(is_known) {
-            Ok(inner) => inner,
+            Ok(()) => MaybeFatalTransition::success(
+                SessionEvent::CheckedNoInputsSeenBefore(),
+                Receiver {
+                    state: OutputsUnknown { original: self.original.clone() },
+                    session_context: self.session_context,
+                },
+            ),
             Err(e) => match e {
-                Error::Implementation(_) => {
-                    return MaybeFatalTransition::transient(e);
-                }
-                _ => {
-                    return MaybeFatalTransition::replyable_error(
-                        SessionEvent::GotReplyableError((&e).into()),
-                        Receiver {
-                            state: HasReplyableError { error_reply: (&e).into() },
-                            session_context: self.session_context,
-                        },
-                        e,
-                    );
-                }
+                Error::Implementation(_) => MaybeFatalTransition::transient(e),
+                _ => MaybeFatalTransition::replyable_error(
+                    SessionEvent::GotReplyableError((&e).into()),
+                    Receiver {
+                        state: HasReplyableError { error_reply: (&e).into() },
+                        session_context: self.session_context,
+                    },
+                    e,
+                ),
             },
-        };
-        MaybeFatalTransition::success(
-            SessionEvent::CheckedNoInputsSeenBefore(),
-            Receiver {
-                state: OutputsUnknown { original: self.original.clone() },
-                session_context: self.session_context,
+        }
+    }
+
+    /// Check that the receiver has never seen the inputs in the original proposal before.
+    ///
+    /// This check prevents the following attacks:
+    /// 1. Probing attacks, where the sender can use the exact same proposal (or with minimal change)
+    ///    to have the receiver reveal their UTXO set by contributing to all proposals with different inputs
+    ///    and sending them back to the receiver.
+    /// 2. Re-entrant payjoin, where the sender uses the payjoin PSBT of a previous payjoin as the
+    ///    original proposal PSBT of the current, new payjoin.
+    pub async fn check_no_inputs_seen_before_async<F>(
+        self,
+        is_known: &mut impl FnMut(&OutPoint) -> F,
+    ) -> MaybeFatalTransition<
+        SessionEvent,
+        Receiver<OutputsUnknown>,
+        Error,
+        Receiver<HasReplyableError>,
+    >
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        match self.state.original.check_no_inputs_seen_before_async(is_known).await {
+            Ok(()) => MaybeFatalTransition::success(
+                SessionEvent::CheckedNoInputsSeenBefore(),
+                Receiver {
+                    state: OutputsUnknown { original: self.original.clone() },
+                    session_context: self.session_context,
+                },
+            ),
+            Err(e) => match e {
+                Error::Implementation(_) => MaybeFatalTransition::transient(e),
+                _ => MaybeFatalTransition::replyable_error(
+                    SessionEvent::GotReplyableError((&e).into()),
+                    Receiver {
+                        state: HasReplyableError { error_reply: (&e).into() },
+                        session_context: self.session_context,
+                    },
+                    e,
+                ),
             },
-        )
+        }
     }
 
     pub(crate) fn apply_checked_no_inputs_seen_before(self) -> ReceiveSession {
@@ -828,7 +963,8 @@ pub struct OutputsUnknown {
 /// The receiver should only accept the original PSBTs from the sender which actually send them
 /// money.
 ///
-/// Call [`Receiver<OutputsUnknown>::identify_receiver_outputs`] to proceed.
+/// Call [`Receiver<OutputsUnknown>::identify_receiver_outputs`] or
+/// [`Receiver<OutputsUnknown>::identify_receiver_outputs_async`] to proceed.
 impl Receiver<OutputsUnknown> {
     /// Validates whether the original PSBT contains outputs which pay to the receiver and only
     /// then proceeds to the next typestate.
@@ -840,6 +976,9 @@ impl Receiver<OutputsUnknown> {
     /// function sets that parameter to None so that it is ignored in subsequent steps of the
     /// receiver flow. This protects the receiver from accidentally subtracting fees from their own
     /// outputs.
+    ///
+    /// If the `is_known` validation callback needs to be asynchronous
+    /// [`Receiver<OutputsUnknown>::identify_receiver_outputs_async`] should be used instead.
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
@@ -849,28 +988,64 @@ impl Receiver<OutputsUnknown> {
         Error,
         Receiver<HasReplyableError>,
     > {
-        let inner = match self.state.original.identify_receiver_outputs(is_receiver_output) {
-            Ok(inner) => inner,
+        match self.state.original.identify_receiver_outputs(is_receiver_output) {
+            Ok(inner) => MaybeFatalTransition::success(
+                SessionEvent::IdentifiedReceiverOutputs(inner.owned_vouts.clone()),
+                Receiver { state: WantsOutputs { inner }, session_context: self.session_context },
+            ),
             Err(e) => match e {
-                Error::Implementation(_) => {
-                    return MaybeFatalTransition::transient(e);
-                }
-                _ => {
-                    return MaybeFatalTransition::replyable_error(
-                        SessionEvent::GotReplyableError((&e).into()),
-                        Receiver {
-                            state: HasReplyableError { error_reply: (&e).into() },
-                            session_context: self.session_context,
-                        },
-                        e,
-                    );
-                }
+                Error::Implementation(_) => MaybeFatalTransition::transient(e),
+                _ => MaybeFatalTransition::replyable_error(
+                    SessionEvent::GotReplyableError((&e).into()),
+                    Receiver {
+                        state: HasReplyableError { error_reply: (&e).into() },
+                        session_context: self.session_context,
+                    },
+                    e,
+                ),
             },
-        };
-        MaybeFatalTransition::success(
-            SessionEvent::IdentifiedReceiverOutputs(inner.owned_vouts.clone()),
-            Receiver { state: WantsOutputs { inner }, session_context: self.session_context },
-        )
+        }
+    }
+
+    /// Validates whether the original PSBT contains outputs which pay to the receiver and only
+    /// then proceeds to the next typestate.
+    ///
+    /// Additionally, this function also protects the receiver from accidentally subtracting fees
+    /// from their own outputs: when a sender is sending a proposal,
+    /// they can select an output which they want the receiver to subtract fees from to account for
+    /// the increased transaction size. If a sender specifies a receiver output for this purpose, this
+    /// function sets that parameter to None so that it is ignored in subsequent steps of the
+    /// receiver flow. This protects the receiver from accidentally subtracting fees from their own
+    /// outputs.
+    pub async fn identify_receiver_outputs_async<F>(
+        self,
+        is_receiver_output: &mut impl FnMut(&Script) -> F,
+    ) -> MaybeFatalTransition<
+        SessionEvent,
+        Receiver<WantsOutputs>,
+        Error,
+        Receiver<HasReplyableError>,
+    >
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        match self.state.original.identify_receiver_outputs_async(is_receiver_output).await {
+            Ok(inner) => MaybeFatalTransition::success(
+                SessionEvent::IdentifiedReceiverOutputs(inner.owned_vouts.clone()),
+                Receiver { state: WantsOutputs { inner }, session_context: self.session_context },
+            ),
+            Err(e) => match e {
+                Error::Implementation(_) => MaybeFatalTransition::transient(e),
+                _ => MaybeFatalTransition::replyable_error(
+                    SessionEvent::GotReplyableError((&e).into()),
+                    Receiver {
+                        state: HasReplyableError { error_reply: (&e).into() },
+                        session_context: self.session_context,
+                    },
+                    e,
+                ),
+            },
+        }
     }
 
     pub(crate) fn apply_identified_receiver_outputs(
@@ -1054,23 +1229,20 @@ impl Receiver<WantsFeeRange> {
     ) -> MaybeFatalTransition<SessionEvent, Receiver<ProvisionalProposal>, ProtocolError> {
         let max_effective_fee_rate =
             max_effective_fee_rate.or(Some(self.session_context.max_fee_rate));
-        let psbt_context = match self
+        match self
             .state
             .inner
             .calculate_psbt_context_with_fee_range(min_fee_rate, max_effective_fee_rate)
         {
-            Ok(inner) => inner,
-            Err(e) => {
-                return MaybeFatalTransition::transient(ProtocolError::OriginalPayload(e.into()));
-            }
-        };
-        MaybeFatalTransition::success(
-            SessionEvent::AppliedFeeRange(psbt_context.clone()),
-            Receiver {
-                state: ProvisionalProposal { psbt_context },
-                session_context: self.session_context,
-            },
-        )
+            Ok(psbt_context) => MaybeFatalTransition::success(
+                SessionEvent::AppliedFeeRange(psbt_context.clone()),
+                Receiver {
+                    state: ProvisionalProposal { psbt_context },
+                    session_context: self.session_context,
+                },
+            ),
+            Err(e) => MaybeFatalTransition::transient(ProtocolError::OriginalPayload(e.into())),
+        }
     }
 
     pub(crate) fn apply_applied_fee_range(self, psbt_context: PsbtContext) -> ReceiveSession {
@@ -1099,22 +1271,54 @@ impl Receiver<ProvisionalProposal> {
     /// Finalization consists of two steps:
     ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
     ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
+    ///
+    /// If the `wallet_process_psbt` validation callback needs to be asynchronous
+    /// [`Receiver<ProvisionalProposal>::finalize_proposal_async`] should be used instead.
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, ImplementationError>
     {
         let original_psbt = self.state.psbt_context.original_psbt.clone();
-        let inner = match self.state.psbt_context.finalize_proposal(wallet_process_psbt) {
-            Ok(inner) => inner,
+        let payjoin_psbt = match self.state.psbt_context.finalize_proposal(wallet_process_psbt) {
+            Ok(payjoin_psbt) => payjoin_psbt,
             Err(e) => {
                 return MaybeTransientTransition::transient(e);
             }
         };
-        let psbt_context = PsbtContext { payjoin_psbt: inner.clone(), original_psbt };
+        let psbt_context = PsbtContext { payjoin_psbt: payjoin_psbt.clone(), original_psbt };
         let payjoin_proposal = PayjoinProposal { psbt_context: psbt_context.clone() };
         MaybeTransientTransition::success(
-            SessionEvent::FinalizedProposal(inner),
+            SessionEvent::FinalizedProposal(payjoin_psbt),
+            Receiver { state: payjoin_proposal, session_context: self.session_context },
+        )
+    }
+
+    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
+    /// they re-sign the transaction and broadcast it to the network.
+    ///
+    /// Finalization consists of two steps:
+    ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
+    ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
+    pub async fn finalize_proposal_async<F>(
+        self,
+        wallet_process_psbt: impl Fn(&Psbt) -> F,
+    ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, ImplementationError>
+    where
+        F: Future<Output = Result<Psbt, ImplementationError>>,
+    {
+        let original_psbt = self.state.psbt_context.original_psbt.clone();
+        let payjoin_psbt =
+            match self.state.psbt_context.finalize_proposal_async(wallet_process_psbt).await {
+                Ok(payjoin_psbt) => payjoin_psbt,
+                Err(e) => {
+                    return MaybeTransientTransition::transient(e);
+                }
+            };
+        let psbt_context = PsbtContext { payjoin_psbt: payjoin_psbt.clone(), original_psbt };
+        let payjoin_proposal = PayjoinProposal { psbt_context: psbt_context.clone() };
+        MaybeTransientTransition::success(
+            SessionEvent::FinalizedProposal(payjoin_psbt),
             Receiver { state: payjoin_proposal, session_context: self.session_context },
         )
     }
@@ -1124,7 +1328,7 @@ impl Receiver<ProvisionalProposal> {
     /// In some applications the entity that progresses the typestate
     /// is different from the entity that has access to the private keys,
     /// so the PSBT to sign must be accessible to such implementers.
-    pub fn psbt_to_sign(&self) -> Psbt { self.state.psbt_context.payjoin_psbt.clone() }
+    pub fn psbt_to_sign(&self) -> Psbt { self.state.psbt_context.psbt_to_sign() }
 
     pub(crate) fn apply_payjoin_proposal(self, payjoin_psbt: Psbt) -> ReceiveSession {
         let psbt_context = PsbtContext {
@@ -1316,6 +1520,35 @@ pub struct Monitor {
 /// Call [`Receiver<Monitor>::check_payment`] to confirm the status of the transaction in the
 /// network and conclude the Payjoin session.
 impl Receiver<Monitor> {
+    fn handle_broadcasted_payjoin_tx(
+        &self,
+        payjoin_txid: Txid,
+        tx: bitcoin::Transaction,
+    ) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, Error> {
+        let tx_id = tx.compute_txid();
+        if tx_id != payjoin_txid {
+            return MaybeFatalOrSuccessTransition::transient(Error::Implementation(
+                ImplementationError::from(
+                    format!(
+                        "Payjoin transaction ID mismatch. Expected: {payjoin_txid}, Got: {tx_id}"
+                    )
+                    .as_str(),
+                ),
+            ));
+        }
+        // TODO: should we check for witness and scriptsig on the tx?
+        let mut sender_witnesses = vec![];
+
+        for i in self.state.psbt_context.sender_input_indexes() {
+            let input = tx.input.get(i).expect("sender_input_indexes should return valid indices");
+            sender_witnesses.push((input.script_sig.clone(), input.witness.clone()));
+        }
+        // Payjoin transaction with SegWit inputs was detected. Log the signatures and complete the session.
+        MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(SessionOutcome::Success(
+            sender_witnesses,
+        )))
+    }
+
     /// Checks the network for the Payjoin proposal or the fallback transaction using the passed
     /// `transaction_exists` closure. Concludes the Payjoin session with a Success if the
     /// transaction satisfies the condition.
@@ -1355,26 +1588,7 @@ impl Receiver<Monitor> {
         // is not going to change when the sender signs it. So we can use the TXID to check the
         // network for the Payjoin proposal.
         match transaction_exists(payjoin_txid) {
-            Ok(Some(tx)) => {
-                let tx_id = tx.compute_txid();
-                if tx_id != payjoin_txid {
-                    return MaybeFatalOrSuccessTransition::transient(Error::Implementation(
-                        ImplementationError::from(format!("Payjoin transaction ID mismatch. Expected: {payjoin_txid}, Got: {tx_id}").as_str()),
-                    ));
-                }
-                // TODO: should we check for witness and scriptsig on the tx?
-                let mut sender_witnesses = vec![];
-
-                for i in self.state.psbt_context.sender_input_indexes() {
-                    let input =
-                        tx.input.get(i).expect("sender_input_indexes should return valid indices");
-                    sender_witnesses.push((input.script_sig.clone(), input.witness.clone()));
-                }
-                // Payjoin transaction with SegWit inputs was detected. Log the signatures and complete the session.
-                return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                    SessionOutcome::Success(sender_witnesses),
-                ));
-            }
+            Ok(Some(tx)) => return self.handle_broadcasted_payjoin_tx(payjoin_txid, tx),
             Ok(None) => {}
             Err(e) => return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e)),
         }
@@ -1382,6 +1596,67 @@ impl Receiver<Monitor> {
         // If the Payjoin proposal was not found, check the fallback transaction, as it is
         // the second of two transactions whose IDs the receiver is aware of.
         match transaction_exists(fallback_tx.compute_txid()) {
+            Ok(Some(_)) =>
+                return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                    SessionOutcome::FallbackBroadcasted,
+                )),
+            Ok(None) => {}
+            Err(e) => return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e)),
+        }
+
+        MaybeFatalOrSuccessTransition::no_results(self.clone())
+    }
+
+    /// Checks the network for the Payjoin proposal or the fallback transaction using the passed
+    /// `transaction_exists` closure. Concludes the Payjoin session with a Success if the
+    /// transaction satisfies the condition.
+    ///
+    /// For example, the condition can be if the transaction has been broadcast to the
+    /// network, or if it has some number of confirmations on the blockchain.
+    ///
+    /// If the receiver input address type in the fallback transaction is non-SegWit, then this
+    /// function will directly conclude the Payjoin session with a Success without running the
+    /// provided `transaction_exists` closure. `transaction_exists` uses the transaction ID to
+    /// search for the transaction in the network. Since a non-SegWit input signature is going to
+    /// change the TXID of the Payjoin proposal, it cannot be monitored.
+    pub async fn check_payment_async<F>(
+        &self,
+        transaction_exists: impl Fn(Txid) -> F,
+    ) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, Error>
+    where
+        F: Future<Output = Result<Option<bitcoin::Transaction>, ImplementationError>>,
+    {
+        let fallback_tx = self
+            .state
+            .psbt_context
+            .original_psbt
+            .clone()
+            .extract_tx_fee_rate_limit()
+            .expect("fallback transaction should be in the receiver context");
+
+        // If the fallback transaction included any non-SegWit inputs, then the transaction ID of
+        // the Payjoin proposal is going to change when the sender signs their non-SegWit address
+        // one more time. The receiver cannot monitor the transaction, and should conclude the session.
+        if fallback_tx.input.iter().any(|txin| txin.witness.is_empty()) {
+            return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                SessionOutcome::PayjoinProposalSent,
+            ));
+        }
+
+        let payjoin_proposal = &self.state.psbt_context.payjoin_psbt;
+        let payjoin_txid = payjoin_proposal.unsigned_tx.compute_txid();
+        // If the sender is spending SegWit-only inputs, then the transaction ID of the Payjoin proposal
+        // is not going to change when the sender signs it. So we can use the TXID to check the
+        // network for the Payjoin proposal.
+        match transaction_exists(payjoin_txid).await {
+            Ok(Some(tx)) => return self.handle_broadcasted_payjoin_tx(payjoin_txid, tx),
+            Ok(None) => {}
+            Err(e) => return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e)),
+        }
+
+        // If the Payjoin proposal was not found, check the fallback transaction, as it is
+        // the second of two transactions whose IDs the receiver is aware of.
+        match transaction_exists(fallback_tx.compute_txid()).await {
             Ok(Some(_)) =>
                 return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
                     SessionOutcome::FallbackBroadcasted,
@@ -1589,6 +1864,113 @@ pub mod test {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_monitor_typestate_async() -> Result<(), BoxError> {
+        let psbt_ctx = PsbtContext {
+            original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+            payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+        };
+        let monitor = Receiver {
+            state: Monitor { psbt_context: psbt_ctx },
+            session_context: SHARED_CONTEXT.clone(),
+        };
+
+        let payjoin_tx = PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx;
+        let original_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("valid tx");
+
+        // Nothing was spent, should be in the same state
+        let persister = InMemoryPersister::default();
+        let res = monitor
+            .check_payment_async(|_| async { Ok(None) })
+            .await
+            .save(&persister)
+            .expect("InMemoryPersister shouldn't fail");
+        assert!(matches!(res, OptionalTransitionOutcome::Stasis(_)));
+        assert!(!persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 0);
+
+        // Payjoin was broadcasted, should progress to success
+        let persister = InMemoryPersister::default();
+        let res = monitor
+            .check_payment_async(|_| async { Ok(Some(payjoin_tx.clone())) })
+            .await
+            .save(&persister)
+            .expect("InMemoryPersister shouldn't fail");
+
+        assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
+        assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
+        assert_eq!(
+            persister.inner.read().expect("Shouldn't be poisoned").events.last(),
+            Some(&SessionEvent::Closed(SessionOutcome::Success(vec![(
+                ScriptBuf::default(),
+                Witness::default()
+            )])))
+        );
+
+        // Fallback was broadcasted, should progress to success
+        let persister = InMemoryPersister::default();
+        let res = monitor
+            .check_payment_async(|txid| {
+                let txid = txid.to_owned();
+                let original_tx = original_tx.to_owned();
+                async move {
+                    // Emulate if one of the fallback outpoints was double spent
+                    if txid == original_tx.compute_txid() {
+                        Ok(Some(original_tx.clone()))
+                    } else {
+                        Ok(None)
+                    }
+                }
+            })
+            .await
+            .save(&persister)
+            .expect("InMemoryPersister shouldn't fail");
+
+        assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
+        assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
+        assert_eq!(
+            persister.inner.read().expect("Shouldn't be poisoned").events.last(),
+            Some(&SessionEvent::Closed(SessionOutcome::FallbackBroadcasted))
+        );
+
+        // Fallback transaction is non-SegWit address type, should end the session without checking
+        // the network for broadcasts.
+        // Not using the test-utils vectors here as they are SegWit.
+        let parsed_original_psbt_p2pkh = Psbt::from_str("cHNidP8BAFICAAAAAd5tU7sqAGa46oUVdEfV1HTeVVPYqvSvxy8/dvF3dwpZAQAAAAD9////AUTxBSoBAAAAFgAUhV1NWa6seBB5g6VZC2lnduxfEaUAAAAAAAEA/QoBAgAAAAIT2eO393FPqJ4fw6NH0rXALebtTCderecX0y6DumtjNgAAAAAA/f///5hrwcRiTXqXScbvk3APDdzy162Yj+6JD/iSEO9KYQl+AQAAAGpHMEQCIGcFm57xH5tQvJMipWfzxS7OGRi7+JfTT6WA27kOt8fVAiAp2I3WGdLk3/dVhoVxN6Jl9Wp/xeCIZZ1OTukSs8jszgEhAjjEq9kNnhvQbdVlWsE9QTIe4h39UPQ8flvU5Ivq6DFm/f///wIo3gUqAQAAABl2qRTWng6zTFWPZX1k12UqqBI6kLz8z4isAPIFKgEAAAAZdqkUIz2wzl605b3cg3j72nXReQuXXaWIrGcAAAABB2pHMEQCIEP33+9X/ecNmaiydM54HS+HoHfZygAQ/vMlc5r1IWkeAiA9oKjOVmp+RnrDF4zzHHGtoG1yy1+UWXBNaDiwd0LokgEhAmfCwbIv1mi5psiB3HFqXN1bFAo+goNUPWIso60J1matAAA=").expect("known psbt should parse");
+        let parsed_payjoin_proposal_p2pkh: Psbt =
+            Psbt::from_str("cHNidP8BAHsCAAAAAphrwcRiTXqXScbvk3APDdzy162Yj+6JD/iSEO9KYQl+AAAAAAD9////3m1TuyoAZrjqhRV0R9XUdN5VU9iq9K/HLz928Xd3ClkBAAAAAP3///8BsOILVAIAAAAWABSFXU1Zrqx4EHmDpVkLaWd27F8RpQAAAAAAAQCgAgAAAAJgEjBIihNzFXar4wIYepzXJwQVpbqZep9GCY8pQCqh3wAAAAAA/f///x8caN/onT7AOPRWJz7vnT6yiNxcsAIs/U3RcgU4kiq4AAAAAAD9////AgDyBSoBAAAAGXapFDGh2kOIa5aNVHT2bHSoFfcawEMiiKyk6QUqAQAAABl2qRQY8AsQvx+jg9NdGUwCuShS3qk2KYisZwAAAAEBIgDyBSoBAAAAGXapFDGh2kOIa5aNVHT2bHSoFfcawEMiiKwBB2pHMEQCICQEE2dMDzlyH3ojsc0l98Da0yd2ARuy5AcWQjlgHHjkAiA70WPB+yQhW5zhsOBTg6qLsi0KzoofRAj1BZFpKT2QwAEhA68L99Q+xdIIp0rinuVDs+4qmqMZwg4E+aqbTQ8RClXLAAEA/QoBAgAAAAIT2eO393FPqJ4fw6NH0rXALebtTCderecX0y6DumtjNgAAAAAA/f///5hrwcRiTXqXScbvk3APDdzy162Yj+6JD/iSEO9KYQl+AQAAAGpHMEQCIGcFm57xH5tQvJMipWfzxS7OGRi7+JfTT6WA27kOt8fVAiAp2I3WGdLk3/dVhoVxN6Jl9Wp/xeCIZZ1OTukSs8jszgEhAjjEq9kNnhvQbdVlWsE9QTIe4h39UPQ8flvU5Ivq6DFm/f///wIo3gUqAQAAABl2qRTWng6zTFWPZX1k12UqqBI6kLz8z4isAPIFKgEAAAAZdqkUIz2wzl605b3cg3j72nXReQuXXaWIrGcAAAAAAA==").expect("known psbt should parse");
+
+        let psbt_ctx_p2pkh = PsbtContext {
+            original_psbt: parsed_original_psbt_p2pkh.clone(),
+            payjoin_psbt: parsed_payjoin_proposal_p2pkh.clone(),
+        };
+        let monitor = Receiver {
+            state: Monitor { psbt_context: psbt_ctx_p2pkh },
+            session_context: SHARED_CONTEXT.clone(),
+        };
+
+        let persister = InMemoryPersister::default();
+        let res = monitor
+            .check_payment_async(|_| async {
+                panic!("check_payment should return before this closure is called")
+            })
+            .await
+            .save(&persister)
+            .expect("InMemoryPersister shouldn't fail");
+
+        assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
+        assert!(persister.inner.read().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.read().expect("Shouldn't be poisoned").events.len(), 1);
+        assert_eq!(
+            persister.inner.read().expect("Shouldn't be poisoned").events.last(),
+            Some(&SessionEvent::Closed(SessionOutcome::PayjoinProposalSent))
+        );
+
+        Ok(())
+    }
+
     #[test]
     fn test_v2_mutable_receiver_state_closures() {
         let persister = InMemoryPersister::default();
@@ -1602,23 +1984,62 @@ pub mod test {
             Ok(ret)
         }
 
-        let maybe_inputs_seen =
-            receiver.check_inputs_not_owned(&mut |_| mock_callback(&mut call_count, false));
+        let maybe_inputs_seen = receiver
+            .check_inputs_not_owned(&mut |_| mock_callback(&mut call_count, false))
+            .save(&persister)
+            .expect("Persister shouldn't fail");
         assert_eq!(call_count, 1);
 
         let outputs_unknown = maybe_inputs_seen
-            .save(&persister)
-            .expect("Persister shouldn't fail")
             .check_no_inputs_seen_before(&mut |_| mock_callback(&mut call_count, false))
             .save(&persister)
             .expect("Persister shouldn't fail");
         assert_eq!(call_count, 2);
 
         let _wants_outputs = outputs_unknown
-            .identify_receiver_outputs(&mut |_| mock_callback(&mut call_count, true));
+            .identify_receiver_outputs(&mut |_| mock_callback(&mut call_count, true))
+            .save(&persister)
+            .expect("Persister shouldn't fail");
         // there are 2 receiver outputs so we should expect this callback to run twice incrementing
         // call count twice
         assert_eq!(call_count, 4);
+    }
+
+    #[tokio::test]
+    async fn test_v2_mutable_receiver_state_closures_async() {
+        let persister = InMemoryPersister::default();
+        let call_count = std::cell::Cell::new(0usize);
+        let maybe_inputs_owned = maybe_inputs_owned_v2_from_test_vector();
+        let receiver =
+            v2::Receiver { state: maybe_inputs_owned, session_context: SHARED_CONTEXT.clone() };
+
+        let mock_callback = |ret: bool| {
+            call_count.set(call_count.get() + 1);
+            async move { Ok::<bool, ImplementationError>(ret) }
+        };
+
+        let maybe_inputs_seen = receiver
+            .check_inputs_not_owned_async(&mut |_| mock_callback(false))
+            .await
+            .save(&persister)
+            .expect("Persister shouldn't fail");
+        assert_eq!(call_count.get(), 1);
+
+        let outputs_unknown = maybe_inputs_seen
+            .check_no_inputs_seen_before_async(&mut |_| mock_callback(false))
+            .await
+            .save(&persister)
+            .expect("Persister shouldn't fail");
+        assert_eq!(call_count.get(), 2);
+
+        let _wants_outputs = outputs_unknown
+            .identify_receiver_outputs_async(&mut |_| mock_callback(true))
+            .await
+            .save(&persister)
+            .expect("Persister shouldn't fail");
+        // there are 2 receiver outputs so we should expect this callback to run twice incrementing
+        // call count twice
+        assert_eq!(call_count.get(), 4);
     }
 
     #[test]
@@ -1630,6 +2051,31 @@ pub mod test {
         let unchecked_proposal = receiver.check_broadcast_suitability(Some(FeeRate::MIN), |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
+
+        match unchecked_proposal {
+            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
+                Error::Implementation(error),
+            )))) => assert_eq!(
+                error.to_string(),
+                Error::Implementation("mock error".into()).to_string()
+            ),
+            _ => panic!("Expected Implementation error"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_unchecked_proposal_transient_error_async() -> Result<(), BoxError> {
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver =
+            v2::Receiver { state: unchecked_proposal, session_context: SHARED_CONTEXT.clone() };
+
+        let unchecked_proposal = receiver
+            .check_broadcast_suitability_async(Some(FeeRate::MIN), |_| async {
+                Err(ImplementationError::new(Error::Implementation("mock error".into())))
+            })
+            .await;
 
         match unchecked_proposal {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
@@ -1661,6 +2107,24 @@ pub mod test {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_unchecked_proposal_fatal_error_async() -> Result<(), BoxError> {
+        let persister = InMemoryPersister::default();
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver =
+            v2::Receiver { state: unchecked_proposal, session_context: SHARED_CONTEXT.clone() };
+
+        let unchecked_proposal_err = receiver
+            .check_broadcast_suitability_async(Some(FeeRate::MIN), |_| async { Ok(false) })
+            .await
+            .save(&persister)
+            .expect_err("should have replyable error");
+        let has_error = unchecked_proposal_err.error_state().expect("should have state");
+
+        let _err_req = has_error.create_error_request(EXAMPLE_URL)?;
+        Ok(())
+    }
+
     #[test]
     fn test_maybe_inputs_seen_transient_error() -> Result<(), BoxError> {
         let persister = InMemoryPersister::default();
@@ -1675,6 +2139,36 @@ pub mod test {
         let maybe_inputs_seen = maybe_inputs_owned.check_inputs_not_owned(&mut |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
+
+        match maybe_inputs_seen {
+            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
+                Error::Implementation(error),
+            )))) => assert_eq!(
+                error.to_string(),
+                Error::Implementation("mock error".into()).to_string()
+            ),
+            _ => panic!("Expected Implementation error"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_maybe_inputs_seen_transient_error_async() -> Result<(), BoxError> {
+        let persister = InMemoryPersister::default();
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver =
+            v2::Receiver { state: unchecked_proposal, session_context: SHARED_CONTEXT.clone() };
+
+        let maybe_inputs_owned = receiver
+            .assume_interactive_receiver()
+            .save(&persister)
+            .expect("Persister shouldn't fail");
+        let maybe_inputs_seen = maybe_inputs_owned
+            .check_inputs_not_owned_async(&mut |_| async {
+                Err(ImplementationError::new(Error::Implementation("mock error".into())))
+            })
+            .await;
 
         match maybe_inputs_seen {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
@@ -1720,6 +2214,40 @@ pub mod test {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_outputs_unknown_transient_error_async() -> Result<(), BoxError> {
+        let persister = InMemoryPersister::default();
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver =
+            v2::Receiver { state: unchecked_proposal, session_context: SHARED_CONTEXT.clone() };
+
+        let maybe_inputs_owned = receiver
+            .assume_interactive_receiver()
+            .save(&persister)
+            .expect("Persister shouldn't fail");
+        let maybe_inputs_seen = maybe_inputs_owned
+            .check_inputs_not_owned_async(&mut |_| async { Ok(false) })
+            .await
+            .save(&persister)
+            .expect("Persister shouldn't fail");
+        let outputs_unknown = maybe_inputs_seen
+            .check_no_inputs_seen_before_async(&mut |_| async {
+                Err(ImplementationError::new(Error::Implementation("mock error".into())))
+            })
+            .await;
+        match outputs_unknown {
+            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
+                Error::Implementation(error),
+            )))) => assert_eq!(
+                error.to_string(),
+                Error::Implementation("mock error".into()).to_string()
+            ),
+            _ => panic!("Expected Implementation error"),
+        }
+
+        Ok(())
+    }
+
     #[test]
     fn test_wants_outputs_transient_error() -> Result<(), BoxError> {
         let persister = InMemoryPersister::default();
@@ -1742,6 +2270,45 @@ pub mod test {
         let wants_outputs = outputs_unknown.identify_receiver_outputs(&mut |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
+        match wants_outputs {
+            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
+                Error::Implementation(error),
+            )))) => assert_eq!(
+                error.to_string(),
+                Error::Implementation("mock error".into()).to_string()
+            ),
+            _ => panic!("Expected Implementation error"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_wants_outputs_transient_error_async() -> Result<(), BoxError> {
+        let persister = InMemoryPersister::default();
+        let unchecked_proposal = unchecked_proposal_v2_from_test_vector();
+        let receiver =
+            v2::Receiver { state: unchecked_proposal, session_context: SHARED_CONTEXT.clone() };
+
+        let maybe_inputs_owned = receiver
+            .assume_interactive_receiver()
+            .save(&persister)
+            .expect("Persister shouldn't fail");
+        let maybe_inputs_seen = maybe_inputs_owned
+            .check_inputs_not_owned_async(&mut |_| async { Ok(false) })
+            .await
+            .save(&persister)
+            .expect("Persister shouldn't fail");
+        let outputs_unknown = maybe_inputs_seen
+            .check_no_inputs_seen_before_async(&mut |_| async { Ok(false) })
+            .await
+            .save(&persister)
+            .expect("Persister shouldn't fail");
+        let wants_outputs = outputs_unknown
+            .identify_receiver_outputs_async(&mut |_| async {
+                Err(ImplementationError::new(Error::Implementation("mock error".into())))
+            })
+            .await;
         match wants_outputs {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
                 Error::Implementation(error),

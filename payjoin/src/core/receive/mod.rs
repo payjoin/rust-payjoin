@@ -10,6 +10,7 @@
 //! version 1, refer to the `receive::v1` module documentation after enabling the `v1` feature.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::str::FromStr;
 
 use bitcoin::transaction::InputWeightPrediction;
@@ -312,6 +313,36 @@ impl PsbtContext {
         sender_input_indexes
     }
 
+    /// Returns payjoin proposal PSBT to be signed
+    ///
+    /// Removes all sender signatures which are received with the original PSBT
+    /// as these signatures are now invalid
+    fn psbt_to_sign(&self) -> Psbt {
+        let mut psbt = self.payjoin_psbt.clone();
+        // Remove now-invalid sender signatures before applying the receiver signatures
+        for i in self.sender_input_indexes() {
+            tracing::trace!("Clearing sender input {i}");
+            psbt.inputs[i].final_script_sig = None;
+            psbt.inputs[i].final_script_witness = None;
+            psbt.inputs[i].tap_key_sig = None;
+        }
+
+        psbt
+    }
+
+    /// Finalizes the signed PSBT and returns payjoin proposal PSBT
+    fn finalize_signed_psbt(self, signed_psbt: Psbt) -> Result<Psbt, ImplementationError> {
+        let expected_ntxid = self.payjoin_psbt.unsigned_tx.compute_ntxid();
+        let actual_ntxid = signed_psbt.unsigned_tx.compute_ntxid();
+        if expected_ntxid != actual_ntxid {
+            return Err(ImplementationError::from(
+                format!("Ntxid mismatch: expected {expected_ntxid}, got {actual_ntxid}").as_str(),
+            ));
+        }
+        let payjoin_proposal = self.prepare_psbt(signed_psbt);
+        Ok(payjoin_proposal)
+    }
+
     /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
     /// they sign the transaction and broadcast it to the network.
     ///
@@ -322,24 +353,27 @@ impl PsbtContext {
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<Psbt, ImplementationError> {
-        let mut psbt = self.payjoin_psbt.clone();
-        // Remove now-invalid sender signatures before applying the receiver signatures
-        for i in self.sender_input_indexes() {
-            tracing::trace!("Clearing sender input {i}");
-            psbt.inputs[i].final_script_sig = None;
-            psbt.inputs[i].final_script_witness = None;
-            psbt.inputs[i].tap_key_sig = None;
-        }
-        let finalized_psbt = wallet_process_psbt(&psbt)?;
-        let expected_ntxid = self.payjoin_psbt.unsigned_tx.compute_ntxid();
-        let actual_ntxid = finalized_psbt.unsigned_tx.compute_ntxid();
-        if expected_ntxid != actual_ntxid {
-            return Err(ImplementationError::from(
-                format!("Ntxid mismatch: expected {expected_ntxid}, got {actual_ntxid}").as_str(),
-            ));
-        }
-        let payjoin_proposal = self.prepare_psbt(finalized_psbt);
-        Ok(payjoin_proposal)
+        let psbt = self.psbt_to_sign();
+        let signed_psbt = wallet_process_psbt(&psbt)?;
+        self.finalize_signed_psbt(signed_psbt)
+    }
+
+    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
+    /// they sign the transaction and broadcast it to the network.
+    ///
+    /// Finalization consists of two steps:
+    ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
+    ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
+    async fn finalize_proposal_async<F>(
+        self,
+        wallet_process_psbt: impl Fn(&Psbt) -> F,
+    ) -> Result<Psbt, ImplementationError>
+    where
+        F: Future<Output = Result<Psbt, ImplementationError>>,
+    {
+        let psbt = self.psbt_to_sign();
+        let signed_psbt = wallet_process_psbt(&psbt).await?;
+        self.finalize_signed_psbt(signed_psbt)
     }
 }
 
@@ -358,20 +392,25 @@ impl OriginalPayload {
         Ok(original_psbt_fee / self.psbt.clone().extract_tx_unchecked_fee_rate().weight())
     }
 
+    fn check_min_fee_rate(&self, min_fee_rate: FeeRate) -> Result<(), Error> {
+        let original_psbt_fee_rate = self.psbt_fee_rate()?;
+        if original_psbt_fee_rate < min_fee_rate {
+            return Err(InternalPayloadError::PsbtBelowFeeRate(
+                original_psbt_fee_rate,
+                min_fee_rate,
+            )
+            .into());
+        }
+        Ok(())
+    }
+
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
-        let original_psbt_fee_rate = self.psbt_fee_rate()?;
         if let Some(min_fee_rate) = min_fee_rate {
-            if original_psbt_fee_rate < min_fee_rate {
-                return Err(InternalPayloadError::PsbtBelowFeeRate(
-                    original_psbt_fee_rate,
-                    min_fee_rate,
-                )
-                .into());
-            }
+            self.check_min_fee_rate(min_fee_rate)?
         }
         if can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())
             .map_err(Error::Implementation)?
@@ -382,6 +421,37 @@ impl OriginalPayload {
         }
     }
 
+    pub async fn check_broadcast_suitability_async<F>(
+        &self,
+        min_fee_rate: Option<FeeRate>,
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> F,
+    ) -> Result<(), Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        if let Some(min_fee_rate) = min_fee_rate {
+            self.check_min_fee_rate(min_fee_rate)?
+        }
+        if can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())
+            .await
+            .map_err(Error::Implementation)?
+        {
+            Ok(())
+        } else {
+            Err(InternalPayloadError::OriginalPsbtNotBroadcastable.into())
+        }
+    }
+
+    fn input_scripts(
+        &self,
+    ) -> Box<dyn Iterator<Item = Result<ScriptBuf, InternalPayloadError>> + Send + '_> {
+        let scripts = Box::new(self.psbt.input_pairs().map(|input| match input.previous_txout() {
+            Ok(txout) => Ok(txout.script_pubkey.to_owned()),
+            Err(e) => Err(InternalPayloadError::PrevTxOut(e)),
+        }));
+        scripts
+    }
+
     /// Check that the original PSBT has no receiver-owned inputs.
     ///
     /// An attacker can try to spend the receiver's own inputs. This check prevents that.
@@ -389,26 +459,35 @@ impl OriginalPayload {
         &self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
-        let mut err: Result<(), Error> = Ok(());
-        if let Some(e) = self
-            .psbt
-            .input_pairs()
-            .scan(&mut err, |err, input| match input.previous_txout() {
-                Ok(txout) => Some(txout.script_pubkey.to_owned()),
-                Err(e) => {
-                    **err = Err(InternalPayloadError::PrevTxOut(e).into());
-                    None
-                }
-            })
-            .find_map(|script| match is_owned(&script) {
-                Ok(false) => None,
-                Ok(true) => Some(InternalPayloadError::InputOwned(script).into()),
-                Err(e) => Some(Error::Implementation(e)),
-            })
-        {
-            return Err(e);
+        for script_result in self.input_scripts() {
+            let script = script_result?;
+            match is_owned(&script) {
+                Ok(false) => continue,
+                Ok(true) => return Err(InternalPayloadError::InputOwned(script).into()),
+                Err(e) => return Err(Error::Implementation(e)),
+            }
         }
-        err?;
+        Ok(())
+    }
+
+    /// Check that the original PSBT has no receiver-owned inputs.
+    ///
+    /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    pub async fn check_inputs_not_owned_async<F>(
+        &self,
+        is_owned: &mut impl FnMut(&Script) -> F,
+    ) -> Result<(), Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        for script_result in self.input_scripts() {
+            let script = script_result?;
+            match is_owned(&script).await {
+                Ok(false) => continue,
+                Ok(true) => return Err(InternalPayloadError::InputOwned(script).into()),
+                Err(e) => return Err(Error::Implementation(e)),
+            }
+        }
         Ok(())
     }
 
@@ -416,37 +495,40 @@ impl OriginalPayload {
         &self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
-        self.psbt.input_pairs().try_for_each(|input| {
+        for input in self.psbt.input_pairs() {
             match is_known(&input.txin.previous_output) {
-                Ok(false) => Ok::<(), Error>(()),
-                Ok(true) =>  {
+                Ok(false) => continue,
+                Ok(true) => {
                     tracing::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
                     Err(InternalPayloadError::InputSeen(input.txin.previous_output))?
-                },
+                }
                 Err(e) => Err(Error::Implementation(e))?,
             }
-        })?;
+        }
         Ok(())
     }
 
-    pub fn identify_receiver_outputs(
-        self,
-        is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
-    ) -> Result<common::WantsOutputs, Error> {
-        let owned_vouts: Vec<usize> = self
-            .psbt
-            .unsigned_tx
-            .output
-            .iter()
-            .enumerate()
-            .filter_map(|(vout, txo)| match is_receiver_output(&txo.script_pubkey) {
-                Ok(true) => Some(Ok(vout)),
-                Ok(false) => None,
-                Err(e) => Some(Err(e)),
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::Implementation)?;
+    pub async fn check_no_inputs_seen_before_async<F>(
+        &self,
+        is_known: &mut impl FnMut(&OutPoint) -> F,
+    ) -> Result<(), Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        for input in self.psbt.input_pairs() {
+            match is_known(&input.txin.previous_output).await {
+                Ok(false) => continue,
+                Ok(true) => {
+                    tracing::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
+                    Err(InternalPayloadError::InputSeen(input.txin.previous_output))?
+                }
+                Err(e) => Err(Error::Implementation(e))?,
+            }
+        }
+        Ok(())
+    }
 
+    fn process_owned_outputs(self, owned_vouts: Vec<usize>) -> Result<common::WantsOutputs, Error> {
         if owned_vouts.is_empty() {
             return Err(InternalPayloadError::MissingPayment.into());
         }
@@ -463,6 +545,41 @@ impl OriginalPayload {
         let original_payload = OriginalPayload { params, ..self.clone() };
         Ok(common::WantsOutputs::new(original_payload, owned_vouts))
     }
+
+    pub fn identify_receiver_outputs(
+        self,
+        is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
+    ) -> Result<common::WantsOutputs, Error> {
+        let mut owned_vouts: Vec<usize> = Vec::new();
+        for (vout, txo) in self.psbt.unsigned_tx.output.iter().enumerate() {
+            match is_receiver_output(&txo.script_pubkey) {
+                Ok(true) => owned_vouts.push(vout),
+                Ok(false) => continue,
+                Err(e) => return Err(Error::Implementation(e)),
+            }
+        }
+
+        self.process_owned_outputs(owned_vouts)
+    }
+
+    pub async fn identify_receiver_outputs_async<F>(
+        self,
+        is_receiver_output: &mut impl FnMut(&Script) -> F,
+    ) -> Result<common::WantsOutputs, Error>
+    where
+        F: Future<Output = Result<bool, ImplementationError>>,
+    {
+        let mut owned_vouts: Vec<usize> = Vec::new();
+        for (vout, txo) in self.psbt.unsigned_tx.output.iter().enumerate() {
+            match is_receiver_output(&txo.script_pubkey).await {
+                Ok(true) => owned_vouts.push(vout),
+                Ok(false) => continue,
+                Err(e) => return Err(Error::Implementation(e)),
+            }
+        }
+
+        self.process_owned_outputs(owned_vouts)
+    }
 }
 
 #[cfg(test)]
@@ -476,7 +593,9 @@ pub(crate) mod tests {
         witness, Amount, PubkeyHash, ScriptBuf, ScriptHash, Sequence, Txid, WScriptHash,
         XOnlyPublicKey,
     };
-    use payjoin_test_utils::{DUMMY20, DUMMY32, PARSED_ORIGINAL_PSBT, QUERY_PARAMS};
+    use payjoin_test_utils::{
+        DUMMY20, DUMMY32, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL, QUERY_PARAMS,
+    };
 
     use super::*;
     use crate::psbt::InternalPsbtInputError::InvalidScriptPubKey;
@@ -486,6 +605,24 @@ pub(crate) mod tests {
         let params = Params::from_query_str(QUERY_PARAMS, &[Version::One])
             .expect("Could not parse params from query str");
         OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
+    }
+
+    pub(crate) fn original_missing_prevtxout_from_test_vector() -> OriginalPayload {
+        let params = Params::from_query_str(QUERY_PARAMS, &[Version::One])
+            .expect("Could not parse params from query str");
+        let mut psbt: Psbt = PARSED_ORIGINAL_PSBT.clone();
+        for psbtin in psbt.inputs_mut() {
+            psbtin.non_witness_utxo = None;
+            psbtin.witness_utxo = None;
+        }
+        OriginalPayload { psbt: psbt.clone(), params }
+    }
+
+    pub(crate) fn psbt_context_from_test_vector() -> PsbtContext {
+        PsbtContext {
+            payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+            original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+        }
     }
 
     #[test]
@@ -823,6 +960,287 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn test_check_broadcast_suitability() {
+        let original = original_from_test_vector();
+
+        // Outcome 1: min_fee_rate too high → PsbtBelowFeeRate error
+        let err = original
+            .clone()
+            .check_broadcast_suitability(Some(FeeRate::MAX), |_| Ok(true))
+            .expect_err("Should fail when fee rate is below minimum");
+        match err {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::PsbtBelowFeeRate(original_fee_rate, min_fee_rate),
+            ))) => {
+                assert_eq!(original_fee_rate, original.psbt_fee_rate().unwrap());
+                assert_eq!(min_fee_rate, FeeRate::MAX);
+            }
+            _ => panic!("Expected PsbtBelowFeeRate error, got: {err:?}"),
+        }
+
+        // Outcome 2: can_broadcast returns false → OriginalPsbtNotBroadcastable error
+        let err = original
+            .clone()
+            .check_broadcast_suitability(None, |_| Ok(false))
+            .expect_err("Should fail when can_broadcast returns false");
+        match err {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::OriginalPsbtNotBroadcastable,
+            ))) => {}
+            _ => panic!("Expected OriginalPsbtNotBroadcastable error, got: {err:?}"),
+        }
+
+        // Outcome 3: can_broadcast returns an implementation error → Error::Implementation
+        let err = original
+            .clone()
+            .check_broadcast_suitability(None, |_| {
+                Err(ImplementationError::from("broadcast check failed"))
+            })
+            .expect_err("Should fail when can_broadcast returns an implementation error");
+        match err {
+            Error::Implementation(error_message) => {
+                assert_eq!(error_message.to_string(), "broadcast check failed".to_string())
+            }
+            _ => panic!("Expected Error::Implementation, got: {err:?}"),
+        }
+
+        // Outcome 4: success
+        original
+            .check_broadcast_suitability(None, |_| Ok(true))
+            .expect("Should succeed when fee rate is acceptable and can_broadcast returns true");
+    }
+
+    #[tokio::test]
+    async fn test_check_broadcast_suitability_async() {
+        let original = original_from_test_vector();
+
+        // Outcome 1: min_fee_rate too high → PsbtBelowFeeRate error
+        let err = original
+            .clone()
+            .check_broadcast_suitability_async(Some(FeeRate::MAX), |_| async { Ok(true) })
+            .await
+            .expect_err("Should fail when fee rate is below minimum");
+        match err {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::PsbtBelowFeeRate(original_fee_rate, min_fee_rate),
+            ))) => {
+                assert_eq!(original_fee_rate, original.psbt_fee_rate().unwrap());
+                assert_eq!(min_fee_rate, FeeRate::MAX);
+            }
+            _ => panic!("Expected PsbtBelowFeeRate error, got: {err:?}"),
+        }
+
+        // Outcome 2: can_broadcast returns false → OriginalPsbtNotBroadcastable error
+        let err = original
+            .clone()
+            .check_broadcast_suitability_async(None, |_| async { Ok(false) })
+            .await
+            .expect_err("Should fail when can_broadcast returns false");
+        match err {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::OriginalPsbtNotBroadcastable,
+            ))) => {}
+            _ => panic!("Expected OriginalPsbtNotBroadcastable error, got: {err:?}"),
+        }
+
+        // Outcome 3: can_broadcast returns an implementation error → Error::Implementation
+        let err = original
+            .clone()
+            .check_broadcast_suitability_async(None, |_| async {
+                Err(ImplementationError::from("broadcast check failed"))
+            })
+            .await
+            .expect_err("Should fail when can_broadcast returns an implementation error");
+        match err {
+            Error::Implementation(error_message) => {
+                assert_eq!(error_message.to_string(), "broadcast check failed".to_string())
+            }
+            _ => panic!("Expected Error::Implementation, got: {err:?}"),
+        }
+
+        // Outcome 4: success
+        original
+            .check_broadcast_suitability_async(None, |_| async { Ok(true) })
+            .await
+            .expect("Should succeed when fee rate is acceptable and can_broadcast returns true");
+    }
+
+    #[test]
+    fn test_check_inputs_not_owned() {
+        let original = original_from_test_vector();
+        let original_missing_prevtxout = original_missing_prevtxout_from_test_vector();
+
+        // Outcome 1: input_scripts returns a PrevTxOut error → Protocol error
+        let err = original_missing_prevtxout
+            .check_inputs_not_owned(&mut |_| Ok(false))
+            .expect_err("Should fail when previous txout is missing");
+        match err {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::PrevTxOut(_),
+            ))) => {}
+            _ => panic!("Expected PrevTxOut error, got: {err:?}"),
+        }
+
+        // Outcome 2: is_owned returns true → InputOwned error
+        let err = original
+            .clone()
+            .check_inputs_not_owned(&mut |_| Ok(true))
+            .expect_err("Should fail when input is owned");
+        match err {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::InputOwned(_),
+            ))) => {}
+            _ => panic!("Expected InputOwned error, got: {err:?}"),
+        }
+
+        // Outcome 3: is_owned returns an implementation error → Error::Implementation
+        let err = original
+            .clone()
+            .check_inputs_not_owned(&mut |_| {
+                Err(ImplementationError::from("ownership check failed"))
+            })
+            .expect_err("Should fail when is_owned returns an implementation error");
+        match err {
+            Error::Implementation(error_message) => {
+                assert_eq!(error_message.to_string(), "ownership check failed".to_string())
+            }
+            _ => panic!("Expected Error::Implementation, got: {err:?}"),
+        }
+
+        // Outcome 4: is_owned returns false → success
+        original
+            .check_inputs_not_owned(&mut |_| Ok(false))
+            .expect("Should succeed when no inputs are owned");
+    }
+
+    #[tokio::test]
+    async fn test_check_inputs_not_owned_async() {
+        let original = original_from_test_vector();
+        let original_missing_prevtxout = original_missing_prevtxout_from_test_vector();
+
+        // Outcome 1: input_scripts returns a PrevTxOut error → Protocol error
+        let err = original_missing_prevtxout
+            .check_inputs_not_owned_async(&mut |_| async { Ok(false) })
+            .await
+            .expect_err("Should fail when previous txout is missing");
+        match err {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::PrevTxOut(_),
+            ))) => {}
+            _ => panic!("Expected PrevTxOut error, got: {err:?}"),
+        }
+
+        // Outcome 2: is_owned returns true → InputOwned error
+        let err = original
+            .clone()
+            .check_inputs_not_owned_async(&mut |_| async { Ok(true) })
+            .await
+            .expect_err("Should fail when input is owned");
+        match err {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::InputOwned(_),
+            ))) => {}
+            _ => panic!("Expected InputOwned error, got: {err:?}"),
+        }
+
+        // Outcome 3: is_owned returns an implementation error → Error::Implementation
+        let err = original
+            .clone()
+            .check_inputs_not_owned_async(&mut |_| async {
+                Err(ImplementationError::from("ownership check failed"))
+            })
+            .await
+            .expect_err("Should fail when is_owned returns an implementation error");
+        match err {
+            Error::Implementation(error_message) => {
+                assert_eq!(error_message.to_string(), "ownership check failed".to_string())
+            }
+            _ => panic!("Expected Error::Implementation, got: {err:?}"),
+        }
+
+        // Outcome 4: is_owned returns false → success
+        original
+            .check_inputs_not_owned_async(&mut |_| async { Ok(false) })
+            .await
+            .expect("Should succeed when no inputs are owned");
+    }
+
+    #[test]
+    fn test_check_no_inputs_seen_before() {
+        let original = original_from_test_vector();
+
+        // Outcome 1: is_known returns true → InputSeen error
+        let err = original
+            .clone()
+            .check_no_inputs_seen_before(&mut |_| Ok(true))
+            .expect_err("Should fail when input has been seen before");
+        match err {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::InputSeen(_),
+            ))) => {}
+            _ => panic!("Expected InputSeen error, got: {err:?}"),
+        }
+
+        // Outcome 2: is_known returns an implementation error → Error::Implementation
+        let err = original
+            .clone()
+            .check_no_inputs_seen_before(&mut |_| {
+                Err(ImplementationError::from("input seen check failed"))
+            })
+            .expect_err("Should fail when is_known returns an implementation error");
+        match err {
+            Error::Implementation(error_message) => {
+                assert_eq!(error_message.to_string(), "input seen check failed".to_string())
+            }
+            _ => panic!("Expected Error::Implementation, got: {err:?}"),
+        }
+
+        // Outcome 3: is_known returns false → success
+        original
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
+            .expect("Should succeed when no inputs have been seen before");
+    }
+
+    #[tokio::test]
+    async fn test_check_no_inputs_seen_before_async() {
+        let original = original_from_test_vector();
+
+        // Outcome 1: is_known returns true → InputSeen error
+        let err = original
+            .clone()
+            .check_no_inputs_seen_before_async(&mut |_| async { Ok(true) })
+            .await
+            .expect_err("Should fail when input has been seen before");
+        match err {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::InputSeen(_),
+            ))) => {}
+            _ => panic!("Expected InputSeen error, got: {err:?}"),
+        }
+
+        // Outcome 2: is_known returns an implementation error → Error::Implementation
+        let err = original
+            .clone()
+            .check_no_inputs_seen_before_async(&mut |_| async {
+                Err(ImplementationError::from("input seen check failed"))
+            })
+            .await
+            .expect_err("Should fail when is_known returns an implementation error");
+        match err {
+            Error::Implementation(error_message) => {
+                assert_eq!(error_message.to_string(), "input seen check failed".to_string())
+            }
+            _ => panic!("Expected Error::Implementation, got: {err:?}"),
+        }
+
+        // Outcome 3: is_known returns false → success
+        original
+            .check_no_inputs_seen_before_async(&mut |_| async { Ok(false) })
+            .await
+            .expect("Should succeed when no inputs have been seen before");
+    }
+
+    #[test]
     fn test_identify_receiver_outputs() {
         let original = original_from_test_vector();
 
@@ -855,5 +1273,108 @@ pub(crate) mod tests {
             .expect("receiver outputs should be identified");
         assert_eq!(wants_outputs.owned_vouts, vec![0, 1]);
         assert_eq!(wants_outputs.params.additional_fee_contribution, None);
+    }
+
+    #[tokio::test]
+    async fn test_identify_receiver_outputs_async() {
+        let original = original_from_test_vector();
+
+        // Simple check that it correctly identifies the owned vouts and leaves params unchanged
+        let wants_outputs =
+            original
+                .clone()
+                .identify_receiver_outputs_async(&mut |script| {
+                    let script = script.to_owned();
+                    async move {
+                        Ok(script == PARSED_ORIGINAL_PSBT.unsigned_tx.output[1].script_pubkey)
+                    }
+                })
+                .await
+                .expect("receiver outputs should be identified");
+        assert_eq!(wants_outputs.owned_vouts, vec![1]);
+        assert_eq!(wants_outputs.params, original.params);
+
+        // No outputs belong to the receiver, it should error
+        let wants_outputs = original
+            .clone()
+            .identify_receiver_outputs_async(&mut |_| async { Ok(false) })
+            .await
+            .expect_err("should error");
+        assert_eq!(wants_outputs.to_string(), "Protocol error: Missing payment.");
+
+        // Fee contribution output belongs to the receiver, it should correctly identify owned
+        // vouts and ignore the additional fee contribution param
+        let params = Params {
+            additional_fee_contribution: Some((Amount::from_sat(182), 1)),
+            ..original.params
+        };
+        let original = OriginalPayload { params, ..original };
+        let wants_outputs = original
+            .identify_receiver_outputs_async(&mut |_| async { Ok(true) })
+            .await
+            .expect("receiver outputs should be identified");
+        assert_eq!(wants_outputs.owned_vouts, vec![0, 1]);
+        assert_eq!(wants_outputs.params.additional_fee_contribution, None);
+    }
+
+    #[test]
+    fn test_finalize_proposal() {
+        let psbt_context = psbt_context_from_test_vector();
+
+        // Outcome 1: wallet_process_psbt returns an implementation error → ImplementationError
+        let err = psbt_context
+            .clone()
+            .finalize_proposal(|_| Err(ImplementationError::from("wallet signing failed")))
+            .expect_err("Should fail when wallet_process_psbt returns an error");
+        assert_eq!(err.to_string(), "wallet signing failed");
+
+        // Outcome 2: wallet_process_psbt returns a psbt with mismatched ntxid → ImplementationError
+        let psbt_context = psbt_context_from_test_vector();
+        let err = psbt_context
+            .clone()
+            .finalize_proposal(|_| {
+                // return a totally different psbt to trigger ntxid mismatch
+                Ok(PARSED_ORIGINAL_PSBT.clone())
+            })
+            .expect_err("Should fail when ntxid mismatches");
+        assert!(err.to_string().contains("Ntxid mismatch"));
+
+        // Outcome 3: wallet_process_psbt succeeds → Ok(Psbt)
+        let _psbt = psbt_context
+            .finalize_proposal(|_| Ok(PARSED_PAYJOIN_PROPOSAL.clone()))
+            .expect("Should succeed when wallet_process_psbt returns a valid signed psbt");
+    }
+
+    #[tokio::test]
+    async fn test_finalize_proposal_async() {
+        let psbt_context = psbt_context_from_test_vector();
+
+        // Outcome 1: wallet_process_psbt returns an implementation error → ImplementationError
+        let err = psbt_context
+            .clone()
+            .finalize_proposal_async(|_| async {
+                Err(ImplementationError::from("wallet signing failed"))
+            })
+            .await
+            .expect_err("Should fail when wallet_process_psbt returns an error");
+        assert_eq!(err.to_string(), "wallet signing failed");
+
+        // Outcome 2: wallet_process_psbt returns a psbt with mismatched ntxid → ImplementationError
+        let psbt_context = psbt_context_from_test_vector();
+        let err = psbt_context
+            .clone()
+            .finalize_proposal_async(|_| async {
+                // return a totally different psbt to trigger ntxid mismatch
+                Ok(PARSED_ORIGINAL_PSBT.clone())
+            })
+            .await
+            .expect_err("Should fail when ntxid mismatches");
+        assert!(err.to_string().contains("Ntxid mismatch"));
+
+        // Outcome 3: wallet_process_psbt succeeds → Ok(Psbt)
+        let _psbt = psbt_context
+            .finalize_proposal_async(|_| async { Ok(PARSED_PAYJOIN_PROPOSAL.clone()) })
+            .await
+            .expect("Should succeed when wallet_process_psbt returns a valid signed psbt");
     }
 }

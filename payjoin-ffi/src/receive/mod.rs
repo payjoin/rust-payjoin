@@ -711,6 +711,12 @@ pub trait CanBroadcast: Send + Sync {
     fn callback(&self, tx: Vec<u8>) -> Result<bool, ForeignError>;
 }
 
+#[uniffi::export(with_foreign)]
+#[async_trait::async_trait]
+pub trait CanBroadcastAsync: Send + Sync {
+    async fn callback(&self, tx: Vec<u8>) -> Result<bool, ForeignError>;
+}
+
 #[uniffi::export]
 impl UncheckedOriginalPayload {
     pub fn check_broadcast_suitability(
@@ -725,6 +731,28 @@ impl UncheckedOriginalPayload {
                     .callback(payjoin::bitcoin::consensus::encode::serialize(transaction))
                     .map_err(|e| ImplementationError::new(e).into())
             }),
+        )))))
+    }
+
+    pub async fn check_broadcast_suitability_async(
+        &self,
+        min_fee_rate: Option<u64>,
+        can_broadcast: Arc<dyn CanBroadcastAsync>,
+    ) -> Result<UncheckedOriginalPayloadTransition, FfiValidationError> {
+        let min_fee_rate = validate_fee_rate_sat_per_kwu_opt(min_fee_rate)?;
+        Ok(UncheckedOriginalPayloadTransition(Arc::new(RwLock::new(Some(
+            self.0
+                .clone()
+                .check_broadcast_suitability_async(min_fee_rate, |transaction| {
+                    let bytes = payjoin::bitcoin::consensus::encode::serialize(transaction);
+                    async {
+                        can_broadcast
+                            .callback(bytes)
+                            .await
+                            .map_err(|e| ImplementationError::new(e).into())
+                    }
+                })
+                .await,
         )))))
     }
 
@@ -775,6 +803,12 @@ pub trait IsScriptOwned: Send + Sync {
     fn callback(&self, script: Vec<u8>) -> Result<bool, ForeignError>;
 }
 
+#[uniffi::export(with_foreign)]
+#[async_trait::async_trait]
+pub trait IsScriptOwnedAsync: Send + Sync {
+    async fn callback(&self, script: Vec<u8>) -> Result<bool, ForeignError>;
+}
+
 #[uniffi::export]
 impl MaybeInputsOwned {
     ///The Sender’s Original PSBT
@@ -783,6 +817,7 @@ impl MaybeInputsOwned {
             &self.0.clone().extract_tx_to_schedule_broadcast(),
         )
     }
+
     pub fn check_inputs_not_owned(
         &self,
         is_owned: Arc<dyn IsScriptOwned>,
@@ -791,6 +826,26 @@ impl MaybeInputsOwned {
             self.0.clone().check_inputs_not_owned(&mut |input| {
                 is_owned.callback(input.to_bytes()).map_err(|e| ImplementationError::new(e).into())
             }),
+        ))))
+    }
+
+    pub async fn check_inputs_not_owned_async(
+        &self,
+        is_owned: Arc<dyn IsScriptOwnedAsync>,
+    ) -> MaybeInputsOwnedTransition {
+        MaybeInputsOwnedTransition(Arc::new(RwLock::new(Some(
+            self.0
+                .clone()
+                .check_inputs_not_owned_async(&mut |input| {
+                    let bytes = input.to_bytes();
+                    async {
+                        is_owned
+                            .callback(bytes)
+                            .await
+                            .map_err(|e| ImplementationError::new(e).into())
+                    }
+                })
+                .await,
         ))))
     }
 }
@@ -830,6 +885,12 @@ pub trait IsOutputKnown: Send + Sync {
     fn callback(&self, outpoint: OutPoint) -> Result<bool, ForeignError>;
 }
 
+#[uniffi::export(with_foreign)]
+#[async_trait::async_trait]
+pub trait IsOutputKnownAsync: Send + Sync {
+    async fn callback(&self, outpoint: OutPoint) -> Result<bool, ForeignError>;
+}
+
 #[uniffi::export]
 impl MaybeInputsSeen {
     pub fn check_no_inputs_seen_before(
@@ -842,6 +903,26 @@ impl MaybeInputsSeen {
                     .callback(OutPoint::from(*outpoint))
                     .map_err(|e| ImplementationError::new(e).into())
             }),
+        ))))
+    }
+
+    pub async fn check_no_inputs_seen_before_async(
+        &self,
+        is_known: Arc<dyn IsOutputKnownAsync>,
+    ) -> MaybeInputsSeenTransition {
+        MaybeInputsSeenTransition(Arc::new(RwLock::new(Some(
+            self.0
+                .clone()
+                .check_no_inputs_seen_before_async(&mut |outpoint| {
+                    let plain_outpoint = OutPoint::from(*outpoint);
+                    async {
+                        is_known
+                            .callback(plain_outpoint)
+                            .await
+                            .map_err(|e| ImplementationError::new(e).into())
+                    }
+                })
+                .await,
         ))))
     }
 }
@@ -891,6 +972,26 @@ impl OutputsUnknown {
                     .callback(input.to_bytes())
                     .map_err(|e| ImplementationError::new(e).into())
             }),
+        ))))
+    }
+
+    pub async fn identify_receiver_outputs_async(
+        &self,
+        is_receiver_output: Arc<dyn IsScriptOwnedAsync>,
+    ) -> OutputsUnknownTransition {
+        OutputsUnknownTransition(Arc::new(RwLock::new(Some(
+            self.0
+                .clone()
+                .identify_receiver_outputs_async(&mut |input| {
+                    let bytes = input.to_bytes();
+                    async {
+                        is_receiver_output
+                            .callback(bytes)
+                            .await
+                            .map_err(|e| ImplementationError::new(e).into())
+                    }
+                })
+                .await,
         ))))
     }
 }
@@ -1160,6 +1261,12 @@ pub trait ProcessPsbt: Send + Sync {
     fn callback(&self, psbt: String) -> Result<String, ForeignError>;
 }
 
+#[uniffi::export(with_foreign)]
+#[async_trait::async_trait]
+pub trait ProcessPsbtAsync: Send + Sync {
+    async fn callback(&self, psbt: String) -> Result<String, ForeignError>;
+}
+
 #[uniffi::export]
 impl ProvisionalProposal {
     pub fn finalize_proposal(
@@ -1173,6 +1280,27 @@ impl ProvisionalProposal {
                     .map_err(ImplementationError::new)?;
                 Ok(Psbt::from_str(&psbt).map_err(ImplementationError::new)?)
             }),
+        ))))
+    }
+
+    pub async fn finalize_proposal_async(
+        &self,
+        process_psbt: Arc<dyn ProcessPsbtAsync>,
+    ) -> ProvisionalProposalTransition {
+        ProvisionalProposalTransition(Arc::new(RwLock::new(Some(
+            self.0
+                .clone()
+                .finalize_proposal_async(|pre_processed| {
+                    let string = pre_processed.to_string();
+                    async {
+                        let psbt = process_psbt
+                            .callback(string)
+                            .await
+                            .map_err(ImplementationError::new)?;
+                        Ok(Psbt::from_str(&psbt).map_err(ImplementationError::new)?)
+                    }
+                })
+                .await,
         ))))
     }
 
@@ -1358,6 +1486,12 @@ pub trait TransactionExists: Send + Sync {
     fn callback(&self, txid: String) -> Result<Option<Vec<u8>>, ForeignError>;
 }
 
+#[uniffi::export(with_foreign)]
+#[async_trait::async_trait]
+pub trait TransactionExistsAsync: Send + Sync {
+    async fn callback(&self, txid: String) -> Result<Option<Vec<u8>>, ForeignError>;
+}
+
 #[allow(clippy::type_complexity)]
 #[derive(uniffi::Object)]
 pub struct MonitorTransition(
@@ -1429,6 +1563,27 @@ impl Monitor {
                 .and_then(|buf| buf.map(try_deserialize_tx).transpose())
                 .map_err(|e| ImplementationError::new(e).into())
         })))))
+    }
+
+    pub async fn monitor_async(
+        &self,
+        transaction_exists: Arc<dyn TransactionExistsAsync>,
+    ) -> MonitorTransition {
+        MonitorTransition(Arc::new(RwLock::new(Some(
+            self.0
+                .clone()
+                .check_payment_async(|txid| {
+                    let string = txid.to_string();
+                    async {
+                        transaction_exists
+                            .callback(string)
+                            .await
+                            .and_then(|buf| buf.map(try_deserialize_tx).transpose())
+                            .map_err(|e| ImplementationError::new(e).into())
+                    }
+                })
+                .await,
+        ))))
     }
 }
 

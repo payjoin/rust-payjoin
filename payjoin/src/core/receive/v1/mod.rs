@@ -113,6 +113,42 @@ impl UncheckedOriginalPayload {
         Ok(MaybeInputsOwned { original: self.original })
     }
 
+    /// Extracts the original PSBT so caller can check that the proposal can be broadcasted.
+    ///
+    /// Result of the broadcastibility check should then be returned to
+    /// [`Self::process_broadcast_suitability_result`].
+    ///
+    /// If the receiver is a non-interactive payment processor (ex. a donation page which generates
+    /// a new QR code for each visit), then it should make sure that the original PSBT is broadcastable
+    /// as a fallback mechanism in case the payjoin fails. This validation would be equivalent to
+    /// `testmempoolaccept` Bitcoin Core RPC call returning `{"allowed": true,...}`.
+    pub fn extract_tx_to_check_broadcast_suitability(&self) -> bitcoin::Transaction {
+        self.original.psbt.clone().extract_tx_unchecked_fee_rate()
+    }
+
+    /// Processes the result of whether the original PSBT in the proposal can be broadcasted.
+    ///
+    /// Call [`Self::extract_tx_to_check_broadcast_suitability`] first to acquire the tx
+    /// to be checked for broadcastibility.
+    ///
+    /// If the receiver is a non-interactive payment processor (ex. a donation page which generates
+    /// a new QR code for each visit), then it should make sure that the original PSBT is broadcastable
+    /// as a fallback mechanism in case the payjoin fails. This validation would be equivalent to
+    /// `testmempoolaccept` Bitcoin Core RPC call returning `{"allowed": true,...}`.
+    ///
+    /// Receiver can optionally set a minimum fee rate which will be enforced on the original PSBT in the proposal.
+    /// This can be used to further prevent probing attacks since the attacker would now need to probe the receiver
+    /// with transactions which are both broadcastable and pay high fee. Unrelated to the probing attack scenario,
+    /// this parameter also makes operating in a high fee environment easier for the receiver.
+    pub fn process_broadcast_suitability_result(
+        self,
+        min_fee_rate: Option<FeeRate>,
+        is_broadcast_suitable: bool,
+    ) -> Result<MaybeInputsOwned, Error> {
+        self.original.apply_broadcast_suitability(min_fee_rate, is_broadcast_suitable)?;
+        Ok(MaybeInputsOwned { original: self.original })
+    }
+
     /// Moves on to the next typestate without any of the current typestate's validations.
     ///
     /// Use this for interactive payment receivers, where there is no risk of a probing attack since the
@@ -151,7 +187,35 @@ impl MaybeInputsOwned {
         self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsSeen, Error> {
-        self.original.check_inputs_not_owned(is_owned)?;
+        let checked_inputs =
+            check_references(self.get_input_script_refs()?, &mut |script: &ScriptBuf| {
+                is_owned(script.as_script())
+            })?;
+        self.apply_input_owned_checks(checked_inputs)
+    }
+
+    /// Get [`Reference`]s that hold the input scripts that need to be checked for ownership by the
+    /// receiver.
+    ///
+    /// Once completed, these checks should be submitted to [`Self::apply_input_owned_checks`].
+    ///
+    /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    pub fn get_input_script_refs(
+        &self,
+    ) -> Result<impl Iterator<Item = Reference<ScriptBuf, InputOwnedTag>>, Error> {
+        self.original.get_input_script_refs()
+    }
+
+    /// Applies the input ownership checks to advance the state machine.
+    ///
+    /// Use [`Self::get_input_script_refs`] to obtain the references that need to be checked.
+    ///
+    /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    pub fn apply_input_owned_checks(
+        self,
+        checked_input_scripts: impl IntoIterator<Item = TaggedReference<ScriptBuf, InputOwnedTag>>,
+    ) -> Result<MaybeInputsSeen, Error> {
+        self.original.apply_input_owned_checks(checked_input_scripts)?;
         Ok(MaybeInputsSeen { original: self.original })
     }
 }
@@ -176,7 +240,42 @@ impl MaybeInputsSeen {
         self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<OutputsUnknown, Error> {
-        self.original.check_no_inputs_seen_before(is_known)?;
+        let checked_inputs = check_references(self.get_input_outpoint_refs(), is_known)?;
+        self.apply_input_seen_checks(checked_inputs)
+    }
+
+    /// Get [`Reference`]s that hold the input outpoints that need to be checked for whether they
+    /// have already been seen by the receiver.
+    ///
+    /// Once completed, these checks should be submitted to [`Self::apply_input_seen_checks`].
+    ///
+    /// This check prevents the following attacks:
+    /// 1. Probing attacks, where the sender can use the exact same proposal (or with minimal change)
+    ///    to have the receiver reveal their UTXO set by contributing to all proposals with different inputs
+    ///    and sending them back to the receiver.
+    /// 2. Re-entrant payjoin, where the sender uses the payjoin PSBT of a previous payjoin as the
+    ///    original proposal PSBT of the current, new payjoin.
+    pub fn get_input_outpoint_refs(
+        &self,
+    ) -> impl Iterator<Item = Reference<OutPoint, InputSeenTag>> {
+        self.original.get_input_outpoint_refs()
+    }
+
+    /// Applies the input seen checks to advance the state machine.
+    ///
+    /// Use [`Self::get_input_outpoint_refs`] to obtain the references that need to be checked.
+    ///
+    /// This check prevents the following attacks:
+    /// 1. Probing attacks, where the sender can use the exact same proposal (or with minimal change)
+    ///    to have the receiver reveal their UTXO set by contributing to all proposals with different inputs
+    ///    and sending them back to the receiver.
+    /// 2. Re-entrant payjoin, where the sender uses the payjoin PSBT of a previous payjoin as the
+    ///    original proposal PSBT of the current, new payjoin.
+    pub fn apply_input_seen_checks(
+        self,
+        checked_input_outpoints: impl IntoIterator<Item = TaggedReference<OutPoint, InputSeenTag>>,
+    ) -> Result<OutputsUnknown, Error> {
+        self.original.apply_input_seen_checks(checked_input_outpoints)?;
         Ok(OutputsUnknown { original: self.original })
     }
 }
@@ -208,7 +307,49 @@ impl OutputsUnknown {
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<WantsOutputs, Error> {
-        self.original.identify_receiver_outputs(is_receiver_output)
+        let checked_outputs =
+            check_references(self.get_output_script_refs(), &mut |script: &ScriptBuf| {
+                is_receiver_output(script.as_script())
+            })?;
+        self.apply_output_owned_checks(checked_outputs)
+    }
+
+    /// Get [`Reference`]s that hold the output scripts that need to be checked for ownership
+    /// by the receiver.
+    ///
+    /// Once completed, these checks should be submitted to [`Self::apply_output_owned_checks`].
+    ///
+    /// Additionally, this function also protects the receiver from accidentally subtracting fees
+    /// from their own outputs: when a sender is sending a proposal,
+    /// they can select an output which they want the receiver to subtract fees from to account for
+    /// the increased transaction size. If a sender specifies a receiver output for this purpose, this
+    /// function sets that parameter to None so that it is ignored in subsequent steps of the
+    /// receiver flow. This protects the receiver from accidentally subtracting fees from their own
+    /// outputs.
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
+    pub fn get_output_script_refs(
+        &self,
+    ) -> impl Iterator<Item = Reference<ScriptBuf, OutputOwnedTag>> {
+        self.original.get_output_script_refs()
+    }
+
+    /// Applies the output owned checks to advance the state machine.
+    ///
+    /// Use [`Self::get_output_script_refs`] to obtain the references that need to be checked.
+    ///
+    /// Additionally, this function also protects the receiver from accidentally subtracting fees
+    /// from their own outputs: when a sender is sending a proposal,
+    /// they can select an output which they want the receiver to subtract fees from to account for
+    /// the increased transaction size. If a sender specifies a receiver output for this purpose, this
+    /// function sets that parameter to None so that it is ignored in subsequent steps of the
+    /// receiver flow. This protects the receiver from accidentally subtracting fees from their own
+    /// outputs.
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
+    pub fn apply_output_owned_checks(
+        &self,
+        checked_output_scripts: impl IntoIterator<Item = TaggedReference<ScriptBuf, OutputOwnedTag>>,
+    ) -> Result<WantsOutputs, Error> {
+        self.original.apply_output_owned_checks(checked_output_scripts)
     }
 }
 
@@ -292,11 +433,9 @@ impl ProvisionalProposal {
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<PayjoinProposal, Error> {
-        let finalized_psbt = self
-            .psbt_context
-            .finalize_proposal(wallet_process_psbt)
-            .map_err(|e| Error::Implementation(ImplementationError::new(e)))?;
-        Ok(PayjoinProposal { payjoin_psbt: finalized_psbt })
+        let psbt = self.psbt_to_sign();
+        let signed_psbt = wallet_process_psbt(&psbt)?;
+        self.finalize_signed_proposal(&signed_psbt)
     }
 
     /// The Payjoin proposal PSBT that the receiver needs to sign
@@ -305,6 +444,17 @@ impl ProvisionalProposal {
     /// is different from the entity that has access to the private keys,
     /// so the PSBT to sign must be accessible to such implementers.
     pub fn psbt_to_sign(&self) -> Psbt { self.psbt_context.psbt_to_sign() }
+
+    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
+    /// they sign the transaction and broadcast it to the network.
+    ///
+    /// This takes a receiver signed PSBT payjoin proposal and finalizes it for broadcast to
+    /// the sender. Use [`Self::psbt_to_sign`] to obtain the payjoin proposal's unsigned
+    /// PSBT for receiver to sign and return here.
+    pub fn finalize_signed_proposal(self, signed_psbt: &Psbt) -> Result<PayjoinProposal, Error> {
+        let finalized_psbt = self.psbt_context.finalize_signed_proposal(signed_psbt.clone())?;
+        Ok(PayjoinProposal { payjoin_psbt: finalized_psbt })
+    }
 }
 
 /// A finalized Payjoin proposal, complete with fees and receiver signatures, that the sender

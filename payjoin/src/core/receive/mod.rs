@@ -10,6 +10,7 @@
 //! version 1, refer to the `receive::v1` module documentation after enabling the `v1` feature.
 
 use std::collections::BTreeMap;
+use std::marker::PhantomData;
 use std::str::FromStr;
 
 use bitcoin::transaction::InputWeightPrediction;
@@ -228,6 +229,142 @@ impl<'a> From<&'a InputPair> for InternalInputPair<'a> {
     fn from(pair: &'a InputPair) -> Self { Self { psbtin: &pair.psbtin, txin: &pair.txin } }
 }
 
+/// Holds a value that requires some form of boolean check.
+#[derive(Debug)]
+pub struct Reference<V, T> {
+    value: V,
+    index: usize,
+    /// The final index in the set of [`Reference`]s to be checked
+    final_index: usize,
+    _tag: PhantomData<T>,
+}
+
+impl<V, T> Reference<V, T>
+where
+    V: Clone,
+    T: Tag,
+{
+    fn new(value: V, index: usize, final_index: usize) -> Self {
+        Reference { value, index, final_index, _tag: PhantomData }
+    }
+
+    /// Returns a [`TaggedReference`] that has been marked with the result of the boolean
+    /// check.
+    pub fn mark(&self, result: bool) -> TaggedReference<V, T> {
+        TaggedReference {
+            value: self.value.clone(),
+            index: self.index,
+            final_index: self.final_index,
+            tag: T::new(result),
+        }
+    }
+
+    /// Extracts the value to to be checked
+    pub fn get_value(&self) -> V { self.value.clone() }
+}
+
+/// Holds the result of a checked [`Reference`]. Can only be created with [`Reference::mark`].
+#[derive(Debug)]
+pub struct TaggedReference<V, T> {
+    value: V,
+    index: usize,
+    final_index: usize,
+    tag: T,
+}
+
+impl<V, T> TaggedReference<V, T>
+where
+    V: Clone,
+    T: Tag,
+{
+    pub fn get_result(&self) -> bool { self.tag.result() }
+    pub fn get_index(&self) -> usize { self.index }
+    pub fn get_value(&self) -> V { self.value.clone() }
+}
+
+/// Trait used to distinguish different types of validation
+pub trait Tag {
+    fn new(result: bool) -> Self;
+    fn result(&self) -> bool;
+}
+
+#[derive(Debug)]
+pub struct InputOwnedTag {
+    is_owned: bool,
+}
+
+impl Tag for InputOwnedTag {
+    fn new(result: bool) -> InputOwnedTag { InputOwnedTag { is_owned: result } }
+    fn result(&self) -> bool { self.is_owned }
+}
+
+#[derive(Debug)]
+pub struct InputSeenTag {
+    is_seen: bool,
+}
+
+impl Tag for InputSeenTag {
+    fn new(result: bool) -> InputSeenTag { InputSeenTag { is_seen: result } }
+    fn result(&self) -> bool { self.is_seen }
+}
+
+#[derive(Debug)]
+pub struct OutputOwnedTag {
+    is_owned: bool,
+}
+
+impl Tag for OutputOwnedTag {
+    fn new(result: bool) -> OutputOwnedTag { OutputOwnedTag { is_owned: result } }
+    fn result(&self) -> bool { self.is_owned }
+}
+
+/// Helper function to run validation callback over a list of [`Reference`]s
+pub fn check_references<V, T>(
+    references: impl Iterator<Item = Reference<V, T>>,
+    check: &mut impl FnMut(&V) -> Result<bool, ImplementationError>,
+) -> Result<impl Iterator<Item = TaggedReference<V, T>>, ImplementationError>
+where
+    V: Clone,
+    T: Tag,
+{
+    let mut checked_references: Vec<TaggedReference<V, T>> = vec![];
+    for reference in references {
+        let result = check(&reference.get_value())?;
+        checked_references.push(reference.mark(result));
+    }
+    Ok(checked_references.into_iter())
+}
+
+/// Validate that the [`TaggedReference`]s are in the correct order and are a complete set.
+fn validate_checks<V, T>(
+    checked_references: impl IntoIterator<Item = TaggedReference<V, T>>,
+) -> Result<impl Iterator<Item = TaggedReference<V, T>>, ImplementationError>
+where
+    V: Clone,
+    T: Tag,
+{
+    let mut current_index = 0;
+    let mut is_complete = false;
+    let mut validated_refs: Vec<TaggedReference<V, T>> = vec![];
+    for reference in checked_references {
+        if reference.get_index() != current_index {
+            return Err(ImplementationError::from(
+                "Missing reference check at index {current_index}",
+            ));
+        }
+        if reference.get_index() == reference.final_index {
+            is_complete = true
+        } else {
+            current_index += 1;
+        }
+        validated_refs.push(reference);
+    }
+    if !is_complete {
+        return Err(ImplementationError::from("Missing reference check at index {current_index}"));
+    }
+    Ok(validated_refs.into_iter())
+}
+
 /// Validate the payload of a Payjoin request for PSBT and Params sanity
 pub(crate) fn parse_payload(
     base64: &str,
@@ -254,7 +391,7 @@ pub struct PsbtContext {
 
 impl PsbtContext {
     /// Prepare the PSBT by creating a new PSBT and copying only the fields allowed by the [spec](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#senders-payjoin-proposal-checklist)
-    fn prepare_psbt(self, processed_psbt: Psbt) -> Psbt {
+    fn prepare_psbt(&self, processed_psbt: Psbt) -> Psbt {
         tracing::trace!("Original PSBT from callback: {processed_psbt:#?}");
 
         // Create a new PSBT and copy only the allowed fields
@@ -329,18 +466,11 @@ impl PsbtContext {
         psbt
     }
 
-    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
-    /// they sign the transaction and broadcast it to the network.
+    /// Finalizes the signed proposal PSBT
     ///
-    /// Finalization consists of two steps:
-    ///   1. Remove all sender signatures which were received with the original PSBT as these signatures are now invalid.
-    ///   2. Sign and finalize the resulting PSBT using the passed `wallet_process_psbt` signing function.
-    fn finalize_proposal(
-        self,
-        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> Result<Psbt, ImplementationError> {
-        let psbt = self.psbt_to_sign();
-        let signed_psbt = wallet_process_psbt(&psbt)?;
+    /// Verifies that signed PSBT is for the same transaction as the payjoin proposal PSBT and prepares
+    /// the signed PSBT to be sent to the sender
+    fn finalize_signed_proposal(&self, signed_psbt: Psbt) -> Result<Psbt, ImplementationError> {
         let expected_ntxid = self.payjoin_psbt.unsigned_tx.compute_ntxid();
         let actual_ntxid = signed_psbt.unsigned_tx.compute_ntxid();
         if expected_ntxid != actual_ntxid {
@@ -373,6 +503,17 @@ impl OriginalPayload {
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
+        self.apply_broadcast_suitability(
+            min_fee_rate,
+            can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())?,
+        )
+    }
+
+    pub fn apply_broadcast_suitability(
+        &self,
+        min_fee_rate: Option<FeeRate>,
+        can_broadcast: bool,
+    ) -> Result<(), Error> {
         let original_psbt_fee_rate = self.psbt_fee_rate()?;
         if let Some(min_fee_rate) = min_fee_rate {
             if original_psbt_fee_rate < min_fee_rate {
@@ -383,80 +524,144 @@ impl OriginalPayload {
                 .into());
             }
         }
-        if can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())
-            .map_err(Error::Implementation)?
-        {
+        if can_broadcast {
             Ok(())
         } else {
             Err(InternalPayloadError::OriginalPsbtNotBroadcastable.into())
         }
     }
 
-    /// Check that the original PSBT has no receiver-owned inputs.
+    /// Check that the original PSBT has no receiver owned inputs.
     ///
     /// An attacker can try to spend the receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         &self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
-        let mut err: Result<(), Error> = Ok(());
-        if let Some(e) = self
+        let checked_inputs =
+            check_references(self.get_input_script_refs()?, &mut |script: &ScriptBuf| {
+                is_owned(script.as_script())
+            })?;
+        self.apply_input_owned_checks(checked_inputs)
+    }
+
+    pub fn get_input_script_refs(
+        &self,
+    ) -> Result<impl Iterator<Item = Reference<ScriptBuf, InputOwnedTag>>, Error> {
+        let final_index = self.psbt.input_pairs().count() - 1;
+        let script_references = self
             .psbt
             .input_pairs()
-            .scan(&mut err, |err, input| match input.previous_txout() {
-                Ok(txout) => Some(txout.script_pubkey.to_owned()),
-                Err(e) => {
-                    **err = Err(InternalPayloadError::PrevTxOut(e).into());
-                    None
-                }
+            .enumerate()
+            .map(|(index, input)| match input.previous_txout() {
+                Ok(txout) => Ok(Reference::<ScriptBuf, InputOwnedTag>::new(
+                    txout.script_pubkey.to_owned(),
+                    index,
+                    final_index,
+                )),
+                Err(e) => Err(InternalPayloadError::PrevTxOut(e)),
             })
-            .find_map(|script| match is_owned(&script) {
-                Ok(false) => None,
-                Ok(true) => Some(InternalPayloadError::InputOwned(script).into()),
-                Err(e) => Some(Error::Implementation(e)),
-            })
-        {
-            return Err(e);
+            .collect::<Result<Vec<Reference<_, _>>, InternalPayloadError>>()?;
+        Ok(script_references.into_iter())
+    }
+
+    pub fn apply_input_owned_checks(
+        &self,
+        checked_input_scripts: impl IntoIterator<Item = TaggedReference<ScriptBuf, InputOwnedTag>>,
+    ) -> Result<(), Error> {
+        let validated_checks = validate_checks(checked_input_scripts)?;
+        match validated_checks.into_iter().find(|checked_input| checked_input.get_result()) {
+            Some(checked_input) =>
+                Err(InternalPayloadError::InputOwned(checked_input.get_value()).into()),
+            None => Ok(()),
         }
-        err?;
-        Ok(())
     }
 
     pub fn check_no_inputs_seen_before(
         &self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
-        self.psbt.input_pairs().try_for_each(|input| {
-            match is_known(&input.txin.previous_output) {
-                Ok(false) => Ok::<(), Error>(()),
-                Ok(true) =>  {
-                    tracing::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
-                    Err(InternalPayloadError::InputSeen(input.txin.previous_output))?
-                },
-                Err(e) => Err(Error::Implementation(e))?,
+        let checked_inputs = check_references(self.get_input_outpoint_refs(), is_known)?;
+        self.apply_input_seen_checks(checked_inputs)
+    }
+
+    pub fn get_input_outpoint_refs(
+        &self,
+    ) -> impl Iterator<Item = Reference<OutPoint, InputSeenTag>> {
+        let final_index = self.psbt.input_pairs().count() - 1;
+        let outpoint_references = self
+            .psbt
+            .input_pairs()
+            .enumerate()
+            .map(|(index, input)| {
+                Reference::<OutPoint, InputSeenTag>::new(
+                    input.txin.previous_output,
+                    index,
+                    final_index,
+                )
+            })
+            .collect::<Vec<_>>();
+        outpoint_references.into_iter()
+    }
+
+    pub fn apply_input_seen_checks(
+        &self,
+        checked_input_outpoints: impl IntoIterator<Item = TaggedReference<OutPoint, InputSeenTag>>,
+    ) -> Result<(), Error> {
+        let validated_checks = validate_checks(checked_input_outpoints)?;
+        match validated_checks.into_iter().find(|checked_input| checked_input.get_result()) {
+            Some(checked_input) => {
+                tracing::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", checked_input.get_value());
+                Err(InternalPayloadError::InputSeen(checked_input.get_value()))?
             }
-        })?;
-        Ok(())
+            None => Ok(()),
+        }
     }
 
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<common::WantsOutputs, Error> {
-        let owned_vouts: Vec<usize> = self
+        let checked_outputs =
+            check_references(self.get_output_script_refs(), &mut |script: &ScriptBuf| {
+                is_receiver_output(script.as_script())
+            })?;
+        self.apply_output_owned_checks(checked_outputs)
+    }
+
+    pub fn get_output_script_refs(
+        &self,
+    ) -> impl Iterator<Item = Reference<ScriptBuf, OutputOwnedTag>> {
+        let final_index = self.psbt.unsigned_tx.output.len() - 1;
+        let script_references = self
             .psbt
             .unsigned_tx
             .output
             .iter()
             .enumerate()
-            .filter_map(|(vout, txo)| match is_receiver_output(&txo.script_pubkey) {
-                Ok(true) => Some(Ok(vout)),
-                Ok(false) => None,
-                Err(e) => Some(Err(e)),
+            .map(|(index, output)| {
+                Reference::<ScriptBuf, OutputOwnedTag>::new(
+                    output.script_pubkey.clone(),
+                    index,
+                    final_index,
+                )
             })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::Implementation)?;
+            .collect::<Vec<_>>();
+        script_references.into_iter()
+    }
 
+    pub fn apply_output_owned_checks(
+        &self,
+        checked_output_scripts: impl IntoIterator<Item = TaggedReference<ScriptBuf, OutputOwnedTag>>,
+    ) -> Result<common::WantsOutputs, Error> {
+        let validated_checks = validate_checks(checked_output_scripts)?;
+        let owned_vouts = validated_checks
+            .into_iter()
+            .filter_map(|checked_output| match checked_output.get_result() {
+                true => Some(checked_output.get_index()),
+                false => None,
+            })
+            .collect::<Vec<_>>();
         if owned_vouts.is_empty() {
             return Err(InternalPayloadError::MissingPayment.into());
         }
@@ -1024,29 +1229,20 @@ pub(crate) mod tests {
 
     #[test]
     fn test_finalize_proposal() {
-        let psbt_context = psbt_context_from_test_vector();
-
-        // Outcome 1: wallet_process_psbt returns an implementation error → ImplementationError
-        let err = psbt_context
-            .clone()
-            .finalize_proposal(|_| Err(ImplementationError::from("wallet signing failed")))
-            .expect_err("Should fail when wallet_process_psbt returns an error");
-        assert_eq!(err.to_string(), "wallet signing failed");
-
-        // Outcome 2: wallet_process_psbt returns a psbt with mismatched ntxid → ImplementationError
+        // Outcome 1: wallet_process_psbt returns a psbt with mismatched ntxid → ImplementationError
         let psbt_context = psbt_context_from_test_vector();
         let err = psbt_context
             .clone()
-            .finalize_proposal(|_| {
+            .finalize_signed_proposal(
                 // return a totally different psbt to trigger ntxid mismatch
-                Ok(PARSED_ORIGINAL_PSBT.clone())
-            })
+                PARSED_ORIGINAL_PSBT.clone(),
+            )
             .expect_err("Should fail when ntxid mismatches");
         assert!(err.to_string().contains("Ntxid mismatch"));
 
-        // Outcome 3: wallet_process_psbt succeeds → Ok(Psbt)
+        // Outcome 2: wallet_process_psbt succeeds → Ok(Psbt)
         let _psbt = psbt_context
-            .finalize_proposal(|_| Ok(PARSED_PAYJOIN_PROPOSAL.clone()))
+            .finalize_signed_proposal(PARSED_PAYJOIN_PROPOSAL.clone())
             .expect("Should succeed when wallet_process_psbt returns a valid signed psbt");
     }
 }

@@ -20,3 +20,6 @@ features = ["wasm-unstable-single-threaded"]
 payjoin = { path = "../../../../payjoin" }
 payjoin-mailroom = { path = "../../../../payjoin-mailroom" }
 payjoin-test-utils = { path = "../../../../payjoin-test-utils" }
+
+[patch."https://github.com/payjoin/rust-payjoin.git"]
+payjoin = { path = "../../../../payjoin" }

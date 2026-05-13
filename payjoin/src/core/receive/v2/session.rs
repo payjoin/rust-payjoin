@@ -166,6 +166,8 @@ impl SessionHistory {
                 SessionOutcome::Failure | SessionOutcome::Cancel => SessionStatus::Failed,
                 SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
             },
+            Some(SessionEvent::Cancelled | SessionEvent::ProtocolFailed) =>
+                SessionStatus::PendingFallback,
             _ => SessionStatus::Active,
         }
     }
@@ -180,6 +182,7 @@ pub enum SessionStatus {
     Failed,
     Completed,
     FallbackBroadcasted,
+    PendingFallback,
 }
 
 /// Represents a piece of information that the receiver has obtained from the session
@@ -198,6 +201,8 @@ pub enum SessionEvent {
     FinalizedProposal(bitcoin::Psbt),
     GotReplyableError(JsonReply),
     PostedPayjoinProposal(),
+    Cancelled,
+    ProtocolFailed,
     Closed(SessionOutcome),
 }
 
@@ -229,7 +234,8 @@ mod tests {
     use crate::receive::tests::original_from_test_vector;
     use crate::receive::v2::test::{mock_err, SHARED_CONTEXT};
     use crate::receive::v2::{
-        Initialized, MaybeInputsOwned, ProvisionalProposal, Receiver, UncheckedOriginalPayload,
+        Initialized, MaybeInputsOwned, PendingFallback, PendingFallbackCause, ProvisionalProposal,
+        Receiver, UncheckedOriginalPayload,
     };
     use crate::receive::{InternalPayloadError, PayloadError};
 
@@ -299,6 +305,8 @@ mod tests {
             SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()),
             SessionEvent::FinalizedProposal(payjoin_proposal.psbt().clone()),
             SessionEvent::GotReplyableError(mock_err()),
+            SessionEvent::Cancelled,
+            SessionEvent::ProtocolFailed,
         ];
 
         for event in test_cases {
@@ -516,6 +524,72 @@ mod tests {
             },
             expected_receiver_state: ReceiveSession::MaybeInputsOwned(Receiver {
                 state: MaybeInputsOwned { original },
+                session_context: SessionContext { reply_key, ..session_context },
+            }),
+        };
+        run_session_history_test(&test);
+        run_session_history_test_async(&test).await;
+    }
+
+    #[tokio::test]
+    async fn replaying_cancelled_session_enters_pending_fallback() {
+        let session_context = SHARED_CONTEXT.clone();
+        let original = original_from_test_vector();
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
+        let expected_fallback = original.psbt.clone().extract_tx_unchecked_fee_rate();
+
+        let test = SessionHistoryTest {
+            events: vec![
+                SessionEvent::Created(session_context.clone()),
+                SessionEvent::RetrievedOriginalPayload {
+                    original: original.clone(),
+                    reply_key: reply_key.clone(),
+                },
+                SessionEvent::CheckedBroadcastSuitability(),
+                SessionEvent::Cancelled,
+            ],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                fallback_tx: Some(expected_fallback.clone()),
+                expected_status: SessionStatus::PendingFallback,
+            },
+            expected_receiver_state: ReceiveSession::PendingFallback(Receiver {
+                state: PendingFallback {
+                    fallback_tx: expected_fallback,
+                    cause: PendingFallbackCause::Cancelled,
+                },
+                session_context: SessionContext { reply_key, ..session_context },
+            }),
+        };
+        run_session_history_test(&test);
+        run_session_history_test_async(&test).await;
+    }
+
+    #[tokio::test]
+    async fn replaying_protocol_failed_session_enters_pending_fallback() {
+        let session_context = SHARED_CONTEXT.clone();
+        let original = original_from_test_vector();
+        let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
+        let expected_fallback = original.psbt.clone().extract_tx_unchecked_fee_rate();
+
+        let test = SessionHistoryTest {
+            events: vec![
+                SessionEvent::Created(session_context.clone()),
+                SessionEvent::RetrievedOriginalPayload {
+                    original: original.clone(),
+                    reply_key: reply_key.clone(),
+                },
+                SessionEvent::CheckedBroadcastSuitability(),
+                SessionEvent::ProtocolFailed,
+            ],
+            expected_session_history: SessionHistoryExpectedOutcome {
+                fallback_tx: Some(expected_fallback.clone()),
+                expected_status: SessionStatus::PendingFallback,
+            },
+            expected_receiver_state: ReceiveSession::PendingFallback(Receiver {
+                state: PendingFallback {
+                    fallback_tx: expected_fallback,
+                    cause: PendingFallbackCause::ProtocolFailed,
+                },
                 session_context: SessionContext { reply_key, ..session_context },
             }),
         };

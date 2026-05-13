@@ -198,6 +198,7 @@ pub enum ReceiveSession {
     PayjoinProposal { inner: Arc<PayjoinProposal> },
     HasReplyableError { inner: Arc<HasReplyableError> },
     Monitor { inner: Arc<Monitor> },
+    PendingFallback { inner: Arc<PendingFallback> },
     Closed { inner: Arc<ReceiverSessionOutcome> },
 }
 
@@ -228,6 +229,8 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
             ReceiveSession::HasReplyableError(inner) =>
                 Self::HasReplyableError { inner: Arc::new(inner.into()) },
             ReceiveSession::Monitor(inner) => Self::Monitor { inner: Arc::new(inner.into()) },
+            ReceiveSession::PendingFallback(inner) =>
+                Self::PendingFallback { inner: Arc::new(inner.into()) },
             ReceiveSession::Closed(session_outcome) =>
                 Self::Closed { inner: Arc::new(session_outcome.into()) },
         }
@@ -1432,6 +1435,81 @@ impl Monitor {
                 .and_then(|buf| buf.map(try_deserialize_tx).transpose())
                 .map_err(|e| ImplementationError::new(e).into())
         })))))
+    }
+}
+
+#[derive(uniffi::Object)]
+#[allow(clippy::type_complexity)]
+pub struct PendingFallbackTransition(
+    Arc<
+        RwLock<
+            Option<payjoin::persist::TerminalTransition<payjoin::receive::v2::SessionEvent, ()>>,
+        >,
+    >,
+);
+
+#[uniffi::export]
+impl PendingFallbackTransition {
+    pub fn save(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersister>,
+    ) -> Result<(), ReceiverPersistedError> {
+        let adapter = CallbackPersisterAdapter::new(persister);
+        let mut inner = self.0.write().expect("Lock should not be poisoned");
+
+        let value = inner.take().expect("Already saved or moved");
+
+        value
+            .save(&adapter)
+            .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
+        Ok(())
+    }
+
+    pub async fn save_async(
+        &self,
+        persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
+    ) -> Result<(), ReceiverPersistedError> {
+        let adapter = AsyncCallbackPersisterAdapter::new(persister);
+        let value = {
+            let mut inner = self.0.write().expect("Lock should not be poisoned");
+            inner.take().expect("Already saved or moved")
+        };
+
+        value
+            .save_async(&adapter)
+            .await
+            .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, uniffi::Object)]
+pub struct PendingFallback(
+    Arc<payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>>,
+);
+
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>>
+    for PendingFallback
+{
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>) -> Self {
+        Self(Arc::new(value))
+    }
+}
+
+impl From<PendingFallback>
+    for payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>
+{
+    fn from(value: PendingFallback) -> Self { value.0.as_ref().clone() }
+}
+
+#[uniffi::export]
+impl PendingFallback {
+    pub fn fallback_tx(&self) -> Vec<u8> {
+        payjoin::bitcoin::consensus::encode::serialize(self.0.fallback_tx())
+    }
+
+    pub fn close(&self) -> PendingFallbackTransition {
+        PendingFallbackTransition(Arc::new(RwLock::new(Some(self.0.as_ref().clone().close()))))
     }
 }
 

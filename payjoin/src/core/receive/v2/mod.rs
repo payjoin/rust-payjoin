@@ -145,6 +145,7 @@ pub enum ReceiveSession {
     PayjoinProposal(Receiver<PayjoinProposal>),
     HasReplyableError(Receiver<HasReplyableError>),
     Monitor(Receiver<Monitor>),
+    PendingFallback(Receiver<PendingFallback>),
     Closed(SessionOutcome),
 }
 
@@ -198,6 +199,26 @@ impl ReceiveSession {
             (ReceiveSession::PayjoinProposal(state), SessionEvent::PostedPayjoinProposal()) =>
                 Ok(state.apply_payjoin_posted()),
 
+            (session, SessionEvent::Cancelled) =>
+                try_pending_fallback(session, PendingFallbackCause::Cancelled).map_err(|session| {
+                    InternalReplayError::InvalidEvent(
+                        Box::new(SessionEvent::Cancelled),
+                        Some(session),
+                    )
+                    .into()
+                }),
+
+            (session, SessionEvent::ProtocolFailed) =>
+                try_pending_fallback(session, PendingFallbackCause::ProtocolFailed).map_err(
+                    |session| {
+                        InternalReplayError::InvalidEvent(
+                            Box::new(SessionEvent::ProtocolFailed),
+                            Some(session),
+                        )
+                        .into()
+                    },
+                ),
+
             (_, SessionEvent::Closed(session_outcome)) =>
                 Ok(ReceiveSession::Closed(session_outcome)),
 
@@ -217,6 +238,7 @@ impl ReceiveSession {
                         ReceiveSession::PayjoinProposal(r) => r.session_context,
                         ReceiveSession::HasReplyableError(r) => r.session_context,
                         ReceiveSession::Monitor(r) => r.session_context,
+                        ReceiveSession::PendingFallback(r) => r.session_context,
                         ReceiveSession::Closed(session_outcome) =>
                             return Ok(ReceiveSession::Closed(session_outcome)),
                     },
@@ -228,6 +250,35 @@ impl ReceiveSession {
             )
             .into()),
         }
+    }
+}
+
+fn pending_fallback_from<S: HasFallbackTx>(
+    r: Receiver<S>,
+    cause: PendingFallbackCause,
+) -> ReceiveSession {
+    let fallback_tx = r.state.fallback_tx();
+    ReceiveSession::PendingFallback(Receiver {
+        state: PendingFallback { fallback_tx, cause },
+        session_context: r.session_context,
+    })
+}
+
+fn try_pending_fallback(
+    session: ReceiveSession,
+    cause: PendingFallbackCause,
+) -> Result<ReceiveSession, Box<ReceiveSession>> {
+    match session {
+        ReceiveSession::MaybeInputsOwned(receiver) => Ok(pending_fallback_from(receiver, cause)),
+        ReceiveSession::MaybeInputsSeen(receiver) => Ok(pending_fallback_from(receiver, cause)),
+        ReceiveSession::OutputsUnknown(receiver) => Ok(pending_fallback_from(receiver, cause)),
+        ReceiveSession::WantsOutputs(receiver) => Ok(pending_fallback_from(receiver, cause)),
+        ReceiveSession::WantsInputs(receiver) => Ok(pending_fallback_from(receiver, cause)),
+        ReceiveSession::WantsFeeRange(receiver) => Ok(pending_fallback_from(receiver, cause)),
+        ReceiveSession::ProvisionalProposal(receiver) => Ok(pending_fallback_from(receiver, cause)),
+        ReceiveSession::PayjoinProposal(receiver) => Ok(pending_fallback_from(receiver, cause)),
+        ReceiveSession::Monitor(receiver) => Ok(pending_fallback_from(receiver, cause)),
+        session => Err(Box::new(session)),
     }
 }
 
@@ -299,6 +350,8 @@ mod sealed {
             Some(self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate())
         }
     }
+
+    impl State for super::PendingFallback {}
 
     pub trait FallbackTx: State {
         fn fallback_tx(&self) -> bitcoin::Transaction;
@@ -417,6 +470,30 @@ impl<S: State> Receiver<S> {
     pub fn cancel(self) -> TerminalTransition<SessionEvent, Option<bitcoin::Transaction>> {
         let fallback = self.state.maybe_fallback_tx();
         TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Cancel), fallback)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingFallback {
+    fallback_tx: bitcoin::Transaction,
+    cause: PendingFallbackCause,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingFallbackCause {
+    Cancelled,
+    ProtocolFailed,
+}
+
+impl Receiver<PendingFallback> {
+    pub fn fallback_tx(&self) -> &bitcoin::Transaction { &self.state.fallback_tx }
+
+    pub fn close(self) -> TerminalTransition<SessionEvent, ()> {
+        let outcome = match self.state.cause {
+            PendingFallbackCause::Cancelled => SessionOutcome::Cancel,
+            PendingFallbackCause::ProtocolFailed => SessionOutcome::Failure,
+        };
+        TerminalTransition::new(SessionEvent::Closed(outcome), ())
     }
 }
 

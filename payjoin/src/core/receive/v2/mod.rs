@@ -233,61 +233,61 @@ impl ReceiveSession {
 
 mod sealed {
     pub trait State {
-        fn fallback_tx(&self) -> Option<bitcoin::Transaction> { None }
+        fn maybe_fallback_tx(&self) -> Option<bitcoin::Transaction> { None }
     }
 
     impl State for super::Initialized {}
 
     impl State for super::UncheckedOriginalPayload {
-        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+        fn maybe_fallback_tx(&self) -> Option<bitcoin::Transaction> {
             Some(self.original.psbt.clone().extract_tx_unchecked_fee_rate())
         }
     }
 
     impl State for super::MaybeInputsOwned {
-        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+        fn maybe_fallback_tx(&self) -> Option<bitcoin::Transaction> {
             Some(self.original.psbt.clone().extract_tx_unchecked_fee_rate())
         }
     }
 
     impl State for super::MaybeInputsSeen {
-        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+        fn maybe_fallback_tx(&self) -> Option<bitcoin::Transaction> {
             Some(self.original.psbt.clone().extract_tx_unchecked_fee_rate())
         }
     }
 
     impl State for super::OutputsUnknown {
-        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+        fn maybe_fallback_tx(&self) -> Option<bitcoin::Transaction> {
             Some(self.original.psbt.clone().extract_tx_unchecked_fee_rate())
         }
     }
 
     impl State for super::WantsOutputs {
-        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+        fn maybe_fallback_tx(&self) -> Option<bitcoin::Transaction> {
             Some(self.inner.original_psbt.clone().extract_tx_unchecked_fee_rate())
         }
     }
 
     impl State for super::WantsInputs {
-        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+        fn maybe_fallback_tx(&self) -> Option<bitcoin::Transaction> {
             Some(self.inner.original_psbt.clone().extract_tx_unchecked_fee_rate())
         }
     }
 
     impl State for super::WantsFeeRange {
-        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+        fn maybe_fallback_tx(&self) -> Option<bitcoin::Transaction> {
             Some(self.inner.original_psbt.clone().extract_tx_unchecked_fee_rate())
         }
     }
 
     impl State for super::ProvisionalProposal {
-        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+        fn maybe_fallback_tx(&self) -> Option<bitcoin::Transaction> {
             Some(self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate())
         }
     }
 
     impl State for super::PayjoinProposal {
-        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+        fn maybe_fallback_tx(&self) -> Option<bitcoin::Transaction> {
             Some(self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate())
         }
     }
@@ -295,8 +295,66 @@ mod sealed {
     impl State for super::HasReplyableError {}
 
     impl State for super::Monitor {
-        fn fallback_tx(&self) -> Option<bitcoin::Transaction> {
+        fn maybe_fallback_tx(&self) -> Option<bitcoin::Transaction> {
             Some(self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate())
+        }
+    }
+
+    pub trait FallbackTx: State {
+        fn fallback_tx(&self) -> bitcoin::Transaction;
+    }
+
+    impl FallbackTx for super::MaybeInputsOwned {
+        fn fallback_tx(&self) -> bitcoin::Transaction {
+            self.original.psbt.clone().extract_tx_unchecked_fee_rate()
+        }
+    }
+
+    impl FallbackTx for super::MaybeInputsSeen {
+        fn fallback_tx(&self) -> bitcoin::Transaction {
+            self.original.psbt.clone().extract_tx_unchecked_fee_rate()
+        }
+    }
+
+    impl FallbackTx for super::OutputsUnknown {
+        fn fallback_tx(&self) -> bitcoin::Transaction {
+            self.original.psbt.clone().extract_tx_unchecked_fee_rate()
+        }
+    }
+
+    impl FallbackTx for super::WantsOutputs {
+        fn fallback_tx(&self) -> bitcoin::Transaction {
+            self.inner.original_psbt.clone().extract_tx_unchecked_fee_rate()
+        }
+    }
+
+    impl FallbackTx for super::WantsInputs {
+        fn fallback_tx(&self) -> bitcoin::Transaction {
+            self.inner.original_psbt.clone().extract_tx_unchecked_fee_rate()
+        }
+    }
+
+    impl FallbackTx for super::WantsFeeRange {
+        fn fallback_tx(&self) -> bitcoin::Transaction {
+            self.inner.original_psbt.clone().extract_tx_unchecked_fee_rate()
+        }
+    }
+
+    impl FallbackTx for super::ProvisionalProposal {
+        fn fallback_tx(&self) -> bitcoin::Transaction {
+            self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate()
+        }
+    }
+
+    impl FallbackTx for super::PayjoinProposal {
+        fn fallback_tx(&self) -> bitcoin::Transaction {
+            self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate()
+        }
+    }
+
+    impl FallbackTx for super::Monitor {
+        fn fallback_tx(&self) -> bitcoin::Transaction {
+            self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate()
         }
     }
 }
@@ -309,6 +367,14 @@ mod sealed {
 pub trait State: sealed::State {}
 
 impl<S: sealed::State> State for S {}
+
+/// Marker trait for receiver protocol states that hold a verified broadcastable
+/// fallback transaction.
+///
+/// This trait is sealed to prevent external implementations.
+pub trait HasFallbackTx: sealed::FallbackTx {}
+
+impl<T: sealed::FallbackTx> HasFallbackTx for T {}
 
 /// A higher-level receiver construct which will be taken through different states through the
 /// protocol workflow.
@@ -349,7 +415,7 @@ impl<S: State> Receiver<S> {
     ///
     /// This is a terminal transition — the session cannot be used after cancellation.
     pub fn cancel(self) -> TerminalTransition<SessionEvent, Option<bitcoin::Transaction>> {
-        let fallback = self.state.fallback_tx();
+        let fallback = self.state.maybe_fallback_tx();
         TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Cancel), fallback)
     }
 }

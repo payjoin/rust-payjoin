@@ -78,6 +78,7 @@ impl StatusText for ReceiveSession {
             ReceiveSession::HasReplyableError(_) =>
                 "Session failure, waiting to post error response",
             ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
+            ReceiveSession::PendingFallback(_) => "Pending fallback handling",
             ReceiveSession::Closed(session_outcome) => match session_outcome {
                 ReceiverSessionOutcome::Failure => "Session failure",
                 ReceiverSessionOutcome::Success(_) => "Session success, Payjoin proposal was broadcasted",
@@ -690,6 +691,8 @@ impl App {
                     self.handle_error(error, persister).await,
                 ReceiveSession::Monitor(proposal) =>
                     self.monitor_payjoin_proposal(proposal, persister).await,
+                ReceiveSession::PendingFallback(_) =>
+                    return Err(anyhow!("PendingFallback session handling not yet implemented")),
                 ReceiveSession::Closed(_) => return Err(anyhow!("Session closed")),
             }
         };

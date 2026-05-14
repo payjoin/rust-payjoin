@@ -129,8 +129,12 @@ impl AppTrait for App {
     }
 
     #[cfg(feature = "v2")]
-    async fn fallback_sender(&self, _session_id: crate::db::v2::SessionId) -> Result<()> {
-        anyhow::bail!("fallback is only supported for v2 (BIP77) sessions")
+    async fn cancel_sender(
+        &self,
+        _session_id: crate::db::v2::SessionId,
+        _no_broadcast: bool,
+    ) -> Result<()> {
+        anyhow::bail!("cancel is only supported for v2 (BIP77) sessions")
     }
 }
 

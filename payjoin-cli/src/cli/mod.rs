@@ -133,11 +133,15 @@ pub enum Commands {
     /// Show payjoin session history
     History,
     #[cfg(feature = "v2")]
-    /// Broadcast the original transaction for a sender session (BIP77/v2 only)
-    Fallback {
-        /// The session ID to broadcast the fallback transaction for
+    /// Cancel a sender session, broadcasting the fallback transaction by default (BIP77/v2 only)
+    Cancel {
+        /// The session ID to cancel
         #[arg(required = true)]
         session_id: i64,
+
+        /// Cancel without broadcasting the fallback transaction
+        #[arg(long = "no-broadcast")]
+        no_broadcast: bool,
     },
 }
 

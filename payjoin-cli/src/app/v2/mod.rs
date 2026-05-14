@@ -257,7 +257,7 @@ impl AppTrait for App {
                             Ok(()) => return Ok(()),
                             Err(err) => {
                                 let id = persister.session_id();
-                                println!("Session {id} failed. Run `payjoin-cli fallback {id}` to broadcast the original transaction.");
+                                println!("Session {id} failed. Run `payjoin-cli cancel {id}` to cancel and broadcast the original transaction.");
                                 return Err(err);
                             }
                         }
@@ -265,7 +265,7 @@ impl AppTrait for App {
                     _ = interrupt.changed() => {
                         let id = persister.session_id();
                         println!(
-                            "Session {id} interrupted. Call `send` again to resume, `resume` to resume all sessions, or `payjoin-cli fallback {id}` to broadcast the original transaction."
+                            "Session {id} interrupted. Call `send` again to resume, `resume` to resume all sessions, or `payjoin-cli cancel {id}` to cancel and broadcast the original transaction."
                         );
                         return Err(anyhow!("Interrupted"))
                     }
@@ -485,22 +485,19 @@ impl AppTrait for App {
         Ok(())
     }
 
-    async fn fallback_sender(&self, session_id: SessionId) -> Result<()> {
+    async fn cancel_sender(&self, session_id: SessionId, no_broadcast: bool) -> Result<()> {
         let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
         let (session, _history) = replay_sender_event_log(&persister)?;
 
         let pending: Sender<PendingFallback> = match session {
-            SendSession::PendingFallback(sender) => sender,
             SendSession::WithReplyKey(sender) => sender.cancel().save(&persister)?,
             SendSession::PollingForProposal(sender) => sender.cancel().save(&persister)?,
+            SendSession::PendingFallback(sender) => sender,
             SendSession::Closed(SenderSessionOutcome::Success(proposal)) => {
                 let txid = proposal.extract_tx_unchecked_fee_rate().compute_txid();
                 println!(
                     "Session {session_id} already produced payjoin transaction {txid}. \
-                     Broadcasting the original now would double-spend against it. \
-                     If the payjoin tx needs re-broadcast, run \
-                     `bitcoin-cli gettransaction {txid}` to fetch the hex, then \
-                     `bitcoin-cli sendrawtransaction <hex>`."
+                     Cannot cancel a completed session."
                 );
                 return Ok(());
             }
@@ -510,9 +507,18 @@ impl AppTrait for App {
             }
         };
 
-        self.wallet().broadcast_tx(pending.fallback_tx())?;
-        println!("Broadcasted fallback transaction txid: {}", pending.fallback_tx().compute_txid());
-
+        if no_broadcast {
+            println!(
+                "Session {session_id} cancelled. Broadcast the original transaction manually:\n{}",
+                serialize_hex(pending.fallback_tx())
+            );
+        } else {
+            self.wallet().broadcast_tx(pending.fallback_tx())?;
+            println!(
+                "Broadcasted fallback transaction txid: {}",
+                pending.fallback_tx().compute_txid()
+            );
+        }
         pending.close().save(&persister)?;
         Ok(())
     }
@@ -552,7 +558,7 @@ impl App {
             SendSession::PendingFallback(_) => {
                 let id = persister.session_id();
                 println!(
-                    "Session {id} was cancelled. Run `payjoin-cli fallback {id}` to broadcast the original transaction."
+                    "Session {id} was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the original transaction."
                 );
                 return Ok(());
             }

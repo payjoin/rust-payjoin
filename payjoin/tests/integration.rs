@@ -194,7 +194,7 @@ mod integration {
         use std::sync::Arc;
         use std::time::Duration;
 
-        use bitcoin::{Address, Transaction};
+        use bitcoin::{Address, ScriptBuf, Transaction};
         use http::StatusCode;
         use payjoin::persist::OptionalTransitionOutcome;
         use payjoin::receive::v2::{
@@ -775,6 +775,80 @@ mod integration {
             Ok(())
         }
 
+        #[tokio::test]
+        async fn v2_to_v2_non_blocking_receiver_transitions() -> Result<(), BoxSendSyncError> {
+            init_tracing();
+            let mut services = TestServices::initialize().await?;
+            let expected_weight = Weight::from_wu(
+                TX_HEADER_WEIGHT + (P2WPKH_INPUT_WEIGHT * 2) + P2WPKH_OUTPUT_WEIGHT,
+            );
+            let expected_fee = expected_weight * FeeRate::BROADCAST_MIN;
+
+            let (_bitcoind, sender, receiver) =
+                init_bitcoind_sender_receiver(Some(AddressType::Bech32), Some(AddressType::Bech32))
+                    .expect("should be able to initialize the sender and the receiver");
+            let recv_persister = InMemoryTestPersister::default();
+            let send_persister = InMemoryTestPersister::default();
+
+            let result = tokio::select!(
+                err = services.take_ohttp_relay_handle() => panic!("Ohttp relay exited early: {:?}", err),
+                err = services.take_directory_handle() => panic!("Directory server exited early: {:?}", err),
+                res = do_v2_to_v2_non_blocking_receiver_transitions(&services, &receiver, &sender, &recv_persister, &send_persister, SenderFinalAction::SignAndBroadcastPayjoinProposal) => res
+            );
+
+            assert!(result.is_ok(), "v2 p2wpkh send receive failed: {:#?}", result.unwrap_err());
+
+            let (broadcasted_transaction, monitoring_payment) = result.unwrap();
+
+            // Sender should have sent the entire value of their UTXO to receiver (minus fees).
+            assert_eq!(broadcasted_transaction.input.len(), 2);
+            assert_eq!(broadcasted_transaction.output.len(), 1);
+            assert_eq!(
+                receiver.get_balances()?.into_model()?.mine.untrusted_pending,
+                Amount::from_btc(100.0)? - expected_fee
+            );
+            assert_eq!(
+                sender.get_balances()?.into_model()?.mine.untrusted_pending,
+                Amount::from_btc(0.0)?
+            );
+
+            // Receiver should be able to validate that the sender has broadcasted the Payjoin proposal.
+            monitoring_payment
+                .check_payment(|txid| {
+                    let get_tx_result = receiver.get_raw_transaction(txid);
+                    match get_tx_result {
+                        Ok(tx) =>
+                            Ok(Some(tx.transaction().expect("transaction should be decodable"))),
+                        Err(_) => {
+                            panic!("should be able to find the payjoin proposal broadcasted")
+                        }
+                    }
+                })
+                .save(&recv_persister)
+                .expect("receiver should successfully monitor for the payment");
+
+            // Receiver session should have completed with a Success, along with information on the
+            // sender signatures on the Payjoin that was broadcasted.
+            let (_session, session_history) = replay_receiver_event_log(&recv_persister)?;
+            let sender_outpoint = session_history.fallback_tx().unwrap().input[0].previous_output;
+            let sender_signatures = {
+                let sender_txin = broadcasted_transaction
+                    .input
+                    .iter()
+                    .find(|txin| txin.previous_output == sender_outpoint)
+                    .expect("sender input must be present in payjoin_tx")
+                    .clone();
+                vec![(sender_txin.clone().script_sig, sender_txin.clone().witness)]
+            };
+            assert_eq!(
+                recv_persister.load().unwrap().last(),
+                Some(payjoin::receive::v2::SessionEvent::Closed(payjoin::receive::v2::SessionOutcome::Success(sender_signatures))),
+                "The last event of the persister should be a SessionOutcome::Success with the correct sender signature",
+            );
+            assert_eq!(session_history.status(), SessionStatus::Completed);
+            Ok(())
+        }
+
         /// Helper function for running a Payjoin v2 session. Uses the `sender_final_action`
         /// parameter to determine what action the sender will take after they receive the Payjoin
         /// proposal from the receiver.
@@ -871,6 +945,146 @@ mod integration {
             };
             let payjoin_proposal =
                 handle_directory_proposal(receiver, proposal, recv_persister, None)?;
+            let (req, ctx) =
+                payjoin_proposal.create_post_request(services.ohttp_relay_url().as_str())?;
+            let response = agent
+                .post(req.url)
+                .header("Content-Type", req.content_type)
+                .body(req.body)
+                .send()
+                .await?;
+            let monitoring_payment = payjoin_proposal
+                .process_response(&response.bytes().await?, ctx)
+                .save(recv_persister)?;
+
+            // **********************
+            // Inside the Sender:
+            // Sender checks, signs, finalizes, constructs, and broadcasts
+            // Replay post fallback to get the response
+            let (Request { url, body, content_type, .. }, ohttp_ctx) =
+                send_ctx.create_poll_request(services.ohttp_relay_url().as_str())?;
+            let response =
+                agent.post(url).header("Content-Type", content_type).body(body).send().await?;
+            tracing::info!("Response: {:#?}", &response);
+            let response = send_ctx
+                .process_response(&response.bytes().await?, ohttp_ctx)
+                .save(send_persister)
+                .expect("psbt should exist");
+
+            let checked_payjoin_proposal_psbt =
+                if let OptionalTransitionOutcome::Progress(psbt) = response {
+                    psbt
+                } else {
+                    panic!("psbt should exist");
+                };
+
+            let broadcasted_transaction = match sender_final_action {
+                SenderFinalAction::SignAndBroadcastPayjoinProposal =>
+                    extract_pj_tx(sender, checked_payjoin_proposal_psbt.clone())?,
+                SenderFinalAction::BroadcastFallbackTransaction =>
+                    replay_sender_event_log(send_persister)?.1.fallback_tx(),
+            };
+            sender.send_raw_transaction(&broadcasted_transaction)?;
+            Ok((broadcasted_transaction, monitoring_payment))
+        }
+
+        /// Helper function for running a Payjoin v2 session with receiver non-blocking
+        /// validation flow. Uses the `sender_final_action` parameter to determine what
+        /// action the sender will take after they receive the Payjoin proposal from the receiver.
+        ///
+        /// Returns the transaction which the sender broadcasts and the state of the Receiver
+        /// before they begin monitoring ([`Receiver<Monitor>`]) so that different tests can modify
+        /// how the receiver is going to validate the action the sender takes.
+        async fn do_v2_to_v2_non_blocking_receiver_transitions<R, S>(
+            services: &TestServices,
+            receiver: &corepc_node::Client,
+            sender: &corepc_node::Client,
+            recv_persister: &R,
+            send_persister: &S,
+            sender_final_action: SenderFinalAction,
+        ) -> Result<(Transaction, Receiver<Monitor>), BoxError>
+        where
+            R: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent> + Clone,
+            S: SessionPersister<SessionEvent = payjoin::send::v2::SessionEvent> + Clone,
+        {
+            let agent = services.http_agent();
+            services.wait_for_services_ready().await?;
+            let ohttp_keys = services.fetch_ohttp_keys().await?;
+            // **********************
+            // Inside the Receiver:
+            let address = receiver.new_address()?;
+
+            // test session with expiration in the future
+            let session =
+                ReceiverBuilder::new(address, services.directory_url().as_str(), ohttp_keys)?
+                    .build()
+                    .save(recv_persister)?;
+            println!("session: {:#?}", &session);
+            // Poll receive request
+            let (req, ctx) = session.create_poll_request(services.ohttp_relay_url().as_str())?;
+            let response = agent
+                .post(req.url)
+                .header("Content-Type", req.content_type)
+                .body(req.body)
+                .send()
+                .await?;
+            assert!(response.status().is_success(), "error response: {}", response.status());
+            let response_body = session
+                .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
+                .save(recv_persister)?;
+            // No proposal yet since sender has not responded
+            let session = if let OptionalTransitionOutcome::Stasis(current_state) = response_body {
+                current_state
+            } else {
+                panic!("Should still be in initialized state")
+            };
+
+            // **********************
+            // Inside the Sender:
+            // Create a funded PSBT (not broadcasted) to address with amount given in the pj_uri
+            let pj_uri = Uri::from_str(&session.pj_uri().to_string())
+                .map_err(|e| e.to_string())?
+                .assume_checked()
+                .check_pj_supported()
+                .map_err(|e| e.to_string())?;
+            let psbt = build_sweep_psbt(sender, &pj_uri)?;
+            let req_ctx = SenderBuilder::new(psbt, pj_uri)
+                .build_recommended(FeeRate::BROADCAST_MIN)?
+                .save(send_persister)?;
+            let (Request { url, body, content_type, .. }, send_ctx) =
+                req_ctx.create_v2_post_request(services.ohttp_relay_url().as_str())?;
+            let response =
+                agent.post(url).header("Content-Type", content_type).body(body).send().await?;
+            tracing::info!("Response: {:#?}", &response);
+            assert!(response.status().is_success(), "error response: {}", response.status());
+            let send_ctx = req_ctx
+                .process_response(&response.bytes().await?, send_ctx)
+                .save(send_persister)?;
+            // POST Original PSBT
+
+            // **********************
+            // Inside the Receiver:
+
+            // GET fallback psbt
+            let (req, ctx) = session.create_poll_request(services.ohttp_relay_url().as_str())?;
+            let response = agent
+                .post(req.url)
+                .header("Content-Type", req.content_type)
+                .body(req.body)
+                .send()
+                .await?;
+            // POST payjoin
+            let outcome = session
+                .process_response(response.bytes().await?.to_vec().as_slice(), ctx)
+                .save(recv_persister)?;
+            let proposal = if let OptionalTransitionOutcome::Progress(psbt) = outcome {
+                psbt
+            } else {
+                panic!("proposal should exist");
+            };
+            let payjoin_proposal =
+                handle_directory_proposal_non_blocking(receiver, proposal, recv_persister, None)
+                    .await?;
             let (req, ctx) =
                 payjoin_proposal.create_post_request(services.ohttp_relay_url().as_str())?;
             let response = agent
@@ -1225,6 +1439,125 @@ mod integration {
                         .map_err(ImplementationError::new)
                 })
                 .save(recv_persister)?;
+            Ok(payjoin)
+        }
+
+        async fn handle_directory_proposal_non_blocking(
+            receiver: &corepc_node::Client,
+            proposal: Receiver<UncheckedOriginalPayload>,
+            recv_persister: &impl SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
+            custom_inputs: Option<Vec<InputPair>>,
+        ) -> Result<Receiver<PayjoinProposal>, BoxError> {
+            // Receive Check 1: Can Broadcast
+            let tx = proposal.extract_tx_to_check_broadcast_suitability();
+            let is_broadcast_suitable = receiver
+                .test_mempool_accept(std::slice::from_ref(&tx))
+                .map_err(ImplementationError::new)?
+                .0
+                .first()
+                .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
+                .allowed;
+            let proposal = proposal
+                .process_broadcast_suitability_result(None, is_broadcast_suitable)
+                .save(recv_persister)?;
+
+            // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
+            let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
+
+            // Receive Check 2: receiver can't sign for proposal inputs
+            let inputs_owned_validator = proposal.get_inputs_owned_validator()?;
+            let mut input_owned_check = |input_script_buf: &ScriptBuf| {
+                let input_script_buf = input_script_buf.clone();
+                async move {
+                    let input = input_script_buf.as_script();
+                    let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
+                        .map_err(ImplementationError::new)?;
+                    receiver
+                        .get_address_info(&address)
+                        .map(|info| info.is_mine)
+                        .map_err(ImplementationError::new)
+                }
+            };
+            let finalized_inputs_owned_validator =
+                inputs_owned_validator.run_async(&mut input_owned_check).await?;
+            let proposal = proposal
+                .process_inputs_owned_validator(finalized_inputs_owned_validator)
+                .save(recv_persister)?;
+
+            // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
+            let inputs_seen_validator = proposal.get_inputs_seen_validator();
+            let mut input_seen_check = |_outpoint: &OutPoint| async move { Ok(false) };
+            let finalized_inputs_seen_validator =
+                inputs_seen_validator.run_async(&mut input_seen_check).await?;
+            let proposal = proposal
+                .process_inputs_seen_validator(finalized_inputs_seen_validator)
+                .save(recv_persister)?;
+            let outputs_owned_validator = proposal.get_outputs_owned_validator();
+            let mut output_owned_check = |output_script_buf: &ScriptBuf| {
+                let output_script_buf = output_script_buf.clone();
+                async move {
+                    let output_script = output_script_buf.as_script();
+                    let address =
+                        bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)
+                            .map_err(ImplementationError::new)?;
+                    receiver
+                        .get_address_info(&address)
+                        .map(|info| info.is_mine)
+                        .map_err(ImplementationError::new)
+                }
+            };
+            let finalized_outputs_owned_validator =
+                outputs_owned_validator.run_async(&mut output_owned_check).await?;
+            let payjoin = proposal
+                .process_outputs_owned_validator(finalized_outputs_owned_validator)
+                .save(recv_persister)?;
+
+            let payjoin = payjoin.commit_outputs().save(recv_persister)?;
+
+            let inputs = match custom_inputs {
+                Some(inputs) => inputs,
+                None => {
+                    let candidate_inputs = receiver
+                        .list_unspent()
+                        .map_err(ImplementationError::new)?
+                        .0
+                        .into_iter()
+                        .map(input_pair_from_list_unspent);
+                    let selected_input =
+                        payjoin.try_preserving_privacy(candidate_inputs).map_err(|e| {
+                            format!("Failed to make privacy preserving selection: {e:?}")
+                        })?;
+                    vec![selected_input]
+                }
+            };
+            let payjoin = payjoin
+                .contribute_inputs(inputs)
+                .map_err(|e| format!("Failed to contribute inputs: {e:?}"))?
+                .commit_inputs()
+                .save(recv_persister)?;
+
+            let payjoin = payjoin
+                .apply_fee_range(
+                    Some(FeeRate::BROADCAST_MIN),
+                    Some(FeeRate::from_sat_per_vb_unchecked(2)),
+                )
+                .save(recv_persister)?;
+
+            // Sign and finalize the proposal PSBT
+            let psbt = payjoin.psbt_to_sign();
+            let signed_psbt = receiver
+                // call RPC manually to pass custom options
+                .call::<corepc_node::vtype::WalletProcessPsbt>(
+                    "walletprocesspsbt",
+                    &[
+                        json!(psbt.to_string()),
+                        json!(None as Option<bool>),
+                        json!(None as Option<&str>),
+                        json!(Some(true)), // check that the receiver properly clears keypaths
+                    ],
+                )
+                .map(|res| Psbt::from_str(&res.psbt).expect("psbt should be valid"))?;
+            let payjoin = payjoin.finalize_signed_proposal(&signed_psbt).save(recv_persister)?;
             Ok(payjoin)
         }
 

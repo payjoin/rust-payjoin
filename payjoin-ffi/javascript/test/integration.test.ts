@@ -31,6 +31,8 @@ interface Utxo {
     scriptPubKey: string;
 }
 
+type TransitionMode = "callback" | "nonblocking";
+
 type PayjoinModule = typeof nodejsPayjoin;
 const webPayjoin = webPayjoinModule as unknown as PayjoinModule;
 
@@ -225,13 +227,23 @@ class ReceiverProcessor {
         private readonly payjoin: PayjoinModule,
         private readonly receiver: testUtils.RpcClient,
         private readonly recvPersister: InMemoryReceiverPersister,
+        private readonly mode: TransitionMode,
     ) {}
 
     private async processProvisionalProposal(
         proposal: PJ<"ProvisionalProposal">,
     ): Promise<PJ<"PayjoinProposal">> {
+        if (this.mode === "callback") {
+            return proposal
+                .finalizeProposal(new ProcessPsbtCallback(this.receiver))
+                .save(this.recvPersister) as PJ<"PayjoinProposal">;
+        }
+
+        const signedPsbt = new ProcessPsbtCallback(this.receiver).callback(
+            proposal.psbtToSign(),
+        );
         return proposal
-            .finalizeProposal(new ProcessPsbtCallback(this.receiver))
+            .finalizeSignedProposal(signedPsbt)
             .save(this.recvPersister) as PJ<"PayjoinProposal">;
     }
 
@@ -266,41 +278,109 @@ class ReceiverProcessor {
     private async processOutputsUnknown(
         proposal: PJ<"OutputsUnknown">,
     ): Promise<PJ<"PayjoinProposal">> {
-        const wantsOutputs = proposal
-            .identifyReceiverOutputs(new IsScriptOwnedCallback(this.receiver))
-            .save(this.recvPersister) as PJ<"WantsOutputs">;
+        let wantsOutputs: PJ<"WantsOutputs">;
+
+        if (this.mode === "callback") {
+            wantsOutputs = proposal
+                .identifyReceiverOutputs(
+                    new IsScriptOwnedCallback(this.receiver),
+                )
+                .save(this.recvPersister) as PJ<"WantsOutputs">;
+        } else {
+            const markedChecklist = proposal
+                .outputsOwnedChecklist()
+                .map((item) =>
+                    item.mark(
+                        new IsScriptOwnedCallback(this.receiver).callback(
+                            item.value(),
+                        ),
+                    ),
+                );
+            wantsOutputs = proposal
+                .applyOutputsOwnedChecklist(markedChecklist)
+                .save(this.recvPersister) as PJ<"WantsOutputs">;
+        }
+
         return this.processWantsOutputs(wantsOutputs);
     }
 
     private async processMaybeInputsSeen(
         proposal: PJ<"MaybeInputsSeen">,
     ): Promise<PJ<"PayjoinProposal">> {
-        const outputsUnknown = proposal
-            .checkNoInputsSeenBefore(
-                new CheckInputsNotSeenCallback(this.receiver),
-            )
-            .save(this.recvPersister) as PJ<"OutputsUnknown">;
+        let outputsUnknown: PJ<"OutputsUnknown">;
+
+        if (this.mode === "callback") {
+            outputsUnknown = proposal
+                .checkNoInputsSeenBefore(
+                    new CheckInputsNotSeenCallback(this.receiver),
+                )
+                .save(this.recvPersister) as PJ<"OutputsUnknown">;
+        } else {
+            const markedChecklist = proposal
+                .inputsSeenChecklist()
+                .map((item) =>
+                    item.mark(
+                        new CheckInputsNotSeenCallback(this.receiver).callback(
+                            item.value(),
+                        ),
+                    ),
+                );
+            outputsUnknown = proposal
+                .applyInputsSeenChecklist(markedChecklist)
+                .save(this.recvPersister) as PJ<"OutputsUnknown">;
+        }
+
         return this.processOutputsUnknown(outputsUnknown);
     }
 
     private async processMaybeInputsOwned(
         proposal: nodejsPayjoin.MaybeInputsOwned,
     ): Promise<PJ<"PayjoinProposal">> {
-        const maybeInputsSeen = proposal
-            .checkInputsNotOwned(new IsScriptOwnedCallback(this.receiver))
-            .save(this.recvPersister) as PJ<"MaybeInputsSeen">;
+        let maybeInputsSeen: PJ<"MaybeInputsSeen">;
+
+        if (this.mode === "callback") {
+            maybeInputsSeen = proposal
+                .checkInputsNotOwned(new IsScriptOwnedCallback(this.receiver))
+                .save(this.recvPersister) as PJ<"MaybeInputsSeen">;
+        } else {
+            const markedChecklist = proposal
+                .inputsOwnedChecklist()
+                .map((item) =>
+                    item.mark(
+                        new IsScriptOwnedCallback(this.receiver).callback(
+                            item.value(),
+                        ),
+                    ),
+                );
+            maybeInputsSeen = proposal
+                .applyInputsOwnedChecklist(markedChecklist)
+                .save(this.recvPersister) as PJ<"MaybeInputsSeen">;
+        }
+
         return this.processMaybeInputsSeen(maybeInputsSeen);
     }
 
     private async processUncheckedProposal(
         proposal: PJ<"UncheckedOriginalPayload">,
     ): Promise<PJ<"PayjoinProposal">> {
-        const maybeInputsOwned = proposal
-            .checkBroadcastSuitability(
-                undefined,
-                new MempoolAcceptanceCallback(this.receiver),
-            )
-            .save(this.recvPersister) as PJ<"MaybeInputsOwned">;
+        let maybeInputsOwned: PJ<"MaybeInputsOwned">;
+
+        if (this.mode === "callback") {
+            maybeInputsOwned = proposal
+                .checkBroadcastSuitability(
+                    undefined,
+                    new MempoolAcceptanceCallback(this.receiver),
+                )
+                .save(this.recvPersister) as PJ<"MaybeInputsOwned">;
+        } else {
+            const canBroadcastResult = new MempoolAcceptanceCallback(
+                this.receiver,
+            ).callback(proposal.extractTxToCheckBroadcastSuitability());
+            maybeInputsOwned = proposal
+                .applyBroadcastSuitability(undefined, canBroadcastResult)
+                .save(this.recvPersister) as PJ<"MaybeInputsOwned">;
+        }
+
         return this.processMaybeInputsOwned(maybeInputsOwned);
     }
 
@@ -491,7 +571,10 @@ function testFfiValidation(payjoin: PayjoinModule): void {
     }, /AmountOutOfRange/);
 }
 
-async function testIntegrationV2ToV2(payjoin: PayjoinModule): Promise<void> {
+async function testIntegrationV2ToV2(
+    payjoin: PayjoinModule,
+    mode: TransitionMode,
+): Promise<void> {
     const env = testUtils.initBitcoindSenderReceiver();
     const receiver = env.getReceiver();
     const sender = env.getSender();
@@ -513,6 +596,7 @@ async function testIntegrationV2ToV2(payjoin: PayjoinModule): Promise<void> {
         payjoin,
         receiver,
         recvPersister,
+        mode,
     );
     const senderPersister = new InMemorySenderPersister();
 
@@ -644,11 +728,13 @@ async function testIntegrationV2ToV2(payjoin: PayjoinModule): Promise<void> {
 async function runTests(): Promise<void> {
     await nodejsUniffiInitAsync();
     testFfiValidation(nodejsPayjoin);
-    await testIntegrationV2ToV2(nodejsPayjoin);
+    await testIntegrationV2ToV2(nodejsPayjoin, "callback");
+    await testIntegrationV2ToV2(nodejsPayjoin, "nonblocking");
 
     await webUniffiInitAsync();
     testFfiValidation(webPayjoin);
-    await testIntegrationV2ToV2(webPayjoin);
+    await testIntegrationV2ToV2(webPayjoin, "callback");
+    await testIntegrationV2ToV2(webPayjoin, "nonblocking");
 }
 
 runTests().catch((error: unknown) => {

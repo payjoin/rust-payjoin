@@ -183,14 +183,25 @@ void main() {
           .buildRecommended(minFeeRateSatPerKwu: 1000)
           .save(persister: sender_persister);
       var cancelTransition = withReplyKey.cancel();
-      var fallbackTx = cancelTransition.save(persister: sender_persister);
-      expect(fallbackTx, isNotNull);
-      expect(fallbackTx.length, greaterThan(0));
-      final result = payjoin.replaySenderEventLog(persister: sender_persister);
+      var pendingFallback = cancelTransition.save(persister: sender_persister);
+      expect(pendingFallback, isNotNull);
+      expect(pendingFallback!.fallbackTx().length, greaterThan(0));
+      final cancelledResult = payjoin.replaySenderEventLog(
+        persister: sender_persister,
+      );
       expect(
-        result.state(),
+        cancelledResult.state(),
+        isA<payjoin.PendingFallbackSendSession>(),
+        reason: "sender should be in PendingFallback state after cancel",
+      );
+      pendingFallback.close().save(persister: sender_persister);
+      final closedResult = payjoin.replaySenderEventLog(
+        persister: sender_persister,
+      );
+      expect(
+        closedResult.state(),
         isA<payjoin.ClosedSendSession>(),
-        reason: "sender should be in Closed state after cancel",
+        reason: "sender should be in Closed state after close",
       );
     });
 
@@ -215,18 +226,27 @@ void main() {
           .buildRecommended(minFeeRateSatPerKwu: 1000)
           .saveAsync(persister: sender_persister);
       var cancelTransition = withReplyKey.cancel();
-      var fallbackTx = await cancelTransition.saveAsync(
+      var pendingFallback = await cancelTransition.saveAsync(
         persister: sender_persister,
       );
-      expect(fallbackTx, isNotNull);
-      expect(fallbackTx.length, greaterThan(0));
-      final result = await payjoin.replaySenderEventLogAsync(
+      expect(pendingFallback, isNotNull);
+      expect(pendingFallback!.fallbackTx().length, greaterThan(0));
+      final cancelledResult = await payjoin.replaySenderEventLogAsync(
         persister: sender_persister,
       );
       expect(
-        result.state(),
+        cancelledResult.state(),
+        isA<payjoin.PendingFallbackSendSession>(),
+        reason: "sender should be in PendingFallback state after cancel",
+      );
+      await pendingFallback.close().saveAsync(persister: sender_persister);
+      final closedResult = await payjoin.replaySenderEventLogAsync(
+        persister: sender_persister,
+      );
+      expect(
+        closedResult.state(),
         isA<payjoin.ClosedSendSession>(),
-        reason: "sender should be in Closed state after cancel",
+        reason: "sender should be in Closed state after close",
       );
     });
   });

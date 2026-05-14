@@ -191,8 +191,8 @@ void main() {
       );
       expect(
         cancelledResult.state(),
-        isA<payjoin.PendingFallbackSendSession>(),
-        reason: "sender should be in PendingFallback state after cancel",
+        isA<payjoin.SenderPendingFallbackSendSession>(),
+        reason: "sender should be in SenderPendingFallback state after cancel",
       );
       pendingFallback.close().save(persister: sender_persister);
       final closedResult = payjoin.replaySenderEventLog(
@@ -236,8 +236,8 @@ void main() {
       );
       expect(
         cancelledResult.state(),
-        isA<payjoin.PendingFallbackSendSession>(),
-        reason: "sender should be in PendingFallback state after cancel",
+        isA<payjoin.SenderPendingFallbackSendSession>(),
+        reason: "sender should be in SenderPendingFallback state after cancel",
       );
       await pendingFallback.close().saveAsync(persister: sender_persister);
       final closedResult = await payjoin.replaySenderEventLogAsync(

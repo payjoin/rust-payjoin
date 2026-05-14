@@ -65,87 +65,151 @@ macro_rules! impl_save_for_transition {
     };
 }
 
-/// A terminal transition produced by cancelling a receiver session.
+enum ReceiverCancelTransition {
+    Terminal(payjoin::persist::TerminalTransition<payjoin::receive::v2::SessionEvent, ()>),
+    PendingFallback(
+        payjoin::persist::NextStateTransition<
+            payjoin::receive::v2::SessionEvent,
+            payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>,
+        >,
+    ),
+    MaybePendingFallback(
+        payjoin::persist::MaybeTerminalTransition<
+            payjoin::receive::v2::SessionEvent,
+            payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>,
+        >,
+    ),
+}
+
+/// A transition produced by cancelling a receiver session.
 #[derive(uniffi::Object)]
 pub struct CancelTransition {
-    transition: RwLock<
-        Option<
-            payjoin::persist::TerminalTransition<
-                payjoin::receive::v2::SessionEvent,
-                Option<payjoin::bitcoin::Transaction>,
-            >,
-        >,
-    >,
+    transition: RwLock<Option<ReceiverCancelTransition>>,
 }
 
 #[uniffi::export]
 impl CancelTransition {
-    /// Persist the cancellation and return the fallback transaction if available.
-    ///
-    /// The fallback transaction is the consensus-encoded raw transaction bytes,
-    /// or `None` if the session was cancelled before the sender's original
-    /// proposal was received.
+    /// Persist the cancellation and return pending fallback handling if needed.
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<Option<Vec<u8>>, ReceiverPersistedError> {
+    ) -> Result<Option<Arc<ReceiverPendingFallback>>, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner = self.transition.write().expect("Lock should not be poisoned");
         let value = inner.take().expect("Already saved or moved");
-        let fallback = value
-            .save(&adapter)
-            .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
-        Ok(fallback.map(|tx| payjoin::bitcoin::consensus::serialize(&tx)))
+        match value {
+            ReceiverCancelTransition::Terminal(transition) => {
+                transition
+                    .save(&adapter)
+                    .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
+                Ok(None)
+            }
+            ReceiverCancelTransition::PendingFallback(transition) => {
+                let pending_fallback = transition
+                    .save(&adapter)
+                    .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
+                Ok(Some(Arc::new(pending_fallback.into())))
+            }
+            ReceiverCancelTransition::MaybePendingFallback(transition) => {
+                let pending_fallback = transition
+                    .save(&adapter)
+                    .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
+                Ok(pending_fallback.map(|pending_fallback| Arc::new(pending_fallback.into())))
+            }
+        }
     }
 
     pub async fn save_async(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
-    ) -> Result<Option<Vec<u8>>, ReceiverPersistedError> {
+    ) -> Result<Option<Arc<ReceiverPendingFallback>>, ReceiverPersistedError> {
         let adapter = AsyncCallbackPersisterAdapter::new(persister);
         let value = {
             let mut inner = self.transition.write().expect("Lock should not be poisoned");
             inner.take().expect("Already saved or moved")
         };
-        let fallback = value
-            .save_async(&adapter)
-            .await
-            .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
-        Ok(fallback.map(|tx| payjoin::bitcoin::consensus::serialize(&tx)))
+        match value {
+            ReceiverCancelTransition::Terminal(transition) => {
+                transition
+                    .save_async(&adapter)
+                    .await
+                    .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
+                Ok(None)
+            }
+            ReceiverCancelTransition::PendingFallback(transition) => {
+                let pending_fallback = transition
+                    .save_async(&adapter)
+                    .await
+                    .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
+                Ok(Some(Arc::new(pending_fallback.into())))
+            }
+            ReceiverCancelTransition::MaybePendingFallback(transition) => {
+                let pending_fallback = transition
+                    .save_async(&adapter)
+                    .await
+                    .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
+                Ok(pending_fallback.map(|pending_fallback| Arc::new(pending_fallback.into())))
+            }
+        }
     }
 }
 
-macro_rules! impl_cancel_for_receiver {
+macro_rules! impl_terminal_cancel_for_receiver {
     ($ty:ident) => {
         #[uniffi::export]
         impl $ty {
             /// Cancel the Payjoin session immediately.
-            ///
-            /// Returns a [`CancelTransition`] that, once persisted, yields the fallback
-            /// transaction when applicable. The fallback transaction is the sender's original
-            /// transaction that should be broadcast to complete the payment without Payjoin.
-            ///
-            /// This is a terminal transition — the session cannot be used after cancellation.
             pub fn cancel(&self) -> CancelTransition {
                 let transition = self.0.clone().cancel();
-                CancelTransition { transition: RwLock::new(Some(transition)) }
+                CancelTransition {
+                    transition: RwLock::new(Some(ReceiverCancelTransition::Terminal(transition))),
+                }
             }
         }
     };
 }
 
-impl_cancel_for_receiver!(Initialized);
-impl_cancel_for_receiver!(UncheckedOriginalPayload);
-impl_cancel_for_receiver!(MaybeInputsOwned);
-impl_cancel_for_receiver!(MaybeInputsSeen);
-impl_cancel_for_receiver!(OutputsUnknown);
-impl_cancel_for_receiver!(WantsOutputs);
-impl_cancel_for_receiver!(WantsInputs);
-impl_cancel_for_receiver!(WantsFeeRange);
-impl_cancel_for_receiver!(ProvisionalProposal);
-impl_cancel_for_receiver!(PayjoinProposal);
-impl_cancel_for_receiver!(HasReplyableError);
-impl_cancel_for_receiver!(Monitor);
+macro_rules! impl_pending_fallback_cancel_for_receiver {
+    ($ty:ident) => {
+        #[uniffi::export]
+        impl $ty {
+            /// Cancel the Payjoin session and return pending fallback handling.
+            pub fn cancel(&self) -> CancelTransition {
+                let transition = self.0.clone().cancel();
+                CancelTransition {
+                    transition: RwLock::new(Some(ReceiverCancelTransition::PendingFallback(
+                        transition,
+                    ))),
+                }
+            }
+        }
+    };
+}
+
+impl_terminal_cancel_for_receiver!(Initialized);
+impl_terminal_cancel_for_receiver!(UncheckedOriginalPayload);
+impl_pending_fallback_cancel_for_receiver!(MaybeInputsOwned);
+impl_pending_fallback_cancel_for_receiver!(MaybeInputsSeen);
+impl_pending_fallback_cancel_for_receiver!(OutputsUnknown);
+impl_pending_fallback_cancel_for_receiver!(WantsOutputs);
+impl_pending_fallback_cancel_for_receiver!(WantsInputs);
+impl_pending_fallback_cancel_for_receiver!(WantsFeeRange);
+impl_pending_fallback_cancel_for_receiver!(ProvisionalProposal);
+impl_pending_fallback_cancel_for_receiver!(PayjoinProposal);
+impl_pending_fallback_cancel_for_receiver!(Monitor);
+
+#[uniffi::export]
+impl HasReplyableError {
+    /// Cancel the Payjoin session without posting the receiver error response.
+    pub fn cancel(&self) -> CancelTransition {
+        let transition = self.0.clone().cancel();
+        CancelTransition {
+            transition: RwLock::new(Some(ReceiverCancelTransition::MaybePendingFallback(
+                transition,
+            ))),
+        }
+    }
+}
 
 #[derive(Debug, Clone, uniffi::Object)]
 pub struct ReceiverSessionEvent(payjoin::receive::v2::SessionEvent);
@@ -198,7 +262,7 @@ pub enum ReceiveSession {
     PayjoinProposal { inner: Arc<PayjoinProposal> },
     HasReplyableError { inner: Arc<HasReplyableError> },
     Monitor { inner: Arc<Monitor> },
-    PendingFallback { inner: Arc<PendingFallback> },
+    ReceiverPendingFallback { inner: Arc<ReceiverPendingFallback> },
     Closed { inner: Arc<ReceiverSessionOutcome> },
 }
 
@@ -230,7 +294,7 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
                 Self::HasReplyableError { inner: Arc::new(inner.into()) },
             ReceiveSession::Monitor(inner) => Self::Monitor { inner: Arc::new(inner.into()) },
             ReceiveSession::PendingFallback(inner) =>
-                Self::PendingFallback { inner: Arc::new(inner.into()) },
+                Self::ReceiverPendingFallback { inner: Arc::new(inner.into()) },
             ReceiveSession::Closed(session_outcome) =>
                 Self::Closed { inner: Arc::new(session_outcome.into()) },
         }
@@ -1211,6 +1275,7 @@ pub struct PayjoinProposalTransition(
                     payjoin::receive::v2::SessionEvent,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>,
                     payjoin::receive::ProtocolError,
+                    payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>,
                 >,
             >,
         >,
@@ -1290,13 +1355,14 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError
 }
 
 #[derive(uniffi::Object)]
+#[allow(clippy::type_complexity)]
 pub struct HasReplyableErrorTransition(
     Arc<
         RwLock<
             Option<
-                payjoin::persist::MaybeSuccessTransition<
+                payjoin::persist::MaybeTerminalSuccessTransition<
                     payjoin::receive::v2::SessionEvent,
-                    (),
+                    payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>,
                     payjoin::receive::ProtocolError,
                 >,
             >,
@@ -1309,28 +1375,29 @@ impl HasReplyableErrorTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<(), ReceiverPersistedError> {
+    ) -> Result<Option<Arc<ReceiverPendingFallback>>, ReceiverPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner = self.0.write().expect("Lock should not be poisoned");
 
         let value = inner.take().expect("Already saved or moved");
 
-        value.save(&adapter).map_err(ReceiverPersistedError::from)?;
-        Ok(())
+        let pending_fallback = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
+        Ok(pending_fallback.map(|pending_fallback| Arc::new(pending_fallback.into())))
     }
 
     pub async fn save_async(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
-    ) -> Result<(), ReceiverPersistedError> {
+    ) -> Result<Option<Arc<ReceiverPendingFallback>>, ReceiverPersistedError> {
         let adapter = AsyncCallbackPersisterAdapter::new(persister);
         let value = {
             let mut inner = self.0.write().expect("Lock should not be poisoned");
             inner.take().expect("Already saved or moved")
         };
 
-        value.save_async(&adapter).await.map_err(ReceiverPersistedError::from)?;
-        Ok(())
+        let pending_fallback =
+            value.save_async(&adapter).await.map_err(ReceiverPersistedError::from)?;
+        Ok(pending_fallback.map(|pending_fallback| Arc::new(pending_fallback.into())))
     }
 }
 
@@ -1484,26 +1551,26 @@ impl PendingFallbackTransition {
 }
 
 #[derive(Clone, uniffi::Object)]
-pub struct PendingFallback(
+pub struct ReceiverPendingFallback(
     Arc<payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>>,
 );
 
 impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>>
-    for PendingFallback
+    for ReceiverPendingFallback
 {
     fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>) -> Self {
         Self(Arc::new(value))
     }
 }
 
-impl From<PendingFallback>
+impl From<ReceiverPendingFallback>
     for payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>
 {
-    fn from(value: PendingFallback) -> Self { value.0.as_ref().clone() }
+    fn from(value: ReceiverPendingFallback) -> Self { value.0.as_ref().clone() }
 }
 
 #[uniffi::export]
-impl PendingFallback {
+impl ReceiverPendingFallback {
     pub fn fallback_tx(&self) -> Vec<u8> {
         payjoin::bitcoin::consensus::encode::serialize(self.0.fallback_tx())
     }

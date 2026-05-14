@@ -216,7 +216,7 @@ public class CancelTests
         Assert.NotEmpty(pendingFallback.FallbackTx());
 
         var cancelledResult = PayjoinMethods.ReplaySenderEventLog(senderPersister);
-        Assert.IsType<SendSession.PendingFallback>(cancelledResult.State());
+        Assert.IsType<SendSession.SenderPendingFallback>(cancelledResult.State());
 
         pendingFallback.Close().Save(senderPersister);
         var closedResult = PayjoinMethods.ReplaySenderEventLog(senderPersister);
@@ -246,7 +246,7 @@ public class CancelTests
         Assert.NotEmpty(pendingFallback.FallbackTx());
 
         var cancelledResult = await PayjoinMethods.ReplaySenderEventLogAsync(senderPersister);
-        Assert.IsType<SendSession.PendingFallback>(cancelledResult.State());
+        Assert.IsType<SendSession.SenderPendingFallback>(cancelledResult.State());
 
         await pendingFallback.Close().SaveAsync(senderPersister);
         var closedResult = await PayjoinMethods.ReplaySenderEventLogAsync(senderPersister);

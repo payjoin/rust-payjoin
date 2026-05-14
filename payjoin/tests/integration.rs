@@ -464,7 +464,18 @@ mod integration {
                 let err_bytes = err_response.bytes().await?;
                 has_error.process_error_response(&err_bytes, err_ctx).save(&persister)?;
 
-                // Ensure the session is closed properly
+                // The error response was sent successfully and the source state
+                // carried a fallback transaction, so the session is now waiting
+                // on the wallet to acknowledge the fallback obligation.
+                let (session, session_history) = replay_receiver_event_log(&persister)?;
+                assert_eq!(session_history.status(), SessionStatus::PendingFallback);
+                let pending = match session {
+                    ReceiveSession::PendingFallback(r) => r,
+                    _ => panic!("Expected PendingFallback"),
+                };
+                pending.close().save(&persister)?;
+
+                // After the wallet closes, the session terminates with a Failed status.
                 let (_, session_history) = replay_receiver_event_log(&persister)?;
                 assert_eq!(session_history.status(), SessionStatus::Failed);
 

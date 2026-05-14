@@ -221,8 +221,8 @@ function runUnitTests(name: string, payjoin: typeof nodejsPayjoin) {
                 payjoin.replaySenderEventLog(senderPersister);
             assert.strictEqual(
                 cancelledResult.state().tag,
-                "PendingFallback",
-                "State should be PendingFallback after cancel",
+                "SenderPendingFallback",
+                "State should be SenderPendingFallback after cancel",
             );
 
             pendingFallback.close().save(senderPersister);
@@ -269,8 +269,8 @@ function runUnitTests(name: string, payjoin: typeof nodejsPayjoin) {
                 await payjoin.replaySenderEventLogAsync(senderPersister);
             assert.strictEqual(
                 cancelledResult.state().tag,
-                "PendingFallback",
-                "State should be PendingFallback after cancel",
+                "SenderPendingFallback",
+                "State should be SenderPendingFallback after cancel",
             );
 
             await pendingFallback.close().saveAsync(senderPersister);

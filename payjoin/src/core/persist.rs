@@ -265,11 +265,6 @@ where
         MaybeFatalTransition(Err(Rejection::replyable_error(event, error_state, error)))
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn fatal_with_state(event: Event, error_state: ErrorState, error: Err) -> Self {
-        MaybeFatalTransition(Err(Rejection::replyable_error(event, error_state, error)))
-    }
-
     pub(crate) fn deconstruct(
         self,
     ) -> (PersistActions<Event>, Result<NextState, ApiError<Err, ErrorState>>) {
@@ -400,74 +395,6 @@ impl<Event, NextState> NextStateTransition<Event, NextState> {
     }
 }
 
-/// A transition that can result in the completion of a state machine or a transient error
-/// Fatal errors cannot occur in this transition.
-pub struct MaybeSuccessTransition<Event, SuccessValue, Err>(
-    Result<AcceptNextState<Event, SuccessValue>, Rejection<Event, Err>>,
-);
-
-impl<Event, SuccessValue, Err> MaybeSuccessTransition<Event, SuccessValue, Err>
-where
-    Err: std::error::Error,
-{
-    #[allow(dead_code)]
-    pub(crate) fn success(event: Event, success_value: SuccessValue) -> Self {
-        MaybeSuccessTransition(Ok(AcceptNextState(event, success_value)))
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn transient(error: Err) -> Self {
-        MaybeSuccessTransition(Err(Rejection::transient(error)))
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn fatal(event: Event, error: Err) -> Self {
-        MaybeSuccessTransition(Err(Rejection::fatal(event, error)))
-    }
-
-    pub(crate) fn deconstruct(
-        self,
-    ) -> (PersistActions<Event>, Result<SuccessValue, ApiError<Err>>) {
-        match self.0 {
-            Ok(AcceptNextState(event, success_value)) =>
-                (PersistActions::SaveAndClose(event), Ok(success_value)),
-            Err(Rejection::Transient(RejectTransient(error))) =>
-                (PersistActions::NoOp, Err(ApiError::Transient(error))),
-            Err(Rejection::Fatal(RejectFatal(event, error))) =>
-                (PersistActions::SaveAndClose(event), Err(ApiError::Fatal(error))),
-            Err(Rejection::ReplyableError(RejectReplyableError(event, _, error))) =>
-                (PersistActions::Save(event), Err(ApiError::Fatal(error))),
-        }
-    }
-
-    pub fn save<P>(
-        self,
-        persister: &P,
-    ) -> Result<SuccessValue, PersistedError<Err, P::InternalStorageError>>
-    where
-        P: SessionPersister<SessionEvent = Event>,
-    {
-        let (actions, outcome) = self.deconstruct();
-        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
-        Ok(outcome.map_err(InternalPersistedError::Api)?)
-    }
-
-    pub async fn save_async<P>(
-        self,
-        persister: &P,
-    ) -> Result<SuccessValue, PersistedError<Err, P::InternalStorageError>>
-    where
-        P: AsyncSessionPersister<SessionEvent = Event>,
-        Err: Send,
-        SuccessValue: Send,
-        Event: Send,
-    {
-        let (actions, outcome) = self.deconstruct();
-        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
-        Ok(outcome.map_err(InternalPersistedError::Api)?)
-    }
-}
-
 /// A transition that either advances to a live state or terminates the session.
 ///
 /// No error path exists. Both outcomes are successful from the protocol's point
@@ -475,7 +402,6 @@ where
 /// not by the caller.
 pub struct MaybeTerminalTransition<Event, NextState>(MaybeTerminalOutcome<Event, NextState>);
 
-#[allow(dead_code)]
 impl<Event, NextState> MaybeTerminalTransition<Event, NextState> {
     pub(crate) fn advance(event: Event, next_state: NextState) -> Self {
         Self(MaybeTerminalOutcome::Advance(AcceptNextState(event, next_state)))
@@ -524,7 +450,6 @@ pub struct MaybeTerminalSuccessTransition<Event, NextState, Err>(
     MaybeTerminalSuccessOutcome<Event, NextState, Err>,
 );
 
-#[allow(dead_code)]
 impl<Event, NextState, Err> MaybeTerminalSuccessTransition<Event, NextState, Err>
 where
     Err: std::error::Error,
@@ -710,13 +635,11 @@ where
 /// Wrapper that marks the progression of a state machine
 pub struct AcceptNextState<Event, NextState>(Event, NextState);
 
-#[allow(dead_code)]
 enum MaybeTerminalOutcome<Event, NextState> {
     Advance(AcceptNextState<Event, NextState>),
     Terminate(Event),
 }
 
-#[allow(dead_code)]
 enum MaybeTerminalSuccessOutcome<Event, NextState, Err> {
     Advance(AcceptNextState<Event, NextState>),
     Terminate(Event),
@@ -1369,57 +1292,6 @@ mod tests {
                     error: Some(
                         InternalPersistedError::Api(ApiError::Transient(InMemoryTestError {}))
                             .into(),
-                    ),
-                    success: None,
-                },
-            },
-        ];
-
-        run_test_cases!(test_cases);
-    }
-
-    #[tokio::test]
-    async fn test_maybe_success_transition() {
-        let event = InMemoryTestEvent("foo".to_string());
-        let error_event = InMemoryTestEvent("error event".to_string());
-
-        let test_cases = vec![
-            TestCase {
-                make_transition: Box::new({
-                    let event = event.clone();
-                    move || MaybeSuccessTransition::success(event.clone(), ())
-                }),
-                expected_result: ExpectedResult {
-                    events: vec![event.clone()],
-                    is_closed: true,
-                    error: None,
-                    success: Some(()),
-                },
-            },
-            TestCase {
-                make_transition: Box::new(|| {
-                    MaybeSuccessTransition::transient(InMemoryTestError {})
-                }),
-                expected_result: ExpectedResult {
-                    events: vec![],
-                    is_closed: false,
-                    error: Some(
-                        InternalPersistedError::Api(ApiError::Transient(InMemoryTestError {}))
-                            .into(),
-                    ),
-                    success: None,
-                },
-            },
-            TestCase {
-                make_transition: Box::new({
-                    let error_event = error_event.clone();
-                    move || MaybeSuccessTransition::fatal(error_event.clone(), InMemoryTestError {})
-                }),
-                expected_result: ExpectedResult {
-                    events: vec![error_event.clone()],
-                    is_closed: true,
-                    error: Some(
-                        InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
                     ),
                     success: None,
                 },

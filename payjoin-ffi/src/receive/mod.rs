@@ -1422,7 +1422,10 @@ fn try_deserialize_tx(
 
 #[uniffi::export]
 impl Monitor {
-    pub fn monitor(&self, transaction_exists: Arc<dyn TransactionExists>) -> MonitorTransition {
+    pub fn check_payment(
+        &self,
+        transaction_exists: Arc<dyn TransactionExists>,
+    ) -> MonitorTransition {
         MonitorTransition(Arc::new(RwLock::new(Some(self.0.clone().check_payment(|txid| {
             transaction_exists
                 .callback(txid.to_string())

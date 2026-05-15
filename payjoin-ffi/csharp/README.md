@@ -6,6 +6,13 @@ Welcome to the C# language bindings for the [Payjoin Dev Kit](https://payjoindev
 
 Follow these steps to clone the repository and run the tests.
 
+With nix, the default development shell provides the Rust toolchain, .NET 10 SDK,
+and .NET 8 runtime:
+
+```shell
+nix develop -c bash payjoin-ffi/csharp/contrib/test.sh
+```
+
 ```shell
 git clone https://github.com/payjoin/rust-payjoin.git
 cd rust-payjoin/payjoin-ffi/csharp

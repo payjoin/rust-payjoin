@@ -32,6 +32,7 @@ interface Utxo {
 }
 
 type PayjoinModule = typeof nodejsPayjoin;
+const webPayjoin = webPayjoinModule as unknown as PayjoinModule;
 
 class MempoolAcceptanceCallback {
     private connection: testUtils.RpcClient;
@@ -480,9 +481,10 @@ async function processReceiverProposal(
 function testFfiValidation(payjoin: PayjoinModule): void {
     const tooLargeAmount = 21000000n * 100000000n + 1n;
 
+    // Invalid outpoint (txid too long) should fail before amount checks.
     const invalidOutpointTxIn = payjoin.TxIn.create({
         previousOutput: payjoin.OutPoint.create({
-            txid: "00".repeat(64),
+            txid: "00".repeat(64), // 64 bytes -> invalid
             vout: 0,
         }),
         scriptSig: new Uint8Array([]).buffer,
@@ -502,9 +504,10 @@ function testFfiValidation(payjoin: PayjoinModule): void {
         new payjoin.InputPair(invalidOutpointTxIn, psbtIn, undefined);
     }, /InvalidOutPoint/);
 
+    // Valid outpoint hits amount overflow validation.
     const amountOverflowTxIn = payjoin.TxIn.create({
         previousOutput: payjoin.OutPoint.create({
-            txid: "00".repeat(32),
+            txid: "00".repeat(32), // valid 32-byte txid
             vout: 0,
         }),
         scriptSig: new Uint8Array([]).buffer,
@@ -519,6 +522,7 @@ function testFfiValidation(payjoin: PayjoinModule): void {
         assert.strictEqual(inner.tag, "AmountOutOfRange");
     }
 
+    // Oversized script_pubkey should fail.
     const hugeScript = new Uint8Array(10_001).fill(0x51).buffer;
     const oversizedTxOut = payjoin.TxOut.create({
         valueSat: 1n,
@@ -537,6 +541,7 @@ function testFfiValidation(payjoin: PayjoinModule): void {
         assert.strictEqual(inner.tag, "ScriptTooLarge");
     }
 
+    // Weight must be positive and <= block weight.
     const smallTxOut = payjoin.TxOut.create({
         valueSat: 1n,
         scriptPubkey: new Uint8Array([0x6a]).buffer,
@@ -731,25 +736,17 @@ async function testIntegrationV2ToV2(payjoin: PayjoinModule): Promise<void> {
     assert.strictEqual(senderBalance, 0.0, "Sender balance should be 0");
 }
 
-async function runTests(
-    name: string,
-    payjoin: PayjoinModule,
-    uniffiInitAsync: () => Promise<void>,
-): Promise<void> {
-    await uniffiInitAsync();
-    testFfiValidation(payjoin);
-    await testIntegrationV2ToV2(payjoin);
+async function runTests(): Promise<void> {
+    await nodejsUniffiInitAsync();
+    testFfiValidation(nodejsPayjoin);
+    await testIntegrationV2ToV2(nodejsPayjoin);
+
+    await webUniffiInitAsync();
+    testFfiValidation(webPayjoin);
+    await testIntegrationV2ToV2(webPayjoin);
 }
 
-runTests("nodejs", nodejsPayjoin, nodejsUniffiInitAsync)
-    .then(() =>
-        runTests(
-            "web",
-            webPayjoinModule as unknown as PayjoinModule,
-            webUniffiInitAsync,
-        ),
-    )
-    .catch((error: unknown) => {
-        console.error("\n✗ Integration test failed:", error);
-        process.exit(1);
-    });
+runTests().catch((error: unknown) => {
+    console.error("\n✗ Integration test failed:", error);
+    process.exit(1);
+});

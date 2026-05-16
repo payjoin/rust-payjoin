@@ -1124,7 +1124,7 @@ impl Receiver<ProvisionalProposal> {
     /// In some applications the entity that progresses the typestate
     /// is different from the entity that has access to the private keys,
     /// so the PSBT to sign must be accessible to such implementers.
-    pub fn psbt_to_sign(&self) -> Psbt { self.state.psbt_context.payjoin_psbt.clone() }
+    pub fn psbt_to_sign(&self) -> Psbt { self.state.psbt_context.psbt_to_sign() }
 
     pub(crate) fn apply_payjoin_proposal(self, payjoin_psbt: Psbt) -> ReceiveSession {
         let psbt_context = PsbtContext {

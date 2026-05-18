@@ -292,11 +292,14 @@ impl ProvisionalProposal {
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<PayjoinProposal, Error> {
+        let original_psbt = self.psbt_context.original_psbt.clone();
         let finalized_psbt = self
             .psbt_context
             .finalize_proposal(wallet_process_psbt)
             .map_err(|e| Error::Implementation(ImplementationError::new(e)))?;
-        Ok(PayjoinProposal { payjoin_psbt: finalized_psbt })
+        Ok(PayjoinProposal {
+            psbt_context: PsbtContext { payjoin_psbt: finalized_psbt, original_psbt },
+        })
     }
 
     /// The Payjoin proposal PSBT that the receiver needs to sign
@@ -311,17 +314,17 @@ impl ProvisionalProposal {
 /// should find acceptable.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PayjoinProposal {
-    payjoin_psbt: Psbt,
+    psbt_context: PsbtContext,
 }
 
 impl PayjoinProposal {
     /// The UTXOs that would be spent by this Payjoin transaction.
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
-        self.payjoin_psbt.unsigned_tx.input.iter().map(|input| &input.previous_output)
+        self.psbt_context.utxos_to_be_locked()
     }
 
     /// The Payjoin Proposal PSBT.
-    pub fn psbt(&self) -> &Psbt { &self.payjoin_psbt }
+    pub fn psbt(&self) -> &Psbt { &self.psbt_context.payjoin_psbt }
 }
 
 #[cfg(test)]
@@ -548,5 +551,22 @@ mod tests {
         };
         let psbt = provisional_proposal.psbt_to_sign();
         assert_eq!(psbt, PARSED_PAYJOIN_PROPOSAL.clone());
+    }
+
+    #[test]
+    fn test_utxos_to_be_locked() {
+        let provisional_proposal = ProvisionalProposal {
+            psbt_context: PsbtContext {
+                payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+                original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+            },
+        };
+        let finalized_proposal = provisional_proposal
+            .clone()
+            .finalize_proposal(|_| Ok(PARSED_PAYJOIN_PROPOSAL.clone()))
+            .unwrap();
+        let utxos = finalized_proposal.utxos_to_be_locked().collect::<Vec<_>>();
+        assert_eq!(utxos.len(), 1);
+        assert_eq!(*utxos[0], PARSED_PAYJOIN_PROPOSAL.unsigned_tx.input[1].previous_output);
     }
 }

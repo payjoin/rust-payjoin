@@ -1149,7 +1149,7 @@ pub struct PayjoinProposal {
 impl Receiver<PayjoinProposal> {
     /// The UTXOs that would be spent by this Payjoin transaction.
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
-        // It would make more sense if the payjoin proposal was only available after utxos are locked via session persister
+        // TODO: It would make more sense if the payjoin proposal was only available after utxos are locked via session persister
         self.psbt_context.utxos_to_be_locked()
     }
 

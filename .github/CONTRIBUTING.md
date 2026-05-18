@@ -142,6 +142,12 @@ If your change requires a dependency to be upgraded you must please run `contrib
 
 We use the nightly Rust formatter for this project. Please run [`rustfmt`](https://github.com/rust-lang/rustfmt) using the nightly toolchain before submitting any changes.
 
+Non-Rust files are formatted via [Prettier](https://prettier.io/) and other language-specific formatters orchestrated by [`treefmt`](https://github.com/numtide/treefmt). If you modify non-rust code (under `payjoin-ffi/`), run:
+
+```sh
+nix fmt
+```
+
 ### Linting
 
 We use [`clippy`](https://github.com/rust-lang/rust-clippy) for linting. Please run `contrib/lint.sh` using the nightly toolchain before submitting any changes.

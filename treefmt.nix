@@ -9,7 +9,7 @@
     rustfmt = {
       enable = true;
       package = pkgs.rustToolchains.nightly;
-      edition = "2018";
+      edition = "2021";
     };
     shellcheck.enable = true;
     shfmt = {

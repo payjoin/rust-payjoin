@@ -270,6 +270,11 @@
             "payjoin-mailroom-image" = mkContainerImage "payjoin-mailroom" packages.payjoin-mailroom tag;
           };
 
+        dotnetSdk = pkgs.dotnetCorePackages.combinePackages [
+          pkgs.dotnetCorePackages.sdk_10_0
+          pkgs.dotnetCorePackages.runtime_8_0
+        ];
+
         devShells = builtins.mapAttrs (
           _name: craneLib:
           craneLib.devShell {
@@ -281,6 +286,7 @@
                 cargo-watch
                 rust-analyzer
                 dart
+                dotnetSdk
                 cargo-fuzz
                 bzip2 # needed for some machines to have access to libzip at runtime
                 codespell
@@ -290,6 +296,8 @@
               ];
             BITCOIND_EXE = pkgs.lib.getExe' pkgs.bitcoind "bitcoind";
             BITCOIND_SKIP_DOWNLOAD = 1;
+            DOTNET_ROOT = "${dotnetSdk}/share/dotnet";
+            DOTNET_CLI_TELEMETRY_OPTOUT = "1";
           }
         ) craneLibVersions;
 

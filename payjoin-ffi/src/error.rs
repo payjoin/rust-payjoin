@@ -1,6 +1,6 @@
 use std::error;
 
-/// Error arising due to the specific receiver implementation
+/// Error arising due to the specific application implementation
 ///
 /// e.g. database errors, network failures, wallet errors
 #[derive(Debug, thiserror::Error, uniffi::Object)]

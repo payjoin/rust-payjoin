@@ -281,12 +281,13 @@ impl AppTrait for App {
                 .await?
                 .ohttp_keys;
         let persister = ReceiverPersister::new(self.db.clone())?;
-        let session =
+        let mut receiver_builder =
             ReceiverBuilder::new(address, self.config.v2()?.pj_directory.as_str(), ohttp_keys)?
-                .with_amount(amount)
-                .with_max_fee_rate(self.config.max_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN))
-                .build()
-                .save(&persister)?;
+                .with_amount(amount);
+        if let Some(max_fee_rate) = self.config.max_fee_rate {
+            receiver_builder = receiver_builder.with_max_fee_rate(max_fee_rate);
+        }
+        let session = receiver_builder.build().save(&persister)?;
 
         println!("Receive session established");
         let pj_uri = session.pj_uri();

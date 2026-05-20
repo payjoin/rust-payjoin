@@ -11,6 +11,8 @@ pub mod wallet;
 use crate::app::config::Config;
 use crate::app::wallet::BitcoindWallet;
 #[cfg(feature = "v2")]
+use crate::cli::Role;
+#[cfg(feature = "v2")]
 use crate::db::v2::SessionId;
 
 #[cfg(feature = "v1")]
@@ -31,7 +33,12 @@ pub trait App: Send + Sync {
     #[cfg(feature = "v2")]
     async fn history(&self) -> Result<()>;
     #[cfg(feature = "v2")]
-    async fn cancel_sender(&self, session_id: SessionId, no_broadcast: bool) -> Result<()>;
+    async fn cancel(
+        &self,
+        session_id: SessionId,
+        no_broadcast: bool,
+        role: Option<Role>,
+    ) -> Result<()>;
 
     fn create_original_psbt(
         &self,

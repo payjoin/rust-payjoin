@@ -1,4 +1,36 @@
 //! IO-related types and functions. Specifically, fetching OHTTP keys from a payjoin directory.
+//!
+//! When multiple relays are configured, callers **should pick one at random per request**
+//! to avoid a fixed contact pattern at the network layer.
+//!
+//! Sender and receiver have distinct request patterns:
+//! - Receiver: long-poll GETs, then a POST
+//! - Sender: a POST, then long-poll GETs
+//!
+//! OHTTP does not hide the client IP from the relay. A relay that sees the same
+//! client repeatedly can observe its access patterns to infer whether
+//! the IP is associated with a sender or receiver, potentially linking to identity or
+//! location. Based on when a session ends it may be easier to correctly guess
+//! whether a transaction is a PayJoin. The IP address linked information may
+//! additionally aid in cluster analysis, for example whether a cluster's temporal
+//! patterns are consistent with a location guess for the IP address.
+//!
+//! ## Health checks
+//!
+//! Some clients call [`fetch_ohttp_keys`] periodically to verify that the
+//! directory and relay infrastructure is reachable. Given the threat model
+//! above, this is acceptable only when:
+//!
+//! - The call is **not** triggered on any deterministic, recurring event
+//!   (e.g. app startup, periodic timer). Prefer user-initiated actions
+//!   (e.g. opening a settings/status screen) or piggybacking on operations
+//!   the user already triggered (e.g. resuming an existing session).
+//! - The caller throttles invocations so they don't produce a recurring
+//!   timing pattern observable by the relay.
+//!
+//! A health check has a distinct traffic pattern from a real payjoin request
+//! and is not temporally tied to any onchain broadcast, but repeated calls
+//! still expose the client IP to the relay.
 use std::time::Duration;
 
 use http::header::ACCEPT;

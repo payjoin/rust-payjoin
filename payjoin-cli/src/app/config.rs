@@ -32,10 +32,33 @@ pub struct V1Config {
 #[cfg(feature = "v2")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct V2Config {
-    #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
+    #[serde(default, deserialize_with = "deserialize_ohttp_keys_from_path")]
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
     pub ohttp_relays: Vec<Url>,
-    pub pj_directory: Url,
+    #[serde(rename = "pj_directories")]
+    pub trusted_directories: Vec<Url>,
+}
+
+#[cfg(feature = "v2")]
+impl V2Config {
+    pub fn trusted_directories(&self) -> &[Url] { &self.trusted_directories }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.trusted_directories.is_empty() {
+            return Err(ConfigError::Message(
+                "At least one v2 trusted directory is required".to_owned(),
+            ));
+        }
+
+        if self.ohttp_keys.is_some() && self.trusted_directories.len() != 1 {
+            return Err(ConfigError::Message(
+                "v2.ohttp_keys is only valid when exactly one v2.pj_directories entry is configured"
+                    .to_owned(),
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -178,7 +201,7 @@ impl Config {
             Version::Two => {
                 #[cfg(feature = "v2")]
                 {
-                    match built_config.get::<V2Config>("v2") {
+                    match load_v2_config(&built_config) {
                         Ok(v2) => config.version = Some(VersionConfig::V2(v2)),
                         Err(e) =>
                             return Err(ConfigError::Message(format!(
@@ -269,19 +292,20 @@ fn add_v1_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
 fn add_v2_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     // Set default values
     let config = config
-        .set_default("v2.pj_directory", "https://payjo.in")?
+        .set_default("v2.pj_directories", vec!["https://payjo.in"])?
         .set_default("v2.ohttp_keys", None::<String>)?;
 
     // Override config values with command line arguments if applicable
     let pj_directory = cli.pj_directory.as_ref().map(|s| s.as_str());
     let ohttp_keys = cli.ohttp_keys.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let pj_directories = pj_directory.map(|dir| vec![dir]);
     let ohttp_relays = cli
         .ohttp_relays
         .as_ref()
         .map(|urls| urls.iter().map(|url| url.as_str()).collect::<Vec<_>>());
 
     config
-        .set_override_option("v2.pj_directory", pj_directory)?
+        .set_override_option("v2.pj_directories", pj_directories)?
         .set_override_option("v2.ohttp_keys", ohttp_keys)?
         .set_override_option("v2.ohttp_relays", ohttp_relays)
 }
@@ -323,8 +347,8 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
             #[cfg(feature = "v2")]
             let config = config
                 .set_override_option(
-                    "v2.pj_directory",
-                    pj_directory.clone().map(|s| s.to_string()),
+                    "v2.pj_directories",
+                    pj_directory.clone().map(|s| vec![s.to_string()]),
                 )?
                 .set_override_option(
                     "v2.ohttp_keys",
@@ -339,6 +363,13 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
         #[cfg(feature = "v2")]
         Commands::Fallback { .. } => Ok(config),
     }
+}
+
+#[cfg(feature = "v2")]
+fn load_v2_config(built_config: &config::Config) -> Result<V2Config, ConfigError> {
+    let v2 = built_config.get::<V2Config>("v2")?;
+    v2.validate()?;
+    Ok(v2)
 }
 
 #[cfg(feature = "v2")]
@@ -360,5 +391,40 @@ where
                 })
             })
             .map(Some),
+    }
+}
+
+#[cfg(all(test, feature = "v2"))]
+mod tests {
+    use super::*;
+
+    fn test_ohttp_keys() -> payjoin::OhttpKeys {
+        payjoin::OhttpKeys::try_from(
+            &[
+                1, 2, 121, 190, 102, 126, 249, 220, 187, 172, 85, 160, 98, 149, 206, 135, 11, 7, 2,
+                155, 252, 219, 45, 206, 40, 217, 89, 242, 129, 91, 22, 248, 23, 152,
+            ][..],
+        )
+        .expect("valid OHTTP keys")
+    }
+
+    #[test]
+    fn rejects_singular_ohttp_keys_with_multiple_directories() {
+        let config = V2Config {
+            ohttp_keys: Some(test_ohttp_keys()),
+            ohttp_relays: vec![],
+            trusted_directories: vec![
+                Url::parse("https://payjo.in").expect("valid url"),
+                Url::parse("https://backup.example").expect("valid url"),
+            ],
+        };
+
+        let error = config.validate().expect_err("ambiguous OHTTP keys should fail validation");
+        assert!(
+            error
+                .to_string()
+                .contains("v2.ohttp_keys is only valid when exactly one v2.pj_directories entry"),
+            "unexpected error: {error}"
+        );
     }
 }

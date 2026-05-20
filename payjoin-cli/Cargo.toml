@@ -20,6 +20,7 @@ path = "src/main.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = ["v2"]
+asmap = ["dep:asmap"]
 native-certs = ["reqwest/rustls-tls-native-roots"]
 _manual-tls = ["reqwest/rustls-tls", "payjoin/_manual-tls", "tokio-rustls"]
 v1 = ["payjoin/v1", "hyper", "hyper-util", "http-body-util"]
@@ -27,6 +28,7 @@ v2 = ["payjoin/v2", "payjoin/io"]
 
 [dependencies]
 anyhow = "1.0.99"
+asmap = { version = "0.1.0", optional = true }
 async-trait = "0.1.89"
 bitcoind-async-client = "0.10.2"
 clap = { version = "4.5.45", features = ["derive"] }

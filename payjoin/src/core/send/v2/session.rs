@@ -153,6 +153,8 @@ pub enum SessionEvent {
     Created(Box<SessionContext>),
     /// Sender POSTed the Original PSBT and is waiting to receive a Proposal PSBT
     PostedOriginalPsbt(),
+    /// User initiated cancellation of the session
+    Cancelled(),
     /// Closed successful or failed session
     Closed(SessionOutcome),
 }
@@ -222,6 +224,7 @@ mod tests {
             SessionEvent::Closed(SessionOutcome::Success(PARSED_ORIGINAL_PSBT.clone())),
             SessionEvent::Closed(SessionOutcome::Failure),
             SessionEvent::Closed(SessionOutcome::Cancel),
+            SessionEvent::Cancelled(),
         ];
 
         for event in test_cases {

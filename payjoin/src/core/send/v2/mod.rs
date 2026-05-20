@@ -246,17 +246,24 @@ impl<State> Sender<State> {
 }
 
 impl<S: State> Sender<S> {
-    /// Cancel the Payjoin session immediately.
-    ///
-    /// Returns a [`TerminalTransition`] that, once persisted, yields the fallback
-    /// transaction. The fallback transaction is the sender's original transaction that
+    /// Cancel the Payjoin session and once the transition is persisted, return a [`PendingFallback`] state.
+    /// The fallback transaction is the sender's original transaction that
     /// should be broadcast to complete the payment without Payjoin.
-    ///
-    /// This is a terminal transition — the session cannot be used after cancellation.
-    pub fn cancel(self) -> TerminalTransition<SessionEvent, bitcoin::Transaction> {
-        let fallback =
-            self.session_context.psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
-        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Cancel), fallback)
+    pub fn cancel(self) -> NextStateTransition<SessionEvent, Sender<PendingFallback>> {
+        NextStateTransition::success(
+            SessionEvent::Cancelled(),
+            Sender {
+                state: PendingFallback {
+                    fallback_tx: self
+                        .session_context
+                        .psbt_ctx
+                        .original_psbt
+                        .clone()
+                        .extract_tx_unchecked_fee_rate(),
+                },
+                session_context: self.session_context,
+            },
+        )
     }
 }
 
@@ -268,6 +275,7 @@ impl<S: State> Sender<S> {
 pub enum SendSession {
     WithReplyKey(Sender<WithReplyKey>),
     PollingForProposal(Sender<PollingForProposal>),
+    PendingFallback(Sender<PendingFallback>),
     Closed(SessionOutcome),
 }
 
@@ -287,6 +295,30 @@ impl SendSession {
                 SendSession::PollingForProposal(_state),
                 SessionEvent::Closed(SessionOutcome::Success(proposal)),
             ) => Ok(SendSession::Closed(SessionOutcome::Success(proposal))),
+            (SendSession::WithReplyKey(state), SessionEvent::Cancelled()) =>
+                Ok(SendSession::PendingFallback(Sender {
+                    state: PendingFallback {
+                        fallback_tx: state
+                            .session_context
+                            .psbt_ctx
+                            .original_psbt
+                            .clone()
+                            .extract_tx_unchecked_fee_rate(),
+                    },
+                    session_context: state.session_context,
+                })),
+            (SendSession::PollingForProposal(state), SessionEvent::Cancelled()) =>
+                Ok(SendSession::PendingFallback(Sender {
+                    state: PendingFallback {
+                        fallback_tx: state
+                            .session_context
+                            .psbt_ctx
+                            .original_psbt
+                            .clone()
+                            .extract_tx_unchecked_fee_rate(),
+                    },
+                    session_context: state.session_context,
+                })),
             (_, SessionEvent::Closed(session_outcome)) => Ok(SendSession::Closed(session_outcome)),
             (current_state, event) => Err(InternalReplayError::InvalidEvent(
                 Box::new(event),
@@ -555,6 +587,22 @@ impl Sender<PollingForProposal> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingFallback {
+    fallback_tx: bitcoin::Transaction,
+}
+
+impl Sender<PendingFallback> {
+    /// Returns the fallback transaction that should be broadcast to complete the payment without Payjoin.
+    pub fn fallback_tx(&self) -> &bitcoin::Transaction { &self.fallback_tx }
+
+    /// Mark the session as complete, signaling that the fallback transaction
+    /// has been broadcast or its control has been transferred.
+    pub fn close(&self) -> TerminalTransition<SessionEvent, ()> {
+        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Cancel), ())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
@@ -732,7 +780,12 @@ mod test {
                         .cancel()
                         .save(&persister)
                         .expect("save should succeed");
-                assert_eq!(fallback, expected_tx, "cancel from {}", stringify!($state));
+                assert_eq!(
+                    *fallback.fallback_tx(),
+                    expected_tx,
+                    "cancel from {}",
+                    stringify!($state)
+                );
             }};
         }
 

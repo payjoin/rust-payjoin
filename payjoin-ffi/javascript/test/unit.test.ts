@@ -210,19 +210,27 @@ function runUnitTests(name: string, payjoin: typeof nodejsPayjoin) {
                 .save(senderPersister);
 
             const cancelTransition = withReplyKey.cancel();
-            const fallbackTx = cancelTransition.save(senderPersister);
-            assert.ok(fallbackTx, "fallback tx should be returned");
+            const pendingFallback = cancelTransition.save(senderPersister);
+            assert.ok(pendingFallback, "pending fallback should be returned");
             assert.ok(
-                fallbackTx.byteLength > 0,
+                pendingFallback.fallbackTx().byteLength > 0,
                 "fallback tx bytes should be non-empty",
             );
 
-            const result = payjoin.replaySenderEventLog(senderPersister);
-            const state = result.state();
+            const cancelledResult =
+                payjoin.replaySenderEventLog(senderPersister);
             assert.strictEqual(
-                state.tag,
+                cancelledResult.state().tag,
+                "PendingFallback",
+                "State should be PendingFallback after cancel",
+            );
+
+            pendingFallback.close().save(senderPersister);
+            const closedResult = payjoin.replaySenderEventLog(senderPersister);
+            assert.strictEqual(
+                closedResult.state().tag,
                 "Closed",
-                "State should be Closed after cancel",
+                "State should be Closed after close",
             );
         });
 
@@ -249,21 +257,29 @@ function runUnitTests(name: string, payjoin: typeof nodejsPayjoin) {
                 .saveAsync(senderPersister);
 
             const cancelTransition = withReplyKey.cancel();
-            const fallbackTx =
+            const pendingFallback =
                 await cancelTransition.saveAsync(senderPersister);
-            assert.ok(fallbackTx, "fallback tx should be returned");
+            assert.ok(pendingFallback, "pending fallback should be returned");
             assert.ok(
-                fallbackTx.byteLength > 0,
+                pendingFallback.fallbackTx().byteLength > 0,
                 "fallback tx bytes should be non-empty",
             );
 
-            const result =
+            const cancelledResult =
                 await payjoin.replaySenderEventLogAsync(senderPersister);
-            const state = result.state();
             assert.strictEqual(
-                state.tag,
+                cancelledResult.state().tag,
+                "PendingFallback",
+                "State should be PendingFallback after cancel",
+            );
+
+            await pendingFallback.close().saveAsync(senderPersister);
+            const closedResult =
+                await payjoin.replaySenderEventLogAsync(senderPersister);
+            assert.strictEqual(
+                closedResult.state().tag,
                 "Closed",
-                "State should be Closed after cancel",
+                "State should be Closed after close",
             );
         });
     });

@@ -211,13 +211,16 @@ public class CancelTests
             .BuildRecommended(1000)
             .Save(senderPersister);
         var cancelTransition = withReplyKey.Cancel();
-        var fallbackTx = cancelTransition.Save(senderPersister);
-        Assert.NotNull(fallbackTx);
-        Assert.NotEmpty(fallbackTx);
+        var pendingFallback = cancelTransition.Save(senderPersister);
+        Assert.NotNull(pendingFallback);
+        Assert.NotEmpty(pendingFallback.FallbackTx());
 
-        var result = PayjoinMethods.ReplaySenderEventLog(senderPersister);
-        var state = result.State();
-        Assert.IsType<SendSession.Closed>(state);
+        var cancelledResult = PayjoinMethods.ReplaySenderEventLog(senderPersister);
+        Assert.IsType<SendSession.PendingFallback>(cancelledResult.State());
+
+        pendingFallback.Close().Save(senderPersister);
+        var closedResult = PayjoinMethods.ReplaySenderEventLog(senderPersister);
+        Assert.IsType<SendSession.Closed>(closedResult.State());
     }
 
     [Fact]
@@ -238,13 +241,16 @@ public class CancelTests
             .BuildRecommended(1000)
             .SaveAsync(senderPersister);
         var cancelTransition = withReplyKey.Cancel();
-        var fallbackTx = await cancelTransition.SaveAsync(senderPersister);
-        Assert.NotNull(fallbackTx);
-        Assert.NotEmpty(fallbackTx);
+        var pendingFallback = await cancelTransition.SaveAsync(senderPersister);
+        Assert.NotNull(pendingFallback);
+        Assert.NotEmpty(pendingFallback.FallbackTx());
 
-        var result = await PayjoinMethods.ReplaySenderEventLogAsync(senderPersister);
-        var state = result.State();
-        Assert.IsType<SendSession.Closed>(state);
+        var cancelledResult = await PayjoinMethods.ReplaySenderEventLogAsync(senderPersister);
+        Assert.IsType<SendSession.PendingFallback>(cancelledResult.State());
+
+        await pendingFallback.Close().SaveAsync(senderPersister);
+        var closedResult = await PayjoinMethods.ReplaySenderEventLogAsync(senderPersister);
+        Assert.IsType<SendSession.Closed>(closedResult.State());
     }
 }
 

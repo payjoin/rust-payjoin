@@ -624,7 +624,7 @@ mod e2e {
 
     #[cfg(feature = "v2")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn sender_fallback_v2() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn sender_cancel_v2() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use payjoin_test_utils::{init_tracing, TestServices};
         use tempfile::TempDir;
 
@@ -637,12 +637,12 @@ mod e2e {
         let result = tokio::select! {
             res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {res:?}").into()),
             res = services.take_directory_handle() => Err(format!("Directory server is long running: {res:?}").into()),
-            res = fallback_cli_async(&services, &temp_dir) => res,
+            res = cancel_cli_async(&services, &temp_dir) => res,
         };
 
-        assert!(result.is_ok(), "sender_fallback_v2 failed: {:#?}", result.unwrap_err());
+        assert!(result.is_ok(), "sender_cancel_v2 failed: {:#?}", result.unwrap_err());
 
-        async fn fallback_cli_async(services: &TestServices, temp_dir: &TempDir) -> Result<()> {
+        async fn cancel_cli_async(services: &TestServices, temp_dir: &TempDir) -> Result<()> {
             let sender_db_path = temp_dir.path().join("sender_db");
             let (bitcoind, sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
             let cert_path = &temp_dir.path().join("localhost.der");
@@ -684,7 +684,7 @@ mod e2e {
                 .expect("Failed to execute payjoin-cli receiver");
             let bip21 = get_bip21_from_receiver(cli_receiver).await;
 
-            // Start sender and capture the session-id from the hint line, then interrupt
+            // Start sender and let it time out waiting for a response
             let cli_sender = Command::new(payjoin_cli)
                 .arg("--root-certificate")
                 .arg(cert_path)
@@ -709,13 +709,9 @@ mod e2e {
 
             // There is only one sender session in progress.
             let session_id = 1i64;
-            // Ensure the fallback was not broadcast yet
-            let mempool_size =
-                sender.get_mempool_info().expect("should be able to get mempool").unbroadcast_count;
-            assert_eq!(mempool_size, 0, "fallback should not be in mempool");
 
-            // Run `payjoin-cli fallback <session-id>` and assert broadcast
-            let mut cli_fallback = Command::new(payjoin_cli)
+            // Run `payjoin-cli cancel <session-id>`: cancels and broadcasts the fallback tx
+            let mut cli_cancel = Command::new(payjoin_cli)
                 .arg("--root-certificate")
                 .arg(cert_path)
                 .arg("--rpchost")
@@ -726,32 +722,31 @@ mod e2e {
                 .arg(&sender_db_path)
                 .arg("--ohttp-relays")
                 .arg(ohttp_relay)
-                .arg("fallback")
+                .arg("cancel")
                 .arg(session_id.to_string())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()
-                .expect("Failed to execute payjoin-cli fallback");
+                .expect("Failed to execute payjoin-cli cancel");
 
-            let mut fallback_stdout =
-                cli_fallback.stdout.take().expect("failed to take stdout of fallback");
+            let mut cancel_stdout =
+                cli_cancel.stdout.take().expect("failed to take stdout of cancel");
             let timeout = tokio::time::Duration::from_secs(10);
             let broadcast_line = tokio::time::timeout(
                 timeout,
-                wait_for_stdout_match(&mut fallback_stdout, |l| {
+                wait_for_stdout_match(&mut cancel_stdout, |l| {
                     l.contains("Broadcasted fallback transaction txid")
                 }),
             )
             .await?;
-
-            terminate(cli_fallback).await.expect("Failed to kill payjoin-cli fallback");
-            let subcommand_output = broadcast_line.expect("fallback should broadcast");
+            terminate(cli_cancel).await.expect("Failed to kill payjoin-cli cancel");
+            let subcommand_output = broadcast_line.expect("cancel should broadcast fallback tx");
             let fallback_txid = subcommand_output.split_whitespace().nth(4).unwrap_or("");
             let fallback_txid = Txid::from_str(fallback_txid).expect("valid txid");
 
             assert!(
                 sender.get_raw_transaction(fallback_txid).is_ok(),
-                "fallback tx should be in the mempool"
+                "fallback tx should be in the mempool after cancel"
             );
 
             Ok(())

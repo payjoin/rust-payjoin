@@ -337,7 +337,7 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
         #[cfg(feature = "v2")]
         Commands::History => Ok(config),
         #[cfg(feature = "v2")]
-        Commands::Fallback { .. } => Ok(config),
+        Commands::Cancel { .. } => Ok(config),
     }
 }
 

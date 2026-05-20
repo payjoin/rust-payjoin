@@ -31,7 +31,7 @@ pub trait App: Send + Sync {
     #[cfg(feature = "v2")]
     async fn history(&self) -> Result<()>;
     #[cfg(feature = "v2")]
-    async fn fallback_sender(&self, session_id: SessionId) -> Result<()>;
+    async fn cancel_sender(&self, session_id: SessionId, no_broadcast: bool) -> Result<()>;
 
     fn create_original_psbt(
         &self,

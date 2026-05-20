@@ -141,6 +141,8 @@ impl ReceiverPersister {
     }
 
     pub fn from_id(db: Arc<Database>, id: SessionId) -> Self { Self { db, session_id: id } }
+
+    pub fn session_id(&self) -> SessionId { self.session_id.clone() }
 }
 
 impl SessionPersister for ReceiverPersister {

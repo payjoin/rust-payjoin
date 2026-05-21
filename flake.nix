@@ -89,17 +89,19 @@
                   "rustfmt"
                   "llvm-tools-preview"
                 ];
-                # Targets needed by payjoin-ffi/python/scripts/generate_bindings.sh
+                # Targets needed by payjoin-ffi/{python,javascript}/scripts/generate_bindings.sh
                 # so cargo can build per-arch artifacts under nix (rustup target add
                 # is a no-op against a nix-provided toolchain).
-                targets =
-                  pkgs.lib.optionals pkgs.stdenv.isDarwin [
-                    "aarch64-apple-darwin"
-                    "x86_64-apple-darwin"
-                  ]
-                  ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-                    "x86_64-unknown-linux-gnu"
-                  ];
+                targets = [
+                  "wasm32-unknown-unknown"
+                ]
+                ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+                  "aarch64-apple-darwin"
+                  "x86_64-apple-darwin"
+                ]
+                ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+                  "x86_64-unknown-linux-gnu"
+                ];
               }
             )
             {
@@ -290,6 +292,14 @@
                 cargo-fuzz
                 bzip2 # needed for some machines to have access to libzip at runtime
                 codespell
+                # secp256k1-sys build.rs invokes cc-rs for the wasm32-unknown-unknown
+                # target; cc-rs defaults to clang for wasm and needs llvm-ar.
+                llvmPackages.clang-unwrapped
+                llvmPackages.bintools-unwrapped
+                lld
+                # Version must match the wasm-bindgen crate locked in
+                # payjoin-ffi/javascript/rust_modules/wasm/Cargo.lock.
+                wasm-bindgen-cli_0_2_108
               ]
               ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
                 cargo-llvm-cov
@@ -298,6 +308,8 @@
             BITCOIND_SKIP_DOWNLOAD = 1;
             DOTNET_ROOT = "${dotnetSdk}/share/dotnet";
             DOTNET_CLI_TELEMETRY_OPTOUT = "1";
+            CC_wasm32_unknown_unknown = "${pkgs.llvmPackages.clang-unwrapped}/bin/clang";
+            AR_wasm32_unknown_unknown = "${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-ar";
           }
         ) craneLibVersions;
 

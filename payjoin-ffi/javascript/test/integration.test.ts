@@ -34,6 +34,15 @@ interface Utxo {
 type PayjoinModule = typeof nodejsPayjoin;
 const webPayjoin = webPayjoinModule as unknown as PayjoinModule;
 
+// Helper types to avoid repeating InstanceType<PayjoinModule[...]> everywhere.
+type PJ<K extends keyof PayjoinModule> = InstanceType<
+    PayjoinModule[K] & (new (...args: any) => any)
+>;
+type PJNested<
+    K extends keyof PayjoinModule,
+    N extends keyof PayjoinModule[K],
+> = InstanceType<PayjoinModule[K][N] & (new (...args: any) => any)>;
+
 class MempoolAcceptanceCallback {
     private connection: testUtils.RpcClient;
 
@@ -129,6 +138,8 @@ class CheckInputsNotSeenCallback {
     }
 
     callback(_outpoint: ArrayBuffer): boolean {
+        if (this.connection) {
+        }
         return false;
     }
 }
@@ -154,7 +165,7 @@ function createReceiverContext(
     directory: string,
     ohttpKeys: ReturnType<PayjoinModule["OhttpKeys"]["decode"]>,
     persister: InMemoryReceiverPersister,
-): InstanceType<PayjoinModule["Initialized"]> {
+): PJ<"Initialized"> {
     return new payjoin.ReceiverBuilder(address, directory, ohttpKeys)
         .build()
         .save(persister);
@@ -162,7 +173,7 @@ function createReceiverContext(
 
 function buildSweepPsbt(
     sender: testUtils.RpcClient,
-    pjUri: InstanceType<PayjoinModule["PjUri"]>,
+    pjUri: PJ<"PjUri">,
 ): string {
     const outputs: Record<string, number> = {};
     outputs[pjUri.address()] = 50;
@@ -191,21 +202,22 @@ function buildSweepPsbt(
 function getInputs(
     payjoin: PayjoinModule,
     rpcConnection: testUtils.RpcClient,
-): InstanceType<PayjoinModule["InputPair"]>[] {
+): PJ<"InputPair">[] {
     const utxos: Utxo[] = JSON.parse(rpcConnection.call("listunspent", []));
-    const inputs: InstanceType<PayjoinModule["InputPair"]>[] = [];
+    const inputs: PJ<"InputPair">[] = [];
     for (const utxo of utxos) {
         const txin = payjoin.TxIn.create({
             previousOutput: payjoin.OutPoint.create({
                 txid: utxo.txid,
                 vout: utxo.vout,
             }),
-            scriptSig: new Uint8Array([]),
+            scriptSig: new Uint8Array([]).buffer,
             sequence: 0,
             witness: [],
         });
         const txOut = payjoin.TxOut.create({
             valueSat: BigInt(Math.round(utxo.amount * 100_000_000)),
+            // @ts-ignore
             scriptPubkey: Buffer.from(utxo.scriptPubKey, "hex"),
         });
         const psbtIn = payjoin.PsbtInput.create({
@@ -219,25 +231,22 @@ function getInputs(
 }
 
 async function processProvisionalProposal(
-    payjoin: PayjoinModule,
-    proposal: InstanceType<PayjoinModule["ProvisionalProposal"]>,
+    proposal: PJ<"ProvisionalProposal">,
     receiver: testUtils.RpcClient,
     recvPersister: InMemoryReceiverPersister,
-): Promise<InstanceType<PayjoinModule["PayjoinProposal"]>> {
+): Promise<PJ<"PayjoinProposal">> {
     return proposal
         .finalizeProposal(new ProcessPsbtCallback(receiver))
         .save(recvPersister);
 }
 
 async function processWantsFeeRange(
-    payjoin: PayjoinModule,
-    proposal: InstanceType<PayjoinModule["WantsFeeRange"]>,
+    proposal: PJ<"WantsFeeRange">,
     receiver: testUtils.RpcClient,
     recvPersister: InMemoryReceiverPersister,
-): Promise<InstanceType<PayjoinModule["PayjoinProposal"]>> {
+): Promise<PJ<"PayjoinProposal">> {
     const wantsFeeRange = proposal.applyFeeRange(1n, 10n).save(recvPersister);
     return await processProvisionalProposal(
-        payjoin,
         wantsFeeRange,
         receiver,
         recvPersister,
@@ -246,16 +255,15 @@ async function processWantsFeeRange(
 
 async function processWantsInputs(
     payjoin: PayjoinModule,
-    proposal: InstanceType<PayjoinModule["WantsInputs"]>,
+    proposal: PJ<"WantsInputs">,
     receiver: testUtils.RpcClient,
     recvPersister: InMemoryReceiverPersister,
-): Promise<InstanceType<PayjoinModule["PayjoinProposal"]>> {
+): Promise<PJ<"PayjoinProposal">> {
     const provisionalProposal = proposal
         .contributeInputs(getInputs(payjoin, receiver))
         .commitInputs()
         .save(recvPersister);
     return await processWantsFeeRange(
-        payjoin,
         provisionalProposal,
         receiver,
         recvPersister,
@@ -264,10 +272,10 @@ async function processWantsInputs(
 
 async function processWantsOutputs(
     payjoin: PayjoinModule,
-    proposal: InstanceType<PayjoinModule["WantsOutputs"]>,
+    proposal: PJ<"WantsOutputs">,
     receiver: testUtils.RpcClient,
     recvPersister: InMemoryReceiverPersister,
-): Promise<InstanceType<PayjoinModule["PayjoinProposal"]>> {
+): Promise<PJ<"PayjoinProposal">> {
     const wantsInputs = proposal.commitOutputs().save(recvPersister);
     return await processWantsInputs(
         payjoin,
@@ -279,10 +287,10 @@ async function processWantsOutputs(
 
 async function processOutputsUnknown(
     payjoin: PayjoinModule,
-    proposal: InstanceType<PayjoinModule["OutputsUnknown"]>,
+    proposal: PJ<"OutputsUnknown">,
     receiver: testUtils.RpcClient,
     recvPersister: InMemoryReceiverPersister,
-): Promise<InstanceType<PayjoinModule["PayjoinProposal"]>> {
+): Promise<PJ<"PayjoinProposal">> {
     const wantsOutputs = proposal
         .identifyReceiverOutputs(new IsScriptOwnedCallback(receiver))
         .save(recvPersister);
@@ -296,10 +304,10 @@ async function processOutputsUnknown(
 
 async function processMaybeInputsSeen(
     payjoin: PayjoinModule,
-    proposal: InstanceType<PayjoinModule["MaybeInputsSeen"]>,
+    proposal: PJ<"MaybeInputsSeen">,
     receiver: testUtils.RpcClient,
     recvPersister: InMemoryReceiverPersister,
-): Promise<InstanceType<PayjoinModule["PayjoinProposal"]>> {
+): Promise<PJ<"PayjoinProposal">> {
     const outputsUnknown = proposal
         .checkNoInputsSeenBefore(new CheckInputsNotSeenCallback(receiver))
         .save(recvPersister);
@@ -313,10 +321,10 @@ async function processMaybeInputsSeen(
 
 async function processMaybeInputsOwned(
     payjoin: PayjoinModule,
-    proposal: InstanceType<PayjoinModule["MaybeInputsOwned"]>,
+    proposal: PJ<"MaybeInputsOwned">,
     receiver: testUtils.RpcClient,
     recvPersister: InMemoryReceiverPersister,
-): Promise<InstanceType<PayjoinModule["PayjoinProposal"]>> {
+): Promise<PJ<"PayjoinProposal">> {
     const maybeInputsOwned = proposal
         .checkInputsNotOwned(new IsScriptOwnedCallback(receiver))
         .save(recvPersister);
@@ -330,10 +338,10 @@ async function processMaybeInputsOwned(
 
 async function processUncheckedProposal(
     payjoin: PayjoinModule,
-    proposal: InstanceType<PayjoinModule["UncheckedOriginalPayload"]>,
+    proposal: PJ<"UncheckedOriginalPayload">,
     receiver: testUtils.RpcClient,
     recvPersister: InMemoryReceiverPersister,
-): Promise<InstanceType<PayjoinModule["PayjoinProposal"]>> {
+): Promise<PJ<"PayjoinProposal">> {
     const uncheckedProposal = proposal
         .checkBroadcastSuitability(
             undefined,
@@ -350,11 +358,11 @@ async function processUncheckedProposal(
 
 async function retrieveReceiverProposal(
     payjoin: PayjoinModule,
-    receiver: InstanceType<PayjoinModule["Initialized"]>,
+    receiver: PJ<"Initialized">,
     receiverRpc: testUtils.RpcClient,
     recvPersister: InMemoryReceiverPersister,
     ohttpRelay: string,
-): Promise<InstanceType<PayjoinModule["PayjoinProposal"]> | null> {
+): Promise<PJ<"PayjoinProposal"> | null> {
     const request = receiver.createPollRequest(ohttpRelay);
     const response = await fetch(request.request.url, {
         method: "POST",
@@ -384,20 +392,20 @@ async function retrieveReceiverProposal(
 async function processReceiverProposal(
     payjoin: PayjoinModule,
     receiver:
-        | InstanceType<PayjoinModule["Initialized"]>
-        | InstanceType<PayjoinModule["UncheckedOriginalPayload"]>
-        | InstanceType<PayjoinModule["MaybeInputsOwned"]>
-        | InstanceType<PayjoinModule["MaybeInputsSeen"]>
-        | InstanceType<PayjoinModule["OutputsUnknown"]>
-        | InstanceType<PayjoinModule["WantsOutputs"]>
-        | InstanceType<PayjoinModule["WantsInputs"]>
-        | InstanceType<PayjoinModule["WantsFeeRange"]>
-        | InstanceType<PayjoinModule["ProvisionalProposal"]>
-        | InstanceType<PayjoinModule["PayjoinProposal"]>,
+        | PJ<"Initialized">
+        | PJ<"UncheckedOriginalPayload">
+        | PJ<"MaybeInputsOwned">
+        | PJ<"MaybeInputsSeen">
+        | PJ<"OutputsUnknown">
+        | PJ<"WantsOutputs">
+        | PJ<"WantsInputs">
+        | PJ<"WantsFeeRange">
+        | PJ<"ProvisionalProposal">
+        | PJ<"PayjoinProposal">,
     receiverRpc: testUtils.RpcClient,
     recvPersister: InMemoryReceiverPersister,
     ohttpRelay: string,
-): Promise<InstanceType<PayjoinModule["PayjoinProposal"]> | null> {
+): Promise<PJ<"PayjoinProposal"> | null> {
     if (receiver instanceof payjoin.Initialized) {
         return await retrieveReceiverProposal(
             payjoin,
@@ -456,16 +464,10 @@ async function processReceiverProposal(
         );
     }
     if (receiver instanceof payjoin.WantsFeeRange) {
-        return await processWantsFeeRange(
-            payjoin,
-            receiver,
-            receiverRpc,
-            recvPersister,
-        );
+        return await processWantsFeeRange(receiver, receiverRpc, recvPersister);
     }
     if (receiver instanceof payjoin.ProvisionalProposal) {
         return await processProvisionalProposal(
-            payjoin,
             receiver,
             receiverRpc,
             recvPersister,
@@ -591,7 +593,9 @@ async function testIntegrationV2ToV2(payjoin: PayjoinModule): Promise<void> {
     const ohttpRelay = services.ohttpRelayUrl();
     services.waitForServicesReady();
     const ohttpKeysBytes = services.fetchOhttpKeys();
-    const ohttpKeys = payjoin.OhttpKeys.decode(ohttpKeysBytes.buffer);
+    const ohttpKeys = payjoin.OhttpKeys.decode(
+        ohttpKeysBytes.buffer as ArrayBuffer,
+    );
 
     const recvPersister = new InMemoryReceiverPersister();
     const senderPersister = new InMemorySenderPersister();
@@ -665,15 +669,8 @@ async function testIntegrationV2ToV2(payjoin: PayjoinModule): Promise<void> {
     );
 
     let pollOutcome:
-        | InstanceType<
-              PayjoinModule["PollingForProposalTransitionOutcome"]["Progress"]
-          >
-        | InstanceType<
-              PayjoinModule["PollingForProposalTransitionOutcome"]["Stasis"]
-          >
-        | InstanceType<
-              PayjoinModule["PollingForProposalTransitionOutcome"]["Terminal"]
-          >;
+        | PJNested<"PollingForProposalTransitionOutcome", "Progress">
+        | PJNested<"PollingForProposalTransitionOutcome", "Stasis">;
     let attempts = 0;
     while (true) {
         const ohttpContextRequest = sendCtx.createPollRequest(ohttpRelay);

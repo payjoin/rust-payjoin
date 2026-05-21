@@ -8,13 +8,14 @@ use payjoin::persist::{OptionalTransitionOutcome, SessionPersister};
 use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
     MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
-    ProvisionalProposal, ReceiveSession, Receiver, ReceiverBuilder,
-    SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload, WantsFeeRange, WantsInputs,
-    WantsOutputs,
+    PendingFallback as ReceiverPendingFallback, ProvisionalProposal, ReceiveSession, Receiver,
+    ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload,
+    WantsFeeRange, WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
-    replay_event_log as replay_sender_event_log, PendingFallback, PollingForProposal, SendSession,
-    Sender, SenderBuilder, SessionOutcome as SenderSessionOutcome, WithReplyKey,
+    replay_event_log as replay_sender_event_log, PendingFallback as SenderPendingFallback,
+    PollingForProposal, SendSession, Sender, SenderBuilder, SessionOutcome as SenderSessionOutcome,
+    WithReplyKey,
 };
 use payjoin::{ImplementationError, PjParam, Uri};
 use tokio::sync::watch;
@@ -24,6 +25,7 @@ use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::v2::ohttp::{unwrap_ohttp_keys_or_else_fetch, RelayManager};
 use crate::app::{handle_interrupt, http_agent};
+use crate::cli::Role as CliRole;
 use crate::db::v2::{ReceiverPersister, SenderPersister, SessionId};
 use crate::db::Database;
 
@@ -78,6 +80,7 @@ impl StatusText for ReceiveSession {
             ReceiveSession::HasReplyableError(_) =>
                 "Session failure, waiting to post error response",
             ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
+            ReceiveSession::PendingFallback(_) => "Pending fallback handling",
             ReceiveSession::Closed(session_outcome) => match session_outcome {
                 ReceiverSessionOutcome::Failure => "Session failure",
                 ReceiverSessionOutcome::Success(_) => "Session success, Payjoin proposal was broadcasted",
@@ -485,11 +488,42 @@ impl AppTrait for App {
         Ok(())
     }
 
-    async fn cancel_sender(&self, session_id: SessionId, no_broadcast: bool) -> Result<()> {
+    async fn cancel(
+        &self,
+        session_id: SessionId,
+        no_broadcast: bool,
+        role: Option<CliRole>,
+    ) -> Result<()> {
+        if let Some(role) = role {
+            return match role {
+                CliRole::Sender => self.cancel_sender_session(session_id, no_broadcast),
+                CliRole::Receiver => self.cancel_receiver_session(session_id, no_broadcast),
+            };
+        }
+
+        let send_ids = self.db.get_send_session_ids()?;
+        let recv_ids = self.db.get_recv_session_ids()?;
+        let is_sender = send_ids.iter().any(|id| id.0 == session_id.0);
+        let is_receiver = recv_ids.iter().any(|id| id.0 == session_id.0);
+
+        match (is_sender, is_receiver) {
+            (true, false) => self.cancel_sender_session(session_id, no_broadcast),
+            (false, true) => self.cancel_receiver_session(session_id, no_broadcast),
+            (true, true) => anyhow::bail!(
+                "Session {session_id} exists as both a sender and receiver session. \
+                 Pass `--role sender` or `--role receiver`."
+            ),
+            (false, false) => anyhow::bail!("Session {session_id} not found"),
+        }
+    }
+}
+
+impl App {
+    fn cancel_sender_session(&self, session_id: SessionId, no_broadcast: bool) -> Result<()> {
         let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
         let (session, _history) = replay_sender_event_log(&persister)?;
 
-        let pending: Sender<PendingFallback> = match session {
+        let pending: Sender<SenderPendingFallback> = match session {
             SendSession::WithReplyKey(sender) => sender.cancel().save(&persister)?,
             SendSession::PollingForProposal(sender) => sender.cancel().save(&persister)?,
             SendSession::PendingFallback(sender) => sender,
@@ -522,9 +556,72 @@ impl AppTrait for App {
         pending.close().save(&persister)?;
         Ok(())
     }
-}
 
-impl App {
+    fn cancel_receiver_session(&self, session_id: SessionId, no_broadcast: bool) -> Result<()> {
+        let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
+        let (session, _history) = replay_receiver_event_log(&persister)?;
+
+        let pending: Receiver<ReceiverPendingFallback> = match session {
+            ReceiveSession::Initialized(receiver) => {
+                receiver.cancel().save(&persister)?;
+                println!("Session {session_id} cancelled. No fallback transaction to broadcast.");
+                return Ok(());
+            }
+            ReceiveSession::UncheckedOriginalPayload(receiver) => {
+                receiver.cancel().save(&persister)?;
+                println!("Session {session_id} cancelled. No fallback transaction to broadcast.");
+                return Ok(());
+            }
+            ReceiveSession::MaybeInputsOwned(receiver) => receiver.cancel().save(&persister)?,
+            ReceiveSession::MaybeInputsSeen(receiver) => receiver.cancel().save(&persister)?,
+            ReceiveSession::OutputsUnknown(receiver) => receiver.cancel().save(&persister)?,
+            ReceiveSession::WantsOutputs(receiver) => receiver.cancel().save(&persister)?,
+            ReceiveSession::WantsInputs(receiver) => receiver.cancel().save(&persister)?,
+            ReceiveSession::WantsFeeRange(receiver) => receiver.cancel().save(&persister)?,
+            ReceiveSession::ProvisionalProposal(receiver) => receiver.cancel().save(&persister)?,
+            ReceiveSession::PayjoinProposal(receiver) => receiver.cancel().save(&persister)?,
+            ReceiveSession::Monitor(receiver) => receiver.cancel().save(&persister)?,
+            ReceiveSession::HasReplyableError(receiver) => match receiver
+                .cancel()
+                .save(&persister)?
+            {
+                Some(pending) => pending,
+                None => {
+                    println!("Session {session_id} cancelled. No fallback transaction available.");
+                    return Ok(());
+                }
+            },
+            ReceiveSession::PendingFallback(receiver) => receiver,
+            ReceiveSession::Closed(
+                ReceiverSessionOutcome::Success(_)
+                | ReceiverSessionOutcome::FallbackBroadcasted
+                | ReceiverSessionOutcome::PayjoinProposalSent,
+            ) => {
+                println!("Session {session_id} already completed successfully. Cannot cancel.");
+                return Ok(());
+            }
+            ReceiveSession::Closed(_) => {
+                println!("Session {session_id} is already closed. Nothing left to do.");
+                return Ok(());
+            }
+        };
+
+        if no_broadcast {
+            println!(
+                "Session {session_id} cancelled. Broadcast the fallback transaction manually:\n{}",
+                serialize_hex(pending.fallback_tx())
+            );
+        } else {
+            self.wallet().broadcast_tx(pending.fallback_tx())?;
+            println!(
+                "Broadcasted fallback transaction txid: {}",
+                pending.fallback_tx().compute_txid()
+            );
+        }
+        pending.close().save(&persister)?;
+        Ok(())
+    }
+
     fn close_failed_session<P>(persister: &P, session_id: &SessionId, role: &str)
     where
         P: SessionPersister,
@@ -558,7 +655,7 @@ impl App {
             SendSession::PendingFallback(_) => {
                 let id = persister.session_id();
                 println!(
-                    "Session {id} was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the original transaction."
+                    "Session {id} was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
                 );
                 return Ok(());
             }
@@ -673,6 +770,13 @@ impl App {
                     self.handle_error(error, persister).await,
                 ReceiveSession::Monitor(proposal) =>
                     self.monitor_payjoin_proposal(proposal, persister).await,
+                ReceiveSession::PendingFallback(_) => {
+                    let id = persister.session_id();
+                    println!(
+                        "Session {id} was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
+                    );
+                    return Ok(());
+                }
                 ReceiveSession::Closed(_) => return Err(anyhow!("Session closed")),
             }
         };

@@ -71,7 +71,7 @@ impl SenderCancelTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonSenderSessionPersister>,
-    ) -> Result<PendingFallback, SenderPersistedError> {
+    ) -> Result<SenderPendingFallback, SenderPersistedError> {
         let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner = self.0.write().expect("Lock should not be poisoned");
         let value = inner.take().expect("Already saved or moved");
@@ -84,7 +84,7 @@ impl SenderCancelTransition {
     pub async fn save_async(
         &self,
         persister: Arc<dyn JsonSenderSessionPersisterAsync>,
-    ) -> Result<PendingFallback, SenderPersistedError> {
+    ) -> Result<SenderPendingFallback, SenderPersistedError> {
         let adapter = AsyncCallbackPersisterAdapter::new(persister);
         let value = {
             let mut inner = self.0.write().expect("Lock should not be poisoned");
@@ -105,7 +105,7 @@ macro_rules! impl_cancel_for_sender {
             /// Cancel the Payjoin session immediately.
             ///
             /// Returns a [`SenderCancelTransition`] that, once persisted, yields a
-            /// [`PendingFallback`] state. Call [`PendingFallback::fallback_tx`] to get
+            /// [`SenderPendingFallback`] state. Call [`SenderPendingFallback::fallback_tx`] to get
             /// the original transaction
             pub fn cancel(&self) -> SenderCancelTransition {
                 let transition = self.0.clone().cancel();
@@ -179,7 +179,7 @@ impl SenderSessionOutcome {
 pub enum SendSession {
     WithReplyKey { inner: Arc<WithReplyKey> },
     PollingForProposal { inner: Arc<PollingForProposal> },
-    PendingFallback { inner: Arc<PendingFallback> },
+    SenderPendingFallback { inner: Arc<SenderPendingFallback> },
     Closed { inner: Arc<SenderSessionOutcome> },
 }
 
@@ -192,7 +192,7 @@ impl From<payjoin::send::v2::SendSession> for SendSession {
             SendSession::PollingForProposal(inner) =>
                 Self::PollingForProposal { inner: Arc::new(inner.into()) },
             SendSession::PendingFallback(inner) =>
-                Self::PendingFallback { inner: Arc::new(inner.into()) },
+                Self::SenderPendingFallback { inner: Arc::new(inner.into()) },
             SendSession::Closed(session_outcome) =>
                 Self::Closed { inner: Arc::new(session_outcome.into()) },
         }
@@ -644,9 +644,9 @@ impl PollingForProposal {
 }
 
 #[derive(Clone, uniffi::Object)]
-pub struct PendingFallback(payjoin::send::v2::Sender<payjoin::send::v2::PendingFallback>);
+pub struct SenderPendingFallback(payjoin::send::v2::Sender<payjoin::send::v2::PendingFallback>);
 
-impl From<payjoin::send::v2::Sender<payjoin::send::v2::PendingFallback>> for PendingFallback {
+impl From<payjoin::send::v2::Sender<payjoin::send::v2::PendingFallback>> for SenderPendingFallback {
     fn from(value: payjoin::send::v2::Sender<payjoin::send::v2::PendingFallback>) -> Self {
         Self(value)
     }
@@ -687,7 +687,7 @@ impl BroadcastedTransition {
 }
 
 #[uniffi::export]
-impl PendingFallback {
+impl SenderPendingFallback {
     /// Returns the fallback transaction as consensus-encoded raw bytes.
     ///
     /// This is the sender's original transaction that should be broadcast to

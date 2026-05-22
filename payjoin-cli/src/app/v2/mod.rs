@@ -347,12 +347,32 @@ impl AppTrait for App {
 
         let mut interrupt = self.interrupt.clone();
         tokio::select! {
-            _ = async {
+            all_completed = async {
+                let mut all_completed = true;
                 for task in tasks {
-                    let _ = task.await;
+                    let result = task.await;
+                    match result {
+                        Ok(inner) => {
+                            match inner {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    all_completed = false;
+                                    println!("{e}")
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            all_completed = false;
+                            println!("{e}")
+                        }
+
+                    }
                 }
+                all_completed
             } => {
-                println!("All resumed sessions completed.");
+                if all_completed {
+                    println!("All resumed sessions completed.");
+                }
             }
             _ = interrupt.changed() => {
                 println!("Resumed sessions were interrupted.");
@@ -859,9 +879,18 @@ impl App {
                     .save(persister);
 
                 match check_result {
-                    Ok(_) => {
-                        println!("Payjoin transaction detected in the mempool!");
-                        return Ok(());
+                    Ok(outcome) => {
+                        match outcome {
+                            OptionalTransitionOutcome::Progress(_) => {
+                                println!("Payjoin transaction detected in the mempool!");
+                                return Ok(());
+                            }
+                            OptionalTransitionOutcome::Stasis(_) => {
+                                // keep polling
+
+                                continue;
+                            }
+                        }
                     }
                     Err(_) => {
                         // keep polling

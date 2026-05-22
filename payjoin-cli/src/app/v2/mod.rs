@@ -299,7 +299,6 @@ impl AppTrait for App {
         Ok(())
     }
 
-    #[allow(clippy::incompatible_msrv)]
     async fn resume_payjoins(&self) -> Result<()> {
         let recv_session_ids = self.db.get_recv_session_ids()?;
         let send_session_ids = self.db.get_send_session_ids()?;
@@ -309,7 +308,8 @@ impl AppTrait for App {
             return Ok(());
         }
 
-        let mut tasks = Vec::new();
+        //let mut tasks = Vec::new();
+        let mut tasks: Vec<(String, tokio::task::JoinHandle<Result<()>>)> = Vec::new();
 
         // Process receiver sessions
         for session_id in recv_session_ids {
@@ -317,12 +317,18 @@ impl AppTrait for App {
             let recv_persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
             match replay_receiver_event_log(&recv_persister) {
                 Ok((receiver_state, _)) => {
-                    tasks.push(tokio::spawn(async move {
-                        self_clone.process_receiver_session(receiver_state, &recv_persister).await
-                    }));
+                    tasks.push((
+                        session_id.to_string(),
+                        tokio::spawn(async move {
+                            self_clone
+                                .process_receiver_session(receiver_state, &recv_persister)
+                                .await
+                        }),
+                    ));
                 }
                 Err(e) => {
                     tracing::error!("An error {:?} occurred while replaying receiver session", e);
+                    println!("Session {session_id} receiver failed to replay -  {e}");
                     Self::close_failed_session(&recv_persister, &session_id, "receiver");
                 }
             }
@@ -334,12 +340,17 @@ impl AppTrait for App {
             match replay_sender_event_log(&sender_persister) {
                 Ok((sender_state, _)) => {
                     let self_clone = self.clone();
-                    tasks.push(tokio::spawn(async move {
-                        self_clone.process_sender_session(sender_state, &sender_persister).await
-                    }));
+
+                    tasks.push((
+                        session_id.clone().to_string(),
+                        tokio::spawn(async move {
+                            self_clone.process_sender_session(sender_state, &sender_persister).await
+                        }),
+                    ));
                 }
                 Err(e) => {
                     tracing::error!("An error {:?} occurred while replaying Sender session", e);
+                    println!("Session {session_id} sender failed to replay -  {e}");
                     Self::close_failed_session(&sender_persister, &session_id, "sender");
                 }
             }
@@ -348,12 +359,27 @@ impl AppTrait for App {
         let mut interrupt = self.interrupt.clone();
         tokio::select! {
             _ = async {
-                for task in tasks {
-                    let _ = task.await;
+                let mut all_completed = true;
+
+                for (session_id, task) in tasks {
+                    match task.await {
+                        Ok(Ok(())) => {
+                            println!("Session {session_id} completed.");
+                        }
+                        Ok(Err(e)) => {
+                            println!("Session {session_id} error: {e:#}");
+                            all_completed = false;
+                        }
+                        Err(e) => {
+                            println!("Session {session_id} panicked or was cancelled: {e:?}");
+                            all_completed = false;
+                        }
+                    }
                 }
-            } => {
+            if all_completed {
                 println!("All resumed sessions completed.");
             }
+        } => {}
             _ = interrupt.changed() => {
                 println!("Resumed sessions were interrupted.");
             }
@@ -571,9 +597,8 @@ impl App {
         sender: Sender<WithReplyKey>,
         persister: &SenderPersister,
     ) -> Result<()> {
-        let (req, ctx) = sender.create_v2_post_request(
-            self.unwrap_relay_or_else_fetch(Some(&sender.endpoint())).await?.as_str(),
-        )?;
+        let relay = self.unwrap_relay_or_else_fetch(Some(&sender.endpoint())).await?;
+        let (req, ctx) = sender.create_v2_post_request(relay.as_str())?;
         let response = self.post_request(req).await?;
         let sender = sender.process_response(&response.bytes().await?, ctx).save(persister)?;
         println!("Posted Original PSBT...");
@@ -859,15 +884,12 @@ impl App {
                     .save(persister);
 
                 match check_result {
-                    Ok(_) => {
+                    Ok(OptionalTransitionOutcome::Progress(())) => {
                         println!("Payjoin transaction detected in the mempool!");
                         return Ok(());
                     }
-                    Err(_) => {
-                        // keep polling
-
-                        continue;
-                    }
+                    Ok(OptionalTransitionOutcome::Stasis(_)) => continue,
+                    Err(_) => continue,
                 }
             }
         })

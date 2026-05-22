@@ -8,27 +8,22 @@ on:
   pull_request:
     paths:
       - payjoin-ffi/**
-env:
-  # Override the value from the rust-toolchain file
-  # This is necessary because even though the correct toolchain
-  # is explicitly specified for the rust-toolchain action,
-  # rustup honors the rust-toolchain file over the default
-  RUSTUP_TOOLCHAIN: 1.85
 
 jobs:
   build-dart-and-test:
     name: "Build and test dart"
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: payjoin-ffi/dart
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
-      - name: Build and test
-        run: nix develop --command bash ./contrib/test.sh
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - name: "Install nix"
+        uses: DeterminateSystems/determinate-nix-action@main
+      - name: "Use nix cache"
+        uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: "Build and test"
+        run: nix develop .#dart -c bash ./payjoin-ffi/dart/contrib/test.sh

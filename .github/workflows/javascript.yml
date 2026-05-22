@@ -13,24 +13,17 @@ jobs:
   build-js-and-test:
     name: "Build and test javascript"
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: payjoin-ffi/javascript
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
-
       - name: "Install nix"
         uses: DeterminateSystems/determinate-nix-action@main
-
       - name: "Use nix cache"
         uses: DeterminateSystems/magic-nix-cache-action@main
-
       - name: "Build and test"
-        run: nix develop .#msrv -c ./contrib/test.sh
+        run: nix develop .#javascript -c ./payjoin-ffi/javascript/contrib/test.sh

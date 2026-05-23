@@ -442,19 +442,6 @@ impl PsbtContext {
         psbt
     }
 
-    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
-    /// they sign the transaction and broadcast it to the network.
-    ///
-    /// Finalization consists of signing and finalizing the PSBT using the passed `wallet_process_psbt` signing function.
-    fn finalize_proposal(
-        self,
-        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> Result<Psbt, ImplementationError> {
-        let psbt = self.psbt_to_sign();
-        let signed_psbt = wallet_process_psbt(&psbt)?;
-        self.finalize_signed_proposal(signed_psbt)
-    }
-
     /// Finalizes the signed payjoin proposal PSBT which the sender will find acceptable before
     /// they sign the transaction and broadcast it to the network.
     ///

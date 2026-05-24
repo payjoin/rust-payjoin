@@ -156,7 +156,7 @@ impl Config {
                 {
                     match built_config.get::<V1Config>("v1") {
                         Ok(v1) => {
-                            if v1.pj_endpoint.port().is_none() != (v1.port == 0) {
+                            if v1.port == 0 && v1.pj_endpoint.port().is_some() {
                                 return Err(ConfigError::Message(
                                     "If --port is 0, --pj-endpoint may not have a port".to_owned(),
                                 ));

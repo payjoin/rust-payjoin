@@ -308,7 +308,6 @@ impl AppTrait for App {
             return Ok(());
         }
 
-        //let mut tasks = Vec::new();
         let mut tasks: Vec<(String, tokio::task::JoinHandle<Result<()>>)> = Vec::new();
 
         // Process receiver sessions
@@ -340,7 +339,6 @@ impl AppTrait for App {
             match replay_sender_event_log(&sender_persister) {
                 Ok((sender_state, _)) => {
                     let self_clone = self.clone();
-
                     tasks.push((
                         session_id.clone().to_string(),
                         tokio::spawn(async move {
@@ -359,7 +357,6 @@ impl AppTrait for App {
         let mut interrupt = self.interrupt.clone();
         tokio::select! {
             _ = async {
-                let mut all_completed = true;
 
                 for (session_id, task) in tasks {
                     match task.await {
@@ -368,17 +365,12 @@ impl AppTrait for App {
                         }
                         Ok(Err(e)) => {
                             println!("Session {session_id} error: {e:#}");
-                            all_completed = false;
                         }
                         Err(e) => {
                             println!("Session {session_id} panicked or was cancelled: {e:?}");
-                            all_completed = false;
                         }
                     }
                 }
-            if all_completed {
-                println!("All resumed sessions completed.");
-            }
         } => {}
             _ = interrupt.changed() => {
                 println!("Resumed sessions were interrupted.");
@@ -898,8 +890,7 @@ impl App {
         match result {
             Ok(ok) => ok,
             Err(_) => Err(anyhow!(
-                "Timeout waiting for payment confirmation after {:?}",
-                timeout_duration
+                "No payjoin transaction detected in mempool within {timeout_duration:?}, stopping."
             )),
         }
     }

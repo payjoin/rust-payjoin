@@ -6,11 +6,10 @@ Welcome to the C# language bindings for the [Payjoin Dev Kit](https://payjoindev
 
 Follow these steps to clone the repository and run the tests.
 
-With nix, the default development shell provides the Rust toolchain, .NET 10 SDK,
-and .NET 8 runtime:
+With nix, the C# development shell provides the Rust toolchain and .NET 10 SDK:
 
 ```shell
-nix develop -c bash payjoin-ffi/csharp/contrib/test.sh
+nix develop .#csharp -c bash payjoin-ffi/csharp/contrib/test.sh
 ```
 
 ```shell
@@ -55,7 +54,7 @@ dotnet test
 
 ## Requirements
 
-- .NET 8.0 or higher
+- .NET 10.0 or higher
 - Rust toolchain (MSRV: 1.85.0 for this repository)
 - Cargo will fetch the C# generator from `chavic/uniffi-bindgen-cs` at commit `878a3d269eacce64beadcd336ade0b7c8da09824` (pinned in `payjoin-ffi/Cargo.toml`)
 

@@ -11,6 +11,7 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use rand::Rng;
 use tokio_listener::{Listener, SystemOptions, UserOptions};
 use tower::{Service, ServiceBuilder};
+use tower_http::trace::TraceLayer;
 use tracing::info;
 
 use crate::ohttp_relay::SentinelTag;
@@ -375,6 +376,7 @@ fn build_app(services: Services) -> Router {
         .fallback(route_request)
         .layer(
             ServiceBuilder::new()
+                .layer(TraceLayer::new_for_http())
                 .layer(axum::middleware::from_fn_with_state(metrics.clone(), track_metrics))
                 .layer(axum::middleware::from_fn_with_state(metrics, track_connections)),
         )

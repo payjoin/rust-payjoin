@@ -89,19 +89,6 @@
                   "rustfmt"
                   "llvm-tools-preview"
                 ];
-                # Targets needed by payjoin-ffi/{python,javascript}/scripts/generate_bindings.sh
-                # so cargo can build per-arch artifacts under nix (rustup target add
-                # is a no-op against a nix-provided toolchain).
-                targets = [
-                  "wasm32-unknown-unknown"
-                ]
-                ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-                  "aarch64-apple-darwin"
-                  "x86_64-apple-darwin"
-                ]
-                ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-                  "x86_64-unknown-linux-gnu"
-                ];
               }
             )
             {
@@ -272,10 +259,7 @@
             "payjoin-mailroom-image" = mkContainerImage "payjoin-mailroom" packages.payjoin-mailroom tag;
           };
 
-        dotnetSdk = pkgs.dotnetCorePackages.combinePackages [
-          pkgs.dotnetCorePackages.sdk_10_0
-          pkgs.dotnetCorePackages.runtime_8_0
-        ];
+        dotnetSdk = pkgs.dotnetCorePackages.sdk_10_0;
 
         devShells = builtins.mapAttrs (
           _name: craneLib:
@@ -287,29 +271,15 @@
                 cargo-nextest
                 cargo-watch
                 rust-analyzer
-                dart
-                dotnetSdk
                 cargo-fuzz
                 bzip2 # needed for some machines to have access to libzip at runtime
                 codespell
-                # secp256k1-sys build.rs invokes cc-rs for the wasm32-unknown-unknown
-                # target; cc-rs defaults to clang for wasm and needs llvm-ar.
-                llvmPackages.clang-unwrapped
-                llvmPackages.bintools-unwrapped
-                lld
-                # Version must match the wasm-bindgen crate locked in
-                # payjoin-ffi/javascript/rust_modules/wasm/Cargo.lock.
-                wasm-bindgen-cli_0_2_108
               ]
               ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [
                 cargo-llvm-cov
               ];
             BITCOIND_EXE = pkgs.lib.getExe' pkgs.bitcoind "bitcoind";
             BITCOIND_SKIP_DOWNLOAD = 1;
-            DOTNET_ROOT = "${dotnetSdk}/share/dotnet";
-            DOTNET_CLI_TELEMETRY_OPTOUT = "1";
-            CC_wasm32_unknown_unknown = "${pkgs.llvmPackages.clang-unwrapped}/bin/clang";
-            AR_wasm32_unknown_unknown = "${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-ar";
           }
         ) craneLibVersions;
 
@@ -338,6 +308,96 @@
           builtins.removeAttrs pythonWorkspace.deps.all [ "payjoin" ]
         );
 
+        # Rust toolchain for the javascript dev shell: msrv pinned to match
+        # payjoin-ffi/javascript build requirements, with wasm32 target added
+        # so cargo can build per-arch artifacts under nix (rustup target add
+        # is a no-op against a nix-provided toolchain).
+        jsRustToolchain = pkgs.rust-bin.stable.${msrv-version}.default.override {
+          extensions = [
+            "rust-src"
+            "rustfmt"
+            "llvm-tools-preview"
+          ];
+          targets = [ "wasm32-unknown-unknown" ];
+        };
+
+        javascriptDevShell = pkgs.mkShell {
+          name = "javascript-dev";
+          packages = with pkgs; [
+            jsRustToolchain
+            nodejs
+            # Version must match the wasm-bindgen crate locked in
+            # payjoin-ffi/javascript/rust_modules/wasm/Cargo.lock.
+            wasm-bindgen-cli_0_2_108
+            # secp256k1-sys build.rs invokes cc-rs for the wasm32-unknown-unknown
+            # target; cc-rs defaults to clang for wasm and needs llvm-ar.
+            llvmPackages.clang-unwrapped
+            llvmPackages.bintools-unwrapped
+            lld
+            bzip2 # needed for some machines to have access to libzip at runtime
+          ];
+          CC_wasm32_unknown_unknown = "${pkgs.llvmPackages.clang-unwrapped}/bin/clang";
+          AR_wasm32_unknown_unknown = "${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-ar";
+        };
+
+        dartDevShell = pkgs.mkShell {
+          name = "dart-dev";
+          packages =
+            with pkgs;
+            [
+              rustVersions.msrv
+              dart
+              bzip2
+            ]
+            ++ lib.optionals pkgs.stdenv.isLinux [
+              pkg-config
+              openssl
+              clang
+            ];
+          BITCOIND_EXE = pkgs.lib.getExe' pkgs.bitcoind "bitcoind";
+          BITCOIND_SKIP_DOWNLOAD = 1;
+        };
+
+        csharpDevShell = pkgs.mkShell {
+          name = "csharp-dev";
+          packages =
+            with pkgs;
+            [
+              rustVersions.msrv
+              dotnetSdk
+              bzip2
+            ]
+            ++ lib.optionals pkgs.stdenv.isLinux [
+              pkg-config
+              openssl
+              clang
+            ];
+          DOTNET_ROOT = "${dotnetSdk}/share/dotnet";
+          DOTNET_CLI_TELEMETRY_OPTOUT = "1";
+          BITCOIND_EXE = pkgs.lib.getExe' pkgs.bitcoind "bitcoind";
+          BITCOIND_SKIP_DOWNLOAD = 1;
+        };
+
+        # Rust toolchain for the python dev shell: msrv pinned to match
+        # payjoin-ffi/python build requirements, with per-arch targets added
+        # so cargo can build artifacts under nix for payjoin-ffi/python/scripts/generate_bindings.sh
+        # (rustup target add is a no-op against a nix-provided toolchain).
+        pythonRustToolchain = pkgs.rust-bin.stable.${msrv-version}.default.override {
+          extensions = [
+            "rust-src"
+            "rustfmt"
+            "llvm-tools-preview"
+          ];
+          targets =
+            pkgs.lib.optionals pkgs.stdenv.isDarwin [
+              "aarch64-apple-darwin"
+              "x86_64-apple-darwin"
+            ]
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              "x86_64-unknown-linux-gnu"
+            ];
+        };
+
         pythonDevShell = pkgs.mkShell {
           name = "python-dev";
           packages =
@@ -345,7 +405,7 @@
             [
               pythonVenv
               uv
-              rustVersions.msrv
+              pythonRustToolchain
               bzip2 # needed for some machines to have access to libzip at runtime
             ]
             ++ lib.optionals pkgs.stdenv.isLinux [
@@ -398,6 +458,9 @@
         devShells = devShells // {
           default = devShells.nightly;
           python = pythonDevShell;
+          javascript = javascriptDevShell;
+          csharp = csharpDevShell;
+          dart = dartDevShell;
         };
         formatter = treefmtEval.config.build.wrapper;
         checks =

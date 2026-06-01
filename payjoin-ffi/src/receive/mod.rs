@@ -1239,7 +1239,20 @@ impl PayjoinProposal {
         .to_string()
     }
 
-    /// Construct an OHTTP Encapsulated HTTP POST request for the Proposal PSBT
+    /// Construct an OHTTP-encapsulated HTTP request carrying the Proposal PSBT.
+    ///
+    /// The inner HTTP method, body encoding, and target mailbox depend on
+    /// whether the original sender used Payjoin v2 (BIP 77) or Payjoin v1
+    /// (BIP 78), as recorded in the session context:
+    ///
+    /// - v2 sender (reply key present): POST an HPKE-encrypted `PjV2MsgB`
+    ///   payload to the sender's reply mailbox.
+    /// - v1 sender (no reply key): PUT the base64-encoded PSBT as cleartext
+    ///   UTF-8 bytes to the receiver's own mailbox, per the
+    ///   [BIP 77](https://github.com/bitcoin/bips/blob/master/bip-0077.md)
+    ///   Backwards compatibility section.
+    ///
+    /// Both paths are then OHTTP-encapsulated to the directory's OHTTP Gateway.
     pub fn create_post_request(
         &self,
         ohttp_relay: String,

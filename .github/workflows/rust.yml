@@ -131,7 +131,7 @@ jobs:
           git diff origin/${{ github.base_ref }}.. -- '*.rs' | tee git.diff
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-mutants@25.2.2
+          tool: cargo-mutants@27.1.0
       - name: "Install toolchain"
         uses: dtolnay/rust-toolchain@stable
       - name: "Use cache"

@@ -2342,7 +2342,7 @@ pub mod test {
                 ],
                 ReceiveSession::PendingFallback(Receiver {
                     state: PendingFallback {
-                        fallback_tx: expected_tx,
+                        fallback_tx: expected_tx.clone(),
                         outcome: SessionOutcome::Cancel,
                     },
                     session_context: SHARED_CONTEXT.clone(),
@@ -2351,11 +2351,74 @@ pub mod test {
             (
                 vec![
                     SessionEvent::Created(SHARED_CONTEXT.clone()),
-                    SessionEvent::RetrievedOriginalPayload { original, reply_key: None },
-                    SessionEvent::GotReplyableError(replyable_error),
+                    SessionEvent::RetrievedOriginalPayload {
+                        original: original.clone(),
+                        reply_key: None,
+                    },
+                    SessionEvent::CheckedBroadcastSuitability(),
+                    SessionEvent::ProtocolFailed,
+                ],
+                ReceiveSession::PendingFallback(Receiver {
+                    state: PendingFallback {
+                        fallback_tx: expected_tx.clone(),
+                        outcome: SessionOutcome::Failure,
+                    },
+                    session_context: SHARED_CONTEXT.clone(),
+                }),
+            ),
+            (
+                vec![
+                    SessionEvent::Created(SHARED_CONTEXT.clone()),
+                    SessionEvent::RetrievedOriginalPayload {
+                        original: original.clone(),
+                        reply_key: None,
+                    },
+                    SessionEvent::CheckedBroadcastSuitability(),
+                    SessionEvent::GotReplyableError(replyable_error.clone()),
+                    SessionEvent::ProtocolFailed,
+                ],
+                ReceiveSession::PendingFallback(Receiver {
+                    state: PendingFallback {
+                        fallback_tx: expected_tx,
+                        outcome: SessionOutcome::Failure,
+                    },
+                    session_context: SHARED_CONTEXT.clone(),
+                }),
+            ),
+            (
+                vec![
+                    SessionEvent::Created(SHARED_CONTEXT.clone()),
+                    SessionEvent::RetrievedOriginalPayload {
+                        original: original.clone(),
+                        reply_key: None,
+                    },
+                    SessionEvent::GotReplyableError(replyable_error.clone()),
                     SessionEvent::Closed(SessionOutcome::Cancel),
                 ],
                 ReceiveSession::Closed(SessionOutcome::Cancel),
+            ),
+            (
+                vec![
+                    SessionEvent::Created(SHARED_CONTEXT.clone()),
+                    SessionEvent::RetrievedOriginalPayload {
+                        original: original.clone(),
+                        reply_key: None,
+                    },
+                    SessionEvent::CheckedBroadcastSuitability(),
+                    SessionEvent::Cancelled,
+                    SessionEvent::Closed(SessionOutcome::Cancel),
+                ],
+                ReceiveSession::Closed(SessionOutcome::Cancel),
+            ),
+            (
+                vec![
+                    SessionEvent::Created(SHARED_CONTEXT.clone()),
+                    SessionEvent::RetrievedOriginalPayload { original, reply_key: None },
+                    SessionEvent::CheckedBroadcastSuitability(),
+                    SessionEvent::ProtocolFailed,
+                    SessionEvent::Closed(SessionOutcome::Failure),
+                ],
+                ReceiveSession::Closed(SessionOutcome::Failure),
             ),
         ];
 

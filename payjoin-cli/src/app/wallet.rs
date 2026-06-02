@@ -42,11 +42,10 @@ impl BitcoindWallet {
         fee_rate: FeeRate,
         lock_unspent: bool,
     ) -> Result<Psbt> {
-        let fee_sat_per_vb = fee_rate.to_sat_per_vb_ceil();
-        tracing::debug!("Fee rate sat/vb: {}", fee_sat_per_vb);
+        tracing::debug!("Fee rate sat/vb: {}", fee_rate);
 
         let options = WalletCreateFundedPsbtOptions {
-            fee_rate: Some(fee_sat_per_vb as f64),
+            fee_rate: Some(fee_rate),
             lock_unspents: Some(lock_unspent),
             replaceable: None,
             conf_target: None,

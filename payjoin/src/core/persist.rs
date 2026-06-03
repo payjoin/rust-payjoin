@@ -453,6 +453,7 @@ pub struct MaybeTerminalSuccessTransition<Event, NextState, Err>(
 impl<Event, NextState, Err> MaybeTerminalSuccessTransition<Event, NextState, Err>
 where
     Err: std::error::Error,
+    NextState: fmt::Debug,
 {
     pub(crate) fn advance(event: Event, next_state: NextState) -> Self {
         Self(MaybeTerminalSuccessOutcome::Advance(AcceptNextState(event, next_state)))
@@ -474,16 +475,17 @@ where
         Self(MaybeTerminalSuccessOutcome::Transient(error))
     }
 
+    #[allow(clippy::type_complexity)]
     pub(crate) fn deconstruct(
         self,
-    ) -> (PersistActions<Event>, Result<Option<NextState>, ApiError<Err>>) {
+    ) -> (PersistActions<Event>, Result<Option<NextState>, ApiError<Err, NextState>>) {
         match self.0 {
             MaybeTerminalSuccessOutcome::Advance(AcceptNextState(event, next_state)) =>
                 (PersistActions::Save(event), Ok(Some(next_state))),
             MaybeTerminalSuccessOutcome::Terminate(event) =>
                 (PersistActions::SaveAndClose(event), Ok(None)),
-            MaybeTerminalSuccessOutcome::FatalAdvance(event, _next_state, error) =>
-                (PersistActions::Save(event), Err(ApiError::Fatal(error))),
+            MaybeTerminalSuccessOutcome::FatalAdvance(event, next_state, error) =>
+                (PersistActions::Save(event), Err(ApiError::FatalWithState(error, next_state))),
             MaybeTerminalSuccessOutcome::FatalTerminate(event, error) =>
                 (PersistActions::SaveAndClose(event), Err(ApiError::Fatal(error))),
             MaybeTerminalSuccessOutcome::Transient(error) =>
@@ -494,7 +496,7 @@ where
     pub fn save<P>(
         self,
         persister: &P,
-    ) -> Result<Option<NextState>, PersistedError<Err, P::InternalStorageError>>
+    ) -> Result<Option<NextState>, PersistedError<Err, P::InternalStorageError, NextState>>
     where
         P: SessionPersister<SessionEvent = Event>,
     {
@@ -506,7 +508,7 @@ where
     pub async fn save_async<P>(
         self,
         persister: &P,
-    ) -> Result<Option<NextState>, PersistedError<Err, P::InternalStorageError>>
+    ) -> Result<Option<NextState>, PersistedError<Err, P::InternalStorageError, NextState>>
     where
         P: AsyncSessionPersister<SessionEvent = Event>,
         Err: Send,

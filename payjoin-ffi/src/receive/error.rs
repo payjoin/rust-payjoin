@@ -38,6 +38,21 @@ impl From<receive::Error> for ReceiverError {
     }
 }
 
+/// Returns `true` if the receiver error is caused by an expired v2 session.
+///
+/// Mirrors [`payjoin::receive::Error::is_expired`] so bindings that catch the
+/// top-level `ReceiverError` can branch on expiry without matching the Display
+/// string. uniffi attaches methods to Object types, not to error enums, so the
+/// predicate is exposed as a free function over the caught error.
+#[uniffi::export]
+pub fn receiver_error_is_expired(error: &ReceiverError) -> bool {
+    match error {
+        ReceiverError::Protocol(e) =>
+            matches!(&e.0, receive::ProtocolError::V2(session) if session.is_expired()),
+        _ => false,
+    }
+}
+
 /// Error that may occur during state machine transitions
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[error(transparent)]
@@ -174,6 +189,12 @@ impl From<ProtocolError> for JsonReply {
 #[error(transparent)]
 pub struct SessionError(#[from] receive::v2::SessionError);
 
+#[uniffi::export]
+impl SessionError {
+    /// Returns `true` if the session has expired.
+    pub fn is_expired(&self) -> bool { self.0.is_expired() }
+}
+
 /// Protocol error raised during output substitution.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display)]
@@ -248,3 +269,60 @@ impl From<FfiValidationError> for InputPairError {
 pub struct ReceiverReplayError(
     #[from] payjoin::error::ReplayError<receive::v2::ReceiveSession, receive::v2::SessionEvent>,
 );
+
+#[uniffi::export]
+impl ReceiverReplayError {
+    /// Returns `true` if the event log could not be replayed because the
+    /// session has expired.
+    pub fn is_expired(&self) -> bool { self.0.is_expired() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_and_replay_errors_expose_is_expired() {
+        // uniffi Objects expose the core predicate to bindings.
+        let _: fn(&SessionError) -> bool = SessionError::is_expired;
+        let _: fn(&ReceiverReplayError) -> bool = ReceiverReplayError::is_expired;
+    }
+
+    #[cfg(feature = "_test-utils")]
+    #[test]
+    fn receiver_error_expiry_predicate() {
+        use std::str::FromStr;
+        use std::time::Duration;
+
+        use payjoin::bitcoin::Address;
+        use payjoin::persist::InMemoryPersister;
+        use payjoin::receive::v2::{ReceiverBuilder, SessionEvent};
+        use payjoin::OhttpKeys;
+        use payjoin_test_utils::{EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
+
+        // Build a receiver whose session is already expired, then surface the
+        // expiry error through the public polling API.
+        let address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
+            .expect("valid address")
+            .assume_checked();
+        let ohttp_keys = OhttpKeys(
+            ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid keys"),
+        );
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let receiver = ReceiverBuilder::new(address, EXAMPLE_URL, ohttp_keys)
+            .expect("valid builder")
+            .with_expiration(Duration::from_secs(0))
+            .build()
+            .save(&persister)
+            .expect("in-memory persister is infallible");
+        let expired =
+            receiver.create_poll_request(EXAMPLE_URL).map(|_| ()).expect_err("session is expired");
+        assert!(receiver_error_is_expired(&ReceiverError::from(expired)));
+
+        // A non-expiry error is not reported as expired.
+        let other = ReceiverError::from(receive::Error::Implementation(
+            payjoin::ImplementationError::from("not an expiry error"),
+        ));
+        assert!(!receiver_error_is_expired(&other));
+    }
+}

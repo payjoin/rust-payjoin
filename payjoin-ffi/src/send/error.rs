@@ -60,6 +60,13 @@ impl From<FfiValidationError> for SenderInputError {
 #[error(transparent)]
 pub struct CreateRequestError(#[from] send::v2::CreateRequestError);
 
+#[uniffi::export]
+impl CreateRequestError {
+    /// Returns `true` if the request could not be created because the session
+    /// has expired.
+    pub fn is_expired(&self) -> bool { self.0.is_expired() }
+}
+
 /// Error returned for v2-specific payload decapsulation errors.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display)]
@@ -121,6 +128,13 @@ pub struct WellKnownError(#[from] send::WellKnownError);
 pub struct SenderReplayError(
     #[from] payjoin::error::ReplayError<send::v2::SendSession, send::v2::SessionEvent>,
 );
+
+#[uniffi::export]
+impl SenderReplayError {
+    /// Returns `true` if the event log could not be replayed because the
+    /// session has expired.
+    pub fn is_expired(&self) -> bool { self.0.is_expired() }
+}
 
 /// Error that may occur during state machine transitions
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -199,5 +213,22 @@ where
             return SenderPersistedError::BuildSenderError(Arc::new(api_err.into()));
         }
         SenderPersistedError::Unexpected
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_request_error_exposes_is_expired() {
+        // A non-expiry CreateRequestError delegates to the core predicate.
+        let err = CreateRequestError::from(send::v2::CreateRequestError::from(
+            payjoin::IntoUrlError::BadScheme,
+        ));
+        assert!(!err.is_expired());
+
+        // The accessor is also exposed on the sender replay error.
+        let _: fn(&SenderReplayError) -> bool = SenderReplayError::is_expired;
     }
 }

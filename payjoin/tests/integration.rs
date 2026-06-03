@@ -7,20 +7,25 @@ mod integration {
     use bitcoin::policy::DEFAULT_MIN_RELAY_TX_FEE;
     use bitcoin::psbt::{Input as PsbtInput, Psbt};
     use bitcoin::{Amount, FeeRate, OutPoint, TxIn, TxOut, Weight};
+    #[cfg(feature = "v1")]
     use payjoin::receive::v1::build_v1_pj_uri;
     use payjoin::receive::InputPair;
-    use payjoin::{ImplementationError, OutputSubstitution, PjUri, Request, Uri, Url};
+    use payjoin::{ImplementationError, PjUri, Request, Uri};
+    #[cfg(feature = "v1")]
+    use payjoin::{OutputSubstitution, Url};
     use payjoin_test_utils::corepc_node::vtype::ListUnspentItem;
     use payjoin_test_utils::corepc_node::AddressType;
     use payjoin_test_utils::{corepc_node, init_bitcoind_sender_receiver, init_tracing, BoxError};
     use serde_json::json;
 
+    #[cfg(feature = "v1")]
     const EXAMPLE_URL: &str = "https://example.com";
     /// Transaction weight components for fee calculation
     /// Useful resource: https://bitcoin.stackexchange.com/a/84006
     const TX_HEADER_LEGACY_WEIGHT: u64 = 40;
     const TX_HEADER_WEIGHT: u64 = 42;
     const P2PKH_INPUT_WEIGHT: u64 = 592;
+    #[cfg(feature = "v1")]
     const NESTED_P2WPKH_INPUT_WEIGHT: u64 = 364;
     const P2WPKH_INPUT_WEIGHT: u64 = 272;
     const P2TR_INPUT_WEIGHT: u64 = 230;
@@ -188,13 +193,14 @@ mod integration {
         }
     }
 
-    // not all needs v1
-    #[cfg(all(feature = "io", feature = "v2", feature = "v1", feature = "_manual-tls"))]
+    #[cfg(all(feature = "io", feature = "v2", feature = "_manual-tls"))]
     mod v2 {
+        #[cfg(feature = "v1")]
         use std::sync::Arc;
         use std::time::Duration;
 
         use bitcoin::{Address, Transaction};
+        #[cfg(feature = "v1")]
         use http::StatusCode;
         use payjoin::persist::OptionalTransitionOutcome;
         use payjoin::receive::v2::{
@@ -207,7 +213,9 @@ mod integration {
         use payjoin_test_utils::{
             BoxSendSyncError, InMemoryPersister, SessionPersister, TestServices,
         };
-        use reqwest::{Client, Response};
+        #[cfg(feature = "v1")]
+        use reqwest::Client;
+        use reqwest::Response;
 
         use super::*;
 
@@ -914,6 +922,7 @@ mod integration {
             Ok((broadcasted_transaction, monitoring_payment))
         }
 
+        #[cfg(feature = "v1")]
         #[test]
         fn v2_to_v1() -> Result<(), BoxError> {
             init_tracing();
@@ -975,6 +984,7 @@ mod integration {
             Ok(())
         }
 
+        #[cfg(feature = "v1")]
         #[tokio::test]
         async fn v1_to_v2() -> Result<(), BoxSendSyncError> {
             init_tracing();
@@ -1476,6 +1486,7 @@ mod integration {
 
     // Receiver receive and process original_psbt from a sender
     // In production it it will come in as an HTTP request (over ssl or onion)
+    #[cfg(feature = "v1")]
     fn handle_v1_pj_request(
         req: Request,
         headers: impl payjoin::receive::v1::Headers,
@@ -1497,6 +1508,7 @@ mod integration {
         Ok(psbt.to_string())
     }
 
+    #[cfg(feature = "v1")]
     fn handle_proposal(
         proposal: payjoin::receive::v1::UncheckedOriginalPayload,
         receiver: &corepc_node::Client,
@@ -1625,12 +1637,15 @@ mod integration {
         InputPair::new(txin, psbtin, expected_weight).expect("Input pair should be valid")
     }
 
+    #[cfg(feature = "v1")]
     struct HeaderMock(HashMap<String, String>);
 
+    #[cfg(feature = "v1")]
     impl payjoin::receive::v1::Headers for HeaderMock {
         fn get_header(&self, key: &str) -> Option<&str> { self.0.get(key).map(|e| e.as_str()) }
     }
 
+    #[cfg(feature = "v1")]
     impl HeaderMock {
         fn new(body: &[u8], content_type: &str) -> HeaderMock {
             let mut h = HashMap::new();

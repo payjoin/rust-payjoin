@@ -1,7 +1,7 @@
 //! IO-related types and functions. Specifically, fetching OHTTP keys from a payjoin directory.
 use std::time::Duration;
 
-use http::header::ACCEPT;
+use http::header::{ACCEPT, CACHE_CONTROL};
 use reqwest::{Client, Proxy};
 
 use crate::into_url::IntoUrl;
@@ -29,6 +29,37 @@ pub async fn fetch_ohttp_keys(
         .send()
         .await?;
     parse_ohttp_keys_response(res).await
+}
+
+/// Fetch the ohttp keys from the specified payjoin directory via proxy, and return the TTL of the cache.
+///
+/// * `ohttp_relay`: The http CONNECT method proxy to request the ohttp keys from a payjoin
+///   directory.  Proxying requests for ohttp keys ensures a client IP address is never revealed to
+///   the payjoin directory.
+///
+/// * `payjoin_directory`: The payjoin directory from which to fetch the ohttp keys.  This
+///   directory stores and forwards payjoin client payloads.
+pub async fn fetch_ohttp_keys_with_cache(
+    ohttp_relay: impl IntoUrl,
+    payjoin_directory: impl IntoUrl,
+) -> Result<(OhttpKeys, Option<Duration>), Error> {
+    let ohttp_keys_url = payjoin_directory.into_url()?.join("/.well-known/ohttp-gateway")?;
+    let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
+    let client = Client::builder().proxy(proxy).http1_only().build()?;
+    let res = client
+        .get(ohttp_keys_url.as_str())
+        .timeout(Duration::from_secs(10))
+        .header(ACCEPT, "application/ohttp-keys")
+        .send()
+        .await?;
+
+    let ttl = res
+        .headers()
+        .get(CACHE_CONTROL)
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_cache_control);
+
+    Ok((parse_ohttp_keys_response(res).await?, ttl))
 }
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
@@ -64,6 +95,34 @@ pub async fn fetch_ohttp_keys_with_cert(
     parse_ohttp_keys_response(res).await
 }
 
+#[cfg(feature = "_manual-tls")]
+pub async fn fetch_ohttp_keys_with_cert_and_cache(
+    ohttp_relay: impl IntoUrl,
+    payjoin_directory: impl IntoUrl,
+    cert_der: &[u8],
+) -> Result<(OhttpKeys, Option<Duration>), Error> {
+    let ohttp_keys_url = payjoin_directory.into_url()?.join("/.well-known/ohttp-gateway")?;
+    let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
+    let client = Client::builder()
+        .use_rustls_tls()
+        .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der)?)
+        .proxy(proxy)
+        .http1_only()
+        .build()?;
+    let res = client
+        .get(ohttp_keys_url.as_str())
+        .timeout(Duration::from_secs(10))
+        .header(ACCEPT, "application/ohttp-keys")
+        .send()
+        .await?;
+    let ttl = res
+        .headers()
+        .get(CACHE_CONTROL)
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_cache_control);
+    Ok((parse_ohttp_keys_response(res).await?, ttl))
+}
+
 async fn parse_ohttp_keys_response(res: reqwest::Response) -> Result<OhttpKeys, Error> {
     if !res.status().is_success() {
         return Err(Error::UnexpectedStatusCode(res.status()));
@@ -73,6 +132,15 @@ async fn parse_ohttp_keys_response(res: reqwest::Response) -> Result<OhttpKeys, 
     OhttpKeys::decode(&body).map_err(|e| {
         Error::Internal(InternalError(InternalErrorInner::InvalidOhttpKeys(e.to_string())))
     })
+}
+
+fn parse_cache_control(cache_control: &str) -> Option<Duration> {
+    cache_control
+        .split(',')
+        .filter_map(|d| d.trim().strip_prefix("s-maxage="))
+        .filter_map(|s| s.trim().parse::<u64>().ok())
+        .next()
+        .map(Duration::from_secs)
 }
 
 #[derive(Debug)]

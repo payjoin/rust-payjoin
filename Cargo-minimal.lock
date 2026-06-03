@@ -507,14 +507,13 @@ dependencies = [
 
 [[package]]
 name = "bitcoin"
-version = "0.32.8"
+version = "0.32.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e499f9fc0407f50fe98af744ab44fa67d409f76b6772e1689ec8485eb0c0f66"
+checksum = "39581299241111285f3268ba75ddf372746fd041620918b145c1af9d75e91b6c"
 dependencies = [
  "base58ck",
  "base64 0.21.7",
  "bech32 0.11.1",
- "bitcoin-internals 0.3.0",
  "bitcoin-io",
  "bitcoin-units",
  "bitcoin_hashes 0.14.1",
@@ -554,9 +553,6 @@ name = "bitcoin-internals"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30bdbe14aa07b06e6cfeffc529a1f099e5fbe249524f8125358604df99a4bed2"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "bitcoin-io"
@@ -630,20 +626,20 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e0a228e083d1702f83389b0ac71eb70078dc8d7fcbb6cde864d1cbca145f5cc"
 dependencies = [
- "bitcoin 0.32.8",
+ "bitcoin 0.32.100",
  "percent-encoding-rfc3986",
 ]
 
 [[package]]
 name = "bitcoind-async-client"
-version = "0.10.4"
+version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dca83dd237c126c82c00c1c2b1d93cc172b1cefd96f29747732b3f12218ba45"
+checksum = "6dee0966d78f8b91e2801e3e870535410b2057ed54e5c140c705c3218151f6ac"
 dependencies = [
  "base64 0.22.1",
- "bitcoin 0.32.8",
+ "bitcoin 0.32.100",
  "bitreq",
- "corepc-types 0.12.0",
+ "corepc-types 0.13.0",
  "hex-conservative 0.2.2",
  "secp256k1 0.29.1",
  "serde",
@@ -1090,7 +1086,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7755b8b9219b23d166a5897b5e2d8266cbdd0de5861d351b96f6db26bcf415f3"
 dependencies = [
- "bitcoin 0.32.8",
+ "bitcoin 0.32.100",
  "corepc-types 0.10.1",
  "jsonrpc 0.18.0",
  "log",
@@ -1123,18 +1119,18 @@ version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c22db78b0223b66f82f92b14345f06307078f76d94b18280431ea9bc6cd9cbb6"
 dependencies = [
- "bitcoin 0.32.8",
+ "bitcoin 0.32.100",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "corepc-types"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1583872320eb2ac629c36753023fd072f1ca1b3b74b20cc62bab055b54278789"
+checksum = "b96c7869aa8234d10a41cbe3a1697bcb3a2482c48d9eb3541b3a4014a81afdad"
 dependencies = [
- "bitcoin 0.32.8",
+ "bitcoin 0.32.100",
  "serde",
  "serde_json",
 ]
@@ -2780,7 +2776,7 @@ name = "payjoin"
 version = "0.25.0"
 dependencies = [
  "bhttp",
- "bitcoin 0.32.8",
+ "bitcoin 0.32.100",
  "bitcoin-hpke",
  "bitcoin-ohttp",
  "bitcoin-units",
@@ -2868,7 +2864,7 @@ dependencies = [
  "axum",
  "axum-server",
  "bhttp",
- "bitcoin 0.32.8",
+ "bitcoin 0.32.100",
  "bitcoin-ohttp",
  "byteorder",
  "bytes",
@@ -2915,7 +2911,7 @@ name = "payjoin-test-utils"
 version = "0.0.1"
 dependencies = [
  "axum-server",
- "bitcoin 0.32.8",
+ "bitcoin 0.32.100",
  "bitcoin-ohttp",
  "corepc-node",
  "http",
@@ -4320,9 +4316,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.52.2"
+version = "1.52.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "110a78583f19d5cdb2c5ccf321d1290344e71313c6c37d43520d386027d18386"
+checksum = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe"
 dependencies = [
  "bytes",
  "libc",

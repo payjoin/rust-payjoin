@@ -2,6 +2,7 @@
 //! See: <https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#receivers-well-known-errors>
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum ErrorCode {
     /// The payjoin endpoint is not available for now.
     Unavailable,

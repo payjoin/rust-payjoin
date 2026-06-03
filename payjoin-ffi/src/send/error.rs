@@ -111,6 +111,10 @@ impl From<send::ResponseError> for ResponseError {
             send::ResponseError::Validation(e) => ResponseError::Validation(Arc::new(e.into())),
             send::ResponseError::Unrecognized { error_code, message } =>
                 ResponseError::Unrecognized { error_code, msg: message },
+            // `send::ResponseError` is non_exhaustive; surface any future
+            // variant as an unrecognized error rather than failing to build.
+            other =>
+                ResponseError::Unrecognized { error_code: String::new(), msg: other.to_string() },
         }
     }
 }

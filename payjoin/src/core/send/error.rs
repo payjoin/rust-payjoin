@@ -251,6 +251,7 @@ impl std::error::Error for InternalProposalError {
 }
 
 /// Represent an error returned by Payjoin receiver.
+#[non_exhaustive]
 pub enum ResponseError {
     /// `WellKnown` Errors are defined in the [`BIP78::ReceiverWellKnownError`] spec.
     ///
@@ -390,6 +391,9 @@ impl From<WellKnownError> for ResponseError {
 }
 
 impl WellKnownError {
+    /// Return the well-known BIP-78 error code.
+    pub fn code(&self) -> ErrorCode { self.code }
+
     /// Create a new well-known error with the given code and message.
     pub(crate) fn new(code: ErrorCode, message: String) -> Self {
         Self { code, message, supported_versions: None }
@@ -411,13 +415,19 @@ mod tests {
         let known_str_error = r#"{"errorCode":"version-unsupported", "message":"custom message here", "supported": [1, 2]}"#;
         match ResponseError::parse(known_str_error) {
             ResponseError::WellKnown(e) => {
-                assert_eq!(e.code, ErrorCode::VersionUnsupported);
+                assert_eq!(e.code(), ErrorCode::VersionUnsupported);
                 assert_eq!(e.message, "custom message here");
                 assert_eq!(
                     e.to_string(),
                     "This version of payjoin is not supported. Use version [1, 2]."
                 );
             }
+            _ => panic!("Expected WellKnown error"),
+        };
+        let not_enough_money_error =
+            r#"{"errorCode":"not-enough-money", "message":"not enough money"}"#;
+        match ResponseError::parse(not_enough_money_error) {
+            ResponseError::WellKnown(e) => assert_eq!(e.code(), ErrorCode::NotEnoughMoney),
             _ => panic!("Expected WellKnown error"),
         };
         let unrecognized_error = r#"{"errorCode":"random", "message":"random"}"#;

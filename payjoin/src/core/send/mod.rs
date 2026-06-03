@@ -21,6 +21,7 @@ use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
 pub use error::{BuildSenderError, ResponseError, ValidationError, WellKnownError};
 pub(crate) use error::{InternalBuildSenderError, InternalProposalError, InternalValidationError};
 
+pub use crate::core::error_codes::ErrorCode;
 use crate::core::Url;
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::{AddressTypeError, PsbtExt, NON_WITNESS_INPUT_WEIGHT};

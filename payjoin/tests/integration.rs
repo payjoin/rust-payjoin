@@ -2,7 +2,9 @@ mod integration {
     use std::collections::HashMap;
     use std::str::FromStr;
 
+    #[cfg(feature = "v2")]
     use bitcoin::bech32::primitives::decode::CheckedHrpstring;
+    #[cfg(feature = "v2")]
     use bitcoin::bech32::NoChecksum;
     use bitcoin::policy::DEFAULT_MIN_RELAY_TX_FEE;
     use bitcoin::psbt::{Input as PsbtInput, Psbt};

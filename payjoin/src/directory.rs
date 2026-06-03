@@ -74,7 +74,7 @@ impl std::str::FromStr for ShortId {
 
 #[cfg(test)]
 mod tests {
-    use crate::uri::ShortId;
+    use super::ShortId;
 
     #[test]
     fn short_id_conversion() {

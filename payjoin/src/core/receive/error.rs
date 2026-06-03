@@ -16,6 +16,21 @@ pub enum Error {
     Implementation(crate::ImplementationError),
 }
 
+impl Error {
+    /// Returns `true` if this error is caused by an expired v2 session.
+    ///
+    /// This is the one lifecycle condition persisted-session callers branch on.
+    /// It reuses [`SessionError::is_expired`](crate::receive::v2::SessionError::is_expired)
+    /// so callers need not match the opaque inner error or its Display string.
+    pub fn is_expired(&self) -> bool {
+        #[cfg(feature = "v2")]
+        if let Error::Protocol(ProtocolError::V2(session)) = self {
+            return session.is_expired();
+        }
+        false
+    }
+}
+
 impl From<&Error> for JsonReply {
     fn from(e: &Error) -> Self {
         match e {

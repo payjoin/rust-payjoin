@@ -70,6 +70,13 @@ impl<SessionState: Debug, SessionEvent: Debug> From<InternalReplayError<SessionS
 }
 
 #[cfg(feature = "v2")]
+impl<SessionState, SessionEvent> ReplayError<SessionState, SessionEvent> {
+    /// Returns `true` if the event log could not be replayed because the
+    /// session has expired.
+    pub fn is_expired(&self) -> bool { matches!(self.0, InternalReplayError::Expired(_)) }
+}
+
+#[cfg(feature = "v2")]
 #[derive(Debug)]
 pub(crate) enum InternalReplayError<SessionState, SessionEvent> {
     /// No events in the event log
@@ -80,4 +87,19 @@ pub(crate) enum InternalReplayError<SessionState, SessionEvent> {
     Expired(crate::time::Time),
     /// Application storage error
     PersistenceFailure(ImplementationError),
+}
+
+#[cfg(all(test, feature = "v2"))]
+mod tests {
+    use super::*;
+    use crate::time::Time;
+
+    #[test]
+    fn replay_error_is_expired() {
+        let expired: ReplayError<(), ()> = ReplayError(InternalReplayError::Expired(Time::now()));
+        assert!(expired.is_expired());
+
+        let other: ReplayError<(), ()> = ReplayError(InternalReplayError::NoEvents);
+        assert!(!other.is_expired());
+    }
 }

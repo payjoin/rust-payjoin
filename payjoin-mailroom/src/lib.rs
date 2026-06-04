@@ -10,7 +10,7 @@ use config::Config;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use rand::Rng;
 use tokio_listener::{Listener, SystemOptions, UserOptions};
-use tower::{Service, ServiceBuilder};
+use tower::{Layer, Service, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -25,13 +25,17 @@ pub mod directory;
 pub mod key_config;
 pub mod metrics;
 pub mod middleware;
+pub mod ohttp_gateway;
 pub mod ohttp_relay;
 
 use crate::metrics::MetricsService;
 use crate::middleware::{track_connections, track_metrics};
 
-type DirectoryService =
-    crate::directory::Service<crate::db::MetricsDb<crate::db::DbServiceAdapter>>;
+/// The plaintext directory/mailbox service, before OHTTP termination.
+type DirectoryInner = crate::directory::Service<crate::db::MetricsDb<crate::db::DbServiceAdapter>>;
+/// The directory service wrapped by the OHTTP gateway layer. This is what the
+/// router dispatches to; it terminates OHTTP and serves the gateway key config.
+type DirectoryService = crate::ohttp_gateway::OhttpGateway<DirectoryInner>;
 
 #[derive(Clone)]
 struct Services {
@@ -251,6 +255,7 @@ async fn init_directory(
 
     let ohttp_keys_dir = config.storage_dir.join("ohttp-keys");
     let ohttp_config = init_ohttp_config(&ohttp_keys_dir)?;
+    let ohttp_server: ohttp::Server = ohttp_config.into();
 
     let v1 = if config.v1.is_some() {
         #[cfg(feature = "access-control")]
@@ -261,7 +266,12 @@ async fn init_directory(
     } else {
         None
     };
-    Ok(crate::directory::Service::new(db, ohttp_config.into(), sentinel_tag, v1))
+
+    // The OHTTP gateway layer owns the key material and terminates the OHTTP
+    // boundary; the directory service only ever sees plaintext requests.
+    let directory = crate::directory::Service::new(db, v1);
+    let gateway = crate::ohttp_gateway::OhttpGatewayLayer::new(ohttp_server, sentinel_tag);
+    Ok(gateway.layer(directory))
 }
 
 #[cfg(feature = "access-control")]

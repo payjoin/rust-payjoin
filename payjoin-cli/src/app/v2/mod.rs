@@ -329,8 +329,15 @@ impl AppTrait for App {
                     ));
                 }
                 Err(e) => {
-                    tracing::error!("An error {:?} occurred while replaying receiver session", e);
-                    println!("Session {session_id} receiver failed to replay -  {e}");
+                    if e.is_expired() {
+                        println!("Session {session_id} receiver expired.");
+                    } else {
+                        tracing::error!(
+                            "An error {:?} occurred while replaying receiver session",
+                            e
+                        );
+                        println!("Session {session_id} receiver failed to replay -  {e}");
+                    }
                     Self::close_failed_session(&recv_persister, &session_id, "receiver");
                 }
             }
@@ -350,8 +357,12 @@ impl AppTrait for App {
                     ));
                 }
                 Err(e) => {
-                    tracing::error!("An error {:?} occurred while replaying Sender session", e);
-                    println!("Session {session_id} sender failed to replay -  {e}");
+                    if e.is_expired() {
+                        println!("Session {session_id} sender expired.");
+                    } else {
+                        tracing::error!("An error {:?} occurred while replaying Sender session", e);
+                        println!("Session {session_id} sender failed to replay -  {e}");
+                    }
                     Self::close_failed_session(&sender_persister, &session_id, "sender");
                 }
             }

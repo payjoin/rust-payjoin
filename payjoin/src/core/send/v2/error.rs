@@ -55,21 +55,21 @@ impl From<crate::into_url::Error> for CreateRequestError {
     }
 }
 
-/// Error returned for v2-specific payload encapsulation errors.
+/// Error returned for v2-specific payload decapsulation errors.
 #[derive(Debug)]
-pub struct EncapsulationError(InternalEncapsulationError);
+pub struct DecapsulationError(InternalDecapsulationError);
 
 #[derive(Debug)]
-pub(crate) enum InternalEncapsulationError {
+pub(crate) enum InternalDecapsulationError {
     /// The HPKE failed.
     Hpke(crate::hpke::HpkeError),
     /// The directory returned a bad response
     DirectoryResponse(DirectoryResponseError),
 }
 
-impl fmt::Display for EncapsulationError {
+impl fmt::Display for DecapsulationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use InternalEncapsulationError::*;
+        use InternalDecapsulationError::*;
 
         match &self.0 {
             Hpke(error) => write!(f, "HPKE error: {error}"),
@@ -78,9 +78,9 @@ impl fmt::Display for EncapsulationError {
     }
 }
 
-impl std::error::Error for EncapsulationError {
+impl std::error::Error for DecapsulationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        use InternalEncapsulationError::*;
+        use InternalDecapsulationError::*;
 
         match &self.0 {
             Hpke(error) => Some(error),
@@ -89,12 +89,12 @@ impl std::error::Error for EncapsulationError {
     }
 }
 
-impl From<InternalEncapsulationError> for EncapsulationError {
-    fn from(value: InternalEncapsulationError) -> Self { EncapsulationError(value) }
+impl From<InternalDecapsulationError> for DecapsulationError {
+    fn from(value: InternalDecapsulationError) -> Self { DecapsulationError(value) }
 }
 
-impl From<InternalEncapsulationError> for super::ResponseError {
-    fn from(value: InternalEncapsulationError) -> Self {
-        super::InternalValidationError::V2Encapsulation(value.into()).into()
+impl From<InternalDecapsulationError> for super::ResponseError {
+    fn from(value: InternalDecapsulationError) -> Self {
+        super::InternalValidationError::V2Decapsulation(value.into()).into()
     }
 }

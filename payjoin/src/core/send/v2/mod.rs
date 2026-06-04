@@ -30,8 +30,8 @@
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::Address;
-pub use error::{CreateRequestError, EncapsulationError};
-use error::{InternalCreateRequestError, InternalEncapsulationError};
+pub use error::{CreateRequestError, DecapsulationError};
+use error::{InternalCreateRequestError, InternalDecapsulationError};
 use ohttp::ClientResponse;
 use serde::{Deserialize, Serialize};
 pub use session::{
@@ -392,18 +392,18 @@ impl Sender<WithReplyKey> {
         self,
         response: &[u8],
         post_ctx: ClientResponse,
-    ) -> MaybeFatalTransition<SessionEvent, Sender<PollingForProposal>, EncapsulationError> {
+    ) -> MaybeFatalTransition<SessionEvent, Sender<PollingForProposal>, DecapsulationError> {
         match process_post_res(response, post_ctx) {
             Ok(()) => {}
             Err(e) =>
                 if e.is_fatal() {
                     return MaybeFatalTransition::fatal(
                         SessionEvent::Closed(SessionOutcome::Failure),
-                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                        InternalDecapsulationError::DirectoryResponse(e).into(),
                     );
                 } else {
                     return MaybeFatalTransition::transient(
-                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                        InternalDecapsulationError::DirectoryResponse(e).into(),
                     );
                 },
         }
@@ -533,11 +533,11 @@ impl Sender<PollingForProposal> {
                 if e.is_fatal() {
                     return MaybeSuccessTransitionWithNoResults::fatal(
                         SessionEvent::Closed(SessionOutcome::Failure),
-                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                        InternalDecapsulationError::DirectoryResponse(e).into(),
                     );
                 } else {
                     return MaybeSuccessTransitionWithNoResults::transient(
-                        InternalEncapsulationError::DirectoryResponse(e).into(),
+                        InternalDecapsulationError::DirectoryResponse(e).into(),
                     );
                 },
         };
@@ -551,7 +551,7 @@ impl Sender<PollingForProposal> {
             Err(e) =>
                 return MaybeSuccessTransitionWithNoResults::fatal(
                     SessionEvent::Closed(SessionOutcome::Failure),
-                    InternalEncapsulationError::Hpke(e).into(),
+                    InternalDecapsulationError::Hpke(e).into(),
                 ),
         };
 

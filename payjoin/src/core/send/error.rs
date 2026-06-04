@@ -98,7 +98,7 @@ pub(crate) enum InternalValidationError {
     ContentTooLarge,
     Proposal(InternalProposalError),
     #[cfg(feature = "v2")]
-    V2Encapsulation(crate::send::v2::EncapsulationError),
+    V2Decapsulation(crate::send::v2::DecapsulationError),
 }
 
 impl From<InternalValidationError> for ValidationError {
@@ -126,7 +126,7 @@ impl fmt::Display for ValidationError {
             }
             Proposal(e) => write!(f, "proposal PSBT error: {e}"),
             #[cfg(feature = "v2")]
-            V2Encapsulation(e) => write!(f, "v2 encapsulation error: {e}"),
+            V2Decapsulation(e) => write!(f, "v2 encapsulation error: {e}"),
         }
     }
 }
@@ -141,7 +141,7 @@ impl std::error::Error for ValidationError {
             ContentTooLarge => None,
             Proposal(e) => Some(e),
             #[cfg(feature = "v2")]
-            V2Encapsulation(e) => Some(e),
+            V2Decapsulation(e) => Some(e),
         }
     }
 }

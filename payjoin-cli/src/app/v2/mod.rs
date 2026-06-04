@@ -1036,7 +1036,18 @@ impl App {
         };
 
         if let Err(e) = session.process_error_response(&err_bytes, err_ctx).save(persister) {
-            return Err(anyhow!("Failed to process error response: {}", e));
+            if let Some(api_err) = e.api_error_ref() {
+                tracing::warn!("Failed to confirm error response delivery: {api_err}");
+            }
+            match e.error_state() {
+                Some(_) => {
+                    let id = persister.session_id();
+                    println!(
+                        "Session {id} failed. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
+                    );
+                }
+                None => return Err(anyhow!("Failed to process error response")),
+            }
         }
 
         Ok(())

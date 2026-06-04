@@ -62,9 +62,16 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
     #[cfg(feature = "access-control")]
     let app = app.into_make_service_with_connect_info::<middleware::MaybePeerIp>();
 
+    // EMFILE/ENFILE (file-descriptor exhaustion) is transient. Without
+    // sleep_on_errors, tokio_listener treats it as fatal and the axum08
+    // accept loop hangs forever (std::future::pending), so a momentary FD
+    // spike permanently downs the service until it is manually restarted.
+    // Backing off 1s and retrying lets the listener self-heal once
+    // descriptors free up (long-polls time out, tunnels close).
+    let mut system_options = SystemOptions::default();
+    system_options.sleep_on_errors = true;
     let listener =
-        Listener::bind(&config.listener, &SystemOptions::default(), &UserOptions::default())
-            .await?;
+        Listener::bind(&config.listener, &system_options, &UserOptions::default()).await?;
     info!("Payjoin service listening on {:?}", listener.local_addr());
     axum::serve(listener, app).await?;
 

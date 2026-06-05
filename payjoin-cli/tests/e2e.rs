@@ -788,4 +788,115 @@ mod e2e {
 
         Ok(())
     }
+
+    #[cfg(feature = "v2")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn receiver_cancel_v2() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use payjoin_test_utils::{init_tracing, TestServices};
+        use tempfile::TempDir;
+
+        type Result<T> = std::result::Result<T, BoxError>;
+
+        init_tracing();
+        let mut services = TestServices::initialize().await?;
+        let temp_dir = tempdir()?;
+
+        let result = tokio::select! {
+            res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {res:?}").into()),
+            res = services.take_directory_handle() => Err(format!("Directory server is long running: {res:?}").into()),
+            res = cancel_cli_async(&services, &temp_dir) => res,
+        };
+
+        assert!(result.is_ok(), "receiver_cancel_v2 failed: {:#?}", result.unwrap_err());
+
+        async fn cancel_cli_async(services: &TestServices, temp_dir: &TempDir) -> Result<()> {
+            let receiver_db_path = temp_dir.path().join("receiver_db");
+            let (bitcoind, _sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
+            let cert_path = &temp_dir.path().join("localhost.der");
+            tokio::fs::write(cert_path, services.cert()).await?;
+            services.wait_for_services_ready().await?;
+            let ohttp_keys = services.fetch_ohttp_keys().await?;
+            let ohttp_keys_path = temp_dir.path().join("ohttp_keys");
+            tokio::fs::write(&ohttp_keys_path, ohttp_keys.encode()?).await?;
+
+            let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
+            let cookie_file = &bitcoind.params.cookie_file;
+            let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
+            let directory = &services.directory_url();
+            let ohttp_relay = &services.ohttp_relay_url();
+
+            // Start a receiver and capture its BIP21 so a session is persisted,
+            // then leave it parked at Initialized waiting for a proposal.
+            let cli_receiver = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relay)
+                .arg("receive")
+                .arg(RECEIVE_SATS)
+                .arg("--pj-directory")
+                .arg(directory)
+                .arg("--ohttp-keys")
+                .arg(&ohttp_keys_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli receiver");
+            let _bip21 = get_bip21_from_receiver(cli_receiver).await;
+
+            // There is only one receiver session in progress.
+            let session_id = 1i64;
+
+            // Run `payjoin-cli cancel <session-id> --role receiver`: the session is at
+            // Initialized so there is no fallback transaction to broadcast.
+            let mut cli_cancel = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relay)
+                .arg("cancel")
+                .arg(session_id.to_string())
+                .arg("--role")
+                .arg("receiver")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli cancel");
+
+            let mut cancel_stdout =
+                cli_cancel.stdout.take().expect("failed to take stdout of cancel");
+            let timeout = tokio::time::Duration::from_secs(10);
+            let cancel_line = tokio::time::timeout(
+                timeout,
+                wait_for_stdout_match(&mut cancel_stdout, |l| {
+                    l.contains("No fallback transaction to broadcast")
+                }),
+            )
+            .await?;
+            terminate(cli_cancel).await.expect("Failed to kill payjoin-cli cancel");
+            let subcommand_output =
+                cancel_line.expect("cancel should report no fallback transaction");
+
+            assert!(
+                subcommand_output.contains(&format!("Session {session_id} cancelled")),
+                "cancel should reference the cancelled session id"
+            );
+
+            Ok(())
+        }
+
+        Ok(())
+    }
 }

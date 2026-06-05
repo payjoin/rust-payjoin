@@ -129,10 +129,11 @@ impl AppTrait for App {
     }
 
     #[cfg(feature = "v2")]
-    async fn cancel_sender(
+    async fn cancel(
         &self,
         _session_id: crate::db::v2::SessionId,
         _no_broadcast: bool,
+        _role: Option<crate::cli::Role>,
     ) -> Result<()> {
         anyhow::bail!("cancel is only supported for v2 (BIP77) sessions")
     }

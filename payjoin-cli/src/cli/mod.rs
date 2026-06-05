@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{value_parser, Parser, Subcommand};
+use clap::{value_parser, Parser, Subcommand, ValueEnum};
 use payjoin::bitcoin::amount::ParseAmountError;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::Url;
@@ -133,7 +133,7 @@ pub enum Commands {
     /// Show payjoin session history
     History,
     #[cfg(feature = "v2")]
-    /// Cancel a sender session, broadcasting the fallback transaction by default (BIP77/v2 only)
+    /// Cancel a sender or receiver session, broadcasting the fallback transaction by default (BIP77/v2 only)
     Cancel {
         /// The session ID to cancel
         #[arg(required = true)]
@@ -142,7 +142,17 @@ pub enum Commands {
         /// Cancel without broadcasting the fallback transaction
         #[arg(long = "no-broadcast")]
         no_broadcast: bool,
+
+        /// The session role to cancel
+        #[arg(long = "role", value_enum)]
+        role: Option<Role>,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum Role {
+    Sender,
+    Receiver,
 }
 
 pub fn parse_amount_in_sat(s: &str) -> Result<Amount, ParseAmountError> {

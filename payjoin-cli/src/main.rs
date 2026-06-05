@@ -79,8 +79,8 @@ async fn main() -> Result<()> {
             app.history().await?;
         }
         #[cfg(feature = "v2")]
-        Commands::Cancel { session_id, no_broadcast } => {
-            app.cancel_sender(SessionId(*session_id), *no_broadcast).await?;
+        Commands::Cancel { session_id, no_broadcast, role } => {
+            app.cancel(SessionId(*session_id), *no_broadcast, *role).await?;
         }
     };
 

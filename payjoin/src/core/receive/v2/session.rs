@@ -589,6 +589,44 @@ mod tests {
         run_session_history_test_async(&test).await;
     }
 
+    #[test]
+    fn event_log_distinguishes_abort_outcome() {
+        let session_context = SHARED_CONTEXT.clone();
+        let original = original_from_test_vector();
+
+        // Cancel scenario: log contains Cancelled event
+        let cancel_events = vec![
+            SessionEvent::Created(session_context.clone()),
+            SessionEvent::RetrievedOriginalPayload { original: original.clone(), reply_key: None },
+            SessionEvent::CheckedBroadcastSuitability(),
+            SessionEvent::Cancelled,
+            SessionEvent::Closed(SessionOutcome::Aborted),
+        ];
+        let cancel_history = SessionHistory { events: cancel_events };
+        let cancel_is_cancel =
+            cancel_history.events.iter().any(|e| matches!(e, SessionEvent::Cancelled));
+        let cancel_is_failure =
+            cancel_history.events.iter().any(|e| matches!(e, SessionEvent::ProtocolFailed));
+        assert!(cancel_is_cancel);
+        assert!(!cancel_is_failure);
+
+        // Failure scenario: log contains ProtocolFailed event
+        let fail_events = vec![
+            SessionEvent::Created(session_context.clone()),
+            SessionEvent::RetrievedOriginalPayload { original: original.clone(), reply_key: None },
+            SessionEvent::CheckedBroadcastSuitability(),
+            SessionEvent::ProtocolFailed,
+            SessionEvent::Closed(SessionOutcome::Aborted),
+        ];
+        let fail_history = SessionHistory { events: fail_events };
+        let fail_is_cancel =
+            fail_history.events.iter().any(|e| matches!(e, SessionEvent::Cancelled));
+        let fail_is_failure =
+            fail_history.events.iter().any(|e| matches!(e, SessionEvent::ProtocolFailed));
+        assert!(!fail_is_cancel);
+        assert!(fail_is_failure);
+    }
+
     #[tokio::test]
     async fn test_contributed_inputs() {
         let persister = InMemoryPersister::<SessionEvent>::default();

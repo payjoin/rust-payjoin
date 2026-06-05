@@ -12,11 +12,11 @@ use bitcoin::{Amount, FeeRate, Script, TxIn, TxOut, Weight};
 use serde::{Deserialize, Serialize};
 
 use super::error::{
-    InputContributionError, InternalInputContributionError, InternalOutputSubstitutionError,
-    InternalSelectionError,
+    InputContributionError, InternalCoinSelectionError, InternalInputContributionError,
+    InternalOutputSubstitutionError,
 };
 use super::optional_parameters::Params;
-use super::{InputPair, OutputSubstitutionError, SelectionError};
+use super::{CoinSelectionError, InputPair, OutputSubstitutionError};
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 use crate::receive::{InternalPayloadError, OriginalPayload, PsbtContext};
@@ -207,7 +207,7 @@ impl WantsInputs {
     pub fn try_preserving_privacy(
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
-    ) -> Result<InputPair, SelectionError> {
+    ) -> Result<InputPair, CoinSelectionError> {
         let mut candidate_inputs = candidate_inputs.into_iter().peekable();
 
         self.avoid_uih(&mut candidate_inputs)
@@ -227,9 +227,9 @@ impl WantsInputs {
     pub(super) fn avoid_uih(
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
-    ) -> Result<InputPair, SelectionError> {
+    ) -> Result<InputPair, CoinSelectionError> {
         if self.payjoin_psbt.outputs.len() != 2 {
-            return Err(InternalSelectionError::UnsupportedOutputLength.into());
+            return Err(InternalCoinSelectionError::UnsupportedOutputLength.into());
         }
 
         let min_out_sats = self
@@ -263,15 +263,15 @@ impl WantsInputs {
         }
 
         // No suitable privacy preserving selection found
-        Err(InternalSelectionError::NotFound.into())
+        Err(InternalCoinSelectionError::NotFound.into())
     }
 
     /// Returns the first candidate input in the provided list or errors if the list is empty.
     fn select_first_candidate(
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
-    ) -> Result<InputPair, SelectionError> {
-        candidate_inputs.into_iter().next().ok_or(InternalSelectionError::Empty.into())
+    ) -> Result<InputPair, CoinSelectionError> {
+        candidate_inputs.into_iter().next().ok_or(InternalCoinSelectionError::Empty.into())
     }
 
     /// Contributes the provided list of inputs to the transaction at random indices. If the total input
@@ -522,7 +522,7 @@ mod tests {
         let result = wants_inputs.try_preserving_privacy(empty_candidate_inputs);
         assert_eq!(
             result.unwrap_err(),
-            SelectionError::from(InternalSelectionError::Empty),
+            CoinSelectionError::from(InternalCoinSelectionError::Empty),
             "try_preserving_privacy should fail with empty candidate inputs"
         );
     }
@@ -604,7 +604,7 @@ mod tests {
         let avoid_uih = payjoin.avoid_uih(input_iter);
         assert_eq!(
             avoid_uih.unwrap_err(),
-            SelectionError::from(InternalSelectionError::UnsupportedOutputLength),
+            CoinSelectionError::from(InternalCoinSelectionError::UnsupportedOutputLength),
             "Payjoin below minimum allowed outputs for avoid uih and should error"
         );
     }

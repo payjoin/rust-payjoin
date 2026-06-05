@@ -45,7 +45,8 @@ use web_time::Duration;
 use self::sealed::FallbackTx;
 use super::error::{Error, InputContributionError};
 use super::{
-    common, InternalPayloadError, JsonReply, OutputSubstitutionError, ProtocolError, SelectionError,
+    common, CoinSelectionError, InternalPayloadError, JsonReply, OutputSubstitutionError,
+    ProtocolError,
 };
 use crate::core::Url;
 use crate::error::{InternalReplayError, ReplayError};
@@ -1093,7 +1094,7 @@ impl Receiver<WantsInputs> {
     pub fn try_preserving_privacy(
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
-    ) -> Result<InputPair, SelectionError> {
+    ) -> Result<InputPair, CoinSelectionError> {
         self.inner.try_preserving_privacy(candidate_inputs)
     }
 

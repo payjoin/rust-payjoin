@@ -226,7 +226,7 @@ impl From<FfiValidationError> for OutputSubstitutionError {
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display)]
 #[error(transparent)]
-pub struct SelectionError(#[from] receive::SelectionError);
+pub struct CoinSelectionError(#[from] receive::CoinSelectionError);
 
 /// Error that may occur when input contribution fails.
 #[derive(Debug, thiserror::Error, uniffi::Object)]

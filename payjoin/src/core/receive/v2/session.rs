@@ -163,7 +163,7 @@ impl SessionHistory {
             Some(SessionEvent::Closed(outcome)) => match outcome {
                 SessionOutcome::Success(_) | SessionOutcome::PayjoinProposalSent =>
                     SessionStatus::Completed,
-                SessionOutcome::Failure | SessionOutcome::Cancel => SessionStatus::Failed,
+                SessionOutcome::Aborted => SessionStatus::Failed,
                 SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
             },
             Some(SessionEvent::Cancelled | SessionEvent::ProtocolFailed) =>
@@ -211,10 +211,8 @@ pub enum SessionEvent {
 pub enum SessionOutcome {
     /// Payjoin completed successfully
     Success(Vec<(bitcoin::ScriptBuf, bitcoin::Witness)>),
-    /// Payjoin failed to complete due to a counterparty deviation from the protocol
-    Failure,
-    /// Payjoin was cancelled by the user
-    Cancel,
+    /// Payjoin was not successful
+    Aborted,
     /// Fallback transaction was broadcasted
     FallbackBroadcasted,
     /// Payjoin proposal was sent, but its broadcast status cannot be tracked because
@@ -553,10 +551,7 @@ mod tests {
                 expected_status: SessionStatus::PendingFallback,
             },
             expected_receiver_state: ReceiveSession::PendingFallback(Receiver {
-                state: PendingFallback {
-                    fallback_tx: expected_fallback,
-                    outcome: SessionOutcome::Cancel,
-                },
+                state: PendingFallback { fallback_tx: expected_fallback },
                 session_context: SessionContext { reply_key, ..session_context },
             }),
         };
@@ -586,15 +581,50 @@ mod tests {
                 expected_status: SessionStatus::PendingFallback,
             },
             expected_receiver_state: ReceiveSession::PendingFallback(Receiver {
-                state: PendingFallback {
-                    fallback_tx: expected_fallback,
-                    outcome: SessionOutcome::Failure,
-                },
+                state: PendingFallback { fallback_tx: expected_fallback },
                 session_context: SessionContext { reply_key, ..session_context },
             }),
         };
         run_session_history_test(&test);
         run_session_history_test_async(&test).await;
+    }
+
+    #[test]
+    fn event_log_distinguishes_abort_outcome() {
+        let session_context = SHARED_CONTEXT.clone();
+        let original = original_from_test_vector();
+
+        // Cancel scenario: log contains Cancelled event
+        let cancel_events = vec![
+            SessionEvent::Created(session_context.clone()),
+            SessionEvent::RetrievedOriginalPayload { original: original.clone(), reply_key: None },
+            SessionEvent::CheckedBroadcastSuitability(),
+            SessionEvent::Cancelled,
+            SessionEvent::Closed(SessionOutcome::Aborted),
+        ];
+        let cancel_history = SessionHistory { events: cancel_events };
+        let cancel_is_cancel =
+            cancel_history.events.iter().any(|e| matches!(e, SessionEvent::Cancelled));
+        let cancel_is_failure =
+            cancel_history.events.iter().any(|e| matches!(e, SessionEvent::ProtocolFailed));
+        assert!(cancel_is_cancel);
+        assert!(!cancel_is_failure);
+
+        // Failure scenario: log contains ProtocolFailed event
+        let fail_events = vec![
+            SessionEvent::Created(session_context.clone()),
+            SessionEvent::RetrievedOriginalPayload { original: original.clone(), reply_key: None },
+            SessionEvent::CheckedBroadcastSuitability(),
+            SessionEvent::ProtocolFailed,
+            SessionEvent::Closed(SessionOutcome::Aborted),
+        ];
+        let fail_history = SessionHistory { events: fail_events };
+        let fail_is_cancel =
+            fail_history.events.iter().any(|e| matches!(e, SessionEvent::Cancelled));
+        let fail_is_failure =
+            fail_history.events.iter().any(|e| matches!(e, SessionEvent::ProtocolFailed));
+        assert!(!fail_is_cancel);
+        assert!(fail_is_failure);
     }
 
     #[tokio::test]
@@ -769,7 +799,7 @@ mod tests {
             reply_key: reply_key.clone(),
         });
         events.push(SessionEvent::GotReplyableError((&expected_error).into()));
-        events.push(SessionEvent::Closed(SessionOutcome::Failure));
+        events.push(SessionEvent::Closed(SessionOutcome::Aborted));
 
         let test = SessionHistoryTest {
             events,
@@ -777,7 +807,7 @@ mod tests {
                 fallback_tx: None,
                 expected_status: SessionStatus::Failed,
             },
-            expected_receiver_state: ReceiveSession::Closed(SessionOutcome::Failure),
+            expected_receiver_state: ReceiveSession::Closed(SessionOutcome::Aborted),
         };
         run_session_history_test(&test);
         run_session_history_test_async(&test).await;

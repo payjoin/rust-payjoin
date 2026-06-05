@@ -130,7 +130,7 @@ impl SessionHistory {
         match self.events.last() {
             Some(SessionEvent::Closed(outcome)) => match outcome {
                 SessionOutcome::Success(_) => SessionStatus::Completed,
-                SessionOutcome::Failure | SessionOutcome::Cancel => SessionStatus::Failed,
+                SessionOutcome::Aborted => SessionStatus::Failed,
             },
             _ => SessionStatus::Active,
         }
@@ -164,10 +164,8 @@ pub enum SessionEvent {
 pub enum SessionOutcome {
     /// Successful payjoin
     Success(bitcoin::Psbt),
-    /// Payjoin failed to complete due to a counterparty deviation from the protocol
-    Failure,
-    /// Payjoin was cancelled by the user
-    Cancel,
+    /// Payjoin was not successful
+    Aborted,
 }
 
 #[cfg(test)]
@@ -222,8 +220,7 @@ mod tests {
             SessionEvent::Created(Box::new(sender_with_reply_key.session_context.clone())),
             SessionEvent::PostedOriginalPsbt(),
             SessionEvent::Closed(SessionOutcome::Success(PARSED_ORIGINAL_PSBT.clone())),
-            SessionEvent::Closed(SessionOutcome::Failure),
-            SessionEvent::Closed(SessionOutcome::Cancel),
+            SessionEvent::Closed(SessionOutcome::Aborted),
             SessionEvent::Cancelled(),
         ];
 
@@ -279,7 +276,7 @@ mod tests {
                     panic!("Unexpected error: {err_str}");
                 }
                 assert_eq!(
-                    SendSession::Closed(SessionOutcome::Failure),
+                    SendSession::Closed(SessionOutcome::Aborted),
                     test.expected_sender_state
                 );
                 assert_eq!(test.expected_session_history.expected_status, SessionStatus::Expired);
@@ -330,7 +327,7 @@ mod tests {
                 pj_param: sender.session_context.pj_param.clone(),
                 expected_status: SessionStatus::Expired,
             },
-            expected_sender_state: SendSession::Closed(SessionOutcome::Failure),
+            expected_sender_state: SendSession::Closed(SessionOutcome::Aborted),
             expected_error: Some("Session expired at".to_string()),
         };
         run_session_history_test(&test);

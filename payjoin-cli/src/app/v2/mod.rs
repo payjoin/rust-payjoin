@@ -55,9 +55,8 @@ impl StatusText for SendSession {
             SendSession::WithReplyKey(_) | SendSession::PollingForProposal(_) =>
                 "Waiting for proposal",
             SendSession::Closed(session_outcome) => match session_outcome {
-                SenderSessionOutcome::Failure => "Session failure",
+                SenderSessionOutcome::Aborted => "Session aborted",
                 SenderSessionOutcome::Success(_) => "Session success",
-                SenderSessionOutcome::Cancel => "Session cancelled",
             },
             SendSession::PendingFallback(_) => "Session awaiting fallback",
         }
@@ -82,9 +81,8 @@ impl StatusText for ReceiveSession {
             ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
             ReceiveSession::PendingFallback(_) => "Pending fallback handling",
             ReceiveSession::Closed(session_outcome) => match session_outcome {
-                ReceiverSessionOutcome::Failure => "Session failure",
+                ReceiverSessionOutcome::Aborted => "Session aborted",
                 ReceiverSessionOutcome::Success(_) => "Session success, Payjoin proposal was broadcasted",
-                ReceiverSessionOutcome::Cancel => "Session cancelled",
                 ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
                 ReceiverSessionOutcome::PayjoinProposalSent =>
                     "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs",
@@ -404,7 +402,7 @@ impl AppTrait for App {
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Sender,
-                        status: SendSession::Closed(SenderSessionOutcome::Failure),
+                        status: SendSession::Closed(SenderSessionOutcome::Aborted),
                         completed_at: None,
                         error_message: Some(e.to_string()),
                     };
@@ -430,7 +428,7 @@ impl AppTrait for App {
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Receiver,
-                        status: ReceiveSession::Closed(ReceiverSessionOutcome::Failure),
+                        status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
                         completed_at: None,
                         error_message: Some(e.to_string()),
                     };
@@ -457,7 +455,7 @@ impl AppTrait for App {
                         let row = SessionHistoryRow {
                             session_id,
                             role: Role::Sender,
-                            status: SendSession::Closed(SenderSessionOutcome::Failure),
+                            status: SendSession::Closed(SenderSessionOutcome::Aborted),
                             completed_at: Some(completed_at),
                             error_message: Some(e.to_string()),
                         };
@@ -485,7 +483,7 @@ impl AppTrait for App {
                         let row = SessionHistoryRow {
                             session_id,
                             role: Role::Receiver,
-                            status: ReceiveSession::Closed(ReceiverSessionOutcome::Failure),
+                            status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
                             completed_at: Some(completed_at),
                             error_message: Some(e.to_string()),
                         };
@@ -665,8 +663,7 @@ impl App {
                 self.process_pj_response(proposal)?;
                 return Ok(());
             }
-            SendSession::Closed(SenderSessionOutcome::Failure)
-            | SendSession::Closed(SenderSessionOutcome::Cancel) => {
+            SendSession::Closed(SenderSessionOutcome::Aborted) => {
                 println!("Session is closed. Nothing left to do");
                 return Ok(());
             }

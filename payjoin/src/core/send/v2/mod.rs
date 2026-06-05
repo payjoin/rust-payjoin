@@ -398,7 +398,7 @@ impl Sender<WithReplyKey> {
             Err(e) =>
                 if e.is_fatal() {
                     return MaybeFatalTransition::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
+                        SessionEvent::Closed(SessionOutcome::Aborted),
                         InternalDecapsulationError::DirectoryResponse(e).into(),
                     );
                 } else {
@@ -532,7 +532,7 @@ impl Sender<PollingForProposal> {
             Err(e) =>
                 if e.is_fatal() {
                     return MaybeSuccessTransitionWithNoResults::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
+                        SessionEvent::Closed(SessionOutcome::Aborted),
                         InternalDecapsulationError::DirectoryResponse(e).into(),
                     );
                 } else {
@@ -550,14 +550,14 @@ impl Sender<PollingForProposal> {
             Ok(body) => body,
             Err(e) =>
                 return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::Closed(SessionOutcome::Failure),
+                    SessionEvent::Closed(SessionOutcome::Aborted),
                     InternalDecapsulationError::Hpke(e).into(),
                 ),
         };
 
         if let Ok(resp_err) = ResponseError::from_slice(&body) {
             return MaybeSuccessTransitionWithNoResults::fatal(
-                SessionEvent::Closed(SessionOutcome::Failure),
+                SessionEvent::Closed(SessionOutcome::Aborted),
                 resp_err,
             );
         }
@@ -566,7 +566,7 @@ impl Sender<PollingForProposal> {
             Ok(proposal) => proposal,
             Err(e) =>
                 return MaybeSuccessTransitionWithNoResults::fatal(
-                    SessionEvent::Closed(SessionOutcome::Failure),
+                    SessionEvent::Closed(SessionOutcome::Aborted),
                     InternalProposalError::Psbt(e).into(),
                 ),
         };
@@ -575,7 +575,7 @@ impl Sender<PollingForProposal> {
                 Ok(processed_proposal) => processed_proposal,
                 Err(e) =>
                     return MaybeSuccessTransitionWithNoResults::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
+                        SessionEvent::Closed(SessionOutcome::Aborted),
                         e.into(),
                     ),
             };
@@ -599,7 +599,7 @@ impl Sender<PendingFallback> {
     /// Mark the session as complete, signaling that the fallback transaction
     /// has been broadcast or its control has been transferred.
     pub fn close(&self) -> TerminalTransition<SessionEvent, ()> {
-        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Cancel), ())
+        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Aborted), ())
     }
 }
 

@@ -166,12 +166,8 @@ impl SenderSessionOutcome {
         }
     }
 
-    pub fn is_failure(&self) -> bool {
-        matches!(self.0, payjoin::send::v2::SessionOutcome::Failure)
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        matches!(self.0, payjoin::send::v2::SessionOutcome::Cancel)
+    pub fn is_aborted(&self) -> bool {
+        matches!(self.0, payjoin::send::v2::SessionOutcome::Aborted)
     }
 }
 

@@ -163,7 +163,7 @@ impl SessionHistory {
             Some(SessionEvent::Closed(outcome)) => match outcome {
                 SessionOutcome::Success(_) | SessionOutcome::PayjoinProposalSent =>
                     SessionStatus::Completed,
-                SessionOutcome::Failure | SessionOutcome::Cancel => SessionStatus::Failed,
+                SessionOutcome::Aborted => SessionStatus::Failed,
                 SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
             },
             Some(SessionEvent::Cancelled | SessionEvent::ProtocolFailed) =>
@@ -211,10 +211,8 @@ pub enum SessionEvent {
 pub enum SessionOutcome {
     /// Payjoin completed successfully
     Success(Vec<(bitcoin::ScriptBuf, bitcoin::Witness)>),
-    /// Payjoin failed to complete due to a counterparty deviation from the protocol
-    Failure,
-    /// Payjoin was cancelled by the user
-    Cancel,
+    /// Payjoin was not successful
+    Aborted,
     /// Fallback transaction was broadcasted
     FallbackBroadcasted,
     /// Payjoin proposal was sent, but its broadcast status cannot be tracked because
@@ -553,10 +551,7 @@ mod tests {
                 expected_status: SessionStatus::PendingFallback,
             },
             expected_receiver_state: ReceiveSession::PendingFallback(Receiver {
-                state: PendingFallback {
-                    fallback_tx: expected_fallback,
-                    outcome: SessionOutcome::Cancel,
-                },
+                state: PendingFallback { fallback_tx: expected_fallback },
                 session_context: SessionContext { reply_key, ..session_context },
             }),
         };
@@ -586,10 +581,7 @@ mod tests {
                 expected_status: SessionStatus::PendingFallback,
             },
             expected_receiver_state: ReceiveSession::PendingFallback(Receiver {
-                state: PendingFallback {
-                    fallback_tx: expected_fallback,
-                    outcome: SessionOutcome::Failure,
-                },
+                state: PendingFallback { fallback_tx: expected_fallback },
                 session_context: SessionContext { reply_key, ..session_context },
             }),
         };
@@ -769,7 +761,7 @@ mod tests {
             reply_key: reply_key.clone(),
         });
         events.push(SessionEvent::GotReplyableError((&expected_error).into()));
-        events.push(SessionEvent::Closed(SessionOutcome::Failure));
+        events.push(SessionEvent::Closed(SessionOutcome::Aborted));
 
         let test = SessionHistoryTest {
             events,
@@ -777,7 +769,7 @@ mod tests {
                 fallback_tx: None,
                 expected_status: SessionStatus::Failed,
             },
-            expected_receiver_state: ReceiveSession::Closed(SessionOutcome::Failure),
+            expected_receiver_state: ReceiveSession::Closed(SessionOutcome::Aborted),
         };
         run_session_history_test(&test);
         run_session_history_test_async(&test).await;

@@ -82,9 +82,8 @@ impl StatusText for ReceiveSession {
             ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
             ReceiveSession::PendingFallback(_) => "Pending fallback handling",
             ReceiveSession::Closed(session_outcome) => match session_outcome {
-                ReceiverSessionOutcome::Failure => "Session failure",
+                ReceiverSessionOutcome::Aborted => "Session aborted",
                 ReceiverSessionOutcome::Success(_) => "Session success, Payjoin proposal was broadcasted",
-                ReceiverSessionOutcome::Cancel => "Session cancelled",
                 ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
                 ReceiverSessionOutcome::PayjoinProposalSent =>
                     "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs",
@@ -430,7 +429,7 @@ impl AppTrait for App {
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Receiver,
-                        status: ReceiveSession::Closed(ReceiverSessionOutcome::Failure),
+                        status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
                         completed_at: None,
                         error_message: Some(e.to_string()),
                     };
@@ -485,7 +484,7 @@ impl AppTrait for App {
                         let row = SessionHistoryRow {
                             session_id,
                             role: Role::Receiver,
-                            status: ReceiveSession::Closed(ReceiverSessionOutcome::Failure),
+                            status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
                             completed_at: Some(completed_at),
                             error_message: Some(e.to_string()),
                         };

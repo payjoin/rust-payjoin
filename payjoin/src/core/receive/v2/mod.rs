@@ -202,7 +202,7 @@ impl ReceiveSession {
                 Ok(state.apply_payjoin_posted()),
 
             (session, SessionEvent::Cancelled) =>
-                try_pending_fallback(session, SessionOutcome::Cancel).map_err(|session| {
+                try_pending_fallback(session).map_err(|session| {
                     InternalReplayError::InvalidEvent(
                         Box::new(SessionEvent::Cancelled),
                         Some(session),
@@ -211,7 +211,7 @@ impl ReceiveSession {
                 }),
 
             (session, SessionEvent::ProtocolFailed) =>
-                try_pending_fallback(session, SessionOutcome::Failure).map_err(|session| {
+                try_pending_fallback(session).map_err(|session| {
                     InternalReplayError::InvalidEvent(
                         Box::new(SessionEvent::ProtocolFailed),
                         Some(session),
@@ -268,25 +268,21 @@ impl ReceiveSession {
     }
 }
 
-fn pending_fallback_from<S: HasFallbackTx>(
-    r: Receiver<S>,
-    outcome: SessionOutcome,
-) -> ReceiveSession {
+fn pending_fallback_from<S: HasFallbackTx>(r: Receiver<S>) -> ReceiveSession {
     let fallback_tx = r.state.fallback_tx();
     ReceiveSession::PendingFallback(Receiver {
-        state: PendingFallback { fallback_tx, outcome },
+        state: PendingFallback { fallback_tx },
         session_context: r.session_context,
     })
 }
 
 fn pending_fallback_from_replyable_error(
     r: Receiver<HasReplyableError>,
-    outcome: SessionOutcome,
 ) -> Result<ReceiveSession, Box<ReceiveSession>> {
     let Receiver { state: HasReplyableError { error_reply, fallback_tx }, session_context } = r;
     match fallback_tx {
         Some(fallback_tx) => Ok(ReceiveSession::PendingFallback(Receiver {
-            state: PendingFallback { fallback_tx, outcome },
+            state: PendingFallback { fallback_tx },
             session_context,
         })),
         None => Err(Box::new(ReceiveSession::HasReplyableError(Receiver {
@@ -296,23 +292,19 @@ fn pending_fallback_from_replyable_error(
     }
 }
 
-fn try_pending_fallback(
-    session: ReceiveSession,
-    outcome: SessionOutcome,
-) -> Result<ReceiveSession, Box<ReceiveSession>> {
+fn try_pending_fallback(session: ReceiveSession) -> Result<ReceiveSession, Box<ReceiveSession>> {
     match session {
-        ReceiveSession::MaybeInputsOwned(receiver) => Ok(pending_fallback_from(receiver, outcome)),
-        ReceiveSession::MaybeInputsSeen(receiver) => Ok(pending_fallback_from(receiver, outcome)),
-        ReceiveSession::OutputsUnknown(receiver) => Ok(pending_fallback_from(receiver, outcome)),
-        ReceiveSession::WantsOutputs(receiver) => Ok(pending_fallback_from(receiver, outcome)),
-        ReceiveSession::WantsInputs(receiver) => Ok(pending_fallback_from(receiver, outcome)),
-        ReceiveSession::WantsFeeRange(receiver) => Ok(pending_fallback_from(receiver, outcome)),
-        ReceiveSession::ProvisionalProposal(receiver) =>
-            Ok(pending_fallback_from(receiver, outcome)),
-        ReceiveSession::PayjoinProposal(receiver) => Ok(pending_fallback_from(receiver, outcome)),
+        ReceiveSession::MaybeInputsOwned(receiver) => Ok(pending_fallback_from(receiver)),
+        ReceiveSession::MaybeInputsSeen(receiver) => Ok(pending_fallback_from(receiver)),
+        ReceiveSession::OutputsUnknown(receiver) => Ok(pending_fallback_from(receiver)),
+        ReceiveSession::WantsOutputs(receiver) => Ok(pending_fallback_from(receiver)),
+        ReceiveSession::WantsInputs(receiver) => Ok(pending_fallback_from(receiver)),
+        ReceiveSession::WantsFeeRange(receiver) => Ok(pending_fallback_from(receiver)),
+        ReceiveSession::ProvisionalProposal(receiver) => Ok(pending_fallback_from(receiver)),
+        ReceiveSession::PayjoinProposal(receiver) => Ok(pending_fallback_from(receiver)),
         ReceiveSession::HasReplyableError(receiver) =>
-            pending_fallback_from_replyable_error(receiver, outcome),
-        ReceiveSession::Monitor(receiver) => Ok(pending_fallback_from(receiver, outcome)),
+            pending_fallback_from_replyable_error(receiver),
+        ReceiveSession::Monitor(receiver) => Ok(pending_fallback_from(receiver)),
         session => Err(Box::new(session)),
     }
 }
@@ -442,14 +434,13 @@ impl<State> core::ops::DerefMut for Receiver<State> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingFallback {
     fallback_tx: bitcoin::Transaction,
-    outcome: SessionOutcome,
 }
 
 impl Receiver<PendingFallback> {
     pub fn fallback_tx(&self) -> &bitcoin::Transaction { &self.state.fallback_tx }
 
     pub fn close(self) -> TerminalTransition<SessionEvent, ()> {
-        TerminalTransition::new(SessionEvent::Closed(self.state.outcome), ())
+        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Aborted), ())
     }
 }
 
@@ -460,7 +451,7 @@ impl<S: HasFallbackTx> Receiver<S> {
         NextStateTransition::success(
             SessionEvent::Cancelled,
             Receiver {
-                state: PendingFallback { fallback_tx, outcome: SessionOutcome::Cancel },
+                state: PendingFallback { fallback_tx },
                 session_context: self.session_context,
             },
         )
@@ -470,7 +461,7 @@ impl<S: HasFallbackTx> Receiver<S> {
 impl Receiver<Initialized> {
     /// Cancel before any fallback transaction exists.
     pub fn cancel(self) -> TerminalTransition<SessionEvent, ()> {
-        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Cancel), ())
+        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Aborted), ())
     }
 }
 
@@ -587,7 +578,7 @@ impl Receiver<Initialized> {
                 ))) =>
                     if directory_error.is_fatal() {
                         return MaybeFatalTransitionWithNoResults::fatal(
-                            SessionEvent::Closed(SessionOutcome::Failure),
+                            SessionEvent::Closed(SessionOutcome::Aborted),
                             e,
                         );
                     } else {
@@ -595,7 +586,7 @@ impl Receiver<Initialized> {
                     },
                 _ =>
                     return MaybeFatalTransitionWithNoResults::fatal(
-                        SessionEvent::Closed(SessionOutcome::Failure),
+                        SessionEvent::Closed(SessionOutcome::Aborted),
                         e,
                     ),
             },
@@ -724,7 +715,7 @@ pub struct UncheckedOriginalPayload {
 impl Receiver<UncheckedOriginalPayload> {
     /// Cancel before broadcast suitability has been checked.
     pub fn cancel(self) -> TerminalTransition<SessionEvent, ()> {
-        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Cancel), ())
+        TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Aborted), ())
     }
 }
 
@@ -1349,10 +1340,7 @@ impl Receiver<PayjoinProposal> {
                     MaybeFatalTransition::replyable_error(
                         SessionEvent::ProtocolFailed,
                         Receiver {
-                            state: PendingFallback {
-                                fallback_tx: self.state.fallback_tx(),
-                                outcome: SessionOutcome::Failure,
-                            },
+                            state: PendingFallback { fallback_tx: self.state.fallback_tx() },
                             session_context: self.session_context.clone(),
                         },
                         ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()),
@@ -1386,13 +1374,10 @@ impl Receiver<HasReplyableError> {
         match fallback_tx {
             Some(fallback_tx) => MaybeTerminalTransition::advance(
                 SessionEvent::Cancelled,
-                Receiver {
-                    state: PendingFallback { fallback_tx, outcome: SessionOutcome::Cancel },
-                    session_context,
-                },
+                Receiver { state: PendingFallback { fallback_tx }, session_context },
             ),
             None =>
-                MaybeTerminalTransition::terminate(SessionEvent::Closed(SessionOutcome::Cancel)),
+                MaybeTerminalTransition::terminate(SessionEvent::Closed(SessionOutcome::Aborted)),
         }
     }
 
@@ -1441,7 +1426,7 @@ impl Receiver<HasReplyableError> {
         let pending = self.pending_fallback_after_protocol_failure();
         let event = match &pending {
             Some(_) => SessionEvent::ProtocolFailed,
-            None => SessionEvent::Closed(SessionOutcome::Failure),
+            None => SessionEvent::Closed(SessionOutcome::Aborted),
         };
         let protocol_error =
             |e| ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into());
@@ -1464,7 +1449,7 @@ impl Receiver<HasReplyableError> {
 
     fn pending_fallback_after_protocol_failure(&self) -> Option<Receiver<PendingFallback>> {
         self.state.fallback_tx.clone().map(|fallback_tx| Receiver {
-            state: PendingFallback { fallback_tx, outcome: SessionOutcome::Failure },
+            state: PendingFallback { fallback_tx },
             session_context: self.session_context.clone(),
         })
     }
@@ -2046,7 +2031,7 @@ pub mod test {
         let pending_fallback = receiver.process_error_response(&response, ctx).save(&persister)?;
 
         assert!(pending_fallback.is_none());
-        assert_events(&persister, &[SessionEvent::Closed(SessionOutcome::Failure)], true);
+        assert_events(&persister, &[SessionEvent::Closed(SessionOutcome::Aborted)], true);
         Ok(())
     }
 
@@ -2087,7 +2072,7 @@ pub mod test {
             .expect_err("fatal response should error");
 
         assert!(err.api_error_ref().is_some());
-        assert_events(&persister, &[SessionEvent::Closed(SessionOutcome::Failure)], true);
+        assert_events(&persister, &[SessionEvent::Closed(SessionOutcome::Aborted)], true);
         Ok(())
     }
 
@@ -2240,7 +2225,7 @@ pub mod test {
         let persister = InMemoryPersister::<SessionEvent>::default();
         receiver(Initialized {}).cancel().save(&persister).expect("save should succeed");
 
-        assert_events(&persister, &[SessionEvent::Closed(SessionOutcome::Cancel)], true);
+        assert_events(&persister, &[SessionEvent::Closed(SessionOutcome::Aborted)], true);
     }
 
     #[test]
@@ -2253,7 +2238,7 @@ pub mod test {
             .save(&persister)
             .expect("save should succeed");
 
-        assert_events(&persister, &[SessionEvent::Closed(SessionOutcome::Cancel)], true);
+        assert_events(&persister, &[SessionEvent::Closed(SessionOutcome::Aborted)], true);
     }
 
     #[test]
@@ -2298,7 +2283,7 @@ pub mod test {
                 .expect("save should succeed");
 
         assert!(pending_fallback.is_none());
-        assert_events(&persister, &[SessionEvent::Closed(SessionOutcome::Cancel)], true);
+        assert_events(&persister, &[SessionEvent::Closed(SessionOutcome::Aborted)], true);
     }
 
     #[test]
@@ -2312,9 +2297,9 @@ pub mod test {
             (
                 vec![
                     SessionEvent::Created(SHARED_CONTEXT.clone()),
-                    SessionEvent::Closed(SessionOutcome::Cancel),
+                    SessionEvent::Closed(SessionOutcome::Aborted),
                 ],
-                ReceiveSession::Closed(SessionOutcome::Cancel),
+                ReceiveSession::Closed(SessionOutcome::Aborted),
             ),
             (
                 vec![
@@ -2323,9 +2308,9 @@ pub mod test {
                         original: original.clone(),
                         reply_key: None,
                     },
-                    SessionEvent::Closed(SessionOutcome::Cancel),
+                    SessionEvent::Closed(SessionOutcome::Aborted),
                 ],
-                ReceiveSession::Closed(SessionOutcome::Cancel),
+                ReceiveSession::Closed(SessionOutcome::Aborted),
             ),
             (
                 vec![
@@ -2338,10 +2323,7 @@ pub mod test {
                     SessionEvent::Cancelled,
                 ],
                 ReceiveSession::PendingFallback(Receiver {
-                    state: PendingFallback {
-                        fallback_tx: expected_tx.clone(),
-                        outcome: SessionOutcome::Cancel,
-                    },
+                    state: PendingFallback { fallback_tx: expected_tx.clone() },
                     session_context: SHARED_CONTEXT.clone(),
                 }),
             ),
@@ -2357,10 +2339,7 @@ pub mod test {
                     SessionEvent::Cancelled,
                 ],
                 ReceiveSession::PendingFallback(Receiver {
-                    state: PendingFallback {
-                        fallback_tx: expected_tx.clone(),
-                        outcome: SessionOutcome::Cancel,
-                    },
+                    state: PendingFallback { fallback_tx: expected_tx.clone() },
                     session_context: SHARED_CONTEXT.clone(),
                 }),
             ),
@@ -2375,10 +2354,7 @@ pub mod test {
                     SessionEvent::ProtocolFailed,
                 ],
                 ReceiveSession::PendingFallback(Receiver {
-                    state: PendingFallback {
-                        fallback_tx: expected_tx.clone(),
-                        outcome: SessionOutcome::Failure,
-                    },
+                    state: PendingFallback { fallback_tx: expected_tx.clone() },
                     session_context: SHARED_CONTEXT.clone(),
                 }),
             ),
@@ -2394,10 +2370,7 @@ pub mod test {
                     SessionEvent::ProtocolFailed,
                 ],
                 ReceiveSession::PendingFallback(Receiver {
-                    state: PendingFallback {
-                        fallback_tx: expected_tx,
-                        outcome: SessionOutcome::Failure,
-                    },
+                    state: PendingFallback { fallback_tx: expected_tx },
                     session_context: SHARED_CONTEXT.clone(),
                 }),
             ),
@@ -2409,9 +2382,9 @@ pub mod test {
                         reply_key: None,
                     },
                     SessionEvent::GotReplyableError(replyable_error.clone()),
-                    SessionEvent::Closed(SessionOutcome::Cancel),
+                    SessionEvent::Closed(SessionOutcome::Aborted),
                 ],
-                ReceiveSession::Closed(SessionOutcome::Cancel),
+                ReceiveSession::Closed(SessionOutcome::Aborted),
             ),
             (
                 vec![
@@ -2422,9 +2395,9 @@ pub mod test {
                     },
                     SessionEvent::CheckedBroadcastSuitability(),
                     SessionEvent::Cancelled,
-                    SessionEvent::Closed(SessionOutcome::Cancel),
+                    SessionEvent::Closed(SessionOutcome::Aborted),
                 ],
-                ReceiveSession::Closed(SessionOutcome::Cancel),
+                ReceiveSession::Closed(SessionOutcome::Aborted),
             ),
             (
                 vec![
@@ -2432,9 +2405,9 @@ pub mod test {
                     SessionEvent::RetrievedOriginalPayload { original, reply_key: None },
                     SessionEvent::CheckedBroadcastSuitability(),
                     SessionEvent::ProtocolFailed,
-                    SessionEvent::Closed(SessionOutcome::Failure),
+                    SessionEvent::Closed(SessionOutcome::Aborted),
                 ],
-                ReceiveSession::Closed(SessionOutcome::Failure),
+                ReceiveSession::Closed(SessionOutcome::Aborted),
             ),
         ];
 

@@ -38,19 +38,21 @@ impl From<receive::Error> for ReceiverError {
     }
 }
 
-/// Returns `true` if the receiver error is caused by an expired v2 session.
+/// Error returned when a receiver request could not be created.
 ///
-/// Mirrors [`payjoin::receive::Error::is_expired`] so bindings that catch the
-/// top-level `ReceiverError` can branch on expiry without matching the Display
-/// string. uniffi attaches methods to Object types, not to error enums, so the
-/// predicate is exposed as a free function over the caught error.
+/// Returned by `create_poll_request` and `create_post_request`. uniffi attaches
+/// methods to Object types, so the expiry predicate is a method here rather than
+/// a free function over the top-level `ReceiverError`.
+#[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
+#[error(transparent)]
+pub struct ReceiverCreateRequestError(#[from] receive::v2::CreateRequestError);
+
 #[uniffi::export]
-pub fn receiver_error_is_expired(error: &ReceiverError) -> bool {
-    match error {
-        ReceiverError::Protocol(e) =>
-            matches!(&e.0, receive::ProtocolError::V2(session) if session.is_expired()),
-        _ => false,
-    }
+impl ReceiverCreateRequestError {
+    /// Returns `true` if the request could not be created because the session
+    /// has expired.
+    pub fn is_expired(&self) -> bool { self.0.is_expired() }
 }
 
 /// Error that may occur during state machine transitions
@@ -290,7 +292,7 @@ mod tests {
 
     #[cfg(feature = "_test-utils")]
     #[test]
-    fn receiver_error_expiry_predicate() {
+    fn receiver_create_request_error_is_expired() {
         use std::str::FromStr;
         use std::time::Duration;
 
@@ -301,7 +303,7 @@ mod tests {
         use payjoin_test_utils::{EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
 
         // Build a receiver whose session is already expired, then surface the
-        // expiry error through the public polling API.
+        // expiry error through the dedicated create-request error.
         let address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
             .expect("valid address")
             .assume_checked();
@@ -317,12 +319,6 @@ mod tests {
             .expect("in-memory persister is infallible");
         let expired =
             receiver.create_poll_request(EXAMPLE_URL).map(|_| ()).expect_err("session is expired");
-        assert!(receiver_error_is_expired(&ReceiverError::from(expired)));
-
-        // A non-expiry error is not reported as expired.
-        let other = ReceiverError::from(receive::Error::Implementation(
-            payjoin::ImplementationError::from("not an expiry error"),
-        ));
-        assert!(!receiver_error_is_expired(&other));
+        assert!(ReceiverCreateRequestError::from(expired).is_expired());
     }
 }

@@ -3,8 +3,8 @@ use std::sync::{Arc, RwLock};
 
 pub use error::{
     AddressParseError, InputContributionError, InputPairError, JsonReply, OutputSubstitutionError,
-    ProtocolError, PsbtInputError, ReceiverBuilderError, ReceiverError, SelectionError,
-    SessionError,
+    ProtocolError, PsbtInputError, ReceiverBuilderError, ReceiverCreateRequestError, ReceiverError,
+    SelectionError, SessionError,
 };
 use payjoin::bitcoin::consensus::Decodable;
 use payjoin::bitcoin::psbt::Psbt;
@@ -689,7 +689,7 @@ impl Initialized {
     pub fn create_poll_request(
         &self,
         ohttp_relay: String,
-    ) -> Result<RequestResponse, ReceiverError> {
+    ) -> Result<RequestResponse, ReceiverCreateRequestError> {
         self.0
             .create_poll_request(ohttp_relay)
             .map(|(req, ctx)| RequestResponse {
@@ -1324,7 +1324,7 @@ impl PayjoinProposal {
     pub fn create_post_request(
         &self,
         ohttp_relay: String,
-    ) -> Result<RequestResponse, ReceiverError> {
+    ) -> Result<RequestResponse, ReceiverCreateRequestError> {
         self.0.clone().create_post_request(ohttp_relay).map_err(Into::into).map(|(req, ctx)| {
             RequestResponse { request: req.into(), client_response: Arc::new(ctx.into()) }
         })

@@ -3,8 +3,6 @@ use std::error;
 
 use crate::hpke::HpkeError;
 use crate::ohttp::{DirectoryResponseError, OhttpEncapsulationError};
-use crate::receive::error::Error;
-use crate::receive::ProtocolError;
 use crate::time::Time;
 
 /// Error that may occur during a v2 session typestate change
@@ -23,8 +21,8 @@ impl SessionError {
     pub fn is_expired(&self) -> bool { matches!(self.0, InternalSessionError::Expired(_)) }
 }
 
-impl From<InternalSessionError> for Error {
-    fn from(e: InternalSessionError) -> Self { Error::Protocol(ProtocolError::V2(e.into())) }
+impl From<crate::into_url::Error> for SessionError {
+    fn from(e: crate::into_url::Error) -> Self { SessionError(InternalSessionError::ParseUrl(e)) }
 }
 
 #[derive(Debug)]
@@ -39,16 +37,6 @@ pub(crate) enum InternalSessionError {
     Hpke(HpkeError),
     /// The directory returned a bad response
     DirectoryResponse(DirectoryResponseError),
-}
-
-impl From<OhttpEncapsulationError> for Error {
-    fn from(e: OhttpEncapsulationError) -> Self {
-        InternalSessionError::OhttpEncapsulation(e).into()
-    }
-}
-
-impl From<HpkeError> for Error {
-    fn from(e: HpkeError) -> Self { InternalSessionError::Hpke(e).into() }
 }
 
 impl fmt::Display for SessionError {
@@ -79,6 +67,79 @@ impl error::Error for SessionError {
     }
 }
 
+/// Error returned when a receiver request could not be created.
+///
+/// Mirrors [`crate::send::v2::CreateRequestError`]: a narrow, opaque error for
+/// the `create_poll_request` and `create_post_request` constructors. It carries
+/// only their real failure modes, so callers can branch on expiry without
+/// matching the broad [`crate::receive::Error`] or its Display string.
+#[derive(Debug)]
+pub struct CreateRequestError(InternalCreateRequestError);
+
+#[derive(Debug)]
+pub(crate) enum InternalCreateRequestError {
+    /// Url parsing failed
+    Url(crate::into_url::Error),
+    /// Hybrid Public Key Encryption failed
+    Hpke(HpkeError),
+    /// OHTTP Encapsulation failed
+    OhttpEncapsulation(OhttpEncapsulationError),
+    /// The session has expired
+    Expired(Time),
+}
+
+impl fmt::Display for CreateRequestError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use InternalCreateRequestError::*;
+
+        match &self.0 {
+            Url(e) => write!(f, "cannot parse url: {e:#?}"),
+            Hpke(e) => write!(f, "v2 error: {e}"),
+            OhttpEncapsulation(e) => write!(f, "v2 error: {e}"),
+            Expired(_expiration) => write!(f, "session expired"),
+        }
+    }
+}
+
+impl error::Error for CreateRequestError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        use InternalCreateRequestError::*;
+
+        match &self.0 {
+            Url(e) => Some(e),
+            Hpke(e) => Some(e),
+            OhttpEncapsulation(e) => Some(e),
+            Expired(_) => None,
+        }
+    }
+}
+
+impl CreateRequestError {
+    /// Returns `true` if the request could not be created because the session
+    /// has expired.
+    pub fn is_expired(&self) -> bool { matches!(self.0, InternalCreateRequestError::Expired(_)) }
+}
+
+impl From<InternalCreateRequestError> for CreateRequestError {
+    fn from(value: InternalCreateRequestError) -> Self { CreateRequestError(value) }
+}
+
+impl From<crate::into_url::Error> for CreateRequestError {
+    fn from(e: crate::into_url::Error) -> Self {
+        CreateRequestError(InternalCreateRequestError::Url(e))
+    }
+}
+
+impl From<HpkeError> for CreateRequestError {
+    fn from(e: HpkeError) -> Self { CreateRequestError(InternalCreateRequestError::Hpke(e)) }
+}
+
+impl From<OhttpEncapsulationError> for CreateRequestError {
+    fn from(e: OhttpEncapsulationError) -> Self {
+        CreateRequestError(InternalCreateRequestError::OhttpEncapsulation(e))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,11 +154,12 @@ mod tests {
     }
 
     #[test]
-    fn top_level_error_is_expired() {
-        let expired = Error::from(InternalSessionError::Expired(Time::now()));
+    fn create_request_error_is_expired() {
+        let expired = CreateRequestError(InternalCreateRequestError::Expired(Time::now()));
         assert!(expired.is_expired());
 
-        let other = Error::from(InternalSessionError::ParseUrl(crate::into_url::Error::BadScheme));
+        let other =
+            CreateRequestError(InternalCreateRequestError::Url(crate::into_url::Error::BadScheme));
         assert!(!other.is_expired());
     }
 }

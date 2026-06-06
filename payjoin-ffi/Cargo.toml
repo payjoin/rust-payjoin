@@ -22,18 +22,18 @@ name = "uniffi-bindgen"
 path = "uniffi-bindgen.rs"
 
 [dependencies]
-async-trait = "0.1"
-getrandom = "0.2"
+async-trait = "0.1.89"
+getrandom = "0.2.10"
 icu_locale_core = "=2.0.1"
 icu_provider = "=2.0.0"
 lazy_static = "1.5.0"
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
 payjoin = { version = "1.0.0-rc.3", features = ["v1", "v2"] }
 payjoin-test-utils = { version = "0.0.1", optional = true }
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.142"
-thiserror = "2.0.14"
-tokio = { version = "1.47.1", features = ["full"], optional = true }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["full"], optional = true }
 uniffi = { version = "0.30.0", features = ["cli"] }
 uniffi-bindgen-cs = { git = "https://github.com/chavic/uniffi-bindgen-cs.git", rev = "878a3d269eacce64beadcd336ade0b7c8da09824", optional = true }
 uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", rev = "b0157aa", optional = true }

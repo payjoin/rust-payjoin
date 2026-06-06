@@ -482,6 +482,13 @@ impl Sender<PollingForProposal> {
         &self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
+        if self.session_context.pj_param.expiration().elapsed() {
+            return Err(InternalCreateRequestError::Expired(
+                self.session_context.pj_param.expiration(),
+            )
+            .into());
+        }
+
         // TODO unify with receiver's fn short_id_from_pubkey
         let hash = sha256::Hash::hash(
             &HpkeKeyPair::from_secret_key(&self.session_context.reply_key)
@@ -694,6 +701,23 @@ mod test {
         match result {
             Ok(_) => panic!("Expected error, got success"),
             Err(error) => assert_eq!(format!("{error}"), "session expired",),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_poll_request_fails_when_expired() -> Result<(), BoxError> {
+        let expiration = Time::try_from(SystemTime::now() - Duration::from_secs(1))
+            .expect("time in the past should be representable");
+        let sender = create_sender_context(expiration)?;
+        let sender =
+            Sender { state: PollingForProposal, session_context: sender.session_context.clone() };
+
+        let result = sender.create_poll_request(EXAMPLE_URL);
+
+        match result {
+            Ok(_) => panic!("Expected session expiration error, got success"),
+            Err(error) => assert!(error.is_expired()),
         }
         Ok(())
     }

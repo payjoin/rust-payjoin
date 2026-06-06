@@ -2,9 +2,9 @@ use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
 pub use error::{
-    AddressParseError, InputContributionError, InputPairError, JsonReply, OutputSubstitutionError,
-    ProtocolError, PsbtInputError, ReceiverBuilderError, ReceiverError, SelectionError,
-    SessionError,
+    AddressParseError, CoinSelectionError, InputContributionError, InputPairError, JsonReply,
+    OutputSubstitutionError, ProtocolError, PsbtInputError, ReceiverBuilderError,
+    ReceiverCreateRequestError, ReceiverError, SessionError,
 };
 use payjoin::bitcoin::consensus::Decodable;
 use payjoin::bitcoin::psbt::Psbt;
@@ -689,7 +689,7 @@ impl Initialized {
     pub fn create_poll_request(
         &self,
         ohttp_relay: String,
-    ) -> Result<RequestResponse, ReceiverError> {
+    ) -> Result<RequestResponse, ReceiverCreateRequestError> {
         self.0
             .create_poll_request(ohttp_relay)
             .map(|(req, ctx)| RequestResponse {
@@ -1069,7 +1069,7 @@ impl WantsInputs {
     pub fn try_preserving_privacy(
         &self,
         candidate_inputs: Vec<Arc<InputPair>>,
-    ) -> Result<Arc<InputPair>, SelectionError> {
+    ) -> Result<Arc<InputPair>, CoinSelectionError> {
         let candidate_inputs: Vec<payjoin::receive::InputPair> =
             candidate_inputs.into_iter().map(|pair| Arc::unwrap_or_clone(pair).into()).collect();
         match self.0.clone().try_preserving_privacy(candidate_inputs) {
@@ -1324,7 +1324,7 @@ impl PayjoinProposal {
     pub fn create_post_request(
         &self,
         ohttp_relay: String,
-    ) -> Result<RequestResponse, ReceiverError> {
+    ) -> Result<RequestResponse, ReceiverCreateRequestError> {
         self.0.clone().create_post_request(ohttp_relay).map_err(Into::into).map(|(req, ctx)| {
             RequestResponse { request: req.into(), client_response: Arc::new(ctx.into()) }
         })

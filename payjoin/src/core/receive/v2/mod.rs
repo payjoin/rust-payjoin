@@ -31,8 +31,8 @@ use std::time::Duration;
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut, Txid};
-pub(crate) use error::InternalSessionError;
-pub use error::SessionError;
+pub use error::{CreateRequestError, SessionError};
+pub(crate) use error::{InternalCreateRequestError, InternalSessionError};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 pub use session::{
@@ -45,7 +45,8 @@ use web_time::Duration;
 use self::sealed::FallbackTx;
 use super::error::{Error, InputContributionError};
 use super::{
-    common, InternalPayloadError, JsonReply, OutputSubstitutionError, ProtocolError, SelectionError,
+    common, CoinSelectionError, InternalPayloadError, JsonReply, OutputSubstitutionError,
+    ProtocolError,
 };
 use crate::core::Url;
 use crate::error::{InternalReplayError, ReplayError};
@@ -85,17 +86,14 @@ pub struct SessionContext {
 }
 
 impl SessionContext {
-    fn full_relay_url(&self, ohttp_relay: impl IntoUrl) -> Result<Url, InternalSessionError> {
-        let relay_base = ohttp_relay.into_url().map_err(InternalSessionError::ParseUrl)?;
+    fn full_relay_url(&self, ohttp_relay: impl IntoUrl) -> Result<Url, crate::into_url::Error> {
+        let relay_base = ohttp_relay.into_url()?;
 
         // Only reveal scheme and authority to the relay
-        let directory_base =
-            self.directory.join("/").map_err(|e| InternalSessionError::ParseUrl(e.into()))?;
+        let directory_base = self.directory.join("/")?;
 
         // Append that information as a path to the relay URL
-        relay_base
-            .join(&format!("/{directory_base}"))
-            .map_err(|e| InternalSessionError::ParseUrl(e.into()))
+        Ok(relay_base.join(&format!("/{directory_base}"))?)
     }
 
     /// The mailbox ID where the receiver expects the sender's Original PSBT.
@@ -541,12 +539,11 @@ impl Receiver<Initialized> {
     pub fn create_poll_request(
         &self,
         ohttp_relay: impl IntoUrl,
-    ) -> Result<(Request, ohttp::ClientResponse), Error> {
+    ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
         if self.session_context.expiration.elapsed() {
-            return Err(InternalSessionError::Expired(self.session_context.expiration).into());
+            return Err(InternalCreateRequestError::Expired(self.session_context.expiration).into());
         }
-        let (body, ohttp_ctx) =
-            self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulation)?;
+        let (body, ohttp_ctx) = self.fallback_req_body()?;
         let req = Request::new_v2(&self.session_context.full_relay_url(ohttp_relay)?, &body);
         Ok((req, ohttp_ctx))
     }
@@ -1088,7 +1085,7 @@ impl Receiver<WantsInputs> {
     pub fn try_preserving_privacy(
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
-    ) -> Result<InputPair, SelectionError> {
+    ) -> Result<InputPair, CoinSelectionError> {
         self.inner.try_preserving_privacy(candidate_inputs)
     }
 
@@ -1279,7 +1276,11 @@ impl Receiver<PayjoinProposal> {
     pub fn create_post_request(
         &self,
         ohttp_relay: impl IntoUrl,
-    ) -> Result<(Request, ohttp::ClientResponse), Error> {
+    ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
+        if self.session_context.expiration.elapsed() {
+            return Err(InternalCreateRequestError::Expired(self.session_context.expiration).into());
+        }
+
         let target_resource: Url;
         let body: Vec<u8>;
         let method: &str;
@@ -2116,6 +2117,26 @@ pub mod test {
 
         assert_eq!(pending_fallback.fallback_tx(), &expected_tx);
         assert_events(&persister, &[SessionEvent::ProtocolFailed], false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_post_request_expiration() -> Result<(), BoxError> {
+        let now = crate::time::Time::now();
+        let context = SessionContext { expiration: now, ..SHARED_CONTEXT.clone() };
+        let psbt_context = PsbtContext {
+            original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+            payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+        };
+        let receiver =
+            Receiver { state: PayjoinProposal { psbt_context }, session_context: context };
+
+        let expiration = receiver.create_post_request(EXAMPLE_URL);
+
+        match expiration {
+            Err(error) => assert!(error.is_expired()),
+            Ok(_) => panic!("Expected session expiration error, got success"),
+        }
         Ok(())
     }
 

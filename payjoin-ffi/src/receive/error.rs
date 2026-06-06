@@ -38,6 +38,23 @@ impl From<receive::Error> for ReceiverError {
     }
 }
 
+/// Error returned when a receiver request could not be created.
+///
+/// Returned by `create_poll_request` and `create_post_request`. uniffi attaches
+/// methods to Object types, so the expiry predicate is a method here rather than
+/// a free function over the top-level `ReceiverError`.
+#[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
+#[error(transparent)]
+pub struct ReceiverCreateRequestError(#[from] receive::v2::CreateRequestError);
+
+#[uniffi::export]
+impl ReceiverCreateRequestError {
+    /// Returns `true` if the request could not be created because the session
+    /// has expired.
+    pub fn is_expired(&self) -> bool { self.0.is_expired() }
+}
+
 /// Error that may occur during state machine transitions
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[error(transparent)]
@@ -174,6 +191,12 @@ impl From<ProtocolError> for JsonReply {
 #[error(transparent)]
 pub struct SessionError(#[from] receive::v2::SessionError);
 
+#[uniffi::export]
+impl SessionError {
+    /// Returns `true` if the session has expired.
+    pub fn is_expired(&self) -> bool { self.0.is_expired() }
+}
+
 /// Protocol error raised during output substitution.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display)]
@@ -203,7 +226,7 @@ impl From<FfiValidationError> for OutputSubstitutionError {
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display)]
 #[error(transparent)]
-pub struct SelectionError(#[from] receive::SelectionError);
+pub struct CoinSelectionError(#[from] receive::CoinSelectionError);
 
 /// Error that may occur when input contribution fails.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
@@ -248,3 +271,54 @@ impl From<FfiValidationError> for InputPairError {
 pub struct ReceiverReplayError(
     #[from] payjoin::error::ReplayError<receive::v2::ReceiveSession, receive::v2::SessionEvent>,
 );
+
+#[uniffi::export]
+impl ReceiverReplayError {
+    /// Returns `true` if the event log could not be replayed because the
+    /// session has expired.
+    pub fn is_expired(&self) -> bool { self.0.is_expired() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_and_replay_errors_expose_is_expired() {
+        // uniffi Objects expose the core predicate to bindings.
+        let _: fn(&SessionError) -> bool = SessionError::is_expired;
+        let _: fn(&ReceiverReplayError) -> bool = ReceiverReplayError::is_expired;
+    }
+
+    #[cfg(feature = "_test-utils")]
+    #[test]
+    fn receiver_create_request_error_is_expired() {
+        use std::str::FromStr;
+        use std::time::Duration;
+
+        use payjoin::bitcoin::Address;
+        use payjoin::persist::InMemoryPersister;
+        use payjoin::receive::v2::{ReceiverBuilder, SessionEvent};
+        use payjoin::OhttpKeys;
+        use payjoin_test_utils::{EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
+
+        // Build a receiver whose session is already expired, then surface the
+        // expiry error through the dedicated create-request error.
+        let address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
+            .expect("valid address")
+            .assume_checked();
+        let ohttp_keys = OhttpKeys(
+            ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid keys"),
+        );
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let receiver = ReceiverBuilder::new(address, EXAMPLE_URL, ohttp_keys)
+            .expect("valid builder")
+            .with_expiration(Duration::from_secs(0))
+            .build()
+            .save(&persister)
+            .expect("in-memory persister is infallible");
+        let expired =
+            receiver.create_poll_request(EXAMPLE_URL).map(|_| ()).expect_err("session is expired");
+        assert!(ReceiverCreateRequestError::from(expired).is_expired());
+    }
+}

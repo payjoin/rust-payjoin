@@ -353,10 +353,10 @@ impl std::error::Error for OutputSubstitutionError {
 /// This is currently opaque type because we aren't sure which variants will stay.
 /// You can only display it.
 #[derive(Debug, PartialEq, Eq)]
-pub struct SelectionError(InternalSelectionError);
+pub struct CoinSelectionError(InternalCoinSelectionError);
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum InternalSelectionError {
+pub(crate) enum InternalCoinSelectionError {
     /// No candidates available for selection
     Empty,
     /// Current privacy selection implementation only supports 2-output transactions
@@ -365,23 +365,23 @@ pub(crate) enum InternalSelectionError {
     NotFound,
 }
 
-impl fmt::Display for SelectionError {
+impl fmt::Display for CoinSelectionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
-            InternalSelectionError::Empty => write!(f, "No candidates available for selection"),
-            InternalSelectionError::UnsupportedOutputLength => write!(
+            InternalCoinSelectionError::Empty => write!(f, "No candidates available for selection"),
+            InternalCoinSelectionError::UnsupportedOutputLength => write!(
                 f,
                 "Current privacy selection implementation only supports 2-output transactions"
             ),
-            InternalSelectionError::NotFound =>
+            InternalCoinSelectionError::NotFound =>
                 write!(f, "No selection candidates improve privacy"),
         }
     }
 }
 
-impl error::Error for SelectionError {
+impl error::Error for CoinSelectionError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        use InternalSelectionError::*;
+        use InternalCoinSelectionError::*;
 
         match &self.0 {
             Empty => None,
@@ -390,8 +390,8 @@ impl error::Error for SelectionError {
         }
     }
 }
-impl From<InternalSelectionError> for SelectionError {
-    fn from(value: InternalSelectionError) -> Self { SelectionError(value) }
+impl From<InternalCoinSelectionError> for CoinSelectionError {
+    fn from(value: InternalCoinSelectionError) -> Self { CoinSelectionError(value) }
 }
 
 /// Error that may occur when input contribution fails.

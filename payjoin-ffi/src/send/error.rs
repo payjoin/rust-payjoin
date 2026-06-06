@@ -60,6 +60,13 @@ impl From<FfiValidationError> for SenderInputError {
 #[error(transparent)]
 pub struct CreateRequestError(#[from] send::v2::CreateRequestError);
 
+#[uniffi::export]
+impl CreateRequestError {
+    /// Returns `true` if the request could not be created because the session
+    /// has expired.
+    pub fn is_expired(&self) -> bool { self.0.is_expired() }
+}
+
 /// Error returned for v2-specific payload decapsulation errors.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display)]
@@ -104,6 +111,40 @@ impl From<send::ResponseError> for ResponseError {
             send::ResponseError::Validation(e) => ResponseError::Validation(Arc::new(e.into())),
             send::ResponseError::Unrecognized { error_code, message } =>
                 ResponseError::Unrecognized { error_code, msg: message },
+            // `send::ResponseError` is non_exhaustive; surface any future
+            // variant as an unrecognized error rather than failing to build.
+            other =>
+                ResponseError::Unrecognized { error_code: String::new(), msg: other.to_string() },
+        }
+    }
+}
+
+/// BIP-78 well-known error code, surfaced to bindings so senders can branch
+/// on the code instead of parsing the Display string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ErrorCode {
+    /// The payjoin endpoint is not available for now.
+    Unavailable,
+    /// The receiver added some inputs but could not bump the fee.
+    NotEnoughMoney,
+    /// This version of payjoin is not supported.
+    VersionUnsupported,
+    /// The receiver rejected the original PSBT.
+    OriginalPsbtRejected,
+    /// A well-known code newer than this binding understands.
+    Unrecognized,
+}
+
+impl From<send::ErrorCode> for ErrorCode {
+    fn from(value: send::ErrorCode) -> Self {
+        match value {
+            send::ErrorCode::Unavailable => ErrorCode::Unavailable,
+            send::ErrorCode::NotEnoughMoney => ErrorCode::NotEnoughMoney,
+            send::ErrorCode::VersionUnsupported => ErrorCode::VersionUnsupported,
+            send::ErrorCode::OriginalPsbtRejected => ErrorCode::OriginalPsbtRejected,
+            // `send::ErrorCode` is non_exhaustive; map codes this binding does
+            // not yet know to Unrecognized.
+            _ => ErrorCode::Unrecognized,
         }
     }
 }
@@ -114,6 +155,13 @@ impl From<send::ResponseError> for ResponseError {
 #[error(transparent)]
 pub struct WellKnownError(#[from] send::WellKnownError);
 
+#[uniffi::export]
+impl WellKnownError {
+    /// Return the BIP-78 well-known error code, letting senders branch on it
+    /// instead of parsing the Display string.
+    pub fn code(&self) -> ErrorCode { self.0.code().into() }
+}
+
 /// Error that may occur when the sender session event log is replayed
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display)]
@@ -121,6 +169,13 @@ pub struct WellKnownError(#[from] send::WellKnownError);
 pub struct SenderReplayError(
     #[from] payjoin::error::ReplayError<send::v2::SendSession, send::v2::SessionEvent>,
 );
+
+#[uniffi::export]
+impl SenderReplayError {
+    /// Returns `true` if the event log could not be replayed because the
+    /// session has expired.
+    pub fn is_expired(&self) -> bool { self.0.is_expired() }
+}
 
 /// Error that may occur during state machine transitions
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -199,5 +254,34 @@ where
             return SenderPersistedError::BuildSenderError(Arc::new(api_err.into()));
         }
         SenderPersistedError::Unexpected
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_request_error_exposes_is_expired() {
+        // A non-expiry CreateRequestError delegates to the core predicate.
+        let err = CreateRequestError::from(send::v2::CreateRequestError::from(
+            payjoin::IntoUrlError::BadScheme,
+        ));
+        assert!(!err.is_expired());
+
+        // The accessor is also exposed on the sender replay error.
+        let _: fn(&SenderReplayError) -> bool = SenderReplayError::is_expired;
+    }
+
+    #[test]
+    fn well_known_error_exposes_code() {
+        use payjoin::send::ErrorCode as Core;
+        assert_eq!(ErrorCode::from(Core::Unavailable), ErrorCode::Unavailable);
+        assert_eq!(ErrorCode::from(Core::NotEnoughMoney), ErrorCode::NotEnoughMoney);
+        assert_eq!(ErrorCode::from(Core::VersionUnsupported), ErrorCode::VersionUnsupported);
+        assert_eq!(ErrorCode::from(Core::OriginalPsbtRejected), ErrorCode::OriginalPsbtRejected);
+
+        // The accessor is exposed on the binding's WellKnownError.
+        let _: fn(&WellKnownError) -> ErrorCode = WellKnownError::code;
     }
 }

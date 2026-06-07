@@ -16,6 +16,7 @@ home = "=0.5.11"
 libfuzzer-sys = { version = "0.4.10" }
 payjoin = { path = "../payjoin", default-features = false, features = [
   "_core",
+  "std",
   "v1",
   "v2",
 ] }

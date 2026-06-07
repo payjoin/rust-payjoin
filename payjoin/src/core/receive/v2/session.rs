@@ -1,9 +1,16 @@
+use alloc::boxed::Box;
+#[cfg(not(feature = "std"))]
+use alloc::vec;
+use alloc::vec::Vec;
+
 use serde::{Deserialize, Serialize};
 
 use super::{ReceiveSession, SessionContext};
 use crate::error::{InternalReplayError, ReplayError};
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::{AsyncSessionPersister, SessionPersister};
+#[cfg(feature = "std")]
+use crate::persist::AsyncSessionPersister;
+use crate::persist::SessionPersister;
 use crate::receive::{InputPair, JsonReply, OriginalPayload, PsbtContext};
 use crate::{ImplementationError, PjUri};
 
@@ -64,6 +71,7 @@ where
 }
 
 /// Async version of [replay_event_log]
+#[cfg(feature = "std")]
 pub async fn replay_event_log_async<P>(
     persister: &P,
 ) -> Result<(ReceiveSession, SessionHistory), ReplayError<ReceiveSession, SessionEvent>>
@@ -225,6 +233,7 @@ pub enum SessionOutcome {
 mod tests {
     use std::time::{Duration, SystemTime};
 
+    #[allow(unused_imports)]
     use payjoin_test_utils::{BoxError, EXAMPLE_URL};
 
     use super::*;
@@ -243,6 +252,8 @@ mod tests {
             session_context: SHARED_CONTEXT.clone(),
         }
     }
+    #[cfg(feature = "v1")]
+    use crate::core::OutputSubstitution;
 
     #[test]
     fn test_session_event_serialization_roundtrip() {
@@ -851,13 +862,16 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "v1")]
     fn test_session_history_uri() -> Result<(), BoxError> {
         let session_context = SHARED_CONTEXT.clone();
         let events = vec![SessionEvent::Created(session_context.clone())];
 
-        let uri = SessionHistory { events }.pj_uri();
+        let binding = SessionHistory { events };
+        let uri = binding.pj_uri();
 
         assert_ne!(uri.extras.pj_param.endpoint().as_str(), EXAMPLE_URL);
+        #[cfg(feature = "v1")]
         assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
 
         Ok(())

@@ -1,10 +1,18 @@
 //! Payjoin v2 URI functionality
 
-use std::collections::BTreeMap;
-use std::str::FromStr;
+use alloc::collections::BTreeMap;
+use alloc::fmt;
+use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use core::error;
+use core::str::FromStr;
+#[cfg(feature = "std")]
+use std::error;
 
 use bitcoin::bech32::Hrp;
 
+use crate::alloc::string::ToString;
+#[cfg(feature = "v2-ohttp")]
 use crate::core::Url;
 use crate::hpke::HpkePublicKey;
 use crate::ohttp::OhttpKeys;
@@ -108,21 +116,46 @@ impl PjParam {
 
     pub(super) fn parse(url: Url) -> Result<Self, PjParseError> {
         let path_segments: Vec<&str> = url.path_segments().map(|c| c.collect()).unwrap_or_default();
-        let id = if path_segments.len() == 1 {
-            ShortId::from_str(path_segments[0]).map_err(|_| PjParseError::NotV2)?
-        } else {
+
+        let non_empty_segments: Vec<&str> =
+            path_segments.iter().filter(|s| !s.is_empty()).copied().collect();
+
+        if non_empty_segments.len() > 1 {
             return Err(PjParseError::NotV2);
+        }
+
+        let fragment = match url.fragment() {
+            Some(f) => f,
+            None => return Err(PjParseError::NotV2),
         };
 
-        if let Some(fragment) = url.fragment() {
-            if fragment.chars().any(|c| c.is_lowercase()) {
-                return Err(PjParseError::LowercaseFragment);
-            }
-
-            if !fragment.contains("RK1") || !fragment.contains("OH1") || !fragment.contains("EX1") {
-                return Err(PjParseError::NotV2);
-            }
+        if fragment.is_empty() {
+            return Err(PjParseError::NotV2);
         }
+
+        let has_valid_short_id =
+            non_empty_segments.len() == 1 && ShortId::from_str(non_empty_segments[0]).is_ok();
+
+        if has_valid_short_id && fragment.chars().any(|c| c.is_lowercase()) {
+            return Err(PjParseError::LowercaseFragment);
+        }
+
+        let has_all_v2_params =
+            fragment.contains("RK1") && fragment.contains("OH1") && fragment.contains("EX1");
+
+        if !has_all_v2_params {
+            return Err(PjParseError::NotV2);
+        }
+
+        if fragment.chars().any(|c| c.is_lowercase()) {
+            return Err(PjParseError::LowercaseFragment);
+        }
+
+        let id = if non_empty_segments.len() == 1 {
+            ShortId::from_str(non_empty_segments[0]).map_err(|_| PjParseError::NotV2)?
+        } else {
+            ShortId([0u8; 8])
+        };
 
         let rk = receiver_pubkey(&url).map_err(PjParseError::InvalidReceiverPubkey)?;
         let oh = ohttp(&url).map_err(PjParseError::InvalidOhttpKeys)?;
@@ -155,12 +188,12 @@ pub(crate) enum ParseFragmentError {
     AmbiguousDelimiter,
 }
 
-impl std::error::Error for ParseFragmentError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
+impl error::Error for ParseFragmentError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> { None }
 }
 
-impl std::fmt::Display for ParseFragmentError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ParseFragmentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ParseFragmentError::*;
 
         match &self {
@@ -263,8 +296,8 @@ pub(super) enum PjParseError {
     InvalidExp(ParseExpParamError),
 }
 
-impl std::fmt::Display for PjParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for PjParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             PjParseError::NotV2 => write!(f, "URL is not a valid v2 URL"),
             PjParseError::LowercaseFragment => write!(f, "fragment contains lowercase characters"),
@@ -275,8 +308,8 @@ impl std::fmt::Display for PjParseError {
     }
 }
 
-impl std::error::Error for PjParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl error::Error for PjParseError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
             PjParseError::NotV2 => None,
             PjParseError::LowercaseFragment => None,
@@ -295,8 +328,8 @@ pub(super) enum ParseOhttpKeysParamError {
     InvalidFragment(ParseFragmentError),
 }
 
-impl std::fmt::Display for ParseOhttpKeysParamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ParseOhttpKeysParamError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ParseOhttpKeysParamError::*;
 
         match &self {
@@ -308,8 +341,8 @@ impl std::fmt::Display for ParseOhttpKeysParamError {
     }
 }
 
-impl std::error::Error for ParseOhttpKeysParamError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl error::Error for ParseOhttpKeysParamError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         use ParseOhttpKeysParamError::*;
         match &self {
             MissingOhttpKeys => None,
@@ -328,8 +361,8 @@ pub(super) enum ParseExpParamError {
     InvalidFragment(ParseFragmentError),
 }
 
-impl std::fmt::Display for ParseExpParamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ParseExpParamError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ParseExpParamError::*;
 
         match &self {
@@ -342,8 +375,8 @@ impl std::fmt::Display for ParseExpParamError {
     }
 }
 
-impl std::error::Error for ParseExpParamError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl error::Error for ParseExpParamError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         use ParseExpParamError::*;
         match &self {
             MissingExp => None,
@@ -362,8 +395,8 @@ pub(super) enum ParseReceiverPubkeyParamError {
     InvalidFragment(ParseFragmentError),
 }
 
-impl std::fmt::Display for ParseReceiverPubkeyParamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl fmt::Display for ParseReceiverPubkeyParamError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use ParseReceiverPubkeyParamError::*;
 
         match &self {
@@ -376,8 +409,8 @@ impl std::fmt::Display for ParseReceiverPubkeyParamError {
     }
 }
 
-impl std::error::Error for ParseReceiverPubkeyParamError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl error::Error for ParseReceiverPubkeyParamError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         use ParseReceiverPubkeyParamError::*;
 
         match &self {
@@ -391,9 +424,12 @@ impl std::error::Error for ParseReceiverPubkeyParamError {
 
 #[cfg(test)]
 mod tests {
-    use payjoin_test_utils::{BoxError, EXAMPLE_URL};
+    #[cfg(all(feature = "v1", feature = "v2"))]
+    use payjoin_test_utils::BoxError;
+    use payjoin_test_utils::EXAMPLE_URL;
 
     use super::*;
+    #[cfg(all(feature = "v1", feature = "v2"))]
     use crate::{Uri, UriExt};
 
     #[test]
@@ -543,6 +579,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "v1")]
     fn test_valid_v2_url_fragment_on_bip21() {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
                    &pjos=0&pj=HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ\
@@ -562,7 +599,18 @@ mod tests {
     }
 
     #[test]
-    fn test_v2_failed_url_fragment() -> Result<(), BoxError> {
+    #[cfg(all(feature = "v1", feature = "v2"))]
+    fn test_failed_url_fragment() -> Result<(), BoxError> {
+        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
+                   &pjos=0&pj=HTTPS://EXAMPLE.COM/missing_short_id\
+                   %23oh1qypm5jxyns754y4r45qwe336qfx6zr8dqgvqculvztv20tfveydmfqc";
+        let extras = Uri::try_from(uri).unwrap().extras;
+        match extras {
+            crate::uri::MaybePayjoinExtras::Supported(extras) => {
+                assert!(matches!(extras.pj_param, crate::uri::PjParam::V1(_)));
+            }
+            _ => panic!("Expected v1 pjparam"),
+        }
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
                    &pjos=0&pj=HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ\
                    %23ex1c4uc6es-oh1qypm5jxyns754y4r45qwe336qfx6zr8dqgvqculvztv20tfveydmfqc-rk1q0djs3vvdxwqqtlq8022qgxsx7ml9phz6edsf6akewqg758jps2ev";
@@ -678,5 +726,18 @@ mod tests {
         // Missing multiple parameters (only RK1 present) - tests last part of OR condition
         let url_only_rk1 = Url::parse("https://example.com/TXJCGKTKXLUUZ#RK1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC").unwrap();
         assert!(matches!(PjParam::parse(url_only_rk1), Err(PjParseError::NotV2)));
+    }
+
+    const VALID_V2_FRAGMENT: &str = "RK1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-\
+    OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-\
+    EX1C4UC6ES";
+
+    #[test]
+    fn pj_param_parse_rejects_v2_url_with_multiple_path_segments() {
+        let url =
+            Url::parse(&format!("https://example.com/TXJCGKTKXLUUZ/EXTRA#{VALID_V2_FRAGMENT}"))
+                .unwrap();
+
+        assert!(matches!(PjParam::parse(url), Err(PjParseError::NotV2)));
     }
 }

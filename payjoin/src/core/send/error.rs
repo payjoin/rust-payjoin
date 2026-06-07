@@ -62,6 +62,7 @@ impl fmt::Display for BuildSenderError {
     }
 }
 
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 impl std::error::Error for BuildSenderError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use InternalBuildSenderError::*;

@@ -1,6 +1,11 @@
+#![cfg(any(feature = "v2", feature = "v2-ohttp"))]
+use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use core::error;
 use core::fmt;
+use core::ops::Deref;
+#[cfg(feature = "std")]
 use std::error;
-use std::ops::Deref;
 
 use bitcoin::key::constants::{ELLSWIFT_ENCODING_SIZE, PUBLIC_KEY_SIZE};
 use bitcoin::secp256k1;
@@ -195,6 +200,7 @@ pub fn decrypt_message_a(
     message_a: &[u8],
     receiver_sk: &HpkeSecretKey,
 ) -> Result<(Vec<u8>, HpkePublicKey), HpkeError> {
+    #[cfg(feature = "std")]
     use std::io::{Cursor, Read};
 
     let mut cursor = Cursor::new(message_a);
@@ -243,6 +249,7 @@ pub fn encrypt_message_b(
     Ok(message_b)
 }
 
+#[cfg(feature = "std")]
 pub fn decrypt_message_b(
     message_b: &[u8],
     receiver_pk: HpkePublicKey,

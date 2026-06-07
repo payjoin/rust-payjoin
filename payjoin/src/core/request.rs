@@ -1,8 +1,12 @@
+use alloc::string::String;
+use alloc::vec::Vec;
+
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 use crate::core::Url;
 #[cfg(feature = "v1")]
 const V1_REQ_CONTENT_TYPE: &str = "text/plain";
 
-#[cfg(feature = "v2")]
+#[cfg(feature = "v2-ohttp")]
 const V2_REQ_CONTENT_TYPE: &str = "message/ohttp-req";
 
 /// Represents data that needs to be transmitted to the receiver or payjoin directory.
@@ -34,7 +38,7 @@ impl Request {
     }
 
     /// Construct a new v2 request.
-    #[cfg(feature = "v2")]
+    #[cfg(feature = "v2-ohttp")]
     pub(crate) fn new_v2(
         url: &Url,
         body: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES],

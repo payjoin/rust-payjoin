@@ -2,12 +2,20 @@
 //! This module isn't meant to be exposed publicly, but for v1 and v2
 //! APIs to expose as relevant typestates.
 
-use std::cmp::{max, min};
-use std::collections::HashSet;
+extern crate alloc;
+
+use alloc::collections::BTreeSet as HashSet;
+#[cfg(not(feature = "std"))]
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cmp::{max, min};
 
 use bitcoin::psbt::Psbt;
+use bitcoin::secp256k1::rand;
+#[cfg(feature = "std")]
 use bitcoin::secp256k1::rand::seq::SliceRandom;
-use bitcoin::secp256k1::rand::{self, Rng};
+#[cfg(feature = "std")]
+use bitcoin::secp256k1::rand::Rng;
 use bitcoin::{Amount, FeeRate, Script, TxIn, TxOut, Weight};
 use serde::{Deserialize, Serialize};
 
@@ -104,6 +112,7 @@ impl WantsOutputs {
     /// Like [`Self::replace_receiver_outputs`], this leaves the receiver holding a single
     /// output, carrying the drain output's value. Any further receiver outputs a prior
     /// call added are dropped, and their value goes to fees.
+    #[cfg(feature = "std")]
     pub fn substitute_receiver_script(
         self,
         output_script: &Script,
@@ -127,6 +136,7 @@ impl WantsOutputs {
     /// example, if the receiver adds their own input, then the drain script output will have its
     /// value increased by the same amount. Or if an output needs to have its value reduced to
     /// account for fees, the value of the output for this script will be reduced.
+    #[cfg(feature = "std")]
     pub fn replace_receiver_outputs(
         self,
         replacement_outputs: impl IntoIterator<Item = TxOut>,
@@ -194,7 +204,10 @@ impl WantsOutputs {
             }
         }
         // Insert all remaining outputs at random indices for privacy
+        #[cfg(feature = "std")]
         interleave_shuffle(&mut outputs, &mut replacement_outputs, rng);
+        #[cfg(not(feature = "std"))]
+        interleave_shuffle(&mut outputs, &mut replacement_outputs);
         // Identify the receiver output that will be used for change and fees
         let change_vout = outputs.iter().position(|txo| txo.script_pubkey == *drain_script);
         // Update the payjoin PSBT outputs
@@ -227,12 +240,12 @@ impl WantsOutputs {
 /// maintaining the relative order in `original` but randomly inserting elements from `new`.
 ///
 /// The combined result replaces the contents of `original`.
+#[cfg(feature = "std")]
 fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [T], rng: &mut R) {
     // Shuffle the substitute_outputs
     new.shuffle(rng);
     // Create a new vector to store the combined result
     let mut combined = Vec::with_capacity(original.len() + new.len());
-    // Initialize indices
     let mut original_index = 0;
     let mut new_index = 0;
     // Interleave elements
@@ -246,6 +259,11 @@ fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [
         }
     }
     *original = combined;
+}
+
+#[cfg(not(feature = "std"))]
+fn interleave_shuffle<T: Clone>(original: &mut Vec<T>, new: &mut [T]) {
+    original.extend_from_slice(new);
 }
 
 /// Typestate for a checked proposal which the receiver may contribute inputs to.
@@ -384,11 +402,15 @@ impl WantsInputs {
         }
 
         // Insert contributions at random indices for privacy
+        #[cfg(feature = "std")]
         let mut rng = rand::thread_rng();
         let receiver_input_amount =
             checked_sum(inputs.iter().map(|input_pair| input_pair.previous_txout().value))?;
         for input_pair in inputs.clone() {
+            #[cfg(feature = "std")]
             let index = rng.gen_range(0..=self.proposal.payjoin_psbt.unsigned_tx.input.len());
+            #[cfg(not(feature = "std"))]
+            let index = self.proposal.payjoin_psbt.unsigned_tx.input.len();
             payjoin_psbt.inputs.insert(index, input_pair.psbtin);
             payjoin_psbt
                 .unsigned_tx

@@ -1,5 +1,12 @@
-use std::borrow::Borrow;
-use std::fmt;
+#[cfg(feature = "std")]
+use alloc::format;
+use alloc::string::String;
+use core::borrow::Borrow;
+#[cfg(not(feature = "std"))]
+use core::error;
+use core::fmt;
+#[cfg(feature = "std")]
+use std::error;
 
 use bitcoin::FeeRate;
 use tracing::warn;
@@ -134,6 +141,7 @@ impl Params {
         Ok(params)
     }
 
+    #[cfg(feature = "std")]
     pub fn from_query_str(
         query: &str,
         supported_versions: &'static [Version],
@@ -161,8 +169,8 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
+impl error::Error for Error {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> { None }
 }
 
 #[cfg(test)]

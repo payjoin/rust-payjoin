@@ -1,7 +1,14 @@
 //! Utilities to make work with PSBTs easier
 
+#[cfg(not(feature = "std"))]
+use alloc::boxed::Box;
+#[cfg(not(feature = "std"))]
+use alloc::collections::BTreeMap;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+use core::fmt;
+#[cfg(feature = "std")]
 use std::collections::BTreeMap;
-use std::fmt;
 
 use bitcoin::address::FromScriptError;
 use bitcoin::psbt::Psbt;
@@ -30,6 +37,7 @@ impl fmt::Display for InconsistentPsbt {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for InconsistentPsbt {}
 
 /// Our Psbt type for validation and utilities
@@ -225,7 +233,6 @@ impl InternalInputPair<'_> {
                 // redeemScript can be extracted from scriptSig for signed P2SH inputs
                 let redeem_script = if let Some(ref script_sig) = self.psbtin.final_script_sig {
                     script_sig.redeem_script()
-                    // try the PSBT redeem_script field for unsigned inputs.
                 } else {
                     self.psbtin.redeem_script.as_ref().map(|script| script.as_ref())
                 };
@@ -300,6 +307,7 @@ impl fmt::Display for PrevTxOutError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for PrevTxOutError {}
 
 #[derive(Debug, PartialEq, Eq)]
@@ -334,6 +342,7 @@ impl fmt::Display for InternalPsbtInputError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for InternalPsbtInputError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -372,6 +381,7 @@ impl fmt::Display for PsbtInputError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{}", self.0) }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for PsbtInputError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.0) }
 }
@@ -388,6 +398,7 @@ impl fmt::Display for PsbtInputsError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for PsbtInputsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.error) }
 }
@@ -411,6 +422,7 @@ impl fmt::Display for AddressTypeError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for AddressTypeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -447,6 +459,7 @@ impl fmt::Display for InputWeightError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for InputWeightError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {

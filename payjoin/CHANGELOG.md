@@ -1,5 +1,49 @@
 # Payjoin Changelog
 
+## 1.0.0-rc.3
+
+This release introduces sender and receiver cancel() APIs, fallback typestates for both sender and receiver, merges Cancel/Failure error variants and carves out dedicated errors (CoinSelectionError, DecapsulationError, dedicated create-request error), promotes InMemoryTestPersister to InMemoryPersister while removing NoopSessionPersister, replaces the url crate dependency with an internal Url type, adds is_expired and ErrorCode/WellKnownError::code to the error hierarchy, and removes sender sigs from receiver psbt_to_sign.
+
+Selected Improvements:
+
+### Error Stabilization
+
+- Stabilize 1.0 errors by carving out errors used in state machine control flow & keeping the rest opaque (#1602)
+- Merge `Cancel` and `Failure` variants in sender and receiver (#1607)
+- Rename `EncapsulationError` to `DecapsulationError` (#1601)
+- Rename `SelectionError` to `CoinSelectionError`
+
+### Fallback and Cancel APIs
+
+- Receiver fallback typestate (#1558)
+- Sender Pending Fallback state (#1557)
+- Send `cancel()` (#1496)
+- Receive `cancel()` (#1470)
+- Remove sender sigs from receiver `psbt_to_sign` (#1560)
+
+### Persistence
+
+- Ship `InMemoryPersister`, replacing `NoopSessionPersister` (#1528)
+- Enforce single-owner contract on `InMemoryPersister` (#1534)
+- Document persistence backwards/forwards compatibility consideration (#1465)
+
+### Dependency and API Refinements
+
+- Use internal Url struct to replace the url crate dependency (#1377)
+- Disable `reqwest` dep when `_manual-tls` is enabled (#1484)
+- Use official bitcoind-async-client release (#1441)
+- Update use of deprecated `from_sat_per_vb_unchecked` (#1502)
+- Test utils feature unification (#1599)
+- Not --all-features test suite (#1038)
+
+### Testing and Documentation
+
+- Add tests for `OriginalPayload` and `PsbtContext` (#1583)
+- Light refactor to v2 receiver for readability (#1585)
+- Fix unused results in session unit tests (#1512)
+- Document BIP77 v1 fallback behavior in `create_post_request` (#1593)
+- Remove redundant language from `finalize_proposal` rustdocs (#1567)
+
 ## 0.25.0
 
 Introduce monitoring typestates, replyable error handling, async

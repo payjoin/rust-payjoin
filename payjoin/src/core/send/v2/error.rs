@@ -1,5 +1,6 @@
-use core::fmt;
+use core::{error, fmt};
 
+#[cfg(feature = "v2-ohttp")]
 use crate::ohttp::DirectoryResponseError;
 use crate::time::Time;
 
@@ -13,10 +14,15 @@ pub struct CreateRequestError(InternalCreateRequestError);
 
 #[derive(Debug)]
 pub(crate) enum InternalCreateRequestError {
+    #[cfg(feature = "v2-ohttp")]
     Url(crate::into_url::Error),
+    #[cfg(feature = "v2-ohttp")]
     Hpke(crate::hpke::HpkeError),
+    #[cfg(feature = "v2-ohttp")]
     OhttpEncapsulation(crate::ohttp::OhttpEncapsulationError),
     Expired(Time),
+    #[cfg(not(feature = "std"))]
+    Implementation(crate::error::ImplementationError),
 }
 
 impl fmt::Display for CreateRequestError {
@@ -24,23 +30,33 @@ impl fmt::Display for CreateRequestError {
         use InternalCreateRequestError::*;
 
         match &self.0 {
+            #[cfg(feature = "v2-ohttp")]
             Url(e) => write!(f, "cannot parse url: {e:#?}"),
+            #[cfg(feature = "v2-ohttp")]
             Hpke(e) => write!(f, "v2 error: {e}"),
+            #[cfg(feature = "v2-ohttp")]
             OhttpEncapsulation(e) => write!(f, "v2 error: {e}"),
             Expired(_expiration) => write!(f, "session expired"),
+            #[cfg(not(feature = "std"))]
+            Implementation(e) => write!(f, "implementation error: {e}"),
         }
     }
 }
 
-impl std::error::Error for CreateRequestError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl error::Error for CreateRequestError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         use InternalCreateRequestError::*;
 
         match &self.0 {
+            #[cfg(feature = "v2-ohttp")]
             Url(error) => Some(error),
+            #[cfg(feature = "v2-ohttp")]
             Hpke(error) => Some(error),
+            #[cfg(feature = "v2-ohttp")]
             OhttpEncapsulation(error) => Some(error),
             Expired(_) => None,
+            #[cfg(not(feature = "std"))]
+            Implementation(e) => Some(e),
         }
     }
 }
@@ -55,6 +71,7 @@ impl CreateRequestError {
     pub fn is_expired(&self) -> bool { matches!(self.0, InternalCreateRequestError::Expired(_)) }
 }
 
+#[cfg(feature = "v2-ohttp")]
 impl From<crate::into_url::Error> for CreateRequestError {
     fn from(value: crate::into_url::Error) -> Self {
         CreateRequestError(InternalCreateRequestError::Url(value))
@@ -67,30 +84,42 @@ pub struct DecapsulationError(InternalDecapsulationError);
 
 #[derive(Debug)]
 pub(crate) enum InternalDecapsulationError {
-    /// The HPKE failed.
+    #[cfg(feature = "v2-ohttp")]
     Hpke(crate::hpke::HpkeError),
-    /// The directory returned a bad response
+    #[cfg(feature = "v2-ohttp")]
     DirectoryResponse(DirectoryResponseError),
+    #[cfg(not(feature = "std"))]
+    Implementation(crate::error::ImplementationError),
 }
 
 impl fmt::Display for DecapsulationError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use InternalDecapsulationError::*;
-
+    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
-            Hpke(error) => write!(f, "HPKE error: {error}"),
-            DirectoryResponse(e) => write!(f, "Directory response error: {e}"),
+            #[cfg(feature = "v2-ohttp")]
+            InternalDecapsulationError::Hpke(error) => write!(_f, "HPKE error: {error}"),
+            #[cfg(feature = "v2-ohttp")]
+            InternalDecapsulationError::DirectoryResponse(e) =>
+                write!(_f, "Directory response error: {e}"),
+            #[cfg(not(feature = "std"))]
+            InternalDecapsulationError::Implementation(e) =>
+                write!(_f, "implementation error: {e}"),
+            #[allow(unreachable_patterns)]
+            _ => unreachable!("InternalEncapsulationError is uninhabited in this configuration"),
         }
     }
 }
 
-impl std::error::Error for DecapsulationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        use InternalDecapsulationError::*;
-
+impl error::Error for DecapsulationError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self.0 {
-            Hpke(error) => Some(error),
-            DirectoryResponse(e) => Some(e),
+            #[cfg(feature = "v2-ohttp")]
+            InternalDecapsulationError::Hpke(error) => Some(error),
+            #[cfg(feature = "v2-ohttp")]
+            InternalDecapsulationError::DirectoryResponse(e) => Some(e),
+            #[cfg(not(feature = "std"))]
+            InternalDecapsulationError::Implementation(e) => Some(e),
+            #[allow(unreachable_patterns)]
+            _ => None,
         }
     }
 }
@@ -99,9 +128,10 @@ impl From<InternalDecapsulationError> for DecapsulationError {
     fn from(value: InternalDecapsulationError) -> Self { DecapsulationError(value) }
 }
 
+#[cfg(any(feature = "v2-ohttp", not(feature = "std")))]
 impl From<InternalDecapsulationError> for super::ResponseError {
     fn from(value: InternalDecapsulationError) -> Self {
-        super::InternalValidationError::V2Decapsulation(value.into()).into()
+        crate::send::error::InternalValidationError::V2Decapsulation(value.into()).into()
     }
 }
 

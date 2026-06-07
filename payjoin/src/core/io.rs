@@ -1,11 +1,12 @@
 //! IO-related types and functions. Specifically, fetching OHTTP keys from a payjoin directory.
+#[cfg(feature = "std")]
 use std::time::Duration;
 
 use http::header::ACCEPT;
 use reqwest::{Client, Proxy};
 
 use crate::into_url::IntoUrl;
-use crate::OhttpKeys;
+use crate::ohttp::OhttpKeys;
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
 ///

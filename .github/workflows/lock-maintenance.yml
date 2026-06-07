@@ -1,0 +1,25 @@
+name: Cargo lock maintenance
+on:
+  schedule:
+    - cron: "0 20 * * 0" # weekly at 20:00 UTC
+  workflow_dispatch:
+
+jobs:
+  update-lock-files:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: UPDATE_DEPS=true bash contrib/update-lock-files.sh
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
+          commit-message: "chore: update Cargo lock files"
+          title: "chore: update Cargo lock files"
+          branch: chore/cargo-lock-update
+          add-paths: |
+            Cargo-minimal.lock
+            Cargo-recent.lock

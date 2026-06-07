@@ -19,6 +19,7 @@ ohttp = { package = "bitcoin-ohttp", version = "0.7.0" }
 payjoin = { path = "../payjoin", default-features = false, features = [
   "arbitrary",
   "_core",
+  "std",
   "v1",
   "v2",
 ] }

@@ -434,6 +434,17 @@ mod test {
     }
 
     #[test]
+    fn test_always_disable_output_substitution() {
+        let mut pj_uri = pj_uri();
+        pj_uri.extras.output_substitution = OutputSubstitution::Enabled;
+        let sender = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
+            .always_disable_output_substitution()
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .expect("sender should succeed");
+        assert_eq!(sender.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
+    }
+
+    #[test]
     fn handle_json_errors() {
         let ctx = create_v1_context();
         let known_json_error = serde_json::json!({

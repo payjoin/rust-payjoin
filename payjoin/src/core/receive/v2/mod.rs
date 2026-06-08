@@ -1578,7 +1578,7 @@ pub(crate) fn pj_uri<'a>(
 pub mod test {
     use std::str::FromStr;
 
-    use bitcoin::{FeeRate, ScriptBuf, Witness};
+    use bitcoin::{Amount, FeeRate, ScriptBuf, Witness};
     use once_cell::sync::Lazy;
     use payjoin_test_utils::{
         BoxError, EXAMPLE_URL, KEM, KEY_ID, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT,
@@ -2233,6 +2233,36 @@ pub mod test {
             Receiver { state: provisional_proposal, session_context: SHARED_CONTEXT.clone() };
         let psbt = receiver.psbt_to_sign();
         assert_eq!(psbt, PARSED_PAYJOIN_PROPOSAL.clone());
+    }
+
+    #[test]
+    fn test_builder_with_amount() {
+        let persister = InMemoryPersister::default();
+        let amount = Amount::from_sat(100_000);
+        let receiver = ReceiverBuilder::new(
+            SHARED_CONTEXT.address.clone(),
+            SHARED_CONTEXT.directory.as_str(),
+            SHARED_CONTEXT.ohttp_keys.clone(),
+        )
+        .expect("constructor on test vector should not fail")
+        .with_amount(amount)
+        .build()
+        .save(&persister)
+        .expect("Persister shouldn't fail");
+
+        assert_eq!(receiver.session_context.amount, Some(amount));
+
+        let receiver = ReceiverBuilder::new(
+            SHARED_CONTEXT.address.clone(),
+            SHARED_CONTEXT.directory.as_str(),
+            SHARED_CONTEXT.ohttp_keys.clone(),
+        )
+        .expect("constructor on test vector should not fail")
+        .build()
+        .save(&persister)
+        .expect("Persister shouldn't fail");
+
+        assert_eq!(receiver.session_context.amount, None);
     }
 
     #[test]

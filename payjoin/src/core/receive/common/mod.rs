@@ -500,12 +500,12 @@ mod tests {
     use bitcoin::hashes::Hash;
     use bitcoin::key::rand::rngs::StdRng;
     use bitcoin::key::rand::SeedableRng;
-    use bitcoin::psbt::Input;
+    use bitcoin::psbt::{Input, PsbtSighashType};
     use bitcoin::secp256k1::Secp256k1;
     use bitcoin::taproot::LeafVersion;
     use bitcoin::{
-        Amount, Network, OutPoint, PubkeyHash, ScriptBuf, Sequence, TapLeafHash, Transaction, TxIn,
-        TxOut, Weight,
+        Amount, Network, OutPoint, PubkeyHash, ScriptBuf, Sequence, TapLeafHash, TapNodeHash,
+        Transaction, TxIn, TxOut, Weight, Witness,
     };
     use payjoin_test_utils::{DUMMY20, RECEIVER_INPUT_CONTRIBUTION};
 
@@ -862,6 +862,15 @@ mod tests {
         assert_eq!(p2tr_proposal.additional_input_weight(), Weight::from_wu(230));
     }
 
+    fn run_prepare_psbt(processed_psbt: Psbt) -> Psbt {
+        let psbt_context = WantsOutputs::new(original_from_test_vector(), vec![0])
+            .commit_outputs()
+            .commit_inputs()
+            .calculate_psbt_context_with_fee_range(None, None)
+            .expect("Contributed inputs should allow for valid fee contributions");
+        psbt_context.finalize_proposal(|_| Ok(processed_psbt.clone())).expect("Valid psbt")
+    }
+
     #[test]
     fn test_prepare_psbt_excludes_keypaths() {
         let original = original_from_test_vector();
@@ -901,26 +910,110 @@ mod tests {
             output.tap_internal_key = Some(x_only);
         }
 
-        let psbt_context = WantsOutputs::new(original_from_test_vector(), vec![0])
-            .commit_outputs()
-            .commit_inputs()
-            .calculate_psbt_context_with_fee_range(None, None)
-            .expect("Contributed inputs should allow for valid fee contributions");
-        let payjoin_proposal =
-            psbt_context.finalize_proposal(|_| Ok(processed_psbt.clone())).expect("Valid psbt");
+        let result = run_prepare_psbt(processed_psbt);
 
-        assert!(payjoin_proposal.xpub.is_empty());
-
-        for input in &payjoin_proposal.inputs {
+        assert!(result.xpub.is_empty());
+        for input in &result.inputs {
             assert!(input.bip32_derivation.is_empty());
             assert!(input.tap_key_origins.is_empty());
             assert!(input.tap_internal_key.is_none());
         }
-
-        for output in &payjoin_proposal.outputs {
+        for output in &result.outputs {
             assert!(output.bip32_derivation.is_empty());
             assert!(output.tap_key_origins.is_empty());
             assert!(output.tap_internal_key.is_none());
+        }
+    }
+
+    #[test]
+    fn test_prepare_psbt_preserves_input_fields() {
+        let original = original_from_test_vector();
+        let mut processed_psbt = original.psbt.clone();
+        let dummy_tx = processed_psbt.unsigned_tx.clone();
+
+        for input in &mut processed_psbt.inputs {
+            input.witness_utxo =
+                Some(TxOut { value: Amount::from_sat(100_000), script_pubkey: ScriptBuf::new() });
+            input.non_witness_utxo = Some(dummy_tx.clone());
+            input.final_script_sig = Some(ScriptBuf::from(vec![0x00, 0x01, 0x02]));
+            input.final_script_witness = Some(Witness::from_slice(&[&[0x03, 0x04, 0x05]]));
+        }
+
+        let result = run_prepare_psbt(processed_psbt);
+
+        for input in &result.inputs {
+            assert!(input.witness_utxo.is_some());
+            assert!(input.non_witness_utxo.is_some());
+            assert!(input.final_script_sig.is_some());
+            assert!(input.final_script_witness.is_some());
+        }
+    }
+
+    #[test]
+    fn test_prepare_psbt_strips_metadata() {
+        let original = original_from_test_vector();
+        let mut processed_psbt = original.psbt.clone();
+        let secp = Secp256k1::new();
+        let (_, pk) = secp.generate_keypair(&mut bitcoin::key::rand::thread_rng());
+        let (x_only, _) = pk.x_only_public_key();
+
+        for input in &mut processed_psbt.inputs {
+            input.sighash_type = Some(PsbtSighashType::from_u32(0x01));
+            input.tap_key_sig =
+                Some(bitcoin::taproot::Signature::from_slice(&[42u8; 64]).expect("valid sig"));
+            let sig = bitcoin::taproot::Signature::from_slice(&[42u8; 64]).expect("valid sig");
+            input.tap_script_sigs.insert(
+                (x_only, TapLeafHash::from_script(&ScriptBuf::new(), LeafVersion::TapScript)),
+                sig,
+            );
+            input.tap_merkle_root =
+                Some(TapNodeHash::from_slice(&[42u8; 32]).expect("valid tap node hash"));
+            input.bip32_derivation.insert(pk, (Fingerprint::default(), DerivationPath::default()));
+            input.tap_key_origins.insert(
+                x_only,
+                (
+                    vec![TapLeafHash::from_script(&ScriptBuf::new(), LeafVersion::TapScript)],
+                    (Fingerprint::default(), DerivationPath::default()),
+                ),
+            );
+            input.tap_internal_key = Some(x_only);
+            input.redeem_script = Some(ScriptBuf::new());
+            input.witness_script = Some(ScriptBuf::new());
+        }
+
+        for output in &mut processed_psbt.outputs {
+            output.bip32_derivation.insert(pk, (Fingerprint::default(), DerivationPath::default()));
+            output.tap_key_origins.insert(
+                x_only,
+                (
+                    vec![TapLeafHash::from_script(&ScriptBuf::new(), LeafVersion::TapScript)],
+                    (Fingerprint::default(), DerivationPath::default()),
+                ),
+            );
+            output.tap_internal_key = Some(x_only);
+            output.redeem_script = Some(ScriptBuf::new());
+            output.witness_script = Some(ScriptBuf::new());
+        }
+
+        let result = run_prepare_psbt(processed_psbt);
+
+        for input in &result.inputs {
+            assert!(input.sighash_type.is_none());
+            assert!(input.tap_key_sig.is_none());
+            assert!(input.tap_script_sigs.is_empty());
+            assert!(input.tap_merkle_root.is_none());
+            assert!(input.bip32_derivation.is_empty());
+            assert!(input.tap_key_origins.is_empty());
+            assert!(input.tap_internal_key.is_none());
+            assert!(input.redeem_script.is_none());
+            assert!(input.witness_script.is_none());
+        }
+        for output in &result.outputs {
+            assert!(output.bip32_derivation.is_empty());
+            assert!(output.tap_key_origins.is_empty());
+            assert!(output.tap_internal_key.is_none());
+            assert!(output.redeem_script.is_none());
+            assert!(output.witness_script.is_none());
         }
     }
 }

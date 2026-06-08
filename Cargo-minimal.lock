@@ -2914,6 +2914,7 @@ dependencies = [
  "bitcoin 0.32.100",
  "bitcoin-ohttp",
  "corepc-node",
+ "futures",
  "http",
  "once_cell",
  "payjoin",

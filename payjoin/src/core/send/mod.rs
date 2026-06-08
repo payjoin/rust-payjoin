@@ -1421,6 +1421,38 @@ mod test {
         }
 
         #[test]
+        fn test_process_proposal_rejects_different_script_in_our_output() -> Result<(), BoxError> {
+            let mut ctx = create_psbt_context()?;
+            ctx.fee_contribution = None;
+            ctx.output_substitution = OutputSubstitution::Enabled;
+
+            let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
+            let original_change = &ctx.original_psbt.unsigned_tx.output[0];
+            assert_ne!(original_change.script_pubkey, ctx.payee);
+
+            let change_pos = proposal
+                .unsigned_tx
+                .output
+                .iter()
+                .position(|o| o.script_pubkey == original_change.script_pubkey)
+                .expect("proposal should contain the change output");
+
+            // Replace the change output with one that has a different script
+            // but the same value, so the mutation would cause arm 3 to match
+            // and the value guard would pass (value >= original.value = true).
+            let dummy_script =
+                ScriptBuf::from_hex("0014ffffffffffffffffffffffffffffffffffffffffff")?;
+            proposal.unsigned_tx.output[change_pos] =
+                TxOut { value: original_change.value, script_pubkey: dummy_script };
+            assert!(
+                ctx.process_proposal(proposal).is_err(),
+                "arm 3 must reject script mismatch in our output"
+            );
+
+            Ok(())
+        }
+
+        #[test]
         fn test_process_proposal_when_output_missing() -> Result<(), BoxError> {
             let ctx = create_psbt_context()?;
             let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();

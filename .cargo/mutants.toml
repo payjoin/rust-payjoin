@@ -26,6 +26,4 @@ exclude_re = [
   # TODO exclusions
   # payjoin/src/core/receive/v1/mod.rs
   "replace > with >= in WantsInputs::avoid_uih", # This mutation I am unsure about whether or not it is a trivial mutant and have not decided on how the best way to approach testing it is
-  # payjoin/src/core/send/mod.rs
-  "replace match guard proposed_txout.script_pubkey == original_output.script_pubkey with true in PsbtContext::check_outputs", # This non-deterministic mutation has a possible test to catch it
 ]

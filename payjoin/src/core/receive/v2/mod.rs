@@ -2052,10 +2052,10 @@ pub mod test {
             .process_error_response(&response, ctx)
             .save(&persister)
             .expect_err("fatal response should error");
-        let pending_fallback = err.error_state().expect("pending fallback should be carried");
 
+        assert!(err.api_error_ref().is_some());
+        let pending_fallback = err.error_state().expect("pending fallback should be carried");
         assert_eq!(pending_fallback.fallback_tx(), &expected_tx);
-        // assert!(err.api_error_ref().is_some());
         assert_events(&persister, &[SessionEvent::ProtocolFailed], false);
         Ok(())
     }

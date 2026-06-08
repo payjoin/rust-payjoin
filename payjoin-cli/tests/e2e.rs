@@ -221,7 +221,7 @@ mod e2e {
         type Result<T> = std::result::Result<T, BoxError>;
 
         init_tracing();
-        let mut services = TestServices::initialize().await?;
+        let mut services = TestServices::initialize_with_relays(3).await?;
         let temp_dir = tempdir()?;
 
         let result = tokio::select! {
@@ -250,7 +250,7 @@ mod e2e {
             let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
 
             let directory = &services.directory_url();
-            let ohttp_relay = &services.ohttp_relay_urls();
+            let ohttp_relays = &services.ohttp_relay_urls();
 
             let cli_receive_initiator = Command::new(payjoin_cli)
                 .arg("--root-certificate")
@@ -262,7 +262,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&receiver_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("receive")
                 .arg(RECEIVE_SATS)
                 .arg("--pj-directory")
@@ -284,7 +284,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&sender_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("send")
                 .arg(&bip21)
                 .arg("--fee-rate")
@@ -305,7 +305,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&receiver_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("resume")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
@@ -323,7 +323,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&receiver_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("resume")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
@@ -341,7 +341,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&sender_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("send")
                 .arg(&bip21)
                 .arg("--fee-rate")
@@ -372,7 +372,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&receiver_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("resume")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
@@ -391,7 +391,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&receiver_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("resume")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
@@ -408,7 +408,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&sender_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("resume")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
@@ -508,7 +508,7 @@ mod e2e {
         type Result<T> = std::result::Result<T, BoxError>;
 
         init_tracing();
-        let services = TestServices::initialize().await?;
+        let services = TestServices::initialize_with_relays(3).await?;
         let temp_dir = tempdir()?;
 
         let result = send_v2_receive_v1_async(&services, &temp_dir).await;
@@ -665,7 +665,7 @@ mod e2e {
         type Result<T> = std::result::Result<T, BoxError>;
 
         init_tracing();
-        let mut services = TestServices::initialize().await?;
+        let mut services = TestServices::initialize_with_relays(3).await?;
         let temp_dir = tempdir()?;
 
         let result = tokio::select! {
@@ -692,7 +692,7 @@ mod e2e {
             let cookie_file = &bitcoind.params.cookie_file;
             let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
             let directory = &services.directory_url();
-            let ohttp_relay = &services.ohttp_relay_urls();
+            let ohttp_relays = &services.ohttp_relay_urls();
 
             // Get a BIP21 from a receiver then kill it so the sender can never complete payjoin
             let cli_receiver = Command::new(payjoin_cli)
@@ -705,7 +705,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&receiver_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("receive")
                 .arg(RECEIVE_SATS)
                 .arg("--pj-directory")
@@ -729,7 +729,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&sender_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("send")
                 .arg(&bip21)
                 .arg("--fee-rate")
@@ -755,7 +755,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&sender_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("cancel")
                 .arg(session_id.to_string())
                 .stdout(Stdio::piped())
@@ -798,7 +798,7 @@ mod e2e {
         type Result<T> = std::result::Result<T, BoxError>;
 
         init_tracing();
-        let mut services = TestServices::initialize().await?;
+        let mut services = TestServices::initialize_with_relays(3).await?;
         let temp_dir = tempdir()?;
 
         let result = tokio::select! {
@@ -823,7 +823,7 @@ mod e2e {
             let cookie_file = &bitcoind.params.cookie_file;
             let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
             let directory = &services.directory_url();
-            let ohttp_relay = &services.ohttp_relay_url();
+            let ohttp_relays = &services.ohttp_relay_urls();
 
             // Start a receiver and capture its BIP21 so a session is persisted,
             // then leave it parked at Initialized waiting for a proposal.
@@ -837,7 +837,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&receiver_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("receive")
                 .arg(RECEIVE_SATS)
                 .arg("--pj-directory")
@@ -865,7 +865,7 @@ mod e2e {
                 .arg("--db-path")
                 .arg(&receiver_db_path)
                 .arg("--ohttp-relays")
-                .arg(ohttp_relay)
+                .arg(ohttp_relays)
                 .arg("cancel")
                 .arg(session_id.to_string())
                 .arg("--role")

@@ -820,7 +820,7 @@ impl Receiver<MaybeInputsOwned> {
     /// for the payjoin. Note that this function does not make any validation on whether
     /// the transaction is broadcastable; it simply extracts it.
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
-        self.original.psbt.clone().extract_tx_unchecked_fee_rate()
+        self.state.fallback_tx()
     }
 
     /// Check that the original PSBT has no receiver-owned inputs.
@@ -1488,13 +1488,7 @@ impl Receiver<Monitor> {
         &self,
         transaction_exists: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,
     ) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, Error> {
-        let fallback_tx = self
-            .state
-            .psbt_context
-            .original_psbt
-            .clone()
-            .extract_tx_fee_rate_limit()
-            .expect("fallback transaction should be in the receiver context");
+        let fallback_tx = self.state.fallback_tx();
 
         // If the fallback transaction included any non-SegWit inputs, then the transaction ID of
         // the Payjoin proposal is going to change when the sender signs their non-SegWit address

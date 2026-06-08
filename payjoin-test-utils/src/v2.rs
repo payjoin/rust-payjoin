@@ -22,6 +22,7 @@ pub struct TestServices {
     cert: Certificate,
     directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
     ohttp_relay: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
+    ohttp_relay2: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
     http_agent: Arc<Client>,
 }
 
@@ -37,7 +38,8 @@ impl TestServices {
         root_store.add(CertificateDer::from(cert.cert.der().to_vec())).unwrap();
 
         let directory = init_directory(cert_key, root_store.clone()).await?;
-        let ohttp_relay = init_ohttp_relay(root_store, None).await?;
+        let ohttp_relay = init_ohttp_relay(root_store.clone(), None).await?;
+        let ohttp_relay2 = init_ohttp_relay(root_store, None).await?;
 
         let http_agent: Arc<Client> = Arc::new(http_agent(cert_der)?);
 
@@ -45,6 +47,7 @@ impl TestServices {
             cert: cert.cert,
             directory: (directory.0, Some(directory.1)),
             ohttp_relay: (ohttp_relay.0, Some(ohttp_relay.1)),
+            ohttp_relay2: (ohttp_relay2.0, Some(ohttp_relay2.1)),
             http_agent,
         })
     }
@@ -59,12 +62,26 @@ impl TestServices {
 
     pub fn ohttp_relay_url(&self) -> String { format!("http://localhost:{}", self.ohttp_relay.0) }
 
+    pub fn ohttp_relay_urls(&self) -> String {
+        format!("http://localhost:{},http://localhost:{}", self.ohttp_relay.0, self.ohttp_relay2.0)
+    }
+
     pub fn ohttp_gateway_url(&self) -> String {
         format!("{}/.well-known/ohttp-gateway", self.directory_url())
     }
 
     pub fn take_ohttp_relay_handle(&mut self) -> JoinHandle<Result<(), BoxSendSyncError>> {
-        self.ohttp_relay.1.take().expect("ohttp relay handle not found")
+        let h1 = self.ohttp_relay.1.take().expect("ohttp relay handle not found");
+        let h2 = self.ohttp_relay2.1.take().expect("ohttp relay2 handle not found");
+        tokio::spawn(async move {
+            match tokio::select! {
+                res = h1 => res,
+                res = h2 => res,
+            } {
+                Ok(inner) => inner,
+                Err(e) => Err(e.into()),
+            }
+        })
     }
 
     pub fn http_agent(&self) -> Arc<Client> { self.http_agent.clone() }

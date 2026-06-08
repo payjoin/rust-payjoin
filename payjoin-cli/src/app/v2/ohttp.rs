@@ -3,7 +3,8 @@
 //! [`RelayManager`] tracks relays that have failed, excluding them from
 //! future selections for the lifetime of the [`RelayManager`].
 //!
-//! `fetch_ohttp_keys` selects a relay at random from the configured list,
+//! `unwrap_ohttp_keys_or_else_fetch` returns user-supplied keys when present,
+//! otherwise selects a relay at random from the configured list,
 //! excluding relays that [`RelayManager`] has marked as failed,
 //! to avoid a fixed contact pattern at the network layer.
 use std::sync::{Arc, Mutex};
@@ -47,24 +48,19 @@ pub(crate) struct ValidatedOhttpKeys {
 
 pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
     config: &Config,
-    directory: Option<Url>,
     relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<ValidatedOhttpKeys> {
     if let Some(ohttp_keys) = config.v2()?.ohttp_keys.clone() {
-        println!("Using OHTTP Keys from config");
-        Ok(ValidatedOhttpKeys { ohttp_keys })
-    } else {
-        println!("Bootstrapping private network transport over Oblivious HTTP");
-        fetch_ohttp_keys(config, directory, relay_manager).await
+        return Ok(ValidatedOhttpKeys { ohttp_keys });
     }
+    fetch_ohttp_keys(config, relay_manager).await
 }
 
 async fn fetch_ohttp_keys(
     config: &Config,
-    directory: Option<Url>,
     relay_manager: Arc<Mutex<RelayManager>>,
 ) -> Result<ValidatedOhttpKeys> {
-    let payjoin_directory = directory.unwrap_or(config.v2()?.pj_directory.clone());
+    let payjoin_directory = config.v2()?.pj_directory.clone();
 
     loop {
         let selected_relay =

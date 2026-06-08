@@ -274,7 +274,7 @@ impl AppTrait for App {
 
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
-        let mut relay_manager = RelayManager::new();
+        let mut relay_manager = RelayManager::new(self.config.clone());
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config, None, &mut relay_manager)
             .await?
             .ohttp_keys;
@@ -556,7 +556,7 @@ impl App {
         session: SendSession,
         persister: &SenderPersister,
     ) -> Result<()> {
-        let mut relay_manager = RelayManager::new();
+        let mut relay_manager = RelayManager::new(self.config.clone());
         match session {
             SendSession::WithReplyKey(context) =>
                 self.post_original_proposal(context, persister, &mut relay_manager).await?,
@@ -670,7 +670,7 @@ impl App {
         session: ReceiveSession,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let mut relay_manager = RelayManager::new();
+        let mut relay_manager = RelayManager::new(self.config.clone());
         let res = {
             match session {
                 ReceiveSession::Initialized(proposal) =>
@@ -916,18 +916,10 @@ impl App {
 
     async fn unwrap_relay_or_else_fetch(
         &self,
-        directory: Option<impl payjoin::IntoUrl>,
+        _directory: Option<impl payjoin::IntoUrl>,
         relay_manager: &mut RelayManager,
     ) -> Result<payjoin::Url> {
-        let directory = directory.map(|url| url.into_url()).transpose()?;
-        let ohttp_relay = match relay_manager.get_selected_relay() {
-            Some(relay) => relay,
-            None =>
-                unwrap_ohttp_keys_or_else_fetch(&self.config, directory, relay_manager)
-                    .await?
-                    .relay_url,
-        };
-        Ok(ohttp_relay)
+        relay_manager.choose_relay()
     }
 
     /// Handle error by attempting to send an error response over the directory

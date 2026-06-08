@@ -1,8 +1,7 @@
 //! OHTTP relay selection and key bootstrapping for the payjoin-cli.
 //!
-//! [`RelayManager`] tracks the currently selected relay and any relays that
-//! have failed, excluding them from future selections for the lifetime of
-//! the [`RelayManager`].
+//! [`RelayManager`] tracks relays that have failed, excluding them from
+//! future selections for the lifetime of the [`RelayManager`].
 //!
 //! `fetch_ohttp_keys` selects a relay at random from the configured list,
 //! excluding relays that [`RelayManager`] has marked as failed,
@@ -15,20 +14,30 @@ use super::Config;
 
 #[derive(Debug, Clone)]
 pub struct RelayManager {
-    selected_relay: Option<Url>,
+    config: Config,
     failed_relays: Vec<Url>,
 }
 
 impl RelayManager {
-    pub fn new() -> Self { RelayManager { selected_relay: None, failed_relays: Vec::new() } }
-
-    pub fn set_selected_relay(&mut self, relay: Url) { self.selected_relay = Some(relay); }
-
-    pub fn get_selected_relay(&self) -> Option<Url> { self.selected_relay.clone() }
+    pub fn new(config: Config) -> Self { RelayManager { config, failed_relays: Vec::new() } }
 
     pub fn add_failed_relay(&mut self, relay: Url) { self.failed_relays.push(relay); }
 
-    pub fn get_failed_relays(&self) -> Vec<Url> { self.failed_relays.clone() }
+    pub fn choose_relay(&self) -> Result<Url> {
+        use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
+        let relays = self.config.v2()?.ohttp_relays.clone();
+        let remaining_relays: Vec<_> =
+            relays.iter().filter(|r| !self.failed_relays.contains(r)).cloned().collect();
+
+        if remaining_relays.is_empty() {
+            return Err(anyhow!("No valid relays available"));
+        }
+
+        match remaining_relays.choose(&mut payjoin::bitcoin::key::rand::thread_rng()) {
+            Some(relay) => Ok(relay.clone()),
+            None => Err(anyhow!("Failed to select from remaining relays")),
+        }
+    }
 }
 
 pub(crate) struct ValidatedOhttpKeys {
@@ -58,27 +67,10 @@ async fn fetch_ohttp_keys(
     directory: Option<Url>,
     relay_manager: &mut RelayManager,
 ) -> Result<ValidatedOhttpKeys> {
-    use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
     let payjoin_directory = directory.unwrap_or(config.v2()?.pj_directory.clone());
-    let relays = config.v2()?.ohttp_relays.clone();
 
     loop {
-        let failed_relays = relay_manager.get_failed_relays();
-
-        let remaining_relays: Vec<_> =
-            relays.iter().filter(|r| !failed_relays.contains(r)).cloned().collect();
-
-        if remaining_relays.is_empty() {
-            return Err(anyhow!("No valid relays available"));
-        }
-
-        let selected_relay =
-            match remaining_relays.choose(&mut payjoin::bitcoin::key::rand::thread_rng()) {
-                Some(relay) => relay.clone(),
-                None => return Err(anyhow!("Failed to select from remaining relays")),
-            };
-
-        relay_manager.set_selected_relay(selected_relay.clone());
+        let selected_relay = relay_manager.choose_relay()?;
 
         let ohttp_keys = {
             #[cfg(feature = "_manual-tls")]

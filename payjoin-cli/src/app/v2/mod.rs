@@ -142,7 +142,7 @@ impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
 impl AppTrait for App {
     async fn new(config: Config) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
-        let relay_manager = Arc::new(Mutex::new(RelayManager::new()));
+        let relay_manager = Arc::new(Mutex::new(RelayManager::new(config.clone())));
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
         let wallet = BitcoindWallet::new(&config.bitcoind).await?;
@@ -1010,19 +1010,9 @@ impl App {
 
     async fn unwrap_relay_or_else_fetch(
         &self,
-        directory: Option<impl payjoin::IntoUrl>,
+        _directory: Option<impl payjoin::IntoUrl>,
     ) -> Result<payjoin::Url> {
-        let directory = directory.map(|url| url.into_url()).transpose()?;
-        let selected_relay =
-            self.relay_manager.lock().expect("Lock should not be poisoned").get_selected_relay();
-        let ohttp_relay = match selected_relay {
-            Some(relay) => relay,
-            None =>
-                unwrap_ohttp_keys_or_else_fetch(&self.config, directory, self.relay_manager.clone())
-                    .await?
-                    .relay_url,
-        };
-        Ok(ohttp_relay)
+        self.relay_manager.lock().expect("Lock should not be poisoned").choose_relay()
     }
 
     /// Handle error by attempting to send an error response over the directory

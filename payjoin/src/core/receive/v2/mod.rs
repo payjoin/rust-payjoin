@@ -1479,7 +1479,7 @@ impl Receiver<Monitor> {
     /// For example, the condition can be if the transaction has been broadcast to the
     /// network, or if it has some number of confirmations on the blockchain.
     ///
-    /// If the receiver input address type in the fallback transaction is non-SegWit, then this
+    /// If the input address type in the fallback transaction is non-SegWit, then this
     /// function will directly conclude the Payjoin session with a Success without running the
     /// provided `transaction_exists` closure. `transaction_exists` uses the transaction ID to
     /// search for the transaction in the network. Since a non-SegWit input signature is going to

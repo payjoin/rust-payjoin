@@ -50,6 +50,7 @@ If any issues need to be fixed before the _MAJOR.MINOR+1.0_ version is released:
 
 Tag and publish new release:
 
+- [ ] Check that the crate is publishable with `cargo publish --dry-run` from that crate's directory.
 - [ ] Add a tag to the `HEAD` commit in the `master` branch.
   - The tag name should be `CRATE-MAJOR.MINOR+1.0`
   - The first line of the tag message should be "Release CRATE-MAJOR.MINOR+1.0".

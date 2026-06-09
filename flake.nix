@@ -345,6 +345,24 @@
           AR_wasm32_unknown_unknown = "${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-ar";
         };
 
+        embeddedRustToolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
+          extensions = [
+            "rust-src"
+            "rustfmt"
+            "llvm-tools-preview"
+          ];
+          targets = [ "thumbv7em-none-eabihf" ];
+        };
+
+        embeddedDevShell = pkgs.mkShell {
+          name = "embedded-dev";
+          packages = with pkgs; [
+            embeddedRustToolchain
+            gcc-arm-embedded
+          ];
+          CC_thumbv7em_none_eabihf = "arm-none-eabi-gcc";
+        };
+
         dartDevShell = pkgs.mkShell {
           name = "dart-dev";
           packages =
@@ -466,6 +484,7 @@
           javascript = javascriptDevShell;
           csharp = csharpDevShell;
           dart = dartDevShell;
+          embedded = embeddedDevShell;
         };
         formatter = treefmtEval.config.build.wrapper;
         checks =

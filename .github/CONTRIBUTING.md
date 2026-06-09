@@ -34,6 +34,8 @@ Good documentation is essential to understanding what PDK does and how to use it
 
 If you're looking for somewhere to start contributing code changes, see the [good first issue](https://github.com/payjoin/rust-payjoin/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22good%20first%20issue%22) list. If you intend to start working on an issue, please leave a comment stating your intent.
 
+If you find a perceived issue like a bug or existing `// TODO` comment, please open an issue first to ensure that the behavior you wish to change can be agreed upon before you sit down to write the fix in earnest.
+
 To contribute a code change:
 
 1. [Fork the repository](https://github.com/payjoin/rust-payjoin/fork).

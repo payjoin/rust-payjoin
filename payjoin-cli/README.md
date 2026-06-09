@@ -11,6 +11,8 @@ transactions via `bitcoind`. By default it supports Payjoin v2, which is
 backwards compatible with v1. Enable the `v1` feature to disable Payjoin v2 to
 send and receive using only v1.
 
+This tool supports bitcoin core versions 29.0 and above as we depend on [bitcoind-async-client](https://github.com/alpenlabs/bitcoind-async-client) for our bitcoin client API.
+
 While this code and design have had significant testing, it is still alpha-quality experimental software. Use at your own risk.
 
 Independent audit is welcome.

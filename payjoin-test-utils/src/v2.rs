@@ -2,6 +2,8 @@ use std::result::Result;
 use std::sync::Arc;
 use std::time::Duration;
 
+type RelayEntry = (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>);
+
 use axum_server::tls_rustls::RustlsConfig;
 use http::StatusCode;
 use ohttp::hpke::{Aead, Kdf, Kem};
@@ -21,12 +23,16 @@ use crate::BoxSendSyncError;
 pub struct TestServices {
     cert: Certificate,
     directory: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
-    ohttp_relay: (u16, Option<JoinHandle<Result<(), BoxSendSyncError>>>),
+    ohttp_relays: Vec<RelayEntry>,
     http_agent: Arc<Client>,
 }
 
 impl TestServices {
     pub async fn initialize() -> Result<Self, BoxSendSyncError> {
+        Self::initialize_with_relays(2).await
+    }
+
+    pub async fn initialize_with_relays(num_relays: u8) -> Result<Self, BoxSendSyncError> {
         // TODO add a UUID, and cleanup guard to delete after on successful run
         let cert = local_cert_key();
         let cert_der = cert.cert.der().to_vec();
@@ -37,14 +43,19 @@ impl TestServices {
         root_store.add(CertificateDer::from(cert.cert.der().to_vec())).unwrap();
 
         let directory = init_directory(cert_key, root_store.clone()).await?;
-        let ohttp_relay = init_ohttp_relay(root_store, None).await?;
+
+        let mut ohttp_relays = Vec::with_capacity(num_relays as usize);
+        for _ in 0..num_relays {
+            let relay = init_ohttp_relay(root_store.clone(), None).await?;
+            ohttp_relays.push((relay.0, Some(relay.1)));
+        }
 
         let http_agent: Arc<Client> = Arc::new(http_agent(cert_der)?);
 
         Ok(Self {
             cert: cert.cert,
             directory: (directory.0, Some(directory.1)),
-            ohttp_relay: (ohttp_relay.0, Some(ohttp_relay.1)),
+            ohttp_relays,
             http_agent,
         })
     }
@@ -57,20 +68,43 @@ impl TestServices {
         self.directory.1.take().expect("directory handle not found")
     }
 
-    pub fn ohttp_relay_url(&self) -> String { format!("http://localhost:{}", self.ohttp_relay.0) }
+    pub fn ohttp_relay_url(&self) -> String {
+        format!("http://localhost:{}", self.ohttp_relays[0].0)
+    }
+
+    pub fn ohttp_relay_urls(&self) -> String {
+        self.ohttp_relays
+            .iter()
+            .map(|r| format!("http://localhost:{}", r.0))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
 
     pub fn ohttp_gateway_url(&self) -> String {
         format!("{}/.well-known/ohttp-gateway", self.directory_url())
     }
 
     pub fn take_ohttp_relay_handle(&mut self) -> JoinHandle<Result<(), BoxSendSyncError>> {
-        self.ohttp_relay.1.take().expect("ohttp relay handle not found")
+        let handles: Vec<_> = self
+            .ohttp_relays
+            .iter_mut()
+            .map(|r| r.1.take().expect("ohttp relay handle not found"))
+            .collect();
+        tokio::spawn(async move {
+            match futures::future::select_all(handles).await {
+                (Ok(inner), _idx, _rest) => inner,
+                (Err(e), _idx, _rest) => Err(e.into()),
+            }
+        })
     }
 
     pub fn http_agent(&self) -> Arc<Client> { self.http_agent.clone() }
 
     pub async fn wait_for_services_ready(&self) -> Result<(), &'static str> {
-        wait_for_service_ready(&self.ohttp_relay_url(), self.http_agent()).await?;
+        for relay in &self.ohttp_relays {
+            wait_for_service_ready(&format!("http://localhost:{}", relay.0), self.http_agent())
+                .await?;
+        }
         wait_for_service_ready(&self.directory_url(), self.http_agent()).await?;
         Ok(())
     }

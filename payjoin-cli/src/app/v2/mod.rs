@@ -142,7 +142,7 @@ impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
 impl AppTrait for App {
     async fn new(config: Config) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
-        let relay_manager = Arc::new(Mutex::new(RelayManager::new()));
+        let relay_manager = Arc::new(Mutex::new(RelayManager::new(config.clone())));
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
         let wallet = BitcoindWallet::new(&config.bitcoind).await?;
@@ -278,10 +278,9 @@ impl AppTrait for App {
 
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
-        let ohttp_keys =
-            unwrap_ohttp_keys_or_else_fetch(&self.config, None, self.relay_manager.clone())
-                .await?
-                .ohttp_keys;
+        let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config, self.relay_manager.clone())
+            .await?
+            .ohttp_keys;
         let persister = ReceiverPersister::new(self.db.clone())?;
         let mut receiver_builder =
             ReceiverBuilder::new(address, self.config.v2()?.pj_directory.as_str(), ohttp_keys)?
@@ -695,9 +694,8 @@ impl App {
         sender: Sender<WithReplyKey>,
         persister: &SenderPersister,
     ) -> Result<()> {
-        let relay = self.unwrap_relay_or_else_fetch(Some(&sender.endpoint())).await?;
-        let (req, ctx) = sender.create_v2_post_request(relay.as_str())?;
-        let response = self.post_request(req).await?;
+        let (response, ctx) =
+            self.post_via_relay(|relay| sender.create_v2_post_request(relay)).await?;
         let sender = sender.process_response(&response.bytes().await?, ctx).save(persister)?;
         println!("Posted Original PSBT...");
         self.get_proposed_payjoin_psbt(sender, persister).await
@@ -708,12 +706,11 @@ impl App {
         sender: Sender<PollingForProposal>,
         persister: &SenderPersister,
     ) -> Result<()> {
-        let ohttp_relay = self.unwrap_relay_or_else_fetch(Some(&sender.endpoint())).await?;
         let mut session = sender.clone();
         // Long poll until we get a response
         loop {
-            let (req, ctx) = session.create_poll_request(ohttp_relay.as_str())?;
-            let response = self.post_request(req).await?;
+            let (response, ctx) =
+                self.post_via_relay(|relay| session.create_poll_request(relay)).await?;
             let res = session.process_response(&response.bytes().await?, ctx).save(persister);
             match res {
                 Ok(OptionalTransitionOutcome::Progress(psbt)) => {
@@ -740,14 +737,11 @@ impl App {
         session: Receiver<Initialized>,
         persister: &ReceiverPersister,
     ) -> Result<Receiver<UncheckedOriginalPayload>> {
-        let ohttp_relay =
-            self.unwrap_relay_or_else_fetch(Some(&session.pj_uri().extras.endpoint())).await?;
-
         let mut session = session;
         loop {
-            let (req, context) = session.create_poll_request(ohttp_relay.as_str())?;
             println!("Polling receive request...");
-            let ohttp_response = self.post_request(req).await?;
+            let (ohttp_response, context) =
+                self.post_via_relay(|relay| session.create_poll_request(relay)).await?;
             let state_transition = session
                 .process_response(ohttp_response.bytes().await?.to_vec().as_slice(), context)
                 .save(persister);
@@ -949,10 +943,13 @@ impl App {
         proposal: Receiver<PayjoinProposal>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let (req, ohttp_ctx) = proposal
-            .create_post_request(self.unwrap_relay_or_else_fetch(None::<&str>).await?.as_str())
-            .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
-        let res = self.post_request(req).await?;
+        let (res, ohttp_ctx) = self
+            .post_via_relay(|relay| {
+                proposal
+                    .create_post_request(relay)
+                    .map_err(|e| anyhow!("v2 req extraction failed {}", e))
+            })
+            .await?;
         let payjoin_psbt = proposal.psbt().clone();
         let session = proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister)?;
         println!(
@@ -1008,36 +1005,19 @@ impl App {
         }
     }
 
-    async fn unwrap_relay_or_else_fetch(
-        &self,
-        directory: Option<impl payjoin::IntoUrl>,
-    ) -> Result<payjoin::Url> {
-        let directory = directory.map(|url| url.into_url()).transpose()?;
-        let selected_relay =
-            self.relay_manager.lock().expect("Lock should not be poisoned").get_selected_relay();
-        let ohttp_relay = match selected_relay {
-            Some(relay) => relay,
-            None =>
-                unwrap_ohttp_keys_or_else_fetch(&self.config, directory, self.relay_manager.clone())
-                    .await?
-                    .relay_url,
-        };
-        Ok(ohttp_relay)
-    }
-
     /// Handle error by attempting to send an error response over the directory
     async fn handle_error(
         &self,
         session: Receiver<HasReplyableError>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let (err_req, err_ctx) = session
-            .create_error_request(self.unwrap_relay_or_else_fetch(None::<&str>).await?.as_str())?;
-
-        let err_response = match self.post_request(err_req).await {
-            Ok(response) => response,
-            Err(e) => return Err(anyhow!("Failed to post error request: {}", e)),
-        };
+        let (err_response, err_ctx) = self
+            .post_via_relay(|relay| {
+                session
+                    .create_error_request(relay)
+                    .map_err(|e| anyhow!("Failed to post error request: {}", e))
+            })
+            .await?;
 
         let err_bytes = match err_response.bytes().await {
             Ok(bytes) => bytes,
@@ -1071,5 +1051,27 @@ impl App {
             .await
             .and_then(|r| r.error_for_status())
             .context("HTTP request failed")
+    }
+
+    async fn post_via_relay<F, T, E>(&self, mut build: F) -> Result<(reqwest::Response, T)>
+    where
+        F: FnMut(&str) -> std::result::Result<(payjoin::Request, T), E>,
+        E: Into<anyhow::Error>,
+    {
+        loop {
+            let relay =
+                self.relay_manager.lock().expect("Lock should not be poisoned").choose_relay()?;
+            let (req, ctx) = build(relay.as_str()).map_err(Into::into)?;
+            match self.post_request(req).await {
+                Ok(resp) => return Ok((resp, ctx)),
+                Err(e) => {
+                    tracing::debug!("Request to relay {relay} failed: {e:?}");
+                    self.relay_manager
+                        .lock()
+                        .expect("Lock should not be poisoned")
+                        .add_failed_relay(relay);
+                }
+            }
+        }
     }
 }

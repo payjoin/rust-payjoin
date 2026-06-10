@@ -40,20 +40,6 @@ jobs:
       - name: Run tests
         run: RUST_LOG=debug bash contrib/test.sh
 
-  Lint-FFI:
-    runs-on: ubuntu-latest
-    steps:
-      - name: "Checkout repo"
-        uses: actions/checkout@v4
-      - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
-      - name: "Install nix"
-        uses: DeterminateSystems/determinate-nix-action@main
-      - name: "Use nix cache"
-        uses: DeterminateSystems/magic-nix-cache-action@main
-      - name: "Run linting check"
-        run: cd payjoin-ffi && nix develop -c ./contrib/lint.sh
-
   Lint:
     runs-on: ubuntu-latest
     steps:

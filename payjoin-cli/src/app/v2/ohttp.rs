@@ -46,6 +46,13 @@ impl RelayManager {
             .ok_or_else(|| anyhow!("Failed to select from remaining relays"))
     }
 
+    pub async fn unwrap_ohttp_keys_or_else_fetch(&self) -> Result<ValidatedOhttpKeys> {
+        if let Some(ohttp_keys) = self.config.v2()?.ohttp_keys.clone() {
+            return Ok(ValidatedOhttpKeys { ohttp_keys });
+        }
+        self.fetch_ohttp_keys().await
+    }
+
     async fn fetch_ohttp_keys(&self) -> Result<ValidatedOhttpKeys> {
         let payjoin_directory = &self.config.v2()?.pj_directory;
 
@@ -92,14 +99,4 @@ impl RelayManager {
 
 pub(crate) struct ValidatedOhttpKeys {
     pub(crate) ohttp_keys: payjoin::OhttpKeys,
-}
-
-pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
-    config: &Config,
-    relay_manager: RelayManager,
-) -> Result<ValidatedOhttpKeys> {
-    if let Some(ohttp_keys) = config.v2()?.ohttp_keys.clone() {
-        return Ok(ValidatedOhttpKeys { ohttp_keys });
-    }
-    relay_manager.fetch_ohttp_keys().await
 }

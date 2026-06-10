@@ -46,7 +46,7 @@ impl RelayManager {
             .ok_or_else(|| anyhow!("Failed to select from remaining relays"))
     }
 
-    pub async fn unwrap_ohttp_keys_or_else_fetch(&self) -> Result<ValidatedOhttpKeys> {
+    pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(&self) -> Result<ValidatedOhttpKeys> {
         if let Some(ohttp_keys) = self.config.v2()?.ohttp_keys.clone() {
             return Ok(ValidatedOhttpKeys { ohttp_keys });
         }

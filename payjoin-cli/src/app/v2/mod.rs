@@ -1,5 +1,5 @@
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
@@ -42,7 +42,7 @@ pub(crate) struct App {
     db: Arc<Database>,
     wallet: BitcoindWallet,
     interrupt: watch::Receiver<()>,
-    relay_manager: Arc<Mutex<RelayManager>>,
+    relay_manager: RelayManager,
 }
 
 trait StatusText {
@@ -142,7 +142,7 @@ impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
 impl AppTrait for App {
     async fn new(config: Config) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
-        let relay_manager = Arc::new(Mutex::new(RelayManager::new(config.clone())));
+        let relay_manager = RelayManager::new(config.clone());
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
         let wallet = BitcoindWallet::new(&config.bitcoind).await?;
@@ -1059,17 +1059,13 @@ impl App {
         E: Into<anyhow::Error>,
     {
         loop {
-            let relay =
-                self.relay_manager.lock().expect("Lock should not be poisoned").choose_relay()?;
+            let relay = self.relay_manager.choose_relay()?;
             let (req, ctx) = build(relay.as_str()).map_err(Into::into)?;
             match self.post_request(req).await {
                 Ok(resp) => return Ok((resp, ctx)),
                 Err(e) => {
                     tracing::debug!("Request to relay {relay} failed: {e:?}");
-                    self.relay_manager
-                        .lock()
-                        .expect("Lock should not be poisoned")
-                        .add_failed_relay(relay);
+                    self.relay_manager.add_failed_relay(relay);
                 }
             }
         }

@@ -17,19 +17,24 @@ use super::Config;
 #[derive(Debug, Clone)]
 pub struct RelayManager {
     config: Config,
-    failed_relays: Vec<Url>,
+    failed_relays: Arc<Mutex<Vec<Url>>>,
 }
 
 impl RelayManager {
-    pub fn new(config: Config) -> Self { RelayManager { config, failed_relays: Vec::new() } }
+    pub fn new(config: Config) -> Self {
+        RelayManager { config, failed_relays: Arc::new(Mutex::new(Vec::new())) }
+    }
 
-    pub fn add_failed_relay(&mut self, relay: Url) { self.failed_relays.push(relay); }
+    pub fn add_failed_relay(&self, relay: Url) {
+        self.failed_relays.lock().expect("Lock should not be poisoned").push(relay);
+    }
 
     pub fn choose_relay(&self) -> Result<Url> {
         use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
-        let relays = self.config.v2()?.ohttp_relays.clone();
+        let relays = &self.config.v2()?.ohttp_relays;
+        let failed_relays = self.failed_relays.lock().expect("Lock should not be poisoned");
         let remaining_relays: Vec<_> =
-            relays.iter().filter(|r| !self.failed_relays.contains(r)).cloned().collect();
+            relays.iter().filter(|r| !failed_relays.contains(r)).cloned().collect();
 
         if remaining_relays.is_empty() {
             return Err(anyhow!("No valid relays available"));
@@ -48,7 +53,7 @@ pub(crate) struct ValidatedOhttpKeys {
 
 pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
     config: &Config,
-    relay_manager: Arc<Mutex<RelayManager>>,
+    relay_manager: RelayManager,
 ) -> Result<ValidatedOhttpKeys> {
     if let Some(ohttp_keys) = config.v2()?.ohttp_keys.clone() {
         return Ok(ValidatedOhttpKeys { ohttp_keys });
@@ -58,13 +63,12 @@ pub(crate) async fn unwrap_ohttp_keys_or_else_fetch(
 
 async fn fetch_ohttp_keys(
     config: &Config,
-    relay_manager: Arc<Mutex<RelayManager>>,
+    relay_manager: RelayManager,
 ) -> Result<ValidatedOhttpKeys> {
     let payjoin_directory = config.v2()?.pj_directory.clone();
 
     loop {
-        let selected_relay =
-            relay_manager.lock().expect("Lock should not be poisoned").choose_relay()?;
+        let selected_relay = relay_manager.choose_relay()?;
 
         let ohttp_keys = {
             #[cfg(feature = "_manual-tls")]
@@ -96,10 +100,7 @@ async fn fetch_ohttp_keys(
             }
             Err(e) => {
                 tracing::debug!("Failed to connect to relay: {selected_relay}, {e:?}");
-                relay_manager
-                    .lock()
-                    .expect("Lock should not be poisoned")
-                    .add_failed_relay(selected_relay);
+                relay_manager.add_failed_relay(selected_relay);
             }
         }
     }

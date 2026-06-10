@@ -188,15 +188,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: "Install nightly toolchain"
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
-        with:
-          toolchain: nightly-2026-10-12
-          components: rust-src
-          targets: thumbv7em-none-eabihf
-      - name: Install ARM cross compiler
-        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: "Install nix"
+        uses: DeterminateSystems/determinate-nix-action@main
+      - name: "Use nix cache"
+        uses: DeterminateSystems/magic-nix-cache-action@main
       - name: "Build embedded target"
-        env:
-          CC_thumbv7em_none_eabihf: arm-none-eabi-gcc
-        run: cargo build -p payjoin --no-default-features --features "alloc,v2" --target thumbv7em-none-eabihf -Zbuild-std=core,alloc
+        run: nix develop .#embedded -c cargo build -p payjoin --no-default-features --features "alloc,v2" --target thumbv7em-none-eabihf -Zbuild-std=core,alloc

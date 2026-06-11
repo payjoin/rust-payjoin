@@ -137,7 +137,7 @@ pub enum Commands {
     Cancel {
         /// The session ID to cancel
         #[arg(required = true)]
-        session_id: i64,
+        session_id: String,
 
         /// Cancel without broadcasting the fallback transaction
         #[arg(long = "no-broadcast")]

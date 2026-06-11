@@ -80,7 +80,10 @@ async fn main() -> Result<()> {
         }
         #[cfg(feature = "v2")]
         Commands::Cancel { session_id, no_broadcast, role } => {
-            app.cancel(SessionId(*session_id), *no_broadcast, *role).await?;
+            let session_id = SessionId(
+                session_id.parse().map_err(|e| anyhow::anyhow!("Invalid session ID UUID: {e}"))?,
+            );
+            app.cancel(session_id, *no_broadcast, *role).await?;
         }
     };
 

@@ -20,7 +20,7 @@ jobs:
       RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: "Install ${{ matrix.rust }} toolchain"
         uses: dtolnay/rust-toolchain@master
         with:
@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
       - name: "Install nix"
@@ -69,7 +69,7 @@ jobs:
       RUSTUP_TOOLCHAIN: stable
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: "Install toolchain"
         # rust-cache usage with stable Rust is most effective, as a cache is tied to the Rust version
         uses: dtolnay/rust-toolchain@stable
@@ -96,7 +96,7 @@ jobs:
     name: Code spell check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: codespell-project/actions-codespell@v2
 
   DiffMutants:
@@ -106,7 +106,7 @@ jobs:
       RUSTUP_TOOLCHAIN: stable
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0 # required for full diff context
       - name: Fetch base branch for diff
@@ -138,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: "Install nightly toolchain"
         uses: dtolnay/rust-toolchain@nightly
       - name: "Use cache"

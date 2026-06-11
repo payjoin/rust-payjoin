@@ -18,7 +18,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
       - name: "Install nix"
@@ -38,7 +38,7 @@ jobs:
         working-directory: payjoin-ffi/csharp
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Install Rust 1.85.0
         uses: dtolnay/rust-toolchain@1.85.0
 

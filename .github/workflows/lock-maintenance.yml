@@ -7,18 +7,20 @@ on:
 jobs:
   update-lock-files:
     runs-on: ubuntu-latest
+    env:
+      UPDATE_DEPS: true
     permissions:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
-      - run: UPDATE_DEPS=true bash contrib/update-lock-files.sh
+      - run: bash contrib/update-lock-files.sh
       - uses: peter-evans/create-pull-request@v7
         with:
+          title: "chore: update cargo.lock"
+          commit-message: "chore: update cargo.lock"
           token: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
-          commit-message: "chore: update Cargo lock files"
-          title: "chore: update Cargo lock files"
           branch: chore/cargo-lock-update
           add-paths: |
             Cargo-minimal.lock

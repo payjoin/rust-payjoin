@@ -29,6 +29,8 @@ fi
 # Cargo-minimal.lock
 # minimum direct dependency versions
 rm -f Cargo.lock && cargo +nightly check --all-features --all-targets -Z direct-minimal-versions
+
+rm -f Cargo.lock && cargo +nightly check --all-features --all-targets -Z minimal-versions
 cp -f Cargo.lock Cargo-minimal.lock
 
 # Cargo-recent.lock

@@ -1,27 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
-LOCKFILE="Cargo.lock"
-LOCKDIR=".bak"
-LOCKFILE_BAK="${LOCKDIR}/${LOCKFILE}"
+source contrib/lockfile.sh
 
-cleanup() {
-    if [ -f "$LOCKFILE_BAK" ]; then
-        mv "$LOCKFILE_BAK" "$LOCKFILE"
-    fi
-    rmdir "$LOCKDIR"
-}
-
-if ! mkdir "$LOCKDIR" 2>/dev/null; then
-    echo "Another instance is running. If you're sure it's not, remove $LOCKDIR and try again." >&2
-    exit 1
-fi
-
-trap cleanup EXIT
-
-if [ -f "$LOCKFILE" ]; then
-    mv "$LOCKFILE" "$LOCKFILE_BAK"
-fi
+use_lockfile Cargo-recent.lock
 
 DEPS="recent minimal"
 CRATES="payjoin payjoin-cli payjoin-mailroom"

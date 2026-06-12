@@ -7,7 +7,7 @@ members = [
   "payjoin-ffi",
   "payjoin-mailroom",
 ]
-resolver = "2"
+resolver = "3"
 
 [patch.crates-io]
 payjoin-fuzz = { path = "fuzz" }

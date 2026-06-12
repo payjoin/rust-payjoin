@@ -77,7 +77,6 @@ if [ -n "$changed_tomls" ]; then
     ./contrib/update-lock-files.sh
     stale_locks=$(git diff --name-only -- Cargo-minimal.lock Cargo-recent.lock)
     if [ -n "$stale_locks" ]; then
-        git checkout -- Cargo-minimal.lock Cargo-recent.lock
         echo "pre-commit: Cargo.toml changed and lockfiles are stale!"
         echo "Stale lockfiles:"
         echo "$stale_locks"

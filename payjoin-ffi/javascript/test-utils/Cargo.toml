@@ -9,8 +9,8 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = "2.16.17"
 napi-derive = "2.16.13"
-serde_json = "1.0.142"
-tokio = { version = "1.47.1", features = ["full"] }
+serde_json = "1.0.149"
+tokio = { version = "1.52.3", features = ["full"] }
 
 icu_locale_core = "=2.0.1"
 icu_provider = "=2.0.0"

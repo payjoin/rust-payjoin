@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -e
 
+source contrib/lockfile.sh
+use_lockfile Cargo-recent.lock
+
 # https://github.com/taiki-e/cargo-llvm-cov?tab=readme-ov-file#merge-coverages-generated-under-different-test-conditions
 # remove artifacts that may affect the coverage results
 cargo llvm-cov clean --workspace
 # exclude payjoin-ffi because bindings are tested in their native language and fuzz because these tests are not coverage worthy
-cargo llvm-cov --no-report --workspace --all-features --exclude payjoin-ffi --exclude payjoin-fuzz
+cargo llvm-cov --locked --no-report --workspace --all-features --exclude payjoin-ffi --exclude payjoin-fuzz
 # Explicitly run payjoin-cli v1 e2e tests
-cargo llvm-cov --no-report --package payjoin-cli --no-default-features --features=v1,_manual-tls
+cargo llvm-cov --locked --no-report --package payjoin-cli --no-default-features --features=v1,_manual-tls
 # generate report without tests
 cargo llvm-cov report --lcov --output-path lcov.info

@@ -26,8 +26,16 @@ if [ -f "$LOCKFILE" ]; then
     mv "$LOCKFILE" "$LOCKFILE_BAK"
 fi
 
-for file in Cargo-minimal.lock Cargo-recent.lock; do
-    cp -f "$file" Cargo.lock
-    cargo check
-    cp -f Cargo.lock "$file"
-done
+# Cargo-minimal.lock
+# minimum direct dependency versions
+rm -f Cargo.lock && cargo +nightly check --all-features --all-targets -Z direct-minimal-versions
+cp -f Cargo.lock Cargo-minimal.lock
+
+# Cargo-recent.lock
+# latest semver-compatible versions
+cp -f Cargo-recent.lock Cargo.lock
+if [ "${UPDATE_DEPS:-}" = "true" ]; then
+    cargo update
+fi
+cargo check --all-features
+cp -f Cargo.lock Cargo-recent.lock

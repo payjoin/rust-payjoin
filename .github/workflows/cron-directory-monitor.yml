@@ -6,6 +6,6 @@ jobs:
   health-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check /health endpoint
         run: cd payjoin-mailroom && bash contrib/health-check.sh

@@ -119,7 +119,7 @@ impl BitcoindWallet {
     pub fn broadcast_tx(&self, tx: &Transaction) -> Result<Txid> {
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
-                .block_on(async { self.rpc.send_raw_transaction(tx).await })
+                .block_on(async { self.rpc.send_raw_transaction(tx, None).await })
         })
         .context("Failed to broadcast transaction")
     }

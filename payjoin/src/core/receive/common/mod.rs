@@ -208,10 +208,8 @@ impl WantsInputs {
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<InputPair, CoinSelectionError> {
-        let mut candidate_inputs = candidate_inputs.into_iter().peekable();
-
-        self.avoid_uih(&mut candidate_inputs)
-            .or_else(|_| self.select_first_candidate(&mut candidate_inputs))
+        let candidates: Vec<_> = candidate_inputs.into_iter().collect();
+        self.avoid_uih(&candidates).or_else(|_| self.select_first_candidate(&candidates))
     }
 
     /// Returns the candidate input which avoids the UIH2 defined in [Unnecessary Input
@@ -226,7 +224,7 @@ impl WantsInputs {
     /// Errors if the transaction does not have exactly 2 outputs.
     pub(super) fn avoid_uih(
         &self,
-        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        candidate_inputs: &[InputPair],
     ) -> Result<InputPair, CoinSelectionError> {
         if self.payjoin_psbt.outputs.len() != 2 {
             return Err(InternalCoinSelectionError::UnsupportedOutputLength.into());
@@ -258,7 +256,7 @@ impl WantsInputs {
             if candidate_min_in > candidate_min_out {
                 // The candidate avoids UIH2 but conforms to UIH1: Optimal change heuristic.
                 // It implies the smallest output is the sender's change address.
-                return Ok(input_pair);
+                return Ok(input_pair.clone());
             }
         }
 
@@ -269,9 +267,9 @@ impl WantsInputs {
     /// Returns the first candidate input in the provided list or errors if the list is empty.
     fn select_first_candidate(
         &self,
-        candidate_inputs: impl IntoIterator<Item = InputPair>,
+        candidate_inputs: &[InputPair],
     ) -> Result<InputPair, CoinSelectionError> {
-        candidate_inputs.into_iter().next().ok_or(InternalCoinSelectionError::Empty.into())
+        candidate_inputs.first().cloned().ok_or(InternalCoinSelectionError::Empty.into())
     }
 
     /// Contributes the provided list of inputs to the transaction at random indices. If the total input
@@ -584,6 +582,53 @@ mod tests {
         );
     }
 
+    fn candidate_input_from_test_vector(value: Amount) -> InputPair {
+        let txout = TxOut {
+            value,
+            script_pubkey: ScriptBuf::new_p2pkh(&PubkeyHash::from_byte_array(DUMMY20)),
+        };
+        let tx = Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: LockTime::Seconds(Time::MIN),
+            input: vec![],
+            output: vec![txout.clone()],
+        };
+        let outpoint = OutPoint { txid: tx.compute_txid(), vout: 0 };
+        InputPair::new(
+            TxIn { previous_output: outpoint, sequence: Sequence::MAX, ..Default::default() },
+            Input { witness_utxo: Some(txout), ..Default::default() },
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn try_preserving_privacy_falls_back_when_avoid_uih_not_found() {
+        let original = original_from_test_vector();
+        let wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        let candidates = vec![
+            candidate_input_from_test_vector(Amount::ONE_SAT),
+            candidate_input_from_test_vector(Amount::from_sat(2)),
+        ];
+
+        let selected = wants_inputs.try_preserving_privacy(candidates.clone()).unwrap();
+
+        assert_eq!(selected, candidates[0]);
+    }
+
+    #[test]
+    fn try_preserving_privacy_falls_back_when_avoid_uih_unsupported() {
+        let original = original_from_test_vector();
+        let mut wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        wants_inputs.payjoin_psbt.unsigned_tx.output.pop();
+        wants_inputs.payjoin_psbt.outputs.pop();
+        let candidate = candidate_input_from_test_vector(Amount::ONE_SAT);
+
+        let selected = wants_inputs.try_preserving_privacy([candidate.clone()]).unwrap();
+
+        assert_eq!(selected, candidate);
+    }
+
     #[test]
     fn test_avoid_uih_one_output() {
         let original = original_from_test_vector();
@@ -594,14 +639,13 @@ mod tests {
             None,
         )
         .unwrap();
-        let input_iter = [input].into_iter();
         let mut payjoin = WantsOutputs::new(original, vec![0])
             .commit_outputs()
-            .contribute_inputs(input_iter.clone())
+            .contribute_inputs([input.clone()])
             .expect("Failed to contribute inputs");
 
         payjoin.payjoin_psbt.outputs.pop();
-        let avoid_uih = payjoin.avoid_uih(input_iter);
+        let avoid_uih = payjoin.avoid_uih(std::slice::from_ref(&input));
         assert_eq!(
             avoid_uih.unwrap_err(),
             CoinSelectionError::from(InternalCoinSelectionError::UnsupportedOutputLength),

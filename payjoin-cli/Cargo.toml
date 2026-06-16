@@ -28,7 +28,7 @@ v2 = ["payjoin/v2", "payjoin/io"]
 ahash = "0.7.8"
 anyhow = "1.0.99"
 async-trait = "0.1.89"
-bitcoind-async-client = ">=0.10.8, <0.10.10"
+bitcoind-async-client = "0.14.0"
 clap = { version = "4.5.45", features = ["derive"] }
 config = "0.15.17"
 dirs = "6.0.0"
@@ -47,7 +47,7 @@ rusqlite = { version = "0.29.0", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tokio = { version = "1.52.3", features = ["full"] }
-tokio-rustls = { version = "0.26.2", features = [
+tokio-rustls = { version = "0.26.4", features = [
   "ring",
 ], default-features = false, optional = true }
 tracing = "0.1.41"

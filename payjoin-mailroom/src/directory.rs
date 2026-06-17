@@ -9,7 +9,7 @@ use axum::http::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE}
 use axum::http::{Method, Request, Response, StatusCode, Uri};
 use http_body_util::BodyExt;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
-use tracing::{debug, error, trace, warn};
+use tracing::{error, warn};
 
 use crate::db::{Db, Error as DbError, SendableError};
 use crate::ohttp_relay::SentinelTag;
@@ -130,7 +130,6 @@ impl<D: Db> Service<D> {
         let query = req.uri().query().unwrap_or_default().to_string();
         let (parts, body) = req.into_parts();
         let path_segments: Vec<&str> = path.split('/').collect();
-        debug!("Service::serve_request: {:?}", &path_segments);
 
         // Best-effort validation that the relay and gateway aren't on the same
         // payjoin-mailroom instance
@@ -258,7 +257,6 @@ impl<D: Db> Service<D> {
         let path = req.uri().path().to_string();
         let (parts, body) = req.into_parts();
         let path_segments: Vec<&str> = path.split('/').collect();
-        debug!("handle_v2: {:?}", &path_segments);
         match (parts.method, path_segments.as_slice()) {
             (Method::POST, &["", id]) => self.post_mailbox(id, body).await,
             (Method::GET, &["", id]) => self.get_mailbox(id).await,
@@ -269,7 +267,6 @@ impl<D: Db> Service<D> {
 
     async fn post_mailbox(&self, id: &str, body: Body) -> Result<Response<Body>, HandlerError> {
         let none_response = Response::builder().status(StatusCode::OK).body(empty())?;
-        trace!("post_mailbox");
         let id = ShortId::from_str(id)?;
         let req = body
             .collect()
@@ -286,7 +283,6 @@ impl<D: Db> Service<D> {
     }
 
     async fn get_mailbox(&self, id: &str) -> Result<Response<Body>, HandlerError> {
-        trace!("get_mailbox");
         let id = ShortId::from_str(id)?;
         let timeout_response = Response::builder().status(StatusCode::ACCEPTED).body(empty())?;
         handle_peek(self.db.wait_for_v2_payload(&id).await, timeout_response)
@@ -314,7 +310,6 @@ impl<D: Db> Service<D> {
     }
 
     async fn put_payjoin_v1(&self, id: &str, body: Body) -> Result<Response<Body>, HandlerError> {
-        trace!("Put_payjoin_v1");
         let ok_response = Response::builder().status(StatusCode::OK).body(empty())?;
         let id = ShortId::from_str(id)?;
         let req = body
@@ -345,7 +340,6 @@ impl<D: Db> Service<D> {
         B: axum::body::HttpBody<Data = Bytes> + Send + 'static,
         B::Error: Into<BoxError>,
     {
-        trace!("Post fallback v1");
         let none_response = Response::builder()
             .status(StatusCode::SERVICE_UNAVAILABLE)
             .body(full(V1_UNAVAILABLE_RES_JSON))?;

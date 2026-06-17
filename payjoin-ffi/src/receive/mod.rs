@@ -1114,6 +1114,9 @@ impl InputPair {
             .map(Self)
             .map_err(|err| InputPairError::InvalidPsbtInput(Arc::new(err.into())))
     }
+
+    /// Returns the outpoint spent by this input pair.
+    pub fn previous_outpoint(&self) -> OutPoint { self.0.previous_outpoint().into() }
 }
 
 impl From<InputPair> for payjoin::receive::InputPair {

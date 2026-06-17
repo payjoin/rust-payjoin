@@ -216,6 +216,9 @@ impl InputPair {
         Self::new_segwit_input_pair(txout, outpoint, Some(expected_weight))
     }
 
+    /// Returns the outpoint spent by this input pair.
+    pub fn previous_outpoint(&self) -> OutPoint { self.txin.previous_output }
+
     pub(crate) fn previous_txout(&self) -> TxOut {
         InternalInputPair::from(self)
             .previous_txout()
@@ -539,6 +542,18 @@ pub(crate) mod tests {
         .unwrap();
 
         assert_eq!(input_pair.expected_weight, expected_satifiability_weight);
+    }
+
+    #[test]
+    fn input_pair_previous_outpoint_returns_previous_output() {
+        let txout = TxOut {
+            value: Amount::from_sat(123),
+            script_pubkey: ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array(DUMMY20)),
+        };
+        let outpoint = OutPoint { txid: Txid::from_byte_array(DUMMY32), vout: 31 };
+        let input_pair = InputPair::new_p2wpkh(txout, outpoint).unwrap();
+
+        assert_eq!(input_pair.previous_outpoint(), outpoint);
     }
 
     #[test]

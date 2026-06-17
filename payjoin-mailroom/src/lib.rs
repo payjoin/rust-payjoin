@@ -190,9 +190,15 @@ pub async fn serve_acme(
 
     let acme = acme_config.into_rustls_config(&config.storage_dir);
     let mut state = acme.state();
-    let rustls_config = Arc::new(
-        rustls::ServerConfig::builder().with_no_client_auth().with_cert_resolver(state.resolver()),
-    );
+    // Advertise HTTP/2 in ALPN so peer relays multiplex their forwarded
+    // requests over a single connection instead of one per concurrent
+    // long-poll. tokio-rustls-acme only injects the `acme-tls/1` challenge
+    // protocol, so application ALPN must be set here. Without this the server
+    // config negotiates no protocol and clients fall back to HTTP/1.1.
+    let mut server_config =
+        rustls::ServerConfig::builder().with_no_client_auth().with_cert_resolver(state.resolver());
+    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    let rustls_config = Arc::new(server_config);
     let acceptor = state.axum_acceptor(rustls_config);
 
     // Drive ACME cert renewal in background

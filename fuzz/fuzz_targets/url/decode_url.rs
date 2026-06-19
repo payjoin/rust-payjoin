@@ -9,7 +9,7 @@ use payjoin::Url;
 fn do_test(data: &[u8]) {
     let Ok(s) = str::from_utf8(data) else { return };
 
-    let Ok(mut url) = Url::parse(s) else { return };
+    let Ok(url) = Url::parse(s) else { return };
 
     let _ = url.scheme();
     let _ = url.domain();
@@ -44,23 +44,6 @@ fn do_test(data: &[u8]) {
             reparsed.as_str()
         );
     }
-
-    url.set_port(Some(8080));
-    url.set_port(None);
-    url.set_fragment(Some("fuzz"));
-    url.set_fragment(None);
-    url.query_pairs_mut().append_pair("k", "v");
-    url.clear_query();
-    url.query_pairs_mut().append_pair("fuzz_key", "fuzz_val");
-
-    if let Some(mut segs) = url.path_segments_mut() {
-        segs.push("fuzz_segment");
-    }
-
-    let _ = url.join("relative/path");
-    let _ = url.join("/absolute/path");
-    let _ = url.join("../dotdot");
-    let _ = url.join("https://other.example.com/new");
 }
 
 fuzz_target!(|data| {

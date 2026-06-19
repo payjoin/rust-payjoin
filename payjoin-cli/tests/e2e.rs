@@ -459,7 +459,7 @@ mod e2e {
         async fn respond_with_payjoin(mut cli_receive_resumer: Child) -> Result<()> {
             let mut stdout =
                 cli_receive_resumer.stdout.take().expect("Failed to take stdout of child process");
-            let timeout = tokio::time::Duration::from_secs(10);
+            let timeout = tokio::time::Duration::from_secs(45);
             let res = tokio::time::timeout(
                 timeout,
                 wait_for_stdout_match(&mut stdout, |line| line.contains("Response successful")),
@@ -474,7 +474,7 @@ mod e2e {
         async fn check_payjoin_sent(mut cli_send_resumer: Child) -> Result<()> {
             let mut stdout =
                 cli_send_resumer.stdout.take().expect("Failed to take stdout of child process");
-            let timeout = tokio::time::Duration::from_secs(10);
+            let timeout = tokio::time::Duration::from_secs(45);
             let res = tokio::time::timeout(
                 timeout,
                 wait_for_stdout_match(&mut stdout, |line| line.contains("Payjoin sent")),
@@ -504,7 +504,7 @@ mod e2e {
         async fn check_resume_completed(mut cli_resumer: Child) -> Result<()> {
             let mut stdout =
                 cli_resumer.stdout.take().expect("Failed to take stdout of child process");
-            let timeout = tokio::time::Duration::from_secs(10);
+            let timeout = tokio::time::Duration::from_secs(45);
             let res = tokio::time::timeout(
                 timeout,
                 wait_for_stdout_match(&mut stdout, |line| line.ends_with("Session completed.")),

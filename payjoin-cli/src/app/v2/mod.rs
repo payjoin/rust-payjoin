@@ -12,6 +12,7 @@ use payjoin::receive::v2::{
     ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload,
     WantsFeeRange, WantsInputs, WantsOutputs,
 };
+use payjoin::schedule::PollSchedule;
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, PendingFallback as SenderPendingFallback,
     PollingForProposal, SendSession, Sender, SenderBuilder, SessionOutcome as SenderSessionOutcome,
@@ -34,6 +35,7 @@ mod ohttp;
 const W_ID: usize = 36;
 const W_ROLE: usize = 15;
 const W_STATUS: usize = 15;
+const POLL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Delay before retrying a transiently failed state transition, so a
 /// misbehaving directory or relay is not hammered in a tight loop.
@@ -891,34 +893,54 @@ impl App {
         sender: Sender<PollingForProposal>,
         persister: &SenderPersister,
     ) -> Result<SendSession> {
-        let (response, ctx) =
-            match self.post_via_relay(|relay| sender.create_poll_request(relay)).await? {
-                RelayPost::Posted(resp, ctx) => (resp, ctx),
-                RelayPost::Expired => {
-                    self.cancel_sender_session(persister.session_id(), true)?;
-                    return Ok(SendSession::Closed(SenderSessionOutcome::Aborted));
+        let session = sender;
+        let mut schedule = PollSchedule::new();
+        let mut polls = tokio::task::JoinSet::new();
+        let next = tokio::time::sleep(schedule.next_gap());
+        tokio::pin!(next);
+        loop {
+            tokio::select! {
+                Some(joined) = polls.join_next(), if !polls.is_empty() => {
+                    let (body, ctx): (Vec<u8>, _) = match joined {
+                        Ok(Ok(v)) => v,
+                        _ => continue,
+                    };
+                    match session.clone().process_response(&body, ctx).save(persister) {
+                        Ok(OptionalTransitionOutcome::Progress(psbt)) => {
+                            persister.print("Proposal received. Processing...");
+                            return Ok(SendSession::Closed(SenderSessionOutcome::Success(psbt)));
+                        }
+                        Ok(OptionalTransitionOutcome::Stasis(_)) => {
+                            persister.print("No response yet.");
+                        }
+                        Err(e) if e.is_transient() => {
+                            tracing::debug!("Transient error polling for proposal, retrying: {e:?}");
+                        }
+                        Err(re) => {
+                            persister.print(&re);
+                            tracing::debug!("{re:?}");
+                            return Err(anyhow!("Response error").context(re));
+                        }
+                    }
                 }
-            };
-        let res = sender.clone().process_response(&response.bytes().await?, ctx).save(persister);
-        match res {
-            Ok(OptionalTransitionOutcome::Progress(psbt)) => {
-                persister.print("Proposal received. Processing...");
-                Ok(SendSession::Closed(SenderSessionOutcome::Success(psbt)))
-            }
-            Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
-                persister.print("No response yet.");
-                Ok(SendSession::PollingForProposal(current_state))
-            }
-            Err(e) if e.is_transient() => {
-                tracing::debug!("Transient error polling for proposal, retrying: {e:?}");
-                let sender = e.transient_state().expect("transient error carries current state");
-                tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
-                Ok(SendSession::PollingForProposal(sender))
-            }
-            Err(re) => {
-                persister.print(&re);
-                tracing::debug!("{re:?}");
-                Err(anyhow!("Response error").context(re))
+                () = &mut next => {
+                    next.as_mut().reset(tokio::time::Instant::now() + schedule.next_gap());
+                    let relay = self.mailroom_manager.choose_relay()?;
+                    let (req, ctx) = match session.create_poll_request(relay.as_str()) {
+                        Ok(r) => r,
+                        Err(e) if e.expired() => {
+                            self.cancel_sender_session(persister.session_id(), true)?;
+                            return Ok(SendSession::Closed(SenderSessionOutcome::Aborted));
+                        }
+                        Err(e) => return Err(e.into()),
+                    };
+                    let app = self.clone();
+                    polls.spawn(async move {
+                        let resp =
+                            tokio::time::timeout(POLL_TIMEOUT, app.post_request(req)).await??;
+                        Ok::<_, anyhow::Error>((resp.bytes().await?.to_vec(), ctx))
+                    });
+                }
             }
         }
     }
@@ -972,39 +994,58 @@ impl App {
         }
     }
 
-    /// Poll the directory once for the sender's original proposal.
+    /// Poll the directory on a Poisson schedule for the sender's original
+    /// proposal.
     async fn read_from_directory(
         &self,
         session: Receiver<Initialized>,
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
         persister.print("Polling receive request...");
-        let (ohttp_response, context) =
-            match self.post_via_relay(|relay| session.create_poll_request(relay)).await? {
-                RelayPost::Posted(resp, ctx) => (resp, ctx),
-                RelayPost::Expired => {
-                    self.cancel_receiver_session(persister.session_id(), true)?;
-                    return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
+        let mut schedule = PollSchedule::new();
+        let mut polls = tokio::task::JoinSet::new();
+        let next = tokio::time::sleep(schedule.next_gap());
+        tokio::pin!(next);
+        loop {
+            tokio::select! {
+                Some(joined) = polls.join_next(), if !polls.is_empty() => {
+                    let (body, ctx): (Vec<u8>, _) = match joined {
+                        Ok(Ok(v)) => v,
+                        _ => continue,
+                    };
+                    match session.clone().process_response(&body, ctx).save(persister) {
+                        Ok(OptionalTransitionOutcome::Progress(next_state)) => {
+                            persister.print(
+                                "Got a request from the sender. Responding with a Payjoin proposal.",
+                            );
+                            return Ok(ReceiveSession::UncheckedOriginalPayload(next_state));
+                        }
+                        Ok(OptionalTransitionOutcome::Stasis(_)) => {}
+                        Err(e) if e.is_transient() => {
+                            tracing::debug!("Transient error polling for request, retrying: {e:?}");
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
                 }
-            };
-        let state_transition = session
-            .process_response(ohttp_response.bytes().await?.to_vec().as_slice(), context)
-            .save(persister);
-        match state_transition {
-            Ok(OptionalTransitionOutcome::Progress(next_state)) => {
-                persister
-                    .print("Got a request from the sender. Responding with a Payjoin proposal.");
-                Ok(ReceiveSession::UncheckedOriginalPayload(next_state))
+                () = &mut next => {
+                    next.as_mut().reset(tokio::time::Instant::now() + schedule.next_gap());
+                    let relay = self.mailroom_manager.choose_relay()?;
+                    let (req, ctx) = match session.create_poll_request(relay.as_str()) {
+                        Ok(r) => r,
+                        Err(e) if e.expired() => {
+                            self.cancel_receiver_session(persister.session_id(), true)?;
+                            return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
+                        }
+                        Err(e) => return Err(e.into()),
+                    };
+                    let app = self.clone();
+                    polls.spawn(async move {
+                        let resp =
+                            tokio::time::timeout(POLL_TIMEOUT, app.post_request(req)).await??;
+                        Ok::<_, anyhow::Error>((resp.bytes().await?.to_vec(), ctx))
+                    });
+                }
             }
-            Ok(OptionalTransitionOutcome::Stasis(current_state)) =>
-                Ok(ReceiveSession::Initialized(current_state)),
-            Err(e) if e.is_transient() => {
-                tracing::debug!("Transient error polling for request, retrying: {e:?}");
-                let session = e.transient_state().expect("transient error carries current state");
-                tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
-                Ok(ReceiveSession::Initialized(session))
-            }
-            Err(e) => Err(e.into()),
         }
     }
 

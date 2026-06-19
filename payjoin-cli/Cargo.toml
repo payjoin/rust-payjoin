@@ -53,6 +53,7 @@ tokio-rustls = { version = "0.26.4", features = [
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
+# Pinned transitive dependencies that appear unused to cargo-machete
 [package.metadata.cargo-machete]
 ignored = ["ahash", "pest_derive"]
 

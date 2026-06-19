@@ -39,10 +39,7 @@ uniffi-bindgen-cs = { git = "https://github.com/benalleng/uniffi-bindgen-cs.git"
 uniffi-dart = { git = "https://github.com/benalleng/uniffi-dart.git", rev = "ce97870a934cd6046eef059c5805359ac0d59964", optional = true }
 url = "2.5.4"
 
-# getrandom is ignored here because it's required by the wasm_js feature
-# icu deps are ignored here because they're required to be pinned as transitive deps of url
-# socks is ignored as a transitive dep of bdk
-# Even though they may appear unused in the default feature set, they are legitimate dependencies.
+# Pinned transitive dependencies that appear unused to cargo-machete
 [package.metadata.cargo-machete]
 ignored = ["getrandom", "icu_provider", "icu_locale_core", "socks"]
 

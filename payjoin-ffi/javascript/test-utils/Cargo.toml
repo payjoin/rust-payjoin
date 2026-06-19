@@ -15,8 +15,7 @@ tokio = { version = "1.52.3", features = ["full"] }
 icu_locale_core = "=2.0.1"
 icu_provider = "=2.0.0"
 
-# icu deps are ignored here because they're required to be pinned as transitive deps of url
-# Even though they may appear unused in the default feature set, they are legitimate dependencies.
+# Pinned transitive dependencies that appear unused to cargo-machete
 [package.metadata.cargo-machete]
 ignored = ["icu_provider", "icu_locale_core"]
 

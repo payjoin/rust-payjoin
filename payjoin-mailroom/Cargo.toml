@@ -78,8 +78,7 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
 unicode-segmentation = "=1.12.0"
 
-# unicode segmentation is ignored because it needs to be pinned due to the use of an unstable
-# feature from within the config crate
+# Pinned transitive dependencies that appear unused to cargo-machete
 [package.metadata.cargo-machete]
 ignored = ["unicode-segmentation"]
 

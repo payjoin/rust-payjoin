@@ -20,6 +20,7 @@ payjoin = { path = "../payjoin", default-features = false, features = [
   "v2",
 ] }
 
+# Pinned transitive dependencies that appear unused to cargo-machete
 [package.metadata.cargo-machete]
 ignored = ["home"]
 

@@ -126,7 +126,11 @@ impl std::ops::Deref for HttpClient {
 
 impl From<HttpsConnectorBuilder<WantsSchemes>> for HttpClient {
     fn from(builder: HttpsConnectorBuilder<WantsSchemes>) -> Self {
-        let https = builder.https_or_http().enable_http1().build();
+        // Enable HTTP/2 so concurrent relayed requests (notably long-poll
+        // mailbox reads) multiplex over a single connection to the gateway
+        // instead of pinning one file descriptor each. Falls back to HTTP/1.1
+        // when the gateway does not negotiate h2 via ALPN.
+        let https = builder.https_or_http().enable_http1().enable_http2().build();
         Self(Client::builder(TokioExecutor::new()).build(https))
     }
 }

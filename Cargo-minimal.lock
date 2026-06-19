@@ -144,9 +144,9 @@ checksum = "b0674a1ddeecb70197781e945de4b3b8ffb61fa939a5597bcf48503737663100"
 
 [[package]]
 name = "arbitrary"
-version = "1.0.0"
+version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "698b65a961a9d730fb45b6b0327e20207810c9f61ee421b082b27ba003f49e2b"
+checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "arc-swap"
@@ -2756,6 +2756,7 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 name = "payjoin"
 version = "1.0.0-rc.3"
 dependencies = [
+ "arbitrary",
  "bhttp",
  "bitcoin 0.32.9",
  "bitcoin-hpke",
@@ -2835,6 +2836,7 @@ dependencies = [
 name = "payjoin-fuzz"
 version = "0.0.1"
 dependencies = [
+ "arbitrary",
  "bitcoin_uri",
  "home",
  "libfuzzer-sys",

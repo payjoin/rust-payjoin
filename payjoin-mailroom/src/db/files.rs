@@ -246,6 +246,7 @@ impl DbTrait for FilesDb {
         Ok(guard.read(id).await?)
     }
 
+    // Unused by GET after the non-blocking switch; v2 waitmap removal is a follow-up.
     async fn wait_for_v2_payload(
         &self,
         id: &ShortId,

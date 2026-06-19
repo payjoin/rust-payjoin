@@ -37,3 +37,9 @@ name = "url_decode_url"
 path = "fuzz_targets/url/decode_url.rs"
 doc = false
 bench = false
+
+[[bin]]
+name = "url_arbitrary_url"
+path = "fuzz_targets/url/arbitrary_url.rs"
+doc = false
+bench = false

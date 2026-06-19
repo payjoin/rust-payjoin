@@ -42,3 +42,9 @@ name = "directory_short_id"
 path = "fuzz_targets/directory/short_id.rs"
 doc = false
 bench = false
+
+[[bin]]
+name = "url_arbitrary_url"
+path = "fuzz_targets/url/arbitrary_url.rs"
+doc = false
+bench = false

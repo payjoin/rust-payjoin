@@ -1469,7 +1469,7 @@ pub struct Monitor {
 /// The caller should decide the condition that must be satisfied for the Payjoin to be considered
 /// successful.
 ///
-/// Call [`Receiver<Monitor>::check_payment`] to confirm the status of the transaction in the
+/// Call [`Receiver<Monitor>::check_for_broadcast`] to confirm the status of the transaction in the
 /// network and conclude the Payjoin session.
 impl Receiver<Monitor> {
     /// Checks the network for the Payjoin proposal or the fallback transaction using the passed
@@ -1484,7 +1484,7 @@ impl Receiver<Monitor> {
     /// provided `transaction_exists` closure. `transaction_exists` uses the transaction ID to
     /// search for the transaction in the network. Since a non-SegWit input signature is going to
     /// change the TXID of the Payjoin proposal, it cannot be monitored.
-    pub fn check_payment(
+    pub fn check_for_broadcast(
         &self,
         transaction_exists: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,
     ) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, Error> {
@@ -1699,7 +1699,7 @@ pub mod test {
         // Nothing was spent, should be in the same state
         let persister = InMemoryPersister::default();
         let res = monitor
-            .check_payment(|_| Ok(None))
+            .check_for_broadcast(|_| Ok(None))
             .save(&persister)
             .expect("InMemoryPersister shouldn't fail");
         assert!(matches!(res, OptionalTransitionOutcome::Stasis(_)));
@@ -1709,7 +1709,7 @@ pub mod test {
         // Payjoin was broadcasted, should progress to success
         let persister = InMemoryPersister::default();
         let res = monitor
-            .check_payment(|_| Ok(Some(payjoin_tx.clone())))
+            .check_for_broadcast(|_| Ok(Some(payjoin_tx.clone())))
             .save(&persister)
             .expect("InMemoryPersister shouldn't fail");
 
@@ -1727,7 +1727,7 @@ pub mod test {
         // Fallback was broadcasted, should progress to success
         let persister = InMemoryPersister::default();
         let res = monitor
-            .check_payment(|txid| {
+            .check_for_broadcast(|txid| {
                 // Emulate if one of the fallback outpoints was double spent
                 if txid == original_tx.compute_txid() {
                     Ok(Some(original_tx.clone()))
@@ -1764,7 +1764,9 @@ pub mod test {
 
         let persister = InMemoryPersister::default();
         let res = monitor
-            .check_payment(|_| panic!("check_payment should return before this closure is called"))
+            .check_for_broadcast(|_| {
+                panic!("check_for_broadcast should return before this closure is called")
+            })
             .save(&persister)
             .expect("InMemoryPersister shouldn't fail");
 

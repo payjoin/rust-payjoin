@@ -12,6 +12,7 @@ use payjoin::receive::v2::{
     ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload,
     WantsFeeRange, WantsInputs, WantsOutputs,
 };
+use payjoin::schedule::PollSchedule;
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, PendingFallback as SenderPendingFallback,
     PollingForProposal, SendSession, Sender, SenderBuilder, SessionOutcome as SenderSessionOutcome,
@@ -35,6 +36,7 @@ const W_ID: usize = 12;
 const W_ROLE: usize = 25;
 const W_DONE: usize = 15;
 const W_STATUS: usize = 15;
+const POLL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[derive(Clone)]
 pub(crate) struct App {
@@ -704,27 +706,44 @@ impl App {
         sender: Sender<PollingForProposal>,
         persister: &SenderPersister,
     ) -> Result<()> {
-        let mut session = sender.clone();
-        // Long poll until we get a response
+        let session = sender;
+        let mut schedule = PollSchedule::new();
+        let mut polls = tokio::task::JoinSet::new();
+        let next = tokio::time::sleep(schedule.next_gap());
+        tokio::pin!(next);
         loop {
-            let (response, ctx) =
-                self.post_via_relay(|relay| session.create_poll_request(relay)).await?;
-            let res = session.process_response(&response.bytes().await?, ctx).save(persister);
-            match res {
-                Ok(OptionalTransitionOutcome::Progress(psbt)) => {
-                    println!("Proposal received. Processing...");
-                    self.process_pj_response(psbt)?;
-                    return Ok(());
+            tokio::select! {
+                Some(joined) = polls.join_next(), if !polls.is_empty() => {
+                    let (body, ctx): (Vec<u8>, _) = match joined {
+                        Ok(Ok(v)) => v,
+                        _ => continue,
+                    };
+                    match session.clone().process_response(&body, ctx).save(persister) {
+                        Ok(OptionalTransitionOutcome::Progress(psbt)) => {
+                            println!("Proposal received. Processing...");
+                            self.process_pj_response(psbt)?;
+                            return Ok(());
+                        }
+                        Ok(OptionalTransitionOutcome::Stasis(_)) => {
+                            println!("No response yet.");
+                        }
+                        Err(re) => {
+                            println!("{re}");
+                            tracing::debug!("{re:?}");
+                            return Err(anyhow!("Response error").context(re));
+                        }
+                    }
                 }
-                Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
-                    println!("No response yet.");
-                    session = current_state;
-                    continue;
-                }
-                Err(re) => {
-                    println!("{re}");
-                    tracing::debug!("{re:?}");
-                    return Err(anyhow!("Response error").context(re));
+                () = &mut next => {
+                    next.as_mut().reset(tokio::time::Instant::now() + schedule.next_gap());
+                    let relay = self.relay_manager.choose_relay()?;
+                    let (req, ctx) = session.create_poll_request(relay.as_str())?;
+                    let app = self.clone();
+                    polls.spawn(async move {
+                        let resp =
+                            tokio::time::timeout(POLL_TIMEOUT, app.post_request(req)).await??;
+                        Ok::<_, anyhow::Error>((resp.bytes().await?.to_vec(), ctx))
+                    });
                 }
             }
         }
@@ -735,24 +754,37 @@ impl App {
         session: Receiver<Initialized>,
         persister: &ReceiverPersister,
     ) -> Result<Receiver<UncheckedOriginalPayload>> {
-        let mut session = session;
+        let mut schedule = PollSchedule::new();
+        let mut polls = tokio::task::JoinSet::new();
+        let next = tokio::time::sleep(schedule.next_gap());
+        tokio::pin!(next);
         loop {
-            println!("Polling receive request...");
-            let (ohttp_response, context) =
-                self.post_via_relay(|relay| session.create_poll_request(relay)).await?;
-            let state_transition = session
-                .process_response(ohttp_response.bytes().await?.to_vec().as_slice(), context)
-                .save(persister);
-            match state_transition {
-                Ok(OptionalTransitionOutcome::Progress(next_state)) => {
-                    println!("Got a request from the sender. Responding with a Payjoin proposal.");
-                    return Ok(next_state);
+            tokio::select! {
+                Some(joined) = polls.join_next(), if !polls.is_empty() => {
+                    let (body, ctx): (Vec<u8>, _) = match joined {
+                        Ok(Ok(v)) => v,
+                        _ => continue,
+                    };
+                    match session.clone().process_response(&body, ctx).save(persister) {
+                        Ok(OptionalTransitionOutcome::Progress(next_state)) => {
+                            println!("Got a request from the sender. Responding with a Payjoin proposal.");
+                            return Ok(next_state);
+                        }
+                        Ok(OptionalTransitionOutcome::Stasis(_)) => {}
+                        Err(e) => return Err(e.into()),
+                    }
                 }
-                Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
-                    session = current_state;
-                    continue;
+                () = &mut next => {
+                    next.as_mut().reset(tokio::time::Instant::now() + schedule.next_gap());
+                    let relay = self.relay_manager.choose_relay()?;
+                    let (req, ctx) = session.create_poll_request(relay.as_str())?;
+                    let app = self.clone();
+                    polls.spawn(async move {
+                        let resp =
+                            tokio::time::timeout(POLL_TIMEOUT, app.post_request(req)).await??;
+                        Ok::<_, anyhow::Error>((resp.bytes().await?.to_vec(), ctx))
+                    });
                 }
-                Err(e) => return Err(e.into()),
             }
         }
     }

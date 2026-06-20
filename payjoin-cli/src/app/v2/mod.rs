@@ -12,6 +12,7 @@ use payjoin::receive::v2::{
     ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload,
     WantsFeeRange, WantsInputs, WantsOutputs,
 };
+use payjoin::relay::RelaySelector;
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, PendingFallback as SenderPendingFallback,
     PollingForProposal, SendSession, Sender, SenderBuilder, SessionOutcome as SenderSessionOutcome,
@@ -278,7 +279,6 @@ impl AppTrait for App {
                 Err(e) => {
                     tracing::debug!("Directory {directory} failed: {e:#}");
                     self.mailroom_manager.add_failed_directory(directory);
-                    self.mailroom_manager.clear_failed_relays();
                     continue;
                 }
             }
@@ -1055,14 +1055,17 @@ impl App {
         F: FnMut(&str) -> std::result::Result<(payjoin::Request, T), E>,
         E: Into<anyhow::Error>,
     {
+        let mut selector = RelaySelector::new(self.config.v2()?.ohttp_relays.clone());
         loop {
-            let relay = self.mailroom_manager.choose_relay()?;
+            let relay = selector
+                .select(&mut payjoin::bitcoin::key::rand::thread_rng())
+                .ok_or_else(|| anyhow!("No valid relays available"))?;
             let (req, ctx) = build(relay.as_str()).map_err(Into::into)?;
             match self.post_request(req).await {
                 Ok(resp) => return Ok((resp, ctx)),
                 Err(e) => {
                     tracing::debug!("Request to relay {relay} failed: {e:?}");
-                    self.mailroom_manager.add_failed_relay(relay);
+                    selector.mark_failed(&relay);
                 }
             }
         }

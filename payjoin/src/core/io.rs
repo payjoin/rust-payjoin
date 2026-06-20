@@ -1,60 +1,93 @@
 //! IO-related types and functions. Specifically, fetching OHTTP keys from a payjoin directory.
 use std::time::Duration;
 
+use bitcoin::secp256k1::rand;
 use http::header::ACCEPT;
 use reqwest::{Client, Proxy};
 
 use crate::into_url::IntoUrl;
-use crate::OhttpKeys;
+use crate::relay::RelaySelector;
+use crate::{OhttpKeys, Url};
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
 ///
-/// * `ohttp_relay`: The http CONNECT method proxy to request the ohttp keys from a payjoin
-///   directory.  Proxying requests for ohttp keys ensures a client IP address is never revealed to
-///   the payjoin directory.
+/// * `relays`: The http CONNECT method proxies to request the ohttp keys from a payjoin
+///   directory, tried in random order until one succeeds.  Proxying requests for ohttp keys
+///   ensures a client IP address is never revealed to the payjoin directory.
 ///
 /// * `payjoin_directory`: The payjoin directory from which to fetch the ohttp keys.  This
 ///   directory stores and forwards payjoin client payloads.
+///
+/// Returns the ohttp keys and the relay that served them.
 pub async fn fetch_ohttp_keys(
-    ohttp_relay: impl IntoUrl,
+    relays: &[Url],
     payjoin_directory: impl IntoUrl,
-) -> Result<OhttpKeys, Error> {
-    let ohttp_keys_url = payjoin_directory.into_url()?.join("/.well-known/ohttp-gateway")?;
-    let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
-    let client = Client::builder().proxy(proxy).http1_only().build()?;
-    let res = client
-        .get(ohttp_keys_url.as_str())
-        .timeout(Duration::from_secs(10))
-        .header(ACCEPT, "application/ohttp-keys")
-        .send()
-        .await?;
-    parse_ohttp_keys_response(res).await
+) -> Result<(OhttpKeys, Url), Error> {
+    fetch_ohttp_keys_inner(relays, payjoin_directory.into_url()?, None).await
 }
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
 ///
-/// * `ohttp_relay`: The http CONNECT method proxy to request the ohttp keys from a payjoin
-///   directory.  Proxying requests for ohttp keys ensures a client IP address is never revealed to
-///   the payjoin directory.
+/// * `relays`: The http CONNECT method proxies to request the ohttp keys from a payjoin
+///   directory, tried in random order until one succeeds.  Proxying requests for ohttp keys
+///   ensures a client IP address is never revealed to the payjoin directory.
 ///
 /// * `payjoin_directory`: The payjoin directory from which to fetch the ohttp keys.  This
 ///   directory stores and forwards payjoin client payloads.
 ///
 /// * `cert_der`: The DER-encoded certificate to use for local HTTPS connections.
+///
+/// Returns the ohttp keys and the relay that served them.
 #[cfg(feature = "_manual-tls")]
 pub async fn fetch_ohttp_keys_with_cert(
-    ohttp_relay: impl IntoUrl,
+    relays: &[Url],
     payjoin_directory: impl IntoUrl,
     cert_der: &[u8],
+) -> Result<(OhttpKeys, Url), Error> {
+    fetch_ohttp_keys_inner(relays, payjoin_directory.into_url()?, Some(cert_der)).await
+}
+
+async fn fetch_ohttp_keys_inner(
+    relays: &[Url],
+    payjoin_directory: Url,
+    cert_der: Option<&[u8]>,
+) -> Result<(OhttpKeys, Url), Error> {
+    let ohttp_keys_url = payjoin_directory.join("/.well-known/ohttp-gateway")?;
+    let mut selector = RelaySelector::new(relays.to_vec());
+    let mut last_err: Option<Error> = None;
+    loop {
+        let relay = match selector.select(&mut rand::thread_rng()) {
+            Some(relay) => relay,
+            None => return Err(last_err.unwrap_or(Error::NoRelaysAvailable)),
+        };
+        match fetch_keys_once(&relay, &ohttp_keys_url, cert_der).await {
+            Ok(keys) => return Ok((keys, relay)),
+            Err(e @ Error::UnexpectedStatusCode(_)) => return Err(e),
+            Err(e) => {
+                selector.mark_failed(&relay);
+                last_err = Some(e);
+            }
+        }
+    }
+}
+
+async fn fetch_keys_once(
+    relay: &Url,
+    ohttp_keys_url: &Url,
+    cert_der: Option<&[u8]>,
 ) -> Result<OhttpKeys, Error> {
-    let ohttp_keys_url = payjoin_directory.into_url()?.join("/.well-known/ohttp-gateway")?;
-    let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
-    let client = Client::builder()
-        .use_rustls_tls()
-        .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der)?)
-        .proxy(proxy)
-        .http1_only()
-        .build()?;
+    #[cfg(not(feature = "_manual-tls"))]
+    let _ = cert_der;
+    let proxy = Proxy::all(relay.as_str())?;
+    let builder = Client::builder().proxy(proxy).http1_only();
+    #[cfg(feature = "_manual-tls")]
+    let builder = match cert_der {
+        Some(cert_der) => builder
+            .use_rustls_tls()
+            .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der)?),
+        None => builder,
+    };
+    let client = builder.build()?;
     let res = client
         .get(ohttp_keys_url.as_str())
         .timeout(Duration::from_secs(10))
@@ -80,6 +113,8 @@ async fn parse_ohttp_keys_response(res: reqwest::Response) -> Result<OhttpKeys, 
 pub enum Error {
     /// When the payjoin directory returns an unexpected status code
     UnexpectedStatusCode(http::StatusCode),
+    /// No relay was available to reach the payjoin directory.
+    NoRelaysAvailable,
     /// Internal errors that should not be pattern matched by users
     #[doc(hidden)]
     Internal(InternalError),
@@ -126,6 +161,7 @@ impl std::fmt::Display for Error {
             Self::UnexpectedStatusCode(code) => {
                 write!(f, "Unexpected status code from payjoin directory: {code}")
             }
+            Self::NoRelaysAvailable => write!(f, "No relay was available to fetch ohttp keys"),
             Self::Internal(InternalError(e)) => e.fmt(f),
         }
     }
@@ -153,6 +189,7 @@ impl std::error::Error for Error {
         match self {
             Self::Internal(InternalError(e)) => e.source(),
             Self::UnexpectedStatusCode(_) => None,
+            Self::NoRelaysAvailable => None,
         }
     }
 }
@@ -239,5 +276,28 @@ mod tests {
             ),
             "expected InvalidOhttpKeys error"
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_with_no_relays_returns_no_relays_available() {
+        assert!(matches!(
+            fetch_ohttp_keys(&[], "https://directory.example").await,
+            Err(Error::NoRelaysAvailable)
+        ));
+    }
+
+    #[tokio::test]
+    async fn fetch_exhausts_unreachable_relays_and_surfaces_last_error() {
+        // Every relay fails to connect: the loop marks each failed and terminates
+        // once none remain, surfacing the last transport error. NoRelaysAvailable
+        // is reserved for an empty relay list, where no attempt was ever made.
+        let relays = [
+            Url::parse("http://127.0.0.1:1").expect("valid url"),
+            Url::parse("http://127.0.0.1:2").expect("valid url"),
+        ];
+        assert!(matches!(
+            fetch_ohttp_keys(&relays, "https://directory.example").await,
+            Err(Error::Internal(_))
+        ));
     }
 }

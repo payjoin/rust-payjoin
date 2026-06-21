@@ -18,7 +18,7 @@ cd fuzz/
 
 ### Running fuzzers
 
-The `fuzz.sh` and `cycle.sh` shell scripts allow for single pass fuzzing and continuous long term fuzzing respectively.
+The `fuzz.sh` and `cycle.sh` shell scripts allow for single-pass fuzzing and continuous long-term fuzzing respectively.
 
 #### Using `fuzz.sh`
 

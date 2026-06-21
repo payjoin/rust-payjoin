@@ -174,7 +174,7 @@ fn check_fragment_delimiter(fragment: &str) -> Result<char, ParseFragmentError> 
     // For backwards compatibility, also accept `+` as a
     // fragment parameter delimiter. This was previously
     // specified, but may be interpreted as ` ` by some
-    // URI parsoing libraries. Therefore if `-` is missing,
+    // URI parsing libraries. Therefore if `-` is missing,
     // assume the URI was generated following the older
     // version of the spec.
 

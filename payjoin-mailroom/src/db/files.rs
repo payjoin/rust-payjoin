@@ -29,7 +29,7 @@ struct V2WaitMapEntry {
 
 #[derive(Debug)]
 struct V1WaitMapEntry {
-    /// The V1 payload. `take()`n after the first read for data minimization —
+    /// The V1 payload. Taken after the first read for data minimization —
     /// plaintext PSBTs should not linger in memory longer than needed.
     payload: Option<Arc<Vec<u8>>>,
     sender: oneshot::Sender<Vec<u8>>,

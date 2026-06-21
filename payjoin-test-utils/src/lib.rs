@@ -84,7 +84,7 @@ fn create_and_fund_wallets<W: AsRef<str>>(
     Ok(funded_wallets)
 }
 
-pub fn init_bitcoind_multi_sender_single_reciever(
+pub fn init_bitcoind_multi_sender_single_receiver(
     number_of_senders: usize,
 ) -> Result<(corepc_node::Node, Vec<corepc_node::Client>, corepc_node::Client), BoxError> {
     let bitcoind = init_bitcoind()?;

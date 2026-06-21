@@ -68,7 +68,7 @@ This release updates the bindings libraries to `payjoin` version `0.21.0`.
 
 #### APIs changed
 
-- Removed `contribute_non_nitness_input` from `v1` & `v2`.
+- Removed `contribute_non_witness_input` from `v1` & `v2`.
 - Allow receivers to make `payjoins` out of sweep transactions ([#259](https://github.com/payjoin/rust-payjoin/pull/259)).
 - Encode &ohttp= and &exp= parameters in the &pj= URL as a fragment instead of as URI params ([#298](https://github.com/payjoin/rust-payjoin/pull/298))
 
@@ -79,7 +79,7 @@ This release updates the bindings libraries to `payjoin` version `0.18.0`.
 #### APIs changed
 
 - Upgrade `receive/v2` type state machine to resume multiple `payjoins` simultaneously ([#283](https://github.com/payjoin/rust-payjoin/pull/283))
-- Refactor output substitution with new fallable `try_substitute_outputs` ([#277](https://github.com/payjoin/rust-payjoin/pull/277))
+- Refactor output substitution with new fallible `try_substitute_outputs` ([#277](https://github.com/payjoin/rust-payjoin/pull/277))
 - Replaced `Enroller` with `SessionInitializer`.
 - Replaced `Enrolled` with `ActiveSession`.
 - Replaced `fallback_target()` with `pj_url`.

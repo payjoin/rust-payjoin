@@ -1,5 +1,5 @@
-///Represents data that needs to be transmitted to the receiver.
-///You need to send this request over HTTP(S) to the receiver.
+/// Represents data that needs to be transmitted to the receiver.
+/// You need to send this request over HTTP(S) to the receiver.
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct Request {
     /// URL to send the request to.

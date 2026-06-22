@@ -844,7 +844,7 @@ pub trait IsScriptOwned: Send + Sync {
 
 #[uniffi::export]
 impl MaybeInputsOwned {
-    ///The Sender’s Original PSBT
+    /// The Sender’s Original PSBT
     pub fn extract_tx_to_schedule_broadcast(&self) -> Vec<u8> {
         payjoin::bitcoin::consensus::encode::serialize(
             &self.0.clone().extract_tx_to_schedule_broadcast(),

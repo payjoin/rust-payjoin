@@ -66,7 +66,7 @@ This release attempts to stabilize the Payjoin V2 Bitcoin URI format. That inclu
 - Include more verbose context when bitcoind fails (#251)
 - Use `*rpcpassword` instead of `*rpcpass` config and option to match bitcoind
 - Test with JoinMarket
-- respect `disableoutputsubtitution` send parameter
+- respect `disableoutputsubstitution` send parameter
 - depend on `payjoin-0.16.0`
 - separate V1 `pj_endpoint` and V2 `pj_directory` config params / cli arguments
 

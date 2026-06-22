@@ -204,7 +204,7 @@ pub(crate) enum InternalPayloadError {
     /// The sender is trying to spend the receiver input
     InputOwned(bitcoin::ScriptBuf),
     #[allow(dead_code)]
-    /// Original PSBT input has been seen before. Only automatic receivers, aka "interactive" in the spec
+    /// Original PSBT input has been seen before. Only automatic receivers, aka "non-interactive" in the spec
     /// look out for these to prevent probing attacks.
     InputSeen(bitcoin::OutPoint),
     /// Original PSBT fee rate is below minimum fee rate set by the receiver.

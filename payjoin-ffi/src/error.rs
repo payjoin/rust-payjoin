@@ -53,6 +53,6 @@ pub enum ForeignError {
 
 impl From<uniffi::UnexpectedUniFFICallbackError> for ForeignError {
     fn from(_: uniffi::UnexpectedUniFFICallbackError) -> Self {
-        Self::InternalError("Unexpected Uniffi callback error".to_string())
+        Self::InternalError("Unexpected UniFFI callback error".to_string())
     }
 }

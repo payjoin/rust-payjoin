@@ -323,9 +323,9 @@ impl InitialSendTransition {
     }
 }
 
-///Builder for sender-side payjoin parameters
+/// Builder for sender-side payjoin parameters
 ///
-///These parameters define how client wants to handle Payjoin.
+/// These parameters define how client wants to handle Payjoin.
 #[derive(Clone, uniffi::Object)]
 pub struct SenderBuilder(payjoin::send::v2::SenderBuilder);
 
@@ -508,8 +508,10 @@ impl WithReplyKey {
     }
 
     /// Decodes and validates the response.
-    /// Call this method with response from receiver to continue BIP-??? flow. A successful response can either be None if the relay has not response yet or Some(Psbt).
-    /// If the response is some valid PSBT you should sign and broadcast.
+    /// Call this method with a response from the receiver to continue the BIP77 flow.
+    /// A successful response can either be `None` if the relay has no response yet,
+    /// or `Some(Psbt)`.
+    /// If the response is a valid PSBT you should sign and broadcast it.
     pub fn process_response(
         &self,
         response: &[u8],
@@ -537,7 +539,7 @@ impl From<payjoin::send::v1::V1Context> for V1Context {
 
 #[uniffi::export]
 impl V1Context {
-    ///Decodes and validates the response.
+    /// Decodes and validates the response.
     /// Call this method with response from receiver to continue BIP78 flow. If the response is valid you will get appropriate PSBT that you should sign and broadcast.
     pub fn process_response(&self, response: &[u8]) -> Result<String, ResponseError> {
         <payjoin::send::v1::V1Context as Clone>::clone(&self.0.clone())
@@ -626,8 +628,10 @@ impl PollingForProposal {
     }
 
     /// Decodes and validates the response.
-    /// Call this method with response from receiver to continue BIP-??? flow. A successful response can either be None if the relay has not response yet or Some(Psbt).
-    /// If the response is some valid PSBT you should sign and broadcast.
+    /// Call this method with a response from the receiver to continue the BIP77 flow.
+    /// A successful response can either be `None` if the relay has no response yet,
+    /// or `Some(Psbt)`.
+    /// If the response is a valid PSBT you should sign and broadcast it.
     pub fn process_response(
         &self,
         response: &[u8],

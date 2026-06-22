@@ -122,7 +122,7 @@ Introduce the Session Event Log for Session Replay
 
 Selected Improvements:
 
-### Introduce Granualar event-based session log for replay
+### Introduce granular event-based session log for replay
 
 - Alter receiver session as_ref assert and persist::Value import for ReceiverToken (#658)
 - Add SessionPersister trait (#716)
@@ -235,7 +235,7 @@ This release attempts to stabilize the Payjoin V2 Bitcoin URI format. That inclu
     - Include a bitcoin address in `SessionContext`
   - Document it all ([#308](https://github.com/payjoin/rust-payjoin/pull/308))
 - `send::ResponseError` variants fields got explicit names ([#304](https://github.com/payjoin/rust-payjoin/pull/304))
-- Refactor output substitution with new fallable `try_substitute_outputs` ([#277](https://github.com/payjoin/rust-payjoin/pull/277))
+- Refactor output substitution with new fallible `try_substitute_outputs` ([#277](https://github.com/payjoin/rust-payjoin/pull/277))
 
 ### Contributors:
 
@@ -345,7 +345,7 @@ Bumping `bitcoin` and other crates was a breaking api change. This is a 0.8.1 se
 - Test receiver compatibility with BlueWallet
 - Rename `sender`, `receiver` features `send`, `receive`
 - Rename `PayJoin` `Payjoin`
-- introduce `receive::Error` for fallable checklist items [#59](https://github.com/payjoin/rust-payjoin/pull/59)
+- introduce `receive::Error` for fallible checklist items [#59](https://github.com/payjoin/rust-payjoin/pull/59)
 - Display receiver errors, RequestErrors with JSON (https://github.com/payjoin/rust-payjoin/pull/49)
 
 ## 0.7.0

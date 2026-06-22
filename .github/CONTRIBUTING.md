@@ -47,7 +47,7 @@ To contribute a code change:
 The git repository is our source of truth for development history. Therefore the commit history is the most important communication
 artifact we produce. Commit messages must follow [the seven rules in this guide by cbeams](https://cbea.ms/git-commit/#seven-rules).
 
-Every commit should be [hygenic](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#committing-patches) and pass CI. This means tests, linting, and formatting should pass without issues on each commit. Below is a [git hook](https://git-scm.com/book/ms/v2/Customizing-Git-Git-Hooks) you may choose to add to `.git/hooks/pre-commit` in your local repository to perform these checks before each commit:
+Every commit should be [hygienic](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#committing-patches) and pass CI. This means tests, linting, and formatting should pass without issues on each commit. Below is a [git hook](https://git-scm.com/book/ms/v2/Customizing-Git-Git-Hooks) you may choose to add to `.git/hooks/pre-commit` in your local repository to perform these checks before each commit:
 
 ```sh
 #!/usr/bin/env bash

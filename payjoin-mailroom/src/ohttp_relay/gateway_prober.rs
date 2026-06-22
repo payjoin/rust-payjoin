@@ -609,7 +609,7 @@ mod tests {
 
         // test happy path
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
-        assert!(status.bip77_allowed, "asserte opt-in should be cached");
+        assert!(status.bip77_allowed, "asserted opt-in should be cached");
     }
 
     #[tokio::test]

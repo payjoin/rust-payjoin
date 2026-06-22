@@ -10,15 +10,15 @@ assignees: ""
 
 ### Summary
 
-<--release summary to be used in announcements-->
+<!-- release summary to be used in announcements -->
 
 ### Commit
 
-<--latest commit ID to include in this release-->
+<!-- latest commit ID to include in this release -->
 
 ### Changelog
 
-<--add notices from PRs merged since the prior release, see ["keep a changelog"]-->
+<!-- add notices from PRs merged since the prior release, see ["keep a changelog"] -->
 
 ### Checklist
 
@@ -33,7 +33,7 @@ Change the `master` branch to the next MINOR+1 version:
 - [ ] Create a new PR branch called `bump-CRATE-MAJOR-MINOR+1`, eg. `bump-CRATE-0-22`.
 - [ ] Bump the `bump-CRATE-MAJOR-MINOR+1` branch to the next development MINOR+1 version.
   - Change the `Cargo.toml` version value to `MAJOR.MINOR+1.0` for all crates in the workspace.
-  - Run `contrib/update-lock-files.sh ` to apply upgrades to the Cargo lock files.
+  - Run `contrib/update-lock-files.sh` to apply upgrades to the Cargo lock files.
   - Update the `CHANGELOG.md` file.
   - The commit message should be "Bump CRATE version to MAJOR.MINOR+1.0".
 - [ ] Create PR for the `bump-CRATE-MAJOR-MINOR+1` branch to `master`.
@@ -59,7 +59,7 @@ Tag and publish new release:
 - [ ] Wait for the CI to finish one last time.
 - [ ] Build the docs locally to ensure they are building correctly.
 - [ ] Push the new tag to the `payjoin/rust-payjoin` repo.
-- [ ] Publish the crate in question crates to crates.io.
+- [ ] Publish the crate in question to crates.io.
 - [ ] Create the release on GitHub.
   - Go to "tags", click on the dots on the right and select "Create Release".
   - Set the title to `Release CRATE-MAJOR.MINOR+1.0`.

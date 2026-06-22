@@ -817,4 +817,53 @@ mod test {
         do_cancel_test!(PollingForProposal);
         Ok(())
     }
+
+    fn ohttp_response_for(
+        ohttp_keys: &OhttpKeys,
+        req_body: &[u8],
+        status: http::StatusCode,
+    ) -> Vec<u8> {
+        let server =
+            ohttp::Server::new(ohttp_keys.0.clone()).expect("test OHTTP server should be valid");
+        let (_, probe_response) = server.decapsulate(req_body).expect("request should decapsulate");
+        let response_overhead =
+            probe_response.encapsulate(&[]).expect("probe should encrypt").len();
+
+        let (_, server_response) =
+            server.decapsulate(req_body).expect("request should decapsulate again");
+        let mut bhttp_response =
+            vec![0u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES - response_overhead];
+        bhttp::Message::response(
+            bhttp::StatusCode::try_from(status.as_u16()).expect("status should be valid"),
+        )
+        .write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_response.as_mut_slice())
+        .expect("BHTTP response should encode");
+        let encrypted =
+            server_response.encapsulate(&bhttp_response).expect("response should encrypt");
+        assert_eq!(encrypted.len(), crate::directory::ENCAPSULATED_MESSAGE_BYTES);
+        encrypted
+    }
+
+    #[test]
+    fn poll_transient_directory_error_is_transient() -> Result<(), BoxError> {
+        let expiration =
+            Time::from_now(Duration::from_secs(60)).expect("expiration should be valid");
+        let sender = create_sender_context(expiration)?;
+        let ohttp_keys = sender.session_context.pj_param.ohttp_keys().clone();
+        let sender = Sender { state: PollingForProposal, session_context: sender.session_context };
+        let (req, ctx) = sender.create_poll_request(EXAMPLE_URL)?;
+        let response =
+            ohttp_response_for(&ohttp_keys, &req.body, http::StatusCode::INTERNAL_SERVER_ERROR);
+        let persister = InMemoryPersister::<SessionEvent>::default();
+
+        let err = sender
+            .process_response(&response, ctx)
+            .save(&persister)
+            .expect_err("transient response should error");
+
+        assert!(err.is_transient());
+        assert!(!persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
+        assert_eq!(persister.inner.lock().expect("Shouldn't be poisoned").events.len(), 0);
+        Ok(())
+    }
 }

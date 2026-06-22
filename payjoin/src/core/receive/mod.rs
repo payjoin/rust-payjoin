@@ -9,17 +9,27 @@
 //! If you specifically need to use
 //! version 1, refer to the `receive::v1` module documentation after enabling the `v1` feature.
 
-use std::collections::BTreeMap;
-use std::str::FromStr;
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use alloc::{format, vec};
+#[cfg(feature = "std")]
+use core::str::FromStr;
+
+pub mod common;
 
 use bitcoin::transaction::InputWeightPrediction;
+#[cfg(feature = "std")]
+use bitcoin::FeeRate;
 use bitcoin::{
-    psbt, AddressType, FeeRate, OutPoint, Psbt, Script, ScriptBuf, Transaction, TxIn, TxOut, Weight,
+    psbt, AddressType, OutPoint, Psbt, Script, ScriptBuf, Transaction, TxIn, TxOut, Weight,
 };
 pub(crate) use error::InternalPayloadError;
+#[cfg(feature = "std")]
+pub use error::JsonReply;
 pub use error::{
-    CoinSelectionError, Error, InputContributionError, JsonReply, OutputSubstitutionError,
-    PayloadError, ProtocolError,
+    CoinSelectionError, Error, InputContributionError, OutputSubstitutionError, PayloadError,
+    ProtocolError,
 };
 use optional_parameters::Params;
 use serde::{Deserialize, Serialize};
@@ -29,7 +39,9 @@ use crate::psbt::{
     InputWeightError, InternalInputPair, InternalPsbtInputError, PrevTxOutError, PsbtExt,
     NON_WITNESS_INPUT_WEIGHT,
 };
-use crate::{ImplementationError, Version};
+use crate::ImplementationError;
+#[cfg(feature = "std")]
+use crate::Version;
 
 /// Input weight for a P2TR key-spend with default sighash (64-byte signature) and no annex.
 const DEFAULT_SIGHASH_KEY_SPEND_INPUT_WEIGHT: Weight = Weight::from_wu(
@@ -37,7 +49,6 @@ const DEFAULT_SIGHASH_KEY_SPEND_INPUT_WEIGHT: Weight = Weight::from_wu(
         + NON_WITNESS_INPUT_WEIGHT.to_wu(),
 );
 
-pub(crate) mod common;
 mod error;
 pub(crate) mod optional_parameters;
 
@@ -47,6 +58,7 @@ pub mod v1;
 
 #[cfg(feature = "v2")]
 #[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
+#[cfg(feature = "v2-ohttp")]
 pub mod v2;
 
 /// A pair of ([`TxIn`], [`psbt::Input`]) with some built-in validation.
@@ -229,6 +241,7 @@ impl<'a> From<&'a InputPair> for InternalInputPair<'a> {
 }
 
 /// Validate the payload of a Payjoin request for PSBT and Params sanity
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 pub(crate) fn parse_payload(
     base64: &str,
     query: &str,
@@ -359,6 +372,7 @@ pub struct OriginalPayload {
 
 impl OriginalPayload {
     // Calculates the fee rate of the original proposal PSBT.
+    #[cfg(feature = "std")]
     fn psbt_fee_rate(&self) -> Result<FeeRate, InternalPayloadError> {
         let original_psbt_fee = self.psbt.fee().map_err(|e| {
             InternalPayloadError::ParsePsbt(bitcoin::psbt::PsbtParseError::PsbtEncoding(e))
@@ -366,6 +380,7 @@ impl OriginalPayload {
         Ok(original_psbt_fee / self.psbt.clone().extract_tx_unchecked_fee_rate().weight())
     }
 
+    #[cfg(feature = "std")]
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<FeeRate>,
@@ -402,7 +417,7 @@ impl OriginalPayload {
             .psbt
             .input_pairs()
             .scan(&mut err, |err, input| match input.previous_txout() {
-                Ok(txout) => Some(txout.script_pubkey.to_owned()),
+                Ok(txout) => Some(txout.script_pubkey.clone()),
                 Err(e) => {
                     **err = Err(InternalPayloadError::PrevTxOut(e).into());
                     None

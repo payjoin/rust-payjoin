@@ -1,9 +1,18 @@
-use std::fmt;
-use std::str::FromStr;
-
+use alloc::string::String;
+use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use core::error;
+use core::fmt;
+#[cfg(feature = "std")]
+mod imports {
+    pub use core::str::FromStr;
+    pub use std::error;
+}
 use bitcoin::locktime::absolute::LockTime;
 use bitcoin::transaction::Version;
 use bitcoin::Sequence;
+#[cfg(feature = "std")]
+use imports::*;
 
 use crate::error_codes::ErrorCode;
 
@@ -62,6 +71,7 @@ impl fmt::Display for BuildSenderError {
     }
 }
 
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 impl std::error::Error for BuildSenderError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use InternalBuildSenderError::*;
@@ -131,6 +141,7 @@ impl fmt::Display for ValidationError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for ValidationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use InternalValidationError::*;
@@ -216,6 +227,7 @@ impl fmt::Display for InternalProposalError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for InternalProposalError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use InternalProposalError::*;
@@ -272,6 +284,9 @@ pub enum ResponseError {
     Unrecognized { error_code: String, message: String },
 }
 
+#[cfg(not(feature = "std"))]
+impl core::error::Error for ResponseError {}
+#[cfg(feature = "std")]
 impl std::error::Error for ResponseError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use ResponseError::*;
@@ -310,26 +325,49 @@ impl fmt::Debug for ResponseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::WellKnown(e) => {
-                let json = serde_json::json!({
-                    "errorCode": e.code.to_string(),
-                    "message": e.message
-                });
-                write!(f, "Well known error: {json}")
+                #[cfg(feature = "std")]
+                {
+                    let json = serde_json::json!({
+                        "errorCode": e.code.to_string(),
+                        "message": e.message
+                    });
+                    write!(f, "Well known error: {json}")
+                }
+
+                #[cfg(not(feature = "std"))]
+                {
+                    write!(f, "Well known error: code={}, message={}", e.code, e.message)
+                }
             }
             Self::Validation(e) => write!(f, "Validation({e:?})"),
 
             Self::Unrecognized { error_code, message } => {
-                let json = serde_json::json!({
-                    "errorCode": error_code,
-                    "message": message
-                });
-                write!(f, "Unrecognized error: {json}")
+                #[cfg(feature = "std")]
+                {
+                    let json = serde_json::json!({
+                        "errorCode": error_code,
+                        "message": message
+                    });
+                    write!(f, "Unrecognized error: {json}")
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    write!(f, "Unrecognized error: code={}, message={}", error_code, message)
+                }
             }
         }
     }
 }
 
 impl ResponseError {
+    #[cfg(feature = "std")]
+    pub fn from_slice(body: &[u8]) -> Result<Self, serde_json::Error> {
+        let trimmed = body.split(|&byte| byte == 0).next().unwrap_or(body);
+        let json: serde_json::Value = serde_json::from_slice(trimmed)?;
+        Ok(Self::from_json(json))
+    }
+
+    #[cfg(feature = "std")]
     pub(crate) fn from_json(json: serde_json::Value) -> Self {
         let message = json
             .as_object()
@@ -357,6 +395,12 @@ impl ResponseError {
             None => InternalValidationError::Parse.into(),
         }
     }
+
+    #[cfg(any(feature = "v1", test))]
+    pub(crate) fn parse_from_str(s: &str) -> Result<Self, serde_json::Error> {
+        let json: serde_json::Value = serde_json::from_str(s)?;
+        Ok(Self::from_json(json))
+    }
 }
 
 /// A well-known error that can be safely displayed to end users.
@@ -367,7 +411,7 @@ pub struct WellKnownError {
     pub(crate) supported_versions: Option<Vec<u64>>,
 }
 
-impl std::error::Error for WellKnownError {}
+impl error::Error for WellKnownError {}
 
 impl core::fmt::Display for WellKnownError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -390,6 +434,7 @@ impl From<WellKnownError> for ResponseError {
     fn from(value: WellKnownError) -> Self { Self::WellKnown(value) }
 }
 
+#[allow(dead_code)]
 impl WellKnownError {
     /// Return the well-known BIP-78 error code.
     pub fn code(&self) -> ErrorCode { self.code }
@@ -413,8 +458,8 @@ mod tests {
         use super::*;
 
         let known_str_error = r#"{"errorCode":"version-unsupported", "message":"custom message here", "supported": [1, 2]}"#;
-        match ResponseError::parse(known_str_error) {
-            ResponseError::WellKnown(e) => {
+        match ResponseError::parse_from_str(known_str_error) {
+            Ok(ResponseError::WellKnown(e)) => {
                 assert_eq!(e.code(), ErrorCode::VersionUnsupported);
                 assert_eq!(e.message, "custom message here");
                 assert_eq!(
@@ -426,14 +471,14 @@ mod tests {
         };
         let not_enough_money_error =
             r#"{"errorCode":"not-enough-money", "message":"not enough money"}"#;
-        match ResponseError::parse(not_enough_money_error) {
-            ResponseError::WellKnown(e) => assert_eq!(e.code(), ErrorCode::NotEnoughMoney),
+        match ResponseError::parse_from_str(not_enough_money_error) {
+            Ok(ResponseError::WellKnown(e)) => assert_eq!(e.code(), ErrorCode::NotEnoughMoney),
             _ => panic!("Expected WellKnown error"),
         };
         let unrecognized_error = r#"{"errorCode":"random", "message":"random"}"#;
         assert!(matches!(
-            ResponseError::parse(unrecognized_error),
-            ResponseError::Unrecognized { .. }
+            ResponseError::parse_from_str(unrecognized_error),
+            Ok(ResponseError::Unrecognized { .. })
         ));
         let invalid_json_error = serde_json::json!({
             "err": "random",

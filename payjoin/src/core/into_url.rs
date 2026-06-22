@@ -1,3 +1,6 @@
+use alloc::string::String;
+use core::{error, fmt};
+
 use crate::core::{Url, UrlParseError};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -6,8 +9,8 @@ pub enum Error {
     ParseError(UrlParseError),
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Error::*;
 
         match self {
@@ -17,7 +20,7 @@ impl std::fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl error::Error for Error {}
 
 impl From<UrlParseError> for Error {
     fn from(err: UrlParseError) -> Error { Error::ParseError(err) }

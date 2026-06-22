@@ -1,5 +1,11 @@
-use std::ops::{Deref, DerefMut};
-use std::{error, fmt};
+use alloc::vec;
+use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use core::error;
+use core::fmt;
+use core::ops::{Deref, DerefMut};
+#[cfg(feature = "std")]
+use std::error;
 
 use bitcoin::bech32::{self, EncodeError};
 use bitcoin::key::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE;
@@ -19,7 +25,7 @@ pub(crate) fn ohttp_encapsulate(
     target_resource: &str,
     body: Option<&[u8]>,
 ) -> Result<([u8; ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse), OhttpEncapsulationError> {
-    use std::fmt::Write;
+    use core::fmt::Write;
     let mut ohttp_keys = ohttp_keys.clone();
 
     let ctx = ohttp::ClientRequest::from_config(&mut ohttp_keys)?;
@@ -56,7 +62,7 @@ pub(crate) fn ohttp_encapsulate(
 #[derive(Debug)]
 pub enum DirectoryResponseError {
     InvalidSize(usize),
-    OhttpDecapsulation(OhttpEncapsulationError),
+    OhttpDecapsulation(ohttp::Error),
     UnexpectedStatusCode(http::StatusCode),
 }
 
@@ -101,6 +107,7 @@ impl error::Error for DirectoryResponseError {
     }
 }
 
+#[cfg(feature = "std")]
 pub(crate) fn process_get_res(
     res: &[u8],
     ohttp_context: ohttp::ClientResponse,
@@ -113,6 +120,7 @@ pub(crate) fn process_get_res(
     }
 }
 
+#[cfg(feature = "std")]
 pub(crate) fn process_post_res(
     res: &[u8],
     ohttp_context: ohttp::ClientResponse,
@@ -124,19 +132,22 @@ pub(crate) fn process_post_res(
     }
 }
 
+#[cfg(feature = "std")]
 fn process_ohttp_res(
     res: &[u8],
     ohttp_context: ohttp::ClientResponse,
 ) -> Result<http::Response<Vec<u8>>, DirectoryResponseError> {
     let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
         res.try_into().map_err(|_| DirectoryResponseError::InvalidSize(res.len()))?;
-    tracing::trace!("decapsulating directory response");
-    let res = ohttp_decapsulate(ohttp_context, response_array)
-        .map_err(DirectoryResponseError::OhttpDecapsulation)?;
-    Ok(res)
+    ohttp_decapsulate(ohttp_context, response_array).map_err(|e| match e {
+        OhttpEncapsulationError::Ohttp(ohttp_err) =>
+            DirectoryResponseError::OhttpDecapsulation(ohttp_err),
+        _ => DirectoryResponseError::InvalidSize(0),
+    })
 }
 
 /// decapsulate ohttp, bhttp response and return http response body and status code
+#[cfg(all(feature = "std", feature = "v2-ohttp"))]
 pub(crate) fn ohttp_decapsulate(
     res_ctx: ohttp::ClientResponse,
     ohttp_body: &[u8; ENCAPSULATED_MESSAGE_BYTES],
@@ -348,8 +359,8 @@ pub enum ParseOhttpKeysError {
     InvalidFormat,
 }
 
-impl std::fmt::Display for ParseOhttpKeysError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ParseOhttpKeysError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ParseOhttpKeysError::*;
         match self {
             IncorrectLength(l) => write!(f, "Invalid length, got {l} expected 34"),
@@ -361,8 +372,8 @@ impl std::fmt::Display for ParseOhttpKeysError {
     }
 }
 
-impl std::error::Error for ParseOhttpKeysError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl error::Error for ParseOhttpKeysError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         use ParseOhttpKeysError::*;
         match self {
             DecodeKeyConfig(e) => Some(e),

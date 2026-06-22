@@ -1,4 +1,5 @@
 //! IO-related types and functions. Specifically, fetching OHTTP keys from a payjoin directory.
+#[cfg(feature = "std")]
 use std::time::Duration;
 
 use http::header::ACCEPT;

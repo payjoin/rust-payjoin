@@ -727,6 +727,9 @@ impl App {
                         Ok(OptionalTransitionOutcome::Stasis(_)) => {
                             println!("No response yet.");
                         }
+                        Err(re) if re.is_transient() => {
+                            tracing::debug!("Transient directory error, retrying poll: {re:?}");
+                        }
                         Err(re) => {
                             println!("{re}");
                             tracing::debug!("{re:?}");
@@ -771,6 +774,9 @@ impl App {
                             return Ok(next_state);
                         }
                         Ok(OptionalTransitionOutcome::Stasis(_)) => {}
+                        Err(e) if e.is_transient() => {
+                            tracing::debug!("Transient directory error, retrying poll: {e:?}");
+                        }
                         Err(e) => return Err(e.into()),
                     }
                 }

@@ -1505,11 +1505,11 @@ fn try_deserialize_tx(
 
 #[uniffi::export]
 impl Monitor {
-    pub fn check_payment(
+    pub fn check_for_broadcast(
         &self,
         transaction_exists: Arc<dyn TransactionExists>,
     ) -> MonitorTransition {
-        MonitorTransition(Arc::new(RwLock::new(Some(self.0.clone().check_payment(|txid| {
+        MonitorTransition(Arc::new(RwLock::new(Some(self.0.clone().check_for_broadcast(|txid| {
             transaction_exists
                 .callback(txid.to_string())
                 .and_then(|buf| buf.map(try_deserialize_tx).transpose())

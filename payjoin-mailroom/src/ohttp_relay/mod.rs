@@ -42,6 +42,8 @@ struct RelayConfig {
     client: HttpClient,
     prober: Prober,
     sentinel_tag: SentinelTag,
+    #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
+    tunnel_limits: bootstrap::TunnelLimits,
 }
 
 impl RelayConfig {
@@ -56,7 +58,14 @@ impl RelayConfig {
     ) -> Self {
         let client = into_client.into();
         let prober = Prober::new_with_client(client.clone());
-        RelayConfig { default_gateway, client, prober, sentinel_tag }
+        RelayConfig {
+            default_gateway,
+            client,
+            prober,
+            sentinel_tag,
+            #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
+            tunnel_limits: bootstrap::TunnelLimits::default(),
+        }
     }
 }
 
@@ -175,7 +184,7 @@ where
         (&Method::GET, _) | (&Method::CONNECT, _) => {
             match parse_gateway_uri(&method, path, authority, config).await {
                 Ok(gateway_uri) =>
-                    crate::ohttp_relay::bootstrap::handle_ohttp_keys(req, gateway_uri).await,
+                    bootstrap::handle_ohttp_keys(req, gateway_uri, &config.tunnel_limits).await,
                 Err(e) => Err(e),
             }
         }

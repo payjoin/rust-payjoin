@@ -526,10 +526,8 @@ impl AppTrait for App {
             };
         }
 
-        let send_ids = self.db.get_send_session_ids()?;
-        let recv_ids = self.db.get_recv_session_ids()?;
-        let is_sender = send_ids.iter().any(|id| id.0 == session_id.0);
-        let is_receiver = recv_ids.iter().any(|id| id.0 == session_id.0);
+        let is_sender = self.db.send_session_exists(&session_id)?;
+        let is_receiver = self.db.recv_session_exists(&session_id)?;
 
         match (is_sender, is_receiver) {
             (true, false) => self.cancel_sender_session(session_id, no_broadcast),

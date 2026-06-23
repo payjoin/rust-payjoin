@@ -10,17 +10,19 @@ use tokio::net::TcpStream;
 use tokio::sync::OwnedSemaphorePermit;
 use tracing::{debug, error, instrument};
 
-use crate::ohttp_relay::bootstrap::{run_tunnel_within, TunnelLimits};
+use crate::metrics::MetricsService;
+use crate::ohttp_relay::bootstrap::{run_tunnel_within, TunnelGuard, TunnelLimits};
 use crate::ohttp_relay::error::Error;
 use crate::ohttp_relay::{empty, GatewayUri};
 
 pub(crate) fn is_connect_request<B>(req: &Request<B>) -> bool { Method::CONNECT == req.method() }
 
-#[instrument(skip(limits))]
+#[instrument(skip(limits, metrics))]
 pub(crate) async fn try_upgrade<B>(
     req: Request<B>,
     gateway_origin: GatewayUri,
     limits: &TunnelLimits,
+    metrics: &MetricsService,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error>
 where
     B: Send + Debug + 'static,
@@ -30,11 +32,16 @@ where
     // unbounded number of file descriptors.
     let permit = match limits.semaphore.clone().try_acquire_owned() {
         Ok(permit) => permit,
-        Err(_) => return Err(Error::Unavailable(limits.timeout)),
+        Err(_) => {
+            metrics.record_tunnel_shed();
+            return Err(Error::Unavailable(limits.timeout));
+        }
     };
 
     let timeout = limits.timeout;
+    let guard = TunnelGuard::open(metrics.clone());
     tokio::task::spawn(async move {
+        let _guard = guard;
         match run_tunnel_within(timeout, tunnel_after_upgrade(req, gateway_origin, permit)).await {
             Some(Ok(())) => {}
             Some(Err(e)) => error!("server io error: {}", e),
@@ -82,6 +89,7 @@ mod tests {
     use tokio::sync::Semaphore;
 
     use super::try_upgrade;
+    use crate::metrics::MetricsService;
     use crate::ohttp_relay::bootstrap::TunnelLimits;
     use crate::ohttp_relay::error::Error;
     use crate::ohttp_relay::GatewayUri;
@@ -94,6 +102,7 @@ mod tests {
             semaphore: Arc::new(Semaphore::new(0)),
             timeout: Duration::from_secs(60),
         };
+        let metrics = MetricsService::new(None);
         let req = Request::builder()
             .method(Method::CONNECT)
             .uri("example.com:443")
@@ -101,7 +110,8 @@ mod tests {
             .expect("valid request");
         let gateway = GatewayUri::from_str("https://example.com").expect("valid gateway");
 
-        let err = try_upgrade(req, gateway, &limits).await.expect_err("should be rejected");
+        let err =
+            try_upgrade(req, gateway, &limits, &metrics).await.expect_err("should be rejected");
 
         assert!(matches!(err, Error::Unavailable(_)));
     }

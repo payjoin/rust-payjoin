@@ -17,7 +17,8 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{tungstenite, WebSocketStream};
 use tracing::{debug, error, instrument};
 
-use crate::ohttp_relay::bootstrap::{run_tunnel_within, TunnelLimits};
+use crate::metrics::MetricsService;
+use crate::ohttp_relay::bootstrap::{run_tunnel_within, TunnelGuard, TunnelLimits};
 use crate::ohttp_relay::empty;
 use crate::ohttp_relay::error::Error;
 use crate::ohttp_relay::gateway_uri::GatewayUri;
@@ -50,11 +51,12 @@ pub(crate) fn is_websocket_request<B>(req: &Request<B>) -> bool {
 /// This performs the WebSocket handshake to support generic body types.
 /// When bootstrapping moves to axum, this can be replaced with
 /// `axum::extract::ws::WebSocketUpgrade`.
-#[instrument(skip(limits))]
+#[instrument(skip(limits, metrics))]
 pub(crate) async fn try_upgrade<B>(
     req: Request<B>,
     gateway_origin: GatewayUri,
     limits: &TunnelLimits,
+    metrics: &MetricsService,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error>
 where
     B: Send + Debug + 'static,
@@ -64,7 +66,10 @@ where
     // descriptors.
     let permit = match limits.semaphore.clone().try_acquire_owned() {
         Ok(permit) => permit,
-        Err(_) => return Err(Error::Unavailable(limits.timeout)),
+        Err(_) => {
+            metrics.record_tunnel_shed();
+            return Err(Error::Unavailable(limits.timeout));
+        }
     };
 
     let key = req
@@ -78,7 +83,9 @@ where
     let accept_key = derive_accept_key(key.as_bytes());
 
     let timeout = limits.timeout;
+    let guard = TunnelGuard::open(metrics.clone());
     tokio::spawn(async move {
+        let _guard = guard;
         match run_tunnel_within(timeout, serve_after_upgrade(req, gateway_origin, permit)).await {
             Some(Ok(())) => {}
             Some(Err(e)) => error!("Error in websocket connection: {e}"),

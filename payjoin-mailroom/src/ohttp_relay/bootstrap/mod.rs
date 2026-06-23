@@ -8,6 +8,7 @@ use hyper::{Request, Response};
 use tokio::sync::Semaphore;
 use tracing::instrument;
 
+use crate::metrics::MetricsService;
 use crate::ohttp_relay::error::Error;
 use crate::ohttp_relay::GatewayUri;
 
@@ -50,6 +51,25 @@ impl Default for TunnelLimits {
     }
 }
 
+/// Records a bootstrap tunnel as open for as long as it is held, and records it
+/// closed on drop. Holding the guard inside the tunnel task means the close is
+/// recorded however the tunnel ends -- normal close, I/O error, timeout
+/// teardown, or panic -- so the active-tunnel gauge cannot drift.
+pub(crate) struct TunnelGuard {
+    metrics: MetricsService,
+}
+
+impl TunnelGuard {
+    pub(crate) fn open(metrics: MetricsService) -> Self {
+        metrics.record_tunnel_open();
+        Self { metrics }
+    }
+}
+
+impl Drop for TunnelGuard {
+    fn drop(&mut self) { self.metrics.record_tunnel_close(); }
+}
+
 /// Drive a bootstrap tunnel to completion, tearing it down if it stays open
 /// longer than `timeout`. The deadline covers the whole tunnel lifecycle (DNS,
 /// HTTP upgrade, outbound connect, and byte proxying), so a stalled client
@@ -62,23 +82,24 @@ pub(crate) async fn run_tunnel_within<F: std::future::Future>(
     tokio::time::timeout(timeout, tunnel).await.ok()
 }
 
-#[instrument(skip(limits))]
+#[instrument(skip(limits, metrics))]
 pub(crate) async fn handle_ohttp_keys<B>(
     req: Request<B>,
     gateway_origin: GatewayUri,
     limits: &TunnelLimits,
+    metrics: &MetricsService,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error>
 where
     B: Send + Debug + 'static,
 {
     #[cfg(feature = "connect-bootstrap")]
     if connect::is_connect_request(&req) {
-        return connect::try_upgrade(req, gateway_origin, limits).await;
+        return connect::try_upgrade(req, gateway_origin, limits, metrics).await;
     }
 
     #[cfg(feature = "ws-bootstrap")]
     if ws::is_websocket_request(&req) {
-        return ws::try_upgrade(req, gateway_origin, limits).await;
+        return ws::try_upgrade(req, gateway_origin, limits, metrics).await;
     }
 
     Err(Error::BadRequest("Not a supported proxy upgrade request".to_string()))

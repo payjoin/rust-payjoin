@@ -29,6 +29,7 @@ pub mod sentinel;
 pub use sentinel::SentinelTag;
 
 use self::error::{BoxError, Error};
+use crate::metrics::MetricsService;
 
 #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
 pub mod bootstrap;
@@ -42,19 +43,25 @@ struct RelayConfig {
     client: HttpClient,
     prober: Prober,
     sentinel_tag: SentinelTag,
+    metrics: MetricsService,
     #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
     tunnel_limits: bootstrap::TunnelLimits,
 }
 
 impl RelayConfig {
-    fn new_with_default_client(default_gateway: GatewayUri, sentinel_tag: SentinelTag) -> Self {
-        Self::new(default_gateway, HttpClient::default(), sentinel_tag)
+    fn new_with_default_client(
+        default_gateway: GatewayUri,
+        sentinel_tag: SentinelTag,
+        metrics: MetricsService,
+    ) -> Self {
+        Self::new(default_gateway, HttpClient::default(), sentinel_tag, metrics)
     }
 
     fn new(
         default_gateway: GatewayUri,
         into_client: impl Into<HttpClient>,
         sentinel_tag: SentinelTag,
+        metrics: MetricsService,
     ) -> Self {
         let client = into_client.into();
         let prober = Prober::new_with_client(client.clone());
@@ -63,6 +70,7 @@ impl RelayConfig {
             client,
             prober,
             sentinel_tag,
+            metrics,
             #[cfg(any(feature = "connect-bootstrap", feature = "ws-bootstrap"))]
             tunnel_limits: bootstrap::TunnelLimits::default(),
         }
@@ -75,13 +83,13 @@ pub struct Service {
 }
 
 impl Service {
-    pub async fn new(sentinel_tag: SentinelTag) -> Self {
+    pub async fn new(sentinel_tag: SentinelTag, metrics: MetricsService) -> Self {
         // The default gateway is hardcoded because it is obsolete and required only for backwards
         // compatibility.
         // The new mechanism for specifying a custom gateway is via RFC 9540 using
         // `/.well-known/ohttp-gateway` request paths.
         let gateway_origin = GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri");
-        let config = RelayConfig::new_with_default_client(gateway_origin, sentinel_tag);
+        let config = RelayConfig::new_with_default_client(gateway_origin, sentinel_tag, metrics);
         config.prober.assert_opt_in(&config.default_gateway).await;
         Self { config: Arc::new(config) }
     }
@@ -91,10 +99,11 @@ impl Service {
         sentinel_tag: SentinelTag,
         root_store: rustls::RootCertStore,
         default_gateway: Option<GatewayUri>,
+        metrics: MetricsService,
     ) -> Self {
         let gateway_origin = default_gateway
             .unwrap_or_else(|| GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri"));
-        let config = RelayConfig::new(gateway_origin, root_store, sentinel_tag);
+        let config = RelayConfig::new(gateway_origin, root_store, sentinel_tag, metrics);
         config.prober.assert_opt_in(&config.default_gateway).await;
         Self { config: Arc::new(config) }
     }
@@ -184,7 +193,13 @@ where
         (&Method::GET, _) | (&Method::CONNECT, _) => {
             match parse_gateway_uri(&method, path, authority, config).await {
                 Ok(gateway_uri) =>
-                    bootstrap::handle_ohttp_keys(req, gateway_uri, &config.tunnel_limits).await,
+                    bootstrap::handle_ohttp_keys(
+                        req,
+                        gateway_uri,
+                        &config.tunnel_limits,
+                        &config.metrics,
+                    )
+                    .await,
                 Err(e) => Err(e),
             }
         }

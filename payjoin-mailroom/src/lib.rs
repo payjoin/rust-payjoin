@@ -53,7 +53,7 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
 
     let services = Services {
         directory,
-        relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
+        relay: crate::ohttp_relay::Service::new(sentinel_tag, metrics.clone()).await,
         metrics,
         #[cfg(feature = "access-control")]
         geoip,
@@ -109,6 +109,7 @@ pub async fn serve_manual_tls(
             sentinel_tag,
             root_store,
             default_gateway,
+            metrics.clone(),
         )
         .await,
         metrics,
@@ -175,7 +176,7 @@ pub async fn serve_acme(
 
     let services = Services {
         directory,
-        relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
+        relay: crate::ohttp_relay::Service::new(sentinel_tag, metrics.clone()).await,
         metrics,
         #[cfg(feature = "access-control")]
         geoip,
@@ -565,7 +566,7 @@ mod tests {
         let metrics = MetricsService::new(Some(provider.clone()));
         let services = Services {
             directory: init_directory(&config, sentinel_tag, &metrics).await.unwrap(),
-            relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
+            relay: crate::ohttp_relay::Service::new(sentinel_tag, metrics.clone()).await,
             metrics,
             #[cfg(feature = "access-control")]
             geoip: None,
@@ -614,7 +615,7 @@ mod tests {
         let metrics = MetricsService::new(Some(provider.clone()));
         let services = Services {
             directory: init_directory(&config, sentinel_tag, &metrics).await.unwrap(),
-            relay: crate::ohttp_relay::Service::new(sentinel_tag).await,
+            relay: crate::ohttp_relay::Service::new(sentinel_tag, metrics.clone()).await,
             metrics,
             #[cfg(feature = "access-control")]
             geoip: None,

@@ -12,6 +12,8 @@ use payjoin::directory::ShortId;
 
 pub(crate) const TOTAL_CONNECTIONS: &str = "total_connections";
 pub(crate) const ACTIVE_CONNECTIONS: &str = "active_connections";
+pub(crate) const ACTIVE_TUNNELS: &str = "bootstrap_active_tunnels";
+pub(crate) const TUNNEL_SHEDS: &str = "bootstrap_tunnel_shed_total";
 pub(crate) const HTTP_REQUESTS: &str = "http_request_total";
 pub(crate) const DB_ENTRIES: &str = "db_entries_total";
 pub(crate) const UNIQUE_SHORT_IDS: &str = "unique_short_ids";
@@ -159,10 +161,20 @@ pub struct MetricsService {
     total_connections: Counter<u64>,
     /// Number of active connections right now
     active_connections: UpDownCounter<i64>,
+    /// Number of OHTTP bootstrap tunnels open right now
+    active_tunnels: UpDownCounter<i64>,
+    /// Total OHTTP bootstrap tunnels shed at the concurrency cap
+    tunnel_sheds_total: Counter<u64>,
     /// Total v1/v2 mailbox entries written, labelled by `version`
     db_entries_total: Counter<u64>,
     tracker: UniqueShortIdTracker,
     _unique_ids_gauge: Option<Arc<ObservableGauge<u64>>>,
+}
+
+impl fmt::Debug for MetricsService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MetricsService").finish_non_exhaustive()
+    }
 }
 
 #[repr(u8)]
@@ -197,6 +209,16 @@ impl MetricsService {
         let active_connections = meter
             .i64_up_down_counter(ACTIVE_CONNECTIONS)
             .with_description("Number of active connections")
+            .build();
+
+        let active_tunnels = meter
+            .i64_up_down_counter(ACTIVE_TUNNELS)
+            .with_description("Number of OHTTP bootstrap tunnels open right now")
+            .build();
+
+        let tunnel_sheds_total = meter
+            .u64_counter(TUNNEL_SHEDS)
+            .with_description("Total OHTTP bootstrap tunnels shed at the concurrency cap")
             .build();
 
         let db_entries_total = meter
@@ -240,6 +262,8 @@ impl MetricsService {
             http_requests_total,
             total_connections,
             active_connections,
+            active_tunnels,
+            tunnel_sheds_total,
             db_entries_total,
             tracker,
             _unique_ids_gauge: unique_ids_gauge,
@@ -263,6 +287,12 @@ impl MetricsService {
     }
 
     pub fn record_connection_close(&self) { self.active_connections.add(-1, &[]); }
+
+    pub fn record_tunnel_open(&self) { self.active_tunnels.add(1, &[]); }
+
+    pub fn record_tunnel_close(&self) { self.active_tunnels.add(-1, &[]); }
+
+    pub fn record_tunnel_shed(&self) { self.tunnel_sheds_total.add(1, &[]); }
 
     pub fn record_db_entry(&self, version: PayjoinVersion) {
         self.db_entries_total.add(1, &[KeyValue::new("version", version.to_string())]);

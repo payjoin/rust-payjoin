@@ -26,11 +26,15 @@ fn replay_events(
 
 fn construct_history(
     session_events: Vec<SessionEvent>,
+    receiver: &ReceiveSession,
 ) -> Result<SessionHistory, ReplayError<ReceiveSession, SessionEvent>> {
     let history = SessionHistory::new(session_events);
-    let ctx = history.session_context();
-    if ctx.expiration.elapsed() {
-        return Err(InternalReplayError::Expired(ctx.expiration).into());
+    // Closed sessions terminated before expiration; do not surface an expired error for them.
+    if !matches!(receiver, ReceiveSession::Closed(_)) {
+        let ctx = history.session_context();
+        if ctx.expiration.elapsed() {
+            return Err(InternalReplayError::Expired(ctx.expiration).into());
+        }
     }
     Ok(history)
 }
@@ -59,7 +63,7 @@ where
         }
     };
 
-    let history = construct_history(session_events)?;
+    let history = construct_history(session_events, &receiver)?;
     Ok((receiver, history))
 }
 
@@ -87,7 +91,7 @@ where
         }
     };
 
-    let history = construct_history(session_events)?;
+    let history = construct_history(session_events, &receiver)?;
     Ok((receiver, history))
 }
 
@@ -156,20 +160,24 @@ impl SessionHistory {
 
     /// Helper method to query the current status of the session.
     pub fn status(&self) -> SessionStatus {
+        // Terminal states take precedence over expiration: a session that has reached
+        // a `Closed` outcome is done regardless of whether its expiration has elapsed.
+        match self.events.last() {
+            Some(SessionEvent::Closed(outcome)) =>
+                return match outcome {
+                    SessionOutcome::Success(_) | SessionOutcome::PayjoinProposalSent =>
+                        SessionStatus::Completed,
+                    SessionOutcome::Aborted => SessionStatus::Failed,
+                    SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
+                },
+            Some(SessionEvent::Cancelled | SessionEvent::ProtocolFailed) =>
+                return SessionStatus::PendingFallback,
+            _ => {}
+        }
         if self.session_context().expiration.elapsed() {
             return SessionStatus::Expired;
         }
-        match self.events.last() {
-            Some(SessionEvent::Closed(outcome)) => match outcome {
-                SessionOutcome::Success(_) | SessionOutcome::PayjoinProposalSent =>
-                    SessionStatus::Completed,
-                SessionOutcome::Aborted => SessionStatus::Failed,
-                SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
-            },
-            Some(SessionEvent::Cancelled | SessionEvent::ProtocolFailed) =>
-                SessionStatus::PendingFallback,
-            _ => SessionStatus::Active,
-        }
+        SessionStatus::Active
     }
 }
 
@@ -403,6 +411,65 @@ mod tests {
         let expected_err: ReplayError<ReceiveSession, SessionEvent> =
             InternalReplayError::Expired(expiration).into();
         assert_eq!(err.to_string(), expected_err.to_string());
+    }
+
+    #[test]
+    fn status_prefers_closed_outcome_over_expired() {
+        let expiration = (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap();
+        let session_context = SessionContext { expiration, ..SHARED_CONTEXT.clone() };
+
+        let success = SessionHistory::new(vec![
+            SessionEvent::Created(session_context.clone()),
+            SessionEvent::Closed(SessionOutcome::Success(vec![])),
+        ]);
+        assert_eq!(success.status(), SessionStatus::Completed);
+
+        let aborted = SessionHistory::new(vec![
+            SessionEvent::Created(session_context.clone()),
+            SessionEvent::Closed(SessionOutcome::Aborted),
+        ]);
+        assert_eq!(aborted.status(), SessionStatus::Failed);
+
+        let fallback = SessionHistory::new(vec![
+            SessionEvent::Created(session_context.clone()),
+            SessionEvent::Closed(SessionOutcome::FallbackBroadcasted),
+        ]);
+        assert_eq!(fallback.status(), SessionStatus::FallbackBroadcasted);
+
+        // Sessions that never reached a terminal state still report Expired.
+        let still_open = SessionHistory::new(vec![SessionEvent::Created(session_context)]);
+        assert_eq!(still_open.status(), SessionStatus::Expired);
+    }
+
+    #[tokio::test]
+    async fn test_replaying_closed_session_past_expiration_is_not_expired() {
+        let expiration = (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap();
+        let session_context = SessionContext { expiration, ..SHARED_CONTEXT.clone() };
+
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        persister
+            .save_event(SessionEvent::Created(session_context.clone()))
+            .expect("in memory persister save should not fail");
+        persister
+            .save_event(SessionEvent::Closed(SessionOutcome::Success(vec![])))
+            .expect("in memory persister save should not fail");
+        let (state, _) =
+            replay_event_log(&persister).expect("closed session should replay successfully");
+        assert!(matches!(state, ReceiveSession::Closed(SessionOutcome::Success(_))));
+
+        let persister = InMemoryAsyncPersister::<SessionEvent>::default();
+        persister
+            .save_event(SessionEvent::Created(session_context))
+            .await
+            .expect("in memory async persister save should not fail");
+        persister
+            .save_event(SessionEvent::Closed(SessionOutcome::Success(vec![])))
+            .await
+            .expect("in memory async persister save should not fail");
+        let (state, _) = replay_event_log_async(&persister)
+            .await
+            .expect("closed session should replay successfully");
+        assert!(matches!(state, ReceiveSession::Closed(SessionOutcome::Success(_))));
     }
 
     #[tokio::test]

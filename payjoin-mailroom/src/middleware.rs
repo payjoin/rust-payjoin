@@ -61,13 +61,18 @@ fn sanitize_short_id(path: &str) -> String {
     }
 }
 
+/// Tracks per-request lifecycle metrics: marks the request started and in
+/// flight on arrival and marks it no longer in flight when it finishes.
+///
+/// The in-flight count is decremented by the `InFlightGuard` held across the
+/// inner future, so it is corrected even if the request is cancelled (a
+/// long-poll client disconnects) or the handler panics -- cases where a manual
+/// decrement after `next.run` would be skipped and leak the count upward.
 pub async fn track_connections(
     metrics: axum::extract::State<MetricsService>,
     req: Request,
     next: Next,
 ) -> Response {
-    metrics.record_connection_open();
-    let response = next.run(req).await;
-    metrics.record_connection_close();
-    response
+    let _guard = metrics.track_request();
+    next.run(req).await
 }

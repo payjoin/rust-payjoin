@@ -10,11 +10,11 @@ use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use payjoin::directory::ShortId;
 
-pub(crate) const TOTAL_CONNECTIONS: &str = "total_connections";
-pub(crate) const ACTIVE_CONNECTIONS: &str = "active_connections";
+pub(crate) const HTTP_REQUESTS_STARTED: &str = "http_requests_started_total";
+pub(crate) const HTTP_REQUESTS_IN_FLIGHT: &str = "http_requests_in_flight";
 pub(crate) const ACTIVE_TUNNELS: &str = "bootstrap_active_tunnels";
 pub(crate) const TUNNEL_SHEDS: &str = "bootstrap_tunnel_shed_total";
-pub(crate) const HTTP_REQUESTS: &str = "http_request_total";
+pub(crate) const HTTP_REQUESTS_TOTAL: &str = "http_requests_total";
 pub(crate) const DB_ENTRIES: &str = "db_entries_total";
 pub(crate) const UNIQUE_SHORT_IDS: &str = "unique_short_ids";
 
@@ -155,12 +155,18 @@ impl Default for UniqueShortIdTracker {
 
 #[derive(Clone)]
 pub struct MetricsService {
-    /// Total number of HTTP requests by endpoint type, method, and status code
+    /// Total number of HTTP requests that ran to completion, by endpoint
+    /// type, method, and status code. Recorded after the handler returns, so
+    /// requests that did not complete are absent. The gap from
+    /// `http_requests_started_total` is therefore an upper bound on dropped
+    /// requests -- client cancellation before the handler returned, requests
+    /// still in flight at scrape time, or a handler panic -- not a precise
+    /// cancellation count.
     http_requests_total: Counter<u64>,
-    /// Total number of connections
-    total_connections: Counter<u64>,
-    /// Number of active connections right now
-    active_connections: UpDownCounter<i64>,
+    /// Total number of HTTP requests started (counted before the handler runs)
+    http_requests_started_total: Counter<u64>,
+    /// Number of HTTP requests currently in flight
+    http_requests_in_flight: UpDownCounter<i64>,
     /// Number of OHTTP bootstrap tunnels open right now
     active_tunnels: UpDownCounter<i64>,
     /// Total OHTTP bootstrap tunnels shed at the concurrency cap
@@ -197,18 +203,18 @@ impl MetricsService {
         let meter = provider.meter("payjoin-mailroom");
 
         let http_requests_total = meter
-            .u64_counter(HTTP_REQUESTS)
-            .with_description("Total number of HTTP requests")
+            .u64_counter(HTTP_REQUESTS_TOTAL)
+            .with_description("Total number of HTTP requests completed")
             .build();
 
-        let total_connections = meter
-            .u64_counter(TOTAL_CONNECTIONS)
-            .with_description("Total number of connections")
+        let http_requests_started_total = meter
+            .u64_counter(HTTP_REQUESTS_STARTED)
+            .with_description("Total number of HTTP requests started")
             .build();
 
-        let active_connections = meter
-            .i64_up_down_counter(ACTIVE_CONNECTIONS)
-            .with_description("Number of active connections")
+        let http_requests_in_flight = meter
+            .i64_up_down_counter(HTTP_REQUESTS_IN_FLIGHT)
+            .with_description("Number of HTTP requests currently in flight")
             .build();
 
         let active_tunnels = meter
@@ -260,8 +266,8 @@ impl MetricsService {
 
         Self {
             http_requests_total,
-            total_connections,
-            active_connections,
+            http_requests_started_total,
+            http_requests_in_flight,
             active_tunnels,
             tunnel_sheds_total,
             db_entries_total,
@@ -281,12 +287,20 @@ impl MetricsService {
         );
     }
 
-    pub fn record_connection_open(&self) {
-        self.total_connections.add(1, &[]);
-        self.active_connections.add(1, &[]);
+    /// Records the start of an HTTP request and returns a guard that marks it
+    /// finished when dropped.
+    ///
+    /// Increments `http_requests_started_total` and `http_requests_in_flight`
+    /// immediately. The returned [`InFlightGuard`] decrements
+    /// `http_requests_in_flight` in its `Drop`, so the in-flight count is
+    /// corrected on normal return, on client cancellation (the request future
+    /// is dropped), and on a handler panic during unwind -- none of which a
+    /// manual decrement after the handler could guarantee.
+    pub(crate) fn track_request(&self) -> InFlightGuard {
+        self.http_requests_started_total.add(1, &[]);
+        self.http_requests_in_flight.add(1, &[]);
+        InFlightGuard { in_flight: self.http_requests_in_flight.clone() }
     }
-
-    pub fn record_connection_close(&self) { self.active_connections.add(-1, &[]); }
 
     pub fn record_tunnel_open(&self) { self.active_tunnels.add(1, &[]); }
 
@@ -299,4 +313,120 @@ impl MetricsService {
     }
 
     pub fn record_short_id(&self, id: &ShortId) { self.tracker.add_id(id); }
+}
+
+/// Guard that decrements `http_requests_in_flight` when dropped.
+///
+/// Returned by [`MetricsService::track_request`] and held for the duration of a
+/// request. Because the decrement happens in `Drop`, the in-flight count is
+/// corrected whether the request returns normally, is cancelled (the future is
+/// dropped without completing), or panics. A manual decrement placed after the
+/// request future would be skipped on cancellation and on unwind, leaking the
+/// count upward.
+pub(crate) struct InFlightGuard {
+    in_flight: UpDownCounter<i64>,
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        // Kept trivial and non-panicking: this runs during stack unwinding.
+        self.in_flight.add(-1, &[]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+
+    use super::*;
+
+    fn sum_i64(exporter: &InMemoryMetricExporter, name: &str) -> i64 {
+        let finished = exporter.get_finished_metrics().expect("metrics");
+        finished
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == name)
+            .flat_map(|m| match m.data() {
+                AggregatedMetrics::I64(MetricData::Sum(sum)) =>
+                    sum.data_points().map(|dp| dp.value()).collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .sum()
+    }
+
+    fn sum_u64(exporter: &InMemoryMetricExporter, name: &str) -> u64 {
+        let finished = exporter.get_finished_metrics().expect("metrics");
+        finished
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == name)
+            .flat_map(|m| match m.data() {
+                AggregatedMetrics::U64(MetricData::Sum(sum)) =>
+                    sum.data_points().map(|dp| dp.value()).collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .sum()
+    }
+
+    #[test]
+    fn track_request_guard_decrements_in_flight_on_drop() {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone()).build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+        let metrics = MetricsService::new(Some(provider.clone()));
+
+        // Two requests start; one finishes (its guard is dropped at the end of
+        // the inner scope), one is still in flight across the flush.
+        let _held = metrics.track_request();
+        {
+            let _finished = metrics.track_request();
+        }
+
+        provider.force_flush().expect("flush failed");
+
+        assert_eq!(
+            sum_u64(&exporter, HTTP_REQUESTS_STARTED),
+            2,
+            "track_request increments the started counter once per call"
+        );
+        assert_eq!(
+            sum_i64(&exporter, HTTP_REQUESTS_IN_FLIGHT),
+            1,
+            "two started, one guard dropped => exactly one still in flight"
+        );
+    }
+
+    #[test]
+    fn in_flight_guard_decrements_during_panic_unwind() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone()).build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+        let metrics = MetricsService::new(Some(provider.clone()));
+
+        // A handler that panics while holding the guard must still decrement the
+        // in-flight count as the stack unwinds (the crate builds panic=unwind).
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = metrics.track_request();
+            panic!("handler blew up mid-request");
+        }));
+        assert!(result.is_err(), "the closure was expected to panic");
+
+        provider.force_flush().expect("flush failed");
+
+        assert_eq!(
+            sum_u64(&exporter, HTTP_REQUESTS_STARTED),
+            1,
+            "the request was counted as started before the panic"
+        );
+        assert_eq!(
+            sum_i64(&exporter, HTTP_REQUESTS_IN_FLIGHT),
+            0,
+            "the guard's Drop decremented in-flight while unwinding"
+        );
+    }
 }

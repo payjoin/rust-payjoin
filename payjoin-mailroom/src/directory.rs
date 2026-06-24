@@ -12,6 +12,7 @@ use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tracing::{error, warn};
 
 use crate::db::{Db, Error as DbError, SendableError};
+use crate::metrics::MetricsService;
 use crate::ohttp_relay::SentinelTag;
 
 const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
@@ -94,6 +95,7 @@ pub struct Service<D: Db> {
     ohttp: ohttp::Server,
     sentinel_tag: SentinelTag,
     v1: Option<V1>,
+    metrics: MetricsService,
 }
 
 impl<D: Db, B> tower::Service<Request<B>> for Service<D>
@@ -117,8 +119,14 @@ where
 }
 
 impl<D: Db> Service<D> {
-    pub fn new(db: D, ohttp: ohttp::Server, sentinel_tag: SentinelTag, v1: Option<V1>) -> Self {
-        Self { db, ohttp, sentinel_tag, v1 }
+    pub fn new(
+        db: D,
+        ohttp: ohttp::Server,
+        sentinel_tag: SentinelTag,
+        v1: Option<V1>,
+        metrics: MetricsService,
+    ) -> Self {
+        Self { db, ohttp, sentinel_tag, v1, metrics }
     }
 
     async fn serve_request<B>(&self, req: Request<B>) -> Result<Response<Body>>
@@ -250,19 +258,38 @@ impl<D: Db> Service<D> {
         Ok(Response::new(full(ohttp_res)))
     }
 
+    /// Dispatch a decapsulated V2 request to its handler, then record the
+    /// logical operation against `http_requests_total`.
+    ///
+    /// The outer `track_metrics` middleware only sees the wire path
+    /// (`/.well-known/ohttp-gateway` or `/`), so without this inner record
+    /// V2 mailbox traffic is invisible to the per-endpoint counter. The
+    /// inner path is collapsed by the same `endpoint_label` used at the
+    /// outer layer, so the bech32 mailbox id never reaches a metric label.
     async fn handle_decapsulated_request(
         &self,
         req: Request<Body>,
     ) -> Result<Response<Body>, HandlerError> {
         let path = req.uri().path().to_string();
         let (parts, body) = req.into_parts();
+        let method = parts.method.clone();
         let path_segments: Vec<&str> = path.split('/').collect();
-        match (parts.method, path_segments.as_slice()) {
+        let result = match (parts.method, path_segments.as_slice()) {
             (Method::POST, &["", id]) => self.post_mailbox(id, body).await,
             (Method::GET, &["", id]) => self.get_mailbox(id).await,
             (Method::PUT, &["", id]) if self.v1.is_some() => self.put_payjoin_v1(id, body).await,
             _ => Ok(not_found()),
-        }
+        };
+        let status = match &result {
+            Ok(response) => response.status().as_u16(),
+            Err(err) => err.status_code().as_u16(),
+        };
+        self.metrics.record_http_request(
+            crate::middleware::endpoint_label(&path),
+            crate::middleware::method_label(&method),
+            status,
+        );
+        result
     }
 
     async fn post_mailbox(&self, id: &str, body: Body) -> Result<Response<Body>, HandlerError> {
@@ -461,43 +488,48 @@ enum HandlerError {
 }
 
 impl HandlerError {
+    /// HTTP status this error maps to, without running the logging/body
+    /// side effects of [`to_response`](Self::to_response).
+    ///
+    /// Used by callers (e.g. `handle_decapsulated_request`) that need the
+    /// status for a metric label but still return the error to the outer
+    /// layer for response rendering, so `to_response` runs exactly once.
+    fn status_code(&self) -> StatusCode {
+        match self {
+            HandlerError::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            HandlerError::InternalServerError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            HandlerError::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            HandlerError::SenderGone(_) => StatusCode::GONE,
+            HandlerError::OhttpKeyRejection(_) => StatusCode::BAD_REQUEST,
+            HandlerError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            HandlerError::V1PsbtRejected(_) => StatusCode::BAD_REQUEST,
+            HandlerError::Forbidden(_) => StatusCode::FORBIDDEN,
+        }
+    }
+
     fn to_response(&self) -> Response<Body> {
         let mut res = Response::new(empty());
+        *res.status_mut() = self.status_code();
         match self {
-            HandlerError::PayloadTooLarge => *res.status_mut() = StatusCode::PAYLOAD_TOO_LARGE,
-            HandlerError::InternalServerError(e) => {
-                error!("Internal server error: {}", e);
-                *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR
-            }
+            HandlerError::PayloadTooLarge => {}
+            HandlerError::InternalServerError(e) => error!("Internal server error: {}", e),
             HandlerError::ServiceUnavailable(e) => {
                 error!("Service temporarily unavailable: {}", e);
-                *res.status_mut() = StatusCode::SERVICE_UNAVAILABLE
             }
-            HandlerError::SenderGone(e) => {
-                error!("Sender gone: {}", e);
-                *res.status_mut() = StatusCode::GONE
-            }
+            HandlerError::SenderGone(e) => error!("Sender gone: {}", e),
             HandlerError::OhttpKeyRejection(e) => {
                 const OHTTP_KEY_REJECTION_RES_JSON: &str = r#"{"type":"https://iana.org/assignments/http-problem-types#ohttp-key", "title": "key identifier unknown"}"#;
                 warn!("Bad request: Key configuration rejected: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST;
                 res.headers_mut()
                     .insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 *res.body_mut() = full(OHTTP_KEY_REJECTION_RES_JSON);
             }
-            HandlerError::BadRequest(e) => {
-                warn!("Bad request: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST
-            }
+            HandlerError::BadRequest(e) => warn!("Bad request: {}", e),
             HandlerError::V1PsbtRejected(e) => {
                 warn!("PSBT rejected: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST;
                 *res.body_mut() = full(V1_REJECT_RES_JSON);
             }
-            HandlerError::Forbidden(e) => {
-                warn!("Forbidden: {}", e);
-                *res.status_mut() = StatusCode::FORBIDDEN
-            }
+            HandlerError::Forbidden(e) => warn!("Forbidden: {}", e),
         }
         res
     }
@@ -594,7 +626,7 @@ mod tests {
         .expect("db init");
         let ohttp: ohttp::Server =
             crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        Service::new(db, ohttp, SentinelTag::new([0u8; 32]), v1)
+        Service::new(db, ohttp, SentinelTag::new([0u8; 32]), v1, MetricsService::new(None))
     }
 
     /// A valid ShortId encoded as bech32 for use in URL paths.
@@ -831,10 +863,10 @@ mod tests {
         )
         .await
         .expect("db init");
-        let db = MetricsDb::new(db, metrics);
+        let db = MetricsDb::new(db, metrics.clone());
         let ohttp: ohttp::Server =
             crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None);
+        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None, metrics);
 
         let id = valid_short_id_path();
         let res = svc
@@ -894,10 +926,10 @@ mod tests {
         )
         .await
         .expect("db init");
-        let db = MetricsDb::new(db, metrics);
+        let db = MetricsDb::new(db, metrics.clone());
         let ohttp: ohttp::Server =
             crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None);
+        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None, metrics);
 
         let id = valid_short_id_path();
         let res = svc

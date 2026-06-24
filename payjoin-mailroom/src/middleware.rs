@@ -78,7 +78,7 @@ pub async fn track_metrics(
 /// - `other` -- everything else: 404s, scanner probes, and the `CONNECT`
 ///   bootstrap whose path is a client-controlled authority (its `method` label
 ///   already distinguishes it)
-fn endpoint_label(path: &str) -> &'static str {
+pub(crate) fn endpoint_label(path: &str) -> &'static str {
     const BECH32_CHARSET: &[u8] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 
     // Exact, server-defined routes shared by the relay and directory. The set
@@ -108,7 +108,7 @@ fn endpoint_label(path: &str) -> &'static str {
 /// `http::Method` admits arbitrary extension tokens, which are client
 /// controlled, so any method outside the standard set collapses to `other` to
 /// keep label cardinality bounded.
-fn method_label(method: &Method) -> &'static str {
+pub(crate) fn method_label(method: &Method) -> &'static str {
     match *method {
         Method::GET => "GET",
         Method::POST => "POST",

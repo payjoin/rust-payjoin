@@ -526,10 +526,8 @@ impl AppTrait for App {
             };
         }
 
-        let send_ids = self.db.get_send_session_ids()?;
-        let recv_ids = self.db.get_recv_session_ids()?;
-        let is_sender = send_ids.iter().any(|id| id.0 == session_id.0);
-        let is_receiver = recv_ids.iter().any(|id| id.0 == session_id.0);
+        let is_sender = self.db.send_session_exists(&session_id)?;
+        let is_receiver = self.db.recv_session_exists(&session_id)?;
 
         match (is_sender, is_receiver) {
             (true, false) => self.cancel_sender_session(session_id, no_broadcast),
@@ -546,7 +544,7 @@ impl AppTrait for App {
 impl App {
     fn cancel_sender_session(&self, session_id: SessionId, no_broadcast: bool) -> Result<()> {
         let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
-        let (session, _history) = replay_sender_event_log(&persister)?;
+        let (session, history) = replay_sender_event_log(&persister)?;
 
         let pending: Sender<SenderPendingFallback> = match session {
             SendSession::WithReplyKey(sender) => sender.cancel().save(&persister)?,
@@ -560,8 +558,11 @@ impl App {
                 );
                 return Ok(());
             }
-            SendSession::Closed(_) => {
-                println!("Session {session_id} is already closed. Nothing left to do.");
+            SendSession::Closed(SenderSessionOutcome::Aborted) => {
+                println!(
+                    "Session {session_id} was already cancelled. Broadcast the original transaction manually:\n{}",
+                    serialize_hex(&history.fallback_tx())
+                );
                 return Ok(());
             }
         };
@@ -584,7 +585,7 @@ impl App {
 
     fn cancel_receiver_session(&self, session_id: SessionId, no_broadcast: bool) -> Result<()> {
         let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
-        let (session, _history) = replay_receiver_event_log(&persister)?;
+        let (session, history) = replay_receiver_event_log(&persister)?;
 
         let pending: Receiver<ReceiverPendingFallback> = match session {
             ReceiveSession::Initialized(receiver) => {
@@ -625,8 +626,16 @@ impl App {
                 println!("Session {session_id} already completed successfully. Cannot cancel.");
                 return Ok(());
             }
-            ReceiveSession::Closed(_) => {
-                println!("Session {session_id} is already closed. Nothing left to do.");
+            ReceiveSession::Closed(ReceiverSessionOutcome::Aborted) => {
+                match history.fallback_tx() {
+                    Some(tx) => println!(
+                        "Session {session_id} was already cancelled. Broadcast the fallback transaction manually:\n{}",
+                        serialize_hex(&tx)
+                    ),
+                    None => println!(
+                        "Session {session_id} is already closed. No fallback transaction available."
+                    ),
+                }
                 return Ok(());
             }
         };

@@ -290,6 +290,28 @@ impl Database {
         }
         Ok(session_ids)
     }
+
+    /// Look up a sender session by ID regardless of active/inactive state.
+    pub(crate) fn send_session_exists(&self, session_id: &SessionId) -> Result<bool> {
+        let conn = self.get_connection()?;
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM send_sessions WHERE session_id = ?1)",
+            params![session_id.0],
+            |row| row.get(0),
+        )?;
+        Ok(exists)
+    }
+
+    /// Look up a receiver session by ID regardless of active/inactive state.
+    pub(crate) fn recv_session_exists(&self, session_id: &SessionId) -> Result<bool> {
+        let conn = self.get_connection()?;
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM receive_sessions WHERE session_id = ?1)",
+            params![session_id.0],
+            |row| row.get(0),
+        )?;
+        Ok(exists)
+    }
 }
 
 #[cfg(all(test, feature = "v2"))]

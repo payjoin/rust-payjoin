@@ -23,11 +23,15 @@ fn replay_events(
 
 fn construct_history(
     session_events: Vec<SessionEvent>,
+    sender: &SendSession,
 ) -> Result<SessionHistory, ReplayError<SendSession, SessionEvent>> {
     let history = SessionHistory::new(session_events);
-    let pj_param = history.pj_param();
-    if pj_param.expiration().elapsed() {
-        return Err(InternalReplayError::Expired(pj_param.expiration()).into());
+    // Closed sessions terminated before expiration; do not surface an expired error for them.
+    if !matches!(sender, SendSession::Closed(_)) {
+        let pj_param = history.pj_param();
+        if pj_param.expiration().elapsed() {
+            return Err(InternalReplayError::Expired(pj_param.expiration()).into());
+        }
     }
     Ok(history)
 }
@@ -56,7 +60,7 @@ where
         }
     };
 
-    let history = construct_history(session_events)?;
+    let history = construct_history(session_events, &sender)?;
     Ok((sender, history))
 }
 
@@ -84,7 +88,7 @@ where
         }
     };
 
-    let history = construct_history(session_events)?;
+    let history = construct_history(session_events, &sender)?;
     Ok((sender, history))
 }
 
@@ -123,15 +127,14 @@ impl SessionHistory {
     }
 
     pub fn status(&self) -> SessionStatus {
-        if self.pj_param().expiration().elapsed() {
-            return SessionStatus::Expired;
-        }
-
+        // Terminal states take precedence over expiration: a session that has reached
+        // a `Closed` outcome is done regardless of whether its expiration has elapsed.
         match self.events.last() {
             Some(SessionEvent::Closed(outcome)) => match outcome {
                 SessionOutcome::Success(_) => SessionStatus::Completed,
                 SessionOutcome::Aborted => SessionStatus::Failed,
             },
+            _ if self.pj_param().expiration().elapsed() => SessionStatus::Expired,
             _ => SessionStatus::Active,
         }
     }
@@ -170,6 +173,8 @@ pub enum SessionOutcome {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime};
+
     use bitcoin::{FeeRate, ScriptBuf};
     use payjoin_test_utils::{KEM, KEY_ID, PARSED_ORIGINAL_PSBT, SYMMETRIC};
 
@@ -410,13 +415,96 @@ mod tests {
             },
         };
 
-        let events = vec![
-            SessionEvent::Created(Box::new(with_reply_key.session_context.clone())),
-            SessionEvent::Closed(SessionOutcome::Success(PARSED_ORIGINAL_PSBT.clone())),
-        ];
+        let mut events =
+            vec![SessionEvent::Created(Box::new(with_reply_key.session_context.clone()))];
+        assert_eq!(SessionHistory { events: events.clone() }.status(), SessionStatus::Active);
 
-        let session = SessionHistory { events };
-        assert_eq!(session.status(), SessionStatus::Completed);
+        events.push(SessionEvent::Closed(SessionOutcome::Success(PARSED_ORIGINAL_PSBT.clone())));
+        assert_eq!(SessionHistory { events }.status(), SessionStatus::Completed);
+    }
+
+    #[test]
+    fn status_prefers_closed_outcome_over_expired() {
+        let psbt = PARSED_ORIGINAL_PSBT.clone();
+        let mut sender = SenderBuilder::new(
+            psbt,
+            Uri::try_from(PJ_URI)
+                .expect("Valid uri")
+                .assume_checked()
+                .check_pj_supported()
+                .expect("Payjoin to be supported"),
+        )
+        .build_recommended(FeeRate::BROADCAST_MIN)
+        .unwrap()
+        .save(&InMemoryPersister::default())
+        .unwrap();
+        sender.session_context.pj_param.expiration =
+            Time::try_from(SystemTime::now() - Duration::from_secs(1))
+                .expect("expiration in the past");
+
+        let success = SessionHistory {
+            events: vec![
+                SessionEvent::Created(Box::new(sender.session_context.clone())),
+                SessionEvent::Closed(SessionOutcome::Success(PARSED_ORIGINAL_PSBT.clone())),
+            ],
+        };
+        assert_eq!(success.status(), SessionStatus::Completed);
+
+        let aborted = SessionHistory {
+            events: vec![
+                SessionEvent::Created(Box::new(sender.session_context.clone())),
+                SessionEvent::Closed(SessionOutcome::Aborted),
+            ],
+        };
+        assert_eq!(aborted.status(), SessionStatus::Failed);
+
+        // Sessions that never reached a terminal state still report Expired.
+        let still_open = SessionHistory {
+            events: vec![SessionEvent::Created(Box::new(sender.session_context))],
+        };
+        assert_eq!(still_open.status(), SessionStatus::Expired);
+    }
+
+    #[tokio::test]
+    async fn test_replaying_closed_sender_session_past_expiration_is_not_expired() {
+        let psbt = PARSED_ORIGINAL_PSBT.clone();
+        let sender = SenderBuilder::new(
+            psbt,
+            Uri::try_from(PJ_URI)
+                .expect("Valid uri")
+                .assume_checked()
+                .check_pj_supported()
+                .expect("Payjoin to be supported"),
+        )
+        .build_recommended(FeeRate::BROADCAST_MIN)
+        .unwrap()
+        .save(&InMemoryPersister::default())
+        .unwrap();
+
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        persister
+            .save_event(SessionEvent::Created(Box::new(sender.session_context.clone())))
+            .expect("in memory persister save should not fail");
+        persister
+            .save_event(SessionEvent::Closed(SessionOutcome::Success(PARSED_ORIGINAL_PSBT.clone())))
+            .expect("in memory persister save should not fail");
+        let (state, _) =
+            replay_event_log(&persister).expect("closed session should replay successfully");
+        assert!(matches!(state, SendSession::Closed(SessionOutcome::Success(_))));
+
+        let persister = InMemoryAsyncPersister::<SessionEvent>::default();
+        persister
+            .save_event(SessionEvent::Created(Box::new(sender.session_context)))
+            .await
+            .expect("in memory async persister save should not fail");
+        persister
+            .save_event(SessionEvent::Closed(SessionOutcome::Success(PARSED_ORIGINAL_PSBT.clone())))
+            .await
+            .expect("in memory async persister save should not fail");
+        let (state, _) = replay_event_log_async(&persister)
+            .await
+            .expect("closed session should replay successfully");
+        assert!(matches!(state, SendSession::Closed(SessionOutcome::Success(_))));
     }
 
     #[tokio::test]

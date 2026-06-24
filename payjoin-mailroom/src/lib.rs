@@ -452,7 +452,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::metrics::{ACTIVE_CONNECTIONS, HTTP_REQUESTS, TOTAL_CONNECTIONS};
+    use crate::metrics::{HTTP_REQUESTS_IN_FLIGHT, HTTP_REQUESTS_STARTED, HTTP_REQUESTS_TOTAL};
 
     async fn start_service(
         cert_der: Vec<u8>,
@@ -587,9 +587,12 @@ mod tests {
             .flat_map(|sm| sm.metrics())
             .map(|m| m.name())
             .collect();
-        assert!(metric_names.contains(&HTTP_REQUESTS), "missing http_request_total");
-        assert!(metric_names.contains(&TOTAL_CONNECTIONS), "missing total_connections");
-        assert!(metric_names.contains(&ACTIVE_CONNECTIONS), "missing active_connections");
+        assert!(metric_names.contains(&HTTP_REQUESTS_TOTAL), "missing http_requests_total");
+        assert!(
+            metric_names.contains(&HTTP_REQUESTS_STARTED),
+            "missing http_requests_started_total"
+        );
+        assert!(metric_names.contains(&HTTP_REQUESTS_IN_FLIGHT), "missing http_requests_in_flight");
     }
 
     #[tokio::test]
@@ -636,7 +639,7 @@ mod tests {
             .iter()
             .flat_map(|rm| rm.scope_metrics())
             .flat_map(|sm| sm.metrics())
-            .filter(|m| m.name() == HTTP_REQUESTS)
+            .filter(|m| m.name() == HTTP_REQUESTS_TOTAL)
             .flat_map(|m| match m.data() {
                 AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
                     .data_points()

@@ -10,11 +10,11 @@ use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use payjoin::directory::ShortId;
 
-pub(crate) const TOTAL_CONNECTIONS: &str = "total_connections";
-pub(crate) const ACTIVE_CONNECTIONS: &str = "active_connections";
+pub(crate) const HTTP_REQUESTS_STARTED: &str = "http_requests_started_total";
+pub(crate) const HTTP_REQUESTS_IN_FLIGHT: &str = "http_requests_in_flight";
 pub(crate) const ACTIVE_TUNNELS: &str = "bootstrap_active_tunnels";
 pub(crate) const TUNNEL_SHEDS: &str = "bootstrap_tunnel_shed_total";
-pub(crate) const HTTP_REQUESTS: &str = "http_request_total";
+pub(crate) const HTTP_REQUESTS_TOTAL: &str = "http_requests_total";
 pub(crate) const DB_ENTRIES: &str = "db_entries_total";
 pub(crate) const UNIQUE_SHORT_IDS: &str = "unique_short_ids";
 
@@ -155,12 +155,18 @@ impl Default for UniqueShortIdTracker {
 
 #[derive(Clone)]
 pub struct MetricsService {
-    /// Total number of HTTP requests by endpoint type, method, and status code
+    /// Total number of HTTP requests that ran to completion, by endpoint
+    /// type, method, and status code. Recorded after the handler returns, so
+    /// requests that did not complete are absent. The gap from
+    /// `http_requests_started_total` is therefore an upper bound on dropped
+    /// requests -- client cancellation before the handler returned, requests
+    /// still in flight at scrape time, or a handler panic -- not a precise
+    /// cancellation count.
     http_requests_total: Counter<u64>,
-    /// Total number of connections
-    total_connections: Counter<u64>,
-    /// Number of active connections right now
-    active_connections: UpDownCounter<i64>,
+    /// Total number of HTTP requests started (counted before the handler runs)
+    http_requests_started_total: Counter<u64>,
+    /// Number of HTTP requests currently in flight
+    http_requests_in_flight: UpDownCounter<i64>,
     /// Number of OHTTP bootstrap tunnels open right now
     active_tunnels: UpDownCounter<i64>,
     /// Total OHTTP bootstrap tunnels shed at the concurrency cap
@@ -197,18 +203,18 @@ impl MetricsService {
         let meter = provider.meter("payjoin-mailroom");
 
         let http_requests_total = meter
-            .u64_counter(HTTP_REQUESTS)
-            .with_description("Total number of HTTP requests")
+            .u64_counter(HTTP_REQUESTS_TOTAL)
+            .with_description("Total number of HTTP requests completed")
             .build();
 
-        let total_connections = meter
-            .u64_counter(TOTAL_CONNECTIONS)
-            .with_description("Total number of connections")
+        let http_requests_started_total = meter
+            .u64_counter(HTTP_REQUESTS_STARTED)
+            .with_description("Total number of HTTP requests started")
             .build();
 
-        let active_connections = meter
-            .i64_up_down_counter(ACTIVE_CONNECTIONS)
-            .with_description("Number of active connections")
+        let http_requests_in_flight = meter
+            .i64_up_down_counter(HTTP_REQUESTS_IN_FLIGHT)
+            .with_description("Number of HTTP requests currently in flight")
             .build();
 
         let active_tunnels = meter
@@ -260,8 +266,8 @@ impl MetricsService {
 
         Self {
             http_requests_total,
-            total_connections,
-            active_connections,
+            http_requests_started_total,
+            http_requests_in_flight,
             active_tunnels,
             tunnel_sheds_total,
             db_entries_total,
@@ -282,11 +288,11 @@ impl MetricsService {
     }
 
     pub fn record_connection_open(&self) {
-        self.total_connections.add(1, &[]);
-        self.active_connections.add(1, &[]);
+        self.http_requests_started_total.add(1, &[]);
+        self.http_requests_in_flight.add(1, &[]);
     }
 
-    pub fn record_connection_close(&self) { self.active_connections.add(-1, &[]); }
+    pub fn record_connection_close(&self) { self.http_requests_in_flight.add(-1, &[]); }
 
     pub fn record_tunnel_open(&self) { self.active_tunnels.add(1, &[]); }
 

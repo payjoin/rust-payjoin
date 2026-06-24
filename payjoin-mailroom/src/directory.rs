@@ -614,9 +614,19 @@ mod tests {
 
     use super::*;
     use crate::db::FilesDb;
+    use crate::metrics::HTTP_REQUESTS_TOTAL;
     use crate::ohttp_relay::SentinelTag;
 
     async fn test_service(v1: Option<V1>) -> Service<FilesDb> {
+        test_service_with_metrics(v1, MetricsService::new(None)).await
+    }
+
+    /// Like [`test_service`] but injects a caller-owned [`MetricsService`] so
+    /// tests can assert on recorded labels via its `SdkMeterProvider`.
+    async fn test_service_with_metrics(
+        v1: Option<V1>,
+        metrics: MetricsService,
+    ) -> Service<FilesDb> {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = FilesDb::init(
             Duration::from_millis(100),
@@ -627,7 +637,7 @@ mod tests {
         .expect("db init");
         let ohttp: ohttp::Server =
             crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        Service::new(db, ohttp, SentinelTag::new([0u8; 32]), v1, MetricsService::new(None))
+        Service::new(db, ohttp, SentinelTag::new([0u8; 32]), v1, metrics)
     }
 
     /// A valid ShortId encoded as bech32 for use in URL paths.
@@ -963,5 +973,202 @@ mod tests {
             }
             other => panic!("expected U64 Gauge, got {other:?}"),
         }
+    }
+
+    // V2 metrics: handle_decapsulated_request records http_requests_total
+
+    /// Finds an `http_requests_total` data point whose labels exactly match the
+    /// given `layer`, `endpoint`, `method`, and `status_code`. Returns its
+    /// counter value (0 if no matching data point exists).
+    fn count_http_request_record(
+        exporter: &opentelemetry_sdk::metrics::InMemoryMetricExporter,
+        layer: &str,
+        endpoint: &str,
+        method: &str,
+        status_code: u16,
+    ) -> u64 {
+        use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+
+        let finished = exporter.get_finished_metrics().expect("metrics");
+        finished
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == HTTP_REQUESTS_TOTAL)
+            .flat_map(|m| match m.data() {
+                AggregatedMetrics::U64(MetricData::Sum(sum)) =>
+                    sum.data_points().collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .filter(|dp| {
+                let mut attrs = dp.attributes();
+                let layer_matches =
+                    attrs.any(|kv| kv.key.as_str() == "layer" && kv.value.to_string() == layer);
+                if !layer_matches {
+                    return false;
+                }
+                let mut attrs = dp.attributes();
+                let endpoint_matches = attrs
+                    .any(|kv| kv.key.as_str() == "endpoint" && kv.value.to_string() == endpoint);
+                if !endpoint_matches {
+                    return false;
+                }
+                let mut attrs = dp.attributes();
+                let method_matches =
+                    attrs.any(|kv| kv.key.as_str() == "method" && kv.value.to_string() == method);
+                if !method_matches {
+                    return false;
+                }
+                let mut attrs = dp.attributes();
+                attrs.any(|kv| {
+                    kv.key.as_str() == "status_code"
+                        && kv.value.to_string() == status_code.to_string()
+                })
+            })
+            .map(|dp| dp.value())
+            .sum()
+    }
+
+    /// Collects every `endpoint` label value recorded under `http_requests_total`
+    /// (any layer), so tests can assert the actual short-id value never leaks.
+    fn recorded_endpoints(
+        exporter: &opentelemetry_sdk::metrics::InMemoryMetricExporter,
+    ) -> Vec<String> {
+        use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+
+        let finished = exporter.get_finished_metrics().expect("metrics");
+        finished
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == HTTP_REQUESTS_TOTAL)
+            .flat_map(|m| match m.data() {
+                AggregatedMetrics::U64(MetricData::Sum(sum)) =>
+                    sum.data_points().collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .flat_map(|dp| {
+                dp.attributes()
+                    .filter_map(|kv| {
+                        if kv.key.as_str() == "endpoint" {
+                            Some(kv.value.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    fn metrics_exporter() -> (
+        opentelemetry_sdk::metrics::InMemoryMetricExporter,
+        opentelemetry_sdk::metrics::SdkMeterProvider,
+    ) {
+        use opentelemetry_sdk::metrics::{
+            InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
+        };
+
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone()).build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+        (exporter, provider)
+    }
+
+    /// A V2 POST to `/{mailbox}` decapsulated by the directory records
+    /// `http_requests_total{layer="v2", endpoint="/{mailbox}", method="POST",
+    /// status_code="200"}` exactly once, and the actual mailbox id never
+    /// reaches any label.
+    #[tokio::test]
+    async fn v2_decapsulated_post_records_mailbox_metric() {
+        let (exporter, provider) = metrics_exporter();
+        let metrics = MetricsService::new(Some(provider.clone()));
+        let svc = test_service_with_metrics(None, metrics).await;
+
+        let id = valid_short_id_path();
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(format!("http://localhost/{id}"))
+            .body(Body::from(b"small payload under 65k".to_vec()))
+            .unwrap();
+
+        let res = svc.handle_decapsulated_request(req).await.expect("decap ok");
+        assert_eq!(res.status(), StatusCode::OK);
+
+        provider.force_flush().expect("flush failed");
+
+        assert_eq!(
+            count_http_request_record(&exporter, "v2", "/{mailbox}", "POST", 200),
+            1,
+            "V2 POST must record exactly one http_requests_total under layer=v2 /{{mailbox}} POST 200"
+        );
+        assert_eq!(
+            count_http_request_record(&exporter, "gateway", "/{mailbox}", "POST", 200),
+            0,
+            "outer gateway layer must not be recorded when only the inner path runs"
+        );
+        let endpoints = recorded_endpoints(&exporter);
+        assert!(
+            endpoints.iter().all(|ep| !ep.contains(&id)),
+            "actual mailbox id {id} leaked into endpoint labels: {endpoints:?}"
+        );
+    }
+
+    /// A V2 GET to `/{mailbox}` that times out at the db returns 202 ACCEPTED
+    /// and is recorded as `layer="v2", endpoint="/{mailbox}", method="GET",
+    /// status_code="202"`.
+    #[tokio::test]
+    async fn v2_decapsulated_get_records_mailbox_metric() {
+        let (exporter, provider) = metrics_exporter();
+        let metrics = MetricsService::new(Some(provider.clone()));
+        let svc = test_service_with_metrics(None, metrics).await;
+
+        let id = valid_short_id_path();
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri(format!("http://localhost/{id}"))
+            .body(Body::empty())
+            .unwrap();
+
+        let res = svc.handle_decapsulated_request(req).await.expect("decap ok");
+        assert_eq!(res.status(), StatusCode::ACCEPTED);
+
+        provider.force_flush().expect("flush failed");
+
+        assert_eq!(
+            count_http_request_record(&exporter, "v2", "/{mailbox}", "GET", 202),
+            1,
+            "V2 GET timeout must record exactly one http_requests_total under layer=v2 /{{mailbox}} GET 202"
+        );
+    }
+
+    /// An inner request whose path doesn't match any handler arm collapses to
+    /// `endpoint="other"` and is still recorded once under layer=v2 with the
+    /// catch-all 404 status.
+    #[tokio::test]
+    async fn v2_decapsulated_unknown_path_records_other_endpoint() {
+        let (exporter, provider) = metrics_exporter();
+        let metrics = MetricsService::new(Some(provider.clone()));
+        let svc = test_service_with_metrics(None, metrics).await;
+
+        // A multi-segment path does not match `(POST, &["", id])`, so it falls
+        // through to the `_ => not_found()` arm instead of attempting a
+        // ShortId parse that would surface as a 400.
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("http://localhost/unknown/path")
+            .body(Body::empty())
+            .unwrap();
+
+        let res = svc.handle_decapsulated_request(req).await.expect("decap ok");
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+        provider.force_flush().expect("flush failed");
+
+        assert_eq!(
+            count_http_request_record(&exporter, "v2", "other", "POST", 404),
+            1,
+            "unknown inner path must collapse to endpoint=other and record 404"
+        );
     }
 }

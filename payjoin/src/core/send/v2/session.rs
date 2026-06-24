@@ -129,16 +129,14 @@ impl SessionHistory {
     pub fn status(&self) -> SessionStatus {
         // Terminal states take precedence over expiration: a session that has reached
         // a `Closed` outcome is done regardless of whether its expiration has elapsed.
-        if let Some(SessionEvent::Closed(outcome)) = self.events.last() {
-            return match outcome {
+        match self.events.last() {
+            Some(SessionEvent::Closed(outcome)) => match outcome {
                 SessionOutcome::Success(_) => SessionStatus::Completed,
                 SessionOutcome::Aborted => SessionStatus::Failed,
-            };
+            },
+            _ if self.pj_param().expiration().elapsed() => SessionStatus::Expired,
+            _ => SessionStatus::Active,
         }
-        if self.pj_param().expiration().elapsed() {
-            return SessionStatus::Expired;
-        }
-        SessionStatus::Active
     }
 }
 
@@ -417,13 +415,12 @@ mod tests {
             },
         };
 
-        let events = vec![
-            SessionEvent::Created(Box::new(with_reply_key.session_context.clone())),
-            SessionEvent::Closed(SessionOutcome::Success(PARSED_ORIGINAL_PSBT.clone())),
-        ];
+        let mut events =
+            vec![SessionEvent::Created(Box::new(with_reply_key.session_context.clone()))];
+        assert_eq!(SessionHistory { events: events.clone() }.status(), SessionStatus::Active);
 
-        let session = SessionHistory { events };
-        assert_eq!(session.status(), SessionStatus::Completed);
+        events.push(SessionEvent::Closed(SessionOutcome::Success(PARSED_ORIGINAL_PSBT.clone())));
+        assert_eq!(SessionHistory { events }.status(), SessionStatus::Completed);
     }
 
     #[test]

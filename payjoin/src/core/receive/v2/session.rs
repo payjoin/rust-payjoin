@@ -163,21 +163,17 @@ impl SessionHistory {
         // Terminal states take precedence over expiration: a session that has reached
         // a `Closed` outcome is done regardless of whether its expiration has elapsed.
         match self.events.last() {
-            Some(SessionEvent::Closed(outcome)) =>
-                return match outcome {
-                    SessionOutcome::Success(_) | SessionOutcome::PayjoinProposalSent =>
-                        SessionStatus::Completed,
-                    SessionOutcome::Aborted => SessionStatus::Failed,
-                    SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
-                },
+            Some(SessionEvent::Closed(outcome)) => match outcome {
+                SessionOutcome::Success(_) | SessionOutcome::PayjoinProposalSent =>
+                    SessionStatus::Completed,
+                SessionOutcome::Aborted => SessionStatus::Failed,
+                SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
+            },
             Some(SessionEvent::Cancelled | SessionEvent::ProtocolFailed) =>
-                return SessionStatus::PendingFallback,
-            _ => {}
+                SessionStatus::PendingFallback,
+            _ if self.session_context().expiration.elapsed() => SessionStatus::Expired,
+            _ => SessionStatus::Active,
         }
-        if self.session_context().expiration.elapsed() {
-            return SessionStatus::Expired;
-        }
-        SessionStatus::Active
     }
 }
 

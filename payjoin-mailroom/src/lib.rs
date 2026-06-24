@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn middleware_sanitizes_short_id_in_metrics() {
+    async fn middleware_bounds_endpoint_labels_in_metrics() {
         use axum::body::Body;
         use axum::http::Request;
         use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
@@ -626,15 +626,23 @@ mod tests {
 
         let app = build_app(services);
 
+        // A 13-char bech32 mailbox id collapses to the /{mailbox} template,
+        // keeping the id itself out of the metric label.
         let short_id = payjoin::directory::ShortId([0u8; 8]).to_string();
-        let uri = format!("/{short_id}");
-        let request = Request::builder().method("GET").uri(&uri).body(Body::empty()).unwrap();
-        let _response = ServiceExt::<Request<Body>>::oneshot(app, request).await.unwrap();
+        let mailbox_uri = format!("/{short_id}");
+        let mailbox_req =
+            Request::builder().method("GET").uri(&mailbox_uri).body(Body::empty()).unwrap();
+        let _ = ServiceExt::<Request<Body>>::oneshot(app.clone(), mailbox_req).await.unwrap();
+
+        // A scanner-style path is not a known template, so it must collapse to
+        // `other` rather than leak a client-controlled, unbounded label value.
+        let scanner_req =
+            Request::builder().method("GET").uri("/wp-login.php").body(Body::empty()).unwrap();
+        let _ = ServiceExt::<Request<Body>>::oneshot(app, scanner_req).await.unwrap();
 
         provider.force_flush().expect("flush failed");
 
         let finished = exporter.get_finished_metrics().expect("metrics");
-        println!("finished: {:?}", finished);
         let endpoint_attrs: Vec<String> = finished
             .iter()
             .flat_map(|rm| rm.scope_metrics())
@@ -656,11 +664,26 @@ mod tests {
             })
             .collect();
 
-        println!("endpoint_attrs: {:?}", endpoint_attrs);
-
+        const ALLOWED: &[&str] = &[
+            "/{mailbox}",
+            "/{gateway}",
+            "/",
+            "/health",
+            "/ohttp-keys",
+            "/.well-known/ohttp-gateway",
+            "other",
+        ];
         assert!(
-            endpoint_attrs.iter().all(|ep| ep == "/{mailbox}"),
-            "short ID must be sanitized in metrics, got: {endpoint_attrs:?}"
+            endpoint_attrs.iter().all(|ep| ALLOWED.contains(&ep.as_str())),
+            "endpoint labels must stay within the bounded set, got: {endpoint_attrs:?}"
+        );
+        assert!(
+            endpoint_attrs.iter().any(|ep| ep == "/{mailbox}"),
+            "mailbox request should record the /{{mailbox}} template, got: {endpoint_attrs:?}"
+        );
+        assert!(
+            endpoint_attrs.iter().any(|ep| ep == "other"),
+            "scanner path should collapse to `other`, got: {endpoint_attrs:?}"
         );
         assert!(
             endpoint_attrs.iter().all(|ep| !ep.contains(&short_id)),

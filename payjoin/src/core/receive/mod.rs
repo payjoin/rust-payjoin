@@ -217,7 +217,7 @@ impl InputPair {
     }
 
     /// Returns the outpoint spent by this input pair.
-    pub fn previous_outpoint(&self) -> OutPoint { self.txin.previous_output }
+    pub fn outpoint(&self) -> OutPoint { self.txin.previous_output }
 
     pub(crate) fn previous_txout(&self) -> TxOut {
         InternalInputPair::from(self)
@@ -545,7 +545,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn input_pair_previous_outpoint_returns_previous_output() {
+    fn input_pair_outpoint_returns_previous_output() {
         let txout = TxOut {
             value: Amount::from_sat(123),
             script_pubkey: ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array(DUMMY20)),
@@ -553,7 +553,7 @@ pub(crate) mod tests {
         let outpoint = OutPoint { txid: Txid::from_byte_array(DUMMY32), vout: 31 };
         let input_pair = InputPair::new_p2wpkh(txout, outpoint).unwrap();
 
-        assert_eq!(input_pair.previous_outpoint(), outpoint);
+        assert_eq!(input_pair.outpoint(), outpoint);
     }
 
     #[test]

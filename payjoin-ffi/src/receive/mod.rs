@@ -1116,7 +1116,7 @@ impl InputPair {
     }
 
     /// Returns the outpoint spent by this input pair.
-    pub fn previous_outpoint(&self) -> OutPoint { self.0.previous_outpoint().into() }
+    pub fn outpoint(&self) -> OutPoint { self.0.outpoint().into() }
 }
 
 impl From<InputPair> for payjoin::receive::InputPair {

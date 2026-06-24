@@ -306,7 +306,7 @@ public class ValidationTests
     }
 
     [Fact]
-    public void InputPairExposesPreviousOutpoint()
+    public void InputPairExposesOutpoint()
     {
         const string txid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         const uint vout = 7;
@@ -323,7 +323,7 @@ public class ValidationTests
         );
         using var inputPair = new InputPair(txin, psbtIn, null);
 
-        var outpoint = inputPair.PreviousOutpoint();
+        var outpoint = inputPair.Outpoint();
 
         Assert.Equal(txid, outpoint.txid);
         Assert.Equal(vout, outpoint.vout);

@@ -1,5 +1,20 @@
 # Payjoin Mailroom Changelog
 
+## 0.1.2
+
+- Add db entry metrics (#1412)
+- Sanitize shortid when storing metrics (#1434)
+- Unify mailbox TTL to a single value (#1457)
+- Handle Retry-After header for 429 and 503 in gateway prober (#1475)
+- Reject post requests over capacity (#1509)
+- Track unique shortids seen (#1459)
+- Recover from transient accept errors and raise file-descriptor limit (#1608)
+- Bump payjoin version to 1.0.0-rc.3 (#1611)
+- Delegate http tracing to tower middleware (#1588)
+- Enable HTTP/2 multiplexing on relay-directory hop (#1655)
+- Bound OHTTP bootstrap tunnel resource usage and export its metrics (#1610)
+- Add per-request metrics middleware (#1674)
+
 ## 0.1.1
 
 - Implement Directory and its db as a tower-service (#1361)

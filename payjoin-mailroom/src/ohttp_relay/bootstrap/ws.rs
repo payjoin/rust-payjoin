@@ -11,11 +11,14 @@ use hyper::header::{CONNECTION, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, UPGRADE
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::sync::OwnedSemaphorePermit;
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{tungstenite, WebSocketStream};
-use tracing::{error, instrument};
+use tracing::{debug, error, instrument};
 
+use crate::metrics::MetricsService;
+use crate::ohttp_relay::bootstrap::{run_tunnel_within, TunnelGuard, TunnelLimits};
 use crate::ohttp_relay::empty;
 use crate::ohttp_relay::error::Error;
 use crate::ohttp_relay::gateway_uri::GatewayUri;
@@ -48,19 +51,26 @@ pub(crate) fn is_websocket_request<B>(req: &Request<B>) -> bool {
 /// This performs the WebSocket handshake to support generic body types.
 /// When bootstrapping moves to axum, this can be replaced with
 /// `axum::extract::ws::WebSocketUpgrade`.
-#[instrument]
+#[instrument(skip(limits, metrics))]
 pub(crate) async fn try_upgrade<B>(
     req: Request<B>,
     gateway_origin: GatewayUri,
+    limits: &TunnelLimits,
+    metrics: &MetricsService,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Error>
 where
     B: Send + Debug + 'static,
 {
-    let gateway_addr = gateway_origin
-        .to_socket_addr()
-        .await
-        .map_err(|e| Error::InternalServerError(Box::new(e)))?
-        .ok_or_else(|| Error::NotFound)?;
+    // Reject before doing any work when the tunnel budget is exhausted, so a
+    // flood of bootstrap requests cannot pin an unbounded number of file
+    // descriptors.
+    let permit = match limits.semaphore.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            metrics.record_tunnel_shed();
+            return Err(Error::Unavailable(limits.timeout));
+        }
+    };
 
     let key = req
         .headers()
@@ -72,20 +82,14 @@ where
 
     let accept_key = derive_accept_key(key.as_bytes());
 
+    let timeout = limits.timeout;
+    let guard = TunnelGuard::open(metrics.clone());
     tokio::spawn(async move {
-        match hyper::upgrade::on(req).await {
-            Ok(upgraded) => {
-                let ws_stream = WebSocketStream::from_raw_socket(
-                    TokioIo::new(upgraded),
-                    tungstenite::protocol::Role::Server,
-                    None,
-                )
-                .await;
-                if let Err(e) = serve_websocket(ws_stream, gateway_addr).await {
-                    error!("Error in websocket connection: {e}");
-                }
-            }
-            Err(e) => error!("WebSocket upgrade error: {}", e),
+        let _guard = guard;
+        match run_tunnel_within(timeout, serve_after_upgrade(req, gateway_origin, permit)).await {
+            Some(Ok(())) => {}
+            Some(Err(e)) => error!("Error in websocket connection: {e}"),
+            None => debug!("websocket tunnel exceeded {timeout:?}, closing"),
         }
     });
 
@@ -100,6 +104,30 @@ where
     Ok(res)
 }
 
+async fn serve_after_upgrade<B>(
+    req: Request<B>,
+    gateway_origin: GatewayUri,
+    permit: OwnedSemaphorePermit,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
+where
+    B: Send + Debug + 'static,
+{
+    // Hold the permit for the entire tunnel lifecycle: DNS, HTTP upgrade,
+    // outbound connect, and byte proxying.
+    let _permit = permit;
+    let gateway_addr = gateway_origin.to_socket_addr().await?.ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "gateway resolved to no addresses")
+    })?;
+    let upgraded = hyper::upgrade::on(req).await?;
+    let ws_stream = WebSocketStream::from_raw_socket(
+        TokioIo::new(upgraded),
+        tungstenite::protocol::Role::Server,
+        None,
+    )
+    .await;
+    serve_websocket(ws_stream, gateway_addr).await
+}
+
 /// Stream WebSocket frames from the client to the gateway server's TCP socket and vice versa.
 #[instrument(skip(ws_stream))]
 async fn serve_websocket<S>(
@@ -111,7 +139,7 @@ where
 {
     let mut tcp_stream = tokio::net::TcpStream::connect(gateway_addr).await?;
     let mut ws_io = WsIo::new(ws_stream);
-    let (_, _) = tokio::io::copy_bidirectional(&mut ws_io, &mut tcp_stream).await?;
+    tokio::io::copy_bidirectional(&mut ws_io, &mut tcp_stream).await?;
     Ok(())
 }
 

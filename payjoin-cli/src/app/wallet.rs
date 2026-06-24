@@ -51,12 +51,17 @@ impl BitcoindWallet {
             conf_target: None,
         };
 
-        // Set locktime to current block height for anti-fee-sniping
-        // This is to follow wallet fingerprinting best practices and set and opinionated
-        // default for external wallet integrations to follow along with
-        let locktime = Some(tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async { self.rpc.get_block_count().await })
-        })? as u32);
+        // walletcreatefundedpsbt does not anti-fee-snipe; do it here.
+        let info = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.rpc.get_blockchain_info().await })
+        })?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock is before the Unix epoch")
+            .as_secs();
+        let locktime =
+            anti_fee_sniping_locktime(info.blocks, info.time, info.initial_block_download, now);
 
         // Sync wrapper around async call - use tokio handle to avoid deadlock
         let result = tokio::task::block_in_place(|| {
@@ -71,7 +76,7 @@ impl BitcoindWallet {
                                 amount: v.to_btc(),
                             })
                             .collect::<Vec<_>>(),
-                        locktime,
+                        Some(locktime),
                         Some(options),
                         None,
                     )
@@ -210,4 +215,68 @@ pub fn input_pair_from_corepc(utxo: ListUnspentItem) -> InputPair {
         ..Default::default()
     };
     InputPair::new(txin, psbtin, None).expect("Input pair should be valid")
+}
+
+/// nLockTime mirroring Core's `DiscourageFeeSniping`/`IsCurrentForAntiFeeSniping`: the tip,
+/// occasionally backdated for delayed-broadcast privacy, or 0 on a stale/IBD tip to avoid a
+/// stale-locktime fingerprint.
+fn anti_fee_sniping_locktime(
+    tip_height: u32,
+    tip_time: Option<u32>,
+    in_ibd: bool,
+    now_secs: u64,
+) -> u32 {
+    const MAX_TIP_AGE_SECS: u64 = 8 * 60 * 60;
+    let current = !in_ibd
+        && tip_time.is_some_and(|t| now_secs.saturating_sub(u64::from(t)) <= MAX_TIP_AGE_SECS);
+    if !current {
+        return 0;
+    }
+    use payjoin::bitcoin::key::rand::Rng;
+    let mut rng = payjoin::bitcoin::key::rand::thread_rng();
+    if rng.gen_range(0..10) == 0 {
+        tip_height.saturating_sub(rng.gen_range(0..100))
+    } else {
+        tip_height
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::anti_fee_sniping_locktime;
+
+    const NOW: u64 = 1_700_000_000;
+
+    #[test]
+    fn fresh_tip_covers_both_branches() {
+        let tip = 800_000;
+        let lts: Vec<u32> = (0..1_000)
+            .map(|_| anti_fee_sniping_locktime(tip, Some(NOW as u32), false, NOW))
+            .collect();
+        assert!(
+            lts.iter().all(|&lt| (tip - 99..=tip).contains(&lt)),
+            "a locktime fell outside [{}, {tip}]",
+            tip - 99
+        );
+        assert!(lts.contains(&tip), "never hit the no-backdate branch");
+        assert!(lts.iter().any(|&lt| lt < tip), "never hit the backdate branch");
+    }
+
+    #[test]
+    fn backdate_saturates_at_low_tip() {
+        let tip = 50;
+        for _ in 0..1_000 {
+            let lt = anti_fee_sniping_locktime(tip, Some(NOW as u32), false, NOW);
+            assert!(lt <= tip, "locktime {lt} exceeds tip {tip} (underflow?)");
+        }
+    }
+
+    #[test]
+    fn stale_ibd_or_unknown_tip_returns_zero() {
+        let tip = 800_000;
+        let stale = (NOW - 8 * 60 * 60 - 1) as u32;
+        assert_eq!(anti_fee_sniping_locktime(tip, Some(stale), false, NOW), 0);
+        assert_eq!(anti_fee_sniping_locktime(tip, Some(NOW as u32), true, NOW), 0);
+        assert_eq!(anti_fee_sniping_locktime(tip, None, false, NOW), 0);
+    }
 }

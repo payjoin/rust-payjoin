@@ -27,7 +27,7 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@main
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.PAYJOIN_DOCKER_RW }}

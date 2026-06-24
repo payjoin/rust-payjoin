@@ -66,6 +66,26 @@ mod e2e {
         res
     }
 
+    /// Read all lines from `child_stdout` until EOF and return them joined by newlines.
+    /// Also writes every read line to tokio::io::stdout();
+    async fn read_all_stdout(child_stdout: &mut tokio::process::ChildStdout) -> String {
+        let reader = BufReader::new(child_stdout);
+        let mut lines = reader.lines();
+        let mut out = String::new();
+
+        let mut stdout = tokio::io::stdout();
+        while let Some(line) = lines.next_line().await.expect("Failed to read line from stdout") {
+            stdout
+                .write_all(format!("{line}\n").as_bytes())
+                .await
+                .expect("Failed to write to stdout");
+            out.push_str(&line);
+            out.push('\n');
+        }
+
+        out
+    }
+
     async fn send_until_request_timeout(mut cli_sender: Child) -> Result<(), BoxError> {
         let mut stdout = cli_sender.stdout.take().expect("failed to take stdout of child process");
         let timeout = tokio::time::Duration::from_secs(35);
@@ -783,6 +803,49 @@ mod e2e {
                 "fallback tx should be in the mempool after cancel"
             );
 
+            // Re-run `cancel` on the now-closed session: the command must still
+            // recognize the session exists and report it is already closed.
+            let mut cli_cancel_again = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&sender_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&sender_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("cancel")
+                .arg(session_id.to_string())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli cancel on closed session");
+
+            let raw_tx = sender.get_transaction(fallback_txid)?.into_model()?.tx;
+            let expected_hex = payjoin::bitcoin::consensus::encode::serialize_hex(&raw_tx);
+
+            let mut cancel_again_stdout = cli_cancel_again
+                .stdout
+                .take()
+                .expect("failed to take stdout of cancel on closed session");
+            let cancel_again_output =
+                tokio::time::timeout(timeout, read_all_stdout(&mut cancel_again_stdout)).await?;
+            terminate(cli_cancel_again)
+                .await
+                .expect("Failed to kill payjoin-cli cancel on closed session");
+
+            assert!(
+                cancel_again_output
+                    .contains(&format!("Session {session_id} was already cancelled")),
+                "cancel on closed session should reference the session id and report it is already closed; got: {cancel_again_output}"
+            );
+            assert!(
+                cancel_again_output.contains(&expected_hex),
+                "cancel on closed session should print the fallback transaction consensus hex; got: {cancel_again_output}"
+            );
+
             Ok(())
         }
 
@@ -868,8 +931,6 @@ mod e2e {
                 .arg(ohttp_relays)
                 .arg("cancel")
                 .arg(session_id.to_string())
-                .arg("--role")
-                .arg("receiver")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()
@@ -892,6 +953,48 @@ mod e2e {
             assert!(
                 subcommand_output.contains(&format!("Session {session_id} cancelled")),
                 "cancel should reference the cancelled session id"
+            );
+
+            // Re-run `cancel` on the now-closed session: the command must still
+            // recognize the session exists and report it is already closed.
+            let mut cli_cancel_again = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("cancel")
+                .arg(session_id.to_string())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli cancel on closed session");
+
+            let mut cancel_again_stdout = cli_cancel_again
+                .stdout
+                .take()
+                .expect("failed to take stdout of cancel on closed session");
+            let cancel_again_line = tokio::time::timeout(
+                timeout,
+                wait_for_stdout_match(&mut cancel_again_stdout, |l| {
+                    l.contains("is already closed")
+                }),
+            )
+            .await?;
+            terminate(cli_cancel_again)
+                .await
+                .expect("Failed to kill payjoin-cli cancel on closed session");
+            let cancel_again_output = cancel_again_line
+                .expect("cancel on closed session should report it is already closed");
+
+            assert!(
+                cancel_again_output.contains(&format!("Session {session_id} is already closed")),
+                "cancel on closed session should reference the session id and report it is already closed"
             );
 
             Ok(())

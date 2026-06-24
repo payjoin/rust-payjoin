@@ -288,6 +288,7 @@ impl<D: Db> Service<D> {
             crate::middleware::endpoint_label(&path),
             crate::middleware::method_label(&method),
             status,
+            crate::metrics::RequestLayer::V2,
         );
         result
     }

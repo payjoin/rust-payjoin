@@ -54,7 +54,7 @@ pub async fn track_metrics(
     let response = next.run(req).await;
     let status = response.status().as_u16();
 
-    metrics.record_http_request(endpoint, method, status);
+    metrics.record_http_request(endpoint, method, status, crate::metrics::RequestLayer::Gateway);
 
     response
 }

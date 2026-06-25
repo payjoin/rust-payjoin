@@ -23,7 +23,7 @@ use tokio::sync::watch;
 use super::config::Config;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
-use crate::app::v2::ohttp::RelayManager;
+use crate::app::v2::ohttp::MailroomManager;
 use crate::app::{handle_interrupt, http_agent};
 use crate::cli::Role as CliRole;
 use crate::db::v2::{ReceiverPersister, SenderPersister, SessionId};
@@ -42,7 +42,7 @@ pub(crate) struct App {
     db: Arc<Database>,
     wallet: BitcoindWallet,
     interrupt: watch::Receiver<()>,
-    relay_manager: RelayManager,
+    mailroom_manager: MailroomManager,
 }
 
 trait StatusText {
@@ -142,11 +142,11 @@ impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
 impl AppTrait for App {
     async fn new(config: Config) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
-        let relay_manager = RelayManager::new(config.clone());
+        let mailroom_manager = MailroomManager::new(config.clone());
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
         let wallet = BitcoindWallet::new(&config.bitcoind).await?;
-        let app = Self { config, db, wallet, interrupt: interrupt_rx, relay_manager };
+        let app = Self { config, db, wallet, interrupt: interrupt_rx, mailroom_manager };
         app.wallet()
             .network()
             .context("Failed to connect to bitcoind. Check config RPC connection.")?;
@@ -278,11 +278,25 @@ impl AppTrait for App {
 
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
-        let ohttp_keys = self.relay_manager.unwrap_ohttp_keys_or_else_fetch().await?.ohttp_keys;
         let persister = ReceiverPersister::new(self.db.clone())?;
+        let (directory, ohttp_keys) = loop {
+            let directory = self.mailroom_manager.choose_directory()?;
+            match self
+                .mailroom_manager
+                .unwrap_ohttp_keys_or_else_fetch_from_directory(&directory)
+                .await
+            {
+                Ok(keys) => break (directory, keys.ohttp_keys),
+                Err(e) => {
+                    tracing::debug!("Directory {directory} failed: {e:#}");
+                    self.mailroom_manager.add_failed_directory(directory);
+                    self.mailroom_manager.clear_failed_relays();
+                    continue;
+                }
+            }
+        };
         let mut receiver_builder =
-            ReceiverBuilder::new(address, self.config.v2()?.pj_directory.as_str(), ohttp_keys)?
-                .with_amount(amount);
+            ReceiverBuilder::new(address, directory.as_str(), ohttp_keys)?.with_amount(amount);
         if let Some(max_fee_rate) = self.config.max_fee_rate {
             receiver_builder = receiver_builder.with_max_fee_rate(max_fee_rate);
         }
@@ -1066,13 +1080,13 @@ impl App {
         E: Into<anyhow::Error>,
     {
         loop {
-            let relay = self.relay_manager.choose_relay()?;
+            let relay = self.mailroom_manager.choose_relay()?;
             let (req, ctx) = build(relay.as_str()).map_err(Into::into)?;
             match self.post_request(req).await {
                 Ok(resp) => return Ok((resp, ctx)),
                 Err(e) => {
                     tracing::debug!("Request to relay {relay} failed: {e:?}");
-                    self.relay_manager.add_failed_relay(relay);
+                    self.mailroom_manager.add_failed_relay(relay);
                 }
             }
         }

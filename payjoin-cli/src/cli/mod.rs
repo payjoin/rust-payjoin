@@ -72,8 +72,8 @@ pub struct Cli {
     pub ohttp_keys: Option<PathBuf>,
 
     #[cfg(feature = "v2")]
-    #[arg(long = "pj-directory", help = "The directory to store payjoin requests", value_parser = value_parser!(Url))]
-    pub pj_directory: Option<Url>,
+    #[arg(long = "pj-directories", help = "One or more payjoin directory URLs, comma-separated", value_parser = value_parser!(Url), value_delimiter = ',', action = clap::ArgAction::Append)]
+    pub pj_directories: Option<Vec<Url>>,
 
     #[cfg(feature = "_manual-tls")]
     #[arg(long = "root-certificate", help = "Specify a TLS certificate to be added as a root", value_parser = value_parser!(PathBuf))]
@@ -117,9 +117,9 @@ pub enum Commands {
         pj_endpoint: Option<Box<Url>>,
 
         #[cfg(feature = "v2")]
-        /// The directory to store payjoin requests
-        #[arg(long = "pj-directory", value_parser = parse_boxed_url)]
-        pj_directory: Option<Box<Url>>,
+        /// One or more payjoin directory URLs, comma-separated
+        #[arg(long = "pj-directories", value_parser = value_parser!(Url), value_delimiter = ',', action = clap::ArgAction::Append)]
+        pj_directories: Option<Vec<Url>>,
 
         #[cfg(feature = "v2")]
         /// The path to the ohttp keys file
@@ -165,6 +165,7 @@ pub fn parse_fee_rate_in_sat_per_vb(s: &str) -> Result<FeeRate, std::num::ParseF
     Ok(FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64))
 }
 
+#[cfg(feature = "v1")]
 fn parse_boxed_url(s: &str) -> Result<Box<Url>, String> {
     s.parse::<Url>().map(Box::new).map_err(|e| e.to_string())
 }

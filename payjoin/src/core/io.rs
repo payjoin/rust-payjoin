@@ -6,7 +6,7 @@ use http::header::ACCEPT;
 use reqwest::{Client, Proxy};
 
 use crate::into_url::IntoUrl;
-use crate::relay::RelaySelector;
+use crate::relay::{RelaySelector, SelectContext};
 use crate::{OhttpKeys, Url};
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
@@ -54,9 +54,10 @@ async fn fetch_ohttp_keys_inner(
 ) -> Result<(OhttpKeys, Url), Error> {
     let ohttp_keys_url = payjoin_directory.join("/.well-known/ohttp-gateway")?;
     let mut selector = RelaySelector::new(relays.to_vec());
+    let ctx = SelectContext::random();
     let mut last_err: Option<Error> = None;
     loop {
-        let relay = match selector.select(&mut rand::thread_rng()) {
+        let relay = match selector.select(&ctx, &mut rand::thread_rng()) {
             Some(relay) => relay,
             None => return Err(last_err.unwrap_or(Error::NoRelaysAvailable)),
         };

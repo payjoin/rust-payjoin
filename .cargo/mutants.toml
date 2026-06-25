@@ -12,6 +12,8 @@ exclude_re = [
   # Timeout loops
   # src/receive/v1/mod.rs
   "interleave_shuffle", # Replacing index += 1 with index *= 1 in a loop causes a timeout due to an infinite loop
+  # src/core/relay.rs
+  "RelaySelector::mark_failed", # A no-op makes fetch_ohttp_keys_inner never exhaust relays, looping until timeout
 
   # Trivial mutations
   # These exclusions are allowing code blocks to run with arithmetic involving zero and as a result are no-ops

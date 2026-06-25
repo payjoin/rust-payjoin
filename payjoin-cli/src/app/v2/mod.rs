@@ -1056,9 +1056,11 @@ impl App {
         E: Into<anyhow::Error>,
     {
         let mut selector = RelaySelector::new(self.config.v2()?.ohttp_relays.clone());
+        // A later policy fills Post/Poll, receiver key and time window in here.
+        let select_ctx = payjoin::relay::SelectContext::random();
         loop {
             let relay = selector
-                .select(&mut payjoin::bitcoin::key::rand::thread_rng())
+                .select(&select_ctx, &mut payjoin::bitcoin::key::rand::thread_rng())
                 .ok_or_else(|| anyhow!("No valid relays available"))?;
             let (req, ctx) = build(relay.as_str()).map_err(Into::into)?;
             match self.post_request(req).await {

@@ -46,27 +46,32 @@ pub(crate) struct App {
 }
 
 trait StatusText {
-    fn status_text(&self) -> &'static str;
+    fn status_text(&self, has_fallback_tx: bool) -> String;
 }
 
 impl StatusText for SendSession {
-    fn status_text(&self) -> &'static str {
+    fn status_text(&self, has_fallback_tx: bool) -> String {
         match self {
             SendSession::WithReplyKey(_) | SendSession::PollingForProposal(_) =>
-                "Waiting for proposal",
+                "Waiting for proposal".to_string(),
             SendSession::Closed(session_outcome) => match session_outcome {
-                SenderSessionOutcome::Aborted => "Session aborted",
-                SenderSessionOutcome::Success(_) => "Session success",
+                SenderSessionOutcome::Aborted =>
+                    if has_fallback_tx {
+                        "Session aborted, Fallback transaction available".to_string()
+                    } else {
+                        "Session aborted".to_string()
+                    },
+                SenderSessionOutcome::Success(_) => "Session success".to_string(),
             },
-            SendSession::PendingFallback(_) => "Session awaiting fallback",
+            SendSession::PendingFallback(_) => "Session awaiting fallback".to_string(),
         }
     }
 }
 
 impl StatusText for ReceiveSession {
-    fn status_text(&self) -> &'static str {
+    fn status_text(&self, has_fallback_tx: bool) -> String {
         match self {
-            ReceiveSession::Initialized(_) => "Waiting for original proposal",
+            ReceiveSession::Initialized(_) => "Waiting for original proposal".to_string(),
             ReceiveSession::UncheckedOriginalPayload(_)
             | ReceiveSession::MaybeInputsOwned(_)
             | ReceiveSession::MaybeInputsSeen(_)
@@ -74,18 +79,24 @@ impl StatusText for ReceiveSession {
             | ReceiveSession::WantsOutputs(_)
             | ReceiveSession::WantsInputs(_)
             | ReceiveSession::WantsFeeRange(_)
-            | ReceiveSession::ProvisionalProposal(_) => "Processing original proposal",
-            ReceiveSession::PayjoinProposal(_) => "Payjoin proposal sent",
+            | ReceiveSession::ProvisionalProposal(_) => "Processing original proposal".to_string(),
+            ReceiveSession::PayjoinProposal(_) => "Payjoin proposal sent".to_string(),
             ReceiveSession::HasReplyableError(_) =>
-                "Session failure, waiting to post error response",
-            ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
-            ReceiveSession::PendingFallback(_) => "Pending fallback handling",
+                "Session failure, waiting to post error response".to_string(),
+            ReceiveSession::Monitor(_) => "Monitoring payjoin proposal".to_string(),
+            ReceiveSession::PendingFallback(_) => "Pending fallback handling".to_string(),
             ReceiveSession::Closed(session_outcome) => match session_outcome {
-                ReceiverSessionOutcome::Aborted => "Session aborted",
-                ReceiverSessionOutcome::Success(_) => "Session success, Payjoin proposal was broadcasted",
-                ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
+                ReceiverSessionOutcome::Aborted => if has_fallback_tx {
+                    "Session aborted, Fallback Tx available".to_string()
+                } else {
+                    "Session aborted".to_string()
+                },
+                ReceiverSessionOutcome::Success(_) =>
+                    "Session success, Payjoin proposal was broadcasted".to_string(),
+                ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted".to_string(),
                 ReceiverSessionOutcome::PayjoinProposalSent =>
-                    "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs",
+                    "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs"
+                        .to_string(),
             },
         }
     }
@@ -112,17 +123,19 @@ struct SessionHistoryRow<Status> {
     session_id: SessionId,
     role: Role,
     status: Status,
+    has_fallback_tx: bool,
     error_message: Option<String>,
 }
 
 impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let status_text = self.status.status_text(self.has_fallback_tx);
         write!(
             f,
             "{:<W_ID$} {:<W_ROLE$} {:<W_STATUS$}",
             self.session_id.to_string(),
             self.role.as_str(),
-            self.error_message.as_deref().unwrap_or(self.status.status_text())
+            self.error_message.as_deref().unwrap_or(status_text.as_str())
         )
     }
 }
@@ -232,6 +245,7 @@ impl AppTrait for App {
                         let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
                         let persister =
                             SenderPersister::new(self.db.clone(), bip21, receiver_pubkey)?;
+                        println!("Send session {} established", persister.session_id());
                         let sender =
                             SenderBuilder::from_parts(psbt, pj_param, &address, Some(amount))
                                 .build_recommended(fee_rate)?
@@ -277,7 +291,7 @@ impl AppTrait for App {
         }
         let session = receiver_builder.build().save(&persister)?;
 
-        println!("Receive session established");
+        println!("Receive session {} established", persister.session_id());
         let pj_uri = session.pj_uri();
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{pj_uri}");
@@ -396,6 +410,7 @@ impl AppTrait for App {
                         session_id,
                         role: Role::Sender,
                         status: sender_state.clone(),
+                        has_fallback_tx: true,
                         error_message: None,
                     };
                     send_rows.push(row);
@@ -405,6 +420,7 @@ impl AppTrait for App {
                         session_id,
                         role: Role::Sender,
                         status: SendSession::Closed(SenderSessionOutcome::Aborted),
+                        has_fallback_tx: false,
                         error_message: Some(e.to_string()),
                     };
                     send_rows.push(row);
@@ -415,11 +431,12 @@ impl AppTrait for App {
         self.db.get_recv_session_ids()?.into_iter().for_each(|session_id| {
             let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
             match replay_receiver_event_log(&persister) {
-                Ok((receiver_state, _)) => {
+                Ok((receiver_state, history)) => {
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Receiver,
                         status: receiver_state.clone(),
+                        has_fallback_tx: history.fallback_tx().is_some(),
                         error_message: None,
                     };
                     recv_rows.push(row);
@@ -429,6 +446,7 @@ impl AppTrait for App {
                         session_id,
                         role: Role::Receiver,
                         status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
+                        has_fallback_tx: false,
                         error_message: Some(e.to_string()),
                     };
                     recv_rows.push(row);

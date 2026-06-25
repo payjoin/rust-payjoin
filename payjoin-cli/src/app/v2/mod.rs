@@ -9,13 +9,14 @@ use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
     MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
     PendingFallback as ReceiverPendingFallback, ProvisionalProposal, ReceiveSession, Receiver,
-    ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload,
-    WantsFeeRange, WantsInputs, WantsOutputs,
+    ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome,
+    SessionStatus as ReceiverSessionStatus, UncheckedOriginalPayload, WantsFeeRange, WantsInputs,
+    WantsOutputs,
 };
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, PendingFallback as SenderPendingFallback,
     PollingForProposal, SendSession, Sender, SenderBuilder, SessionOutcome as SenderSessionOutcome,
-    WithReplyKey,
+    SessionStatus as SenderSessionStatus, WithReplyKey,
 };
 use payjoin::{ImplementationError, PjParam, Uri};
 use tokio::sync::watch;
@@ -33,7 +34,6 @@ mod ohttp;
 
 const W_ID: usize = 12;
 const W_ROLE: usize = 25;
-const W_DONE: usize = 15;
 const W_STATUS: usize = 15;
 
 #[derive(Clone)]
@@ -92,10 +92,7 @@ impl StatusText for ReceiveSession {
 }
 
 fn print_header() {
-    println!(
-        "{:<W_ID$} {:<W_ROLE$} {:<W_DONE$} {:<W_STATUS$}",
-        "Session ID", "Sender/Receiver", "Completed At", "Status"
-    );
+    println!("{:<W_ID$} {:<W_ROLE$} {:<W_STATUS$}", "Session ID", "Sender/Receiver", "Status");
 }
 
 enum Role {
@@ -115,7 +112,6 @@ struct SessionHistoryRow<Status> {
     session_id: SessionId,
     role: Role,
     status: Status,
-    completed_at: Option<u64>,
     error_message: Option<String>,
 }
 
@@ -123,16 +119,9 @@ impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{:<W_ID$} {:<W_ROLE$} {:<W_DONE$} {:<W_STATUS$}",
+            "{:<W_ID$} {:<W_ROLE$} {:<W_STATUS$}",
             self.session_id.to_string(),
             self.role.as_str(),
-            match self.completed_at {
-                None => "Not Completed".to_string(),
-                Some(secs) => {
-                    // TODO: human readable time
-                    secs.to_string()
-                }
-            },
             self.error_message.as_deref().unwrap_or(self.status.status_text())
         )
     }
@@ -302,11 +291,6 @@ impl AppTrait for App {
         let recv_session_ids = self.db.get_recv_session_ids()?;
         let send_session_ids = self.db.get_send_session_ids()?;
 
-        if recv_session_ids.is_empty() && send_session_ids.is_empty() {
-            println!("No sessions to resume.");
-            return Ok(());
-        }
-
         let mut tasks: Vec<(String, tokio::task::JoinHandle<Result<()>>)> = Vec::new();
 
         // Process receiver sessions
@@ -314,15 +298,17 @@ impl AppTrait for App {
             let self_clone = self.clone();
             let recv_persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
             match replay_receiver_event_log(&recv_persister) {
-                Ok((receiver_state, _)) => {
-                    tasks.push((
-                        session_id.to_string(),
-                        tokio::spawn(async move {
-                            self_clone
-                                .process_receiver_session(receiver_state, &recv_persister)
-                                .await
-                        }),
-                    ));
+                Ok((receiver_state, history)) => {
+                    if history.status() == ReceiverSessionStatus::Active {
+                        tasks.push((
+                            session_id.to_string(),
+                            tokio::spawn(async move {
+                                self_clone
+                                    .process_receiver_session(receiver_state, &recv_persister)
+                                    .await
+                            }),
+                        ));
+                    }
                 }
                 Err(e) => {
                     if e.is_expired() {
@@ -343,15 +329,18 @@ impl AppTrait for App {
         for session_id in send_session_ids {
             let sender_persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
             match replay_sender_event_log(&sender_persister) {
-                Ok((sender_state, _)) => {
-                    let self_clone = self.clone();
-                    tasks.push((
-                        session_id.clone().to_string(),
-                        tokio::spawn(async move {
-                            self_clone.process_sender_session(sender_state, &sender_persister).await
-                        }),
-                    ));
-                }
+                Ok((sender_state, history)) =>
+                    if history.status() == SenderSessionStatus::Active {
+                        let self_clone = self.clone();
+                        tasks.push((
+                            session_id.clone().to_string(),
+                            tokio::spawn(async move {
+                                self_clone
+                                    .process_sender_session(sender_state, &sender_persister)
+                                    .await
+                            }),
+                        ));
+                    },
                 Err(e) => {
                     if e.is_expired() {
                         println!("Session {session_id} sender expired.");
@@ -362,6 +351,11 @@ impl AppTrait for App {
                     Self::close_failed_session(&sender_persister, &session_id, "sender");
                 }
             }
+        }
+
+        if tasks.is_empty() {
+            println!("No sessions to resume.");
+            return Ok(());
         }
 
         let mut interrupt = self.interrupt.clone();
@@ -402,7 +396,6 @@ impl AppTrait for App {
                         session_id,
                         role: Role::Sender,
                         status: sender_state.clone(),
-                        completed_at: None,
                         error_message: None,
                     };
                     send_rows.push(row);
@@ -412,7 +405,6 @@ impl AppTrait for App {
                         session_id,
                         role: Role::Sender,
                         status: SendSession::Closed(SenderSessionOutcome::Aborted),
-                        completed_at: None,
                         error_message: Some(e.to_string()),
                     };
                     send_rows.push(row);
@@ -428,7 +420,6 @@ impl AppTrait for App {
                         session_id,
                         role: Role::Receiver,
                         status: receiver_state.clone(),
-                        completed_at: None,
                         error_message: None,
                     };
                     recv_rows.push(row);
@@ -438,69 +429,12 @@ impl AppTrait for App {
                         session_id,
                         role: Role::Receiver,
                         status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
-                        completed_at: None,
                         error_message: Some(e.to_string()),
                     };
                     recv_rows.push(row);
                 }
             }
         });
-
-        self.db.get_inactive_send_session_ids()?.into_iter().for_each(
-            |(session_id, completed_at)| {
-                let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
-                match replay_sender_event_log(&persister) {
-                    Ok((sender_state, _)) => {
-                        let row = SessionHistoryRow {
-                            session_id,
-                            role: Role::Sender,
-                            status: sender_state.clone(),
-                            completed_at: Some(completed_at),
-                            error_message: None,
-                        };
-                        send_rows.push(row);
-                    }
-                    Err(e) => {
-                        let row = SessionHistoryRow {
-                            session_id,
-                            role: Role::Sender,
-                            status: SendSession::Closed(SenderSessionOutcome::Aborted),
-                            completed_at: Some(completed_at),
-                            error_message: Some(e.to_string()),
-                        };
-                        send_rows.push(row);
-                    }
-                }
-            },
-        );
-
-        self.db.get_inactive_recv_session_ids()?.into_iter().for_each(
-            |(session_id, completed_at)| {
-                let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
-                match replay_receiver_event_log(&persister) {
-                    Ok((receiver_state, _)) => {
-                        let row = SessionHistoryRow {
-                            session_id,
-                            role: Role::Receiver,
-                            status: receiver_state.clone(),
-                            completed_at: Some(completed_at),
-                            error_message: None,
-                        };
-                        recv_rows.push(row);
-                    }
-                    Err(e) => {
-                        let row = SessionHistoryRow {
-                            session_id,
-                            role: Role::Receiver,
-                            status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
-                            completed_at: Some(completed_at),
-                            error_message: Some(e.to_string()),
-                        };
-                        recv_rows.push(row);
-                    }
-                }
-            },
-        );
 
         // Print receiver and sender rows separately
         for row in send_rows {

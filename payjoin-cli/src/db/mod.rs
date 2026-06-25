@@ -42,16 +42,14 @@ impl Database {
             "CREATE TABLE IF NOT EXISTS send_sessions (
                 session_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 pj_uri TEXT NOT NULL,
-                receiver_pubkey BLOB NOT NULL,
-                completed_at INTEGER
+                receiver_pubkey BLOB NOT NULL
             )",
             [],
         )?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS receive_sessions (
-                session_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                completed_at INTEGER
+                session_id INTEGER PRIMARY KEY AUTOINCREMENT
             )",
             [],
         )?;

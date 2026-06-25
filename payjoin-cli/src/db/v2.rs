@@ -1,10 +1,14 @@
 use std::sync::Arc;
 
 use payjoin::persist::SessionPersister;
-use payjoin::receive::v2::SessionEvent as ReceiverSessionEvent;
-use payjoin::send::v2::SessionEvent as SenderSessionEvent;
+use payjoin::receive::v2::{
+    SessionEvent as ReceiverSessionEvent, SessionOutcome as ReceiverSessionOutcome,
+};
+use payjoin::send::v2::{
+    SessionEvent as SenderSessionEvent, SessionOutcome as SenderSessionOutcome,
+};
 use payjoin::HpkePublicKey;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use super::*;
 
@@ -109,13 +113,24 @@ impl SessionPersister for SenderPersister {
     }
 
     fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
-        let conn = self.db.get_connection()?;
-
-        conn.execute(
-            "UPDATE send_sessions SET completed_at = ?1 WHERE session_id = ?2",
-            params![now(), *self.session_id],
-        )?;
-
+        let already_closed = {
+            let conn = self.db.get_connection()?;
+            let last_event: Option<String> = conn
+                .query_row(
+                    "SELECT event_data FROM send_session_events
+                     WHERE session_id = ?1 ORDER BY id DESC LIMIT 1",
+                    params![*self.session_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            last_event
+                .and_then(|data| serde_json::from_str::<SenderSessionEvent>(&data).ok())
+                .map(|e| matches!(e, SenderSessionEvent::Closed(_)))
+                .unwrap_or(false)
+        };
+        if !already_closed {
+            self.save_event(SenderSessionEvent::Closed(SenderSessionOutcome::Aborted))?;
+        }
         Ok(())
     }
 }
@@ -192,13 +207,24 @@ impl SessionPersister for ReceiverPersister {
     }
 
     fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
-        let conn = self.db.get_connection()?;
-
-        conn.execute(
-            "UPDATE receive_sessions SET completed_at = ?1 WHERE session_id = ?2",
-            params![now(), *self.session_id],
-        )?;
-
+        let already_closed = {
+            let conn = self.db.get_connection()?;
+            let last_event: Option<String> = conn
+                .query_row(
+                    "SELECT event_data FROM receive_session_events
+                     WHERE session_id = ?1 ORDER BY id DESC LIMIT 1",
+                    params![*self.session_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            last_event
+                .and_then(|data| serde_json::from_str::<ReceiverSessionEvent>(&data).ok())
+                .map(|e| matches!(e, ReceiverSessionEvent::Closed(_)))
+                .unwrap_or(false)
+        };
+        if !already_closed {
+            self.save_event(ReceiverSessionEvent::Closed(ReceiverSessionOutcome::Aborted))?;
+        }
         Ok(())
     }
 }
@@ -206,8 +232,7 @@ impl SessionPersister for ReceiverPersister {
 impl Database {
     pub(crate) fn get_recv_session_ids(&self) -> Result<Vec<SessionId>> {
         let conn = self.get_connection()?;
-        let mut stmt =
-            conn.prepare("SELECT session_id FROM receive_sessions WHERE completed_at IS NULL")?;
+        let mut stmt = conn.prepare("SELECT session_id FROM receive_sessions")?;
 
         let session_rows = stmt.query_map([], |row| {
             let session_id: i64 = row.get(0)?;
@@ -225,8 +250,7 @@ impl Database {
 
     pub(crate) fn get_send_session_ids(&self) -> Result<Vec<SessionId>> {
         let conn = self.get_connection()?;
-        let mut stmt =
-            conn.prepare("SELECT session_id FROM send_sessions WHERE completed_at IS NULL")?;
+        let mut stmt = conn.prepare("SELECT session_id FROM send_sessions")?;
 
         let session_rows = stmt.query_map([], |row| {
             let session_id: i64 = row.get(0)?;
@@ -251,44 +275,6 @@ impl Database {
             conn.prepare("SELECT receiver_pubkey FROM send_sessions WHERE session_id = ?1")?;
         let receiver_pubkey: Vec<u8> = stmt.query_row(params![session_id.0], |row| row.get(0))?;
         Ok(HpkePublicKey::from_compressed_bytes(&receiver_pubkey).expect("Valid receiver pubkey"))
-    }
-
-    pub(crate) fn get_inactive_send_session_ids(&self) -> Result<Vec<(SessionId, u64)>> {
-        let conn = self.get_connection()?;
-        let mut stmt = conn.prepare(
-            "SELECT session_id, completed_at FROM send_sessions WHERE completed_at IS NOT NULL",
-        )?;
-        let session_rows = stmt.query_map([], |row| {
-            let session_id: i64 = row.get(0)?;
-            let completed_at: u64 = row.get(1)?;
-            Ok((SessionId(session_id), completed_at))
-        })?;
-
-        let mut session_ids = Vec::new();
-        for session_row in session_rows {
-            let (session_id, completed_at) = session_row?;
-            session_ids.push((session_id, completed_at));
-        }
-        Ok(session_ids)
-    }
-
-    pub(crate) fn get_inactive_recv_session_ids(&self) -> Result<Vec<(SessionId, u64)>> {
-        let conn = self.get_connection()?;
-        let mut stmt = conn.prepare(
-            "SELECT session_id, completed_at FROM receive_sessions WHERE completed_at IS NOT NULL",
-        )?;
-        let session_rows = stmt.query_map([], |row| {
-            let session_id: i64 = row.get(0)?;
-            let completed_at: u64 = row.get(1)?;
-            Ok((SessionId(session_id), completed_at))
-        })?;
-
-        let mut session_ids = Vec::new();
-        for session_row in session_rows {
-            let (session_id, completed_at) = session_row?;
-            session_ids.push((session_id, completed_at));
-        }
-        Ok(session_ids)
     }
 
     /// Look up a sender session by ID regardless of active/inactive state.

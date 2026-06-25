@@ -1,7 +1,7 @@
 name: Payjoin directory health check
 on:
   schedule:
-    - cron: "*/15 * * * *" # Every 15 minutes
+    - cron: "9,23,38,53 * * * *" # Runs 4 times per hour offset from the high traffic quarters that may delay or cancel a run from occuring
 jobs:
   health-check:
     runs-on: ubuntu-latest

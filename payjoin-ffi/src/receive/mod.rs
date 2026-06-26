@@ -1437,7 +1437,7 @@ impl HasReplyableError {
 }
 
 #[uniffi::export(with_foreign)]
-pub trait TransactionExists: Send + Sync {
+pub trait TransactionFinder: Send + Sync {
     fn callback(&self, txid: String) -> Result<Option<Vec<u8>>, ForeignError>;
 }
 
@@ -1505,16 +1505,18 @@ fn try_deserialize_tx(
 
 #[uniffi::export]
 impl Monitor {
-    pub fn check_for_broadcast(
+    pub fn check_for_transaction(
         &self,
-        transaction_exists: Arc<dyn TransactionExists>,
+        find_transaction: Arc<dyn TransactionFinder>,
     ) -> MonitorTransition {
-        MonitorTransition(Arc::new(RwLock::new(Some(self.0.clone().check_for_broadcast(|txid| {
-            transaction_exists
-                .callback(txid.to_string())
-                .and_then(|buf| buf.map(try_deserialize_tx).transpose())
-                .map_err(|e| ImplementationError::new(e).into())
-        })))))
+        MonitorTransition(Arc::new(RwLock::new(Some(self.0.clone().check_for_transaction(
+            |txid| {
+                find_transaction
+                    .callback(txid.to_string())
+                    .and_then(|buf| buf.map(try_deserialize_tx).transpose())
+                    .map_err(|e| ImplementationError::new(e).into())
+            },
+        )))))
     }
 }
 

@@ -557,8 +557,8 @@ mod integration {
             // The sender is using a non-SegWit address, so their signature is going to change the TXID. So we test whether the
             // function exists early and does not call the closure.
             monitoring_payment
-                .check_for_broadcast(|_| {
-                    panic!("when the sender is using a non-SegWit address type, the check_for_broadcast function should skip the check and return success")
+                .check_for_transaction(|_| {
+                    panic!("when the sender is using a non-SegWit address type, the check_for_transaction function should skip the check and return success")
                 })
                 .save(&recv_persister)
                 .expect("receiver should successfully monitor for the payment");
@@ -612,7 +612,7 @@ mod integration {
 
             // Receiver should be able to validate that the sender has broadcasted the Payjoin proposal.
             monitoring_payment
-                .check_for_broadcast(|txid| {
+                .check_for_transaction(|txid| {
                     let get_tx_result = receiver.get_raw_transaction(txid);
                     match get_tx_result {
                         Ok(tx) =>
@@ -694,7 +694,7 @@ mod integration {
 
             // Receiver should be able to validate that the sender has broadcasted the Payjoin proposal.
             monitoring_payment
-                .check_for_broadcast(|txid| {
+                .check_for_transaction(|txid| {
                     let get_tx_result = receiver.get_raw_transaction(txid);
                     match get_tx_result {
                         Ok(tx) =>
@@ -770,10 +770,10 @@ mod integration {
             );
 
             // Receiver should be able to validate that the sender has broadcasted the fallback transaction.
-            // The check_for_broadcast closure should be called twice: first for the Payjoin proposal, which will not be found,
+            // The check_for_transaction closure should be called twice: first for the Payjoin proposal, which will not be found,
             // and then for the fallback transaction, which will be found..
             monitoring_payment
-                .check_for_broadcast(|txid| {
+                .check_for_transaction(|txid| {
                     let get_tx_result = receiver.get_raw_transaction(txid);
                     match get_tx_result {
                         Ok(tx) =>

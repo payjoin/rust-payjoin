@@ -458,17 +458,7 @@ impl OriginalPayload {
             return Err(InternalPayloadError::MissingPayment.into());
         }
 
-        let mut params = self.params.clone();
-        if let Some((_, additional_fee_output_index)) = params.additional_fee_contribution {
-            // If the additional fee output index specified by the sender is pointing to a receiver output,
-            // the receiver should ignore the parameter.
-            // https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#optional-parameters
-            if owned_vouts.contains(&additional_fee_output_index) {
-                params.additional_fee_contribution = None;
-            }
-        }
-        let original_payload = OriginalPayload { params, ..self.clone() };
-        Ok(common::WantsOutputs::new(original_payload, owned_vouts))
+        Ok(common::WantsOutputs::new(self, owned_vouts))
     }
 }
 
@@ -1009,7 +999,7 @@ pub(crate) mod tests {
             })
             .expect("receiver outputs should be identified");
         assert_eq!(wants_outputs.owned_vouts, vec![1]);
-        assert_eq!(wants_outputs.params, original.params);
+        assert_eq!(wants_outputs.original.params, original.params);
 
         // No outputs belong to the receiver, it should error
         let wants_outputs = original
@@ -1029,7 +1019,7 @@ pub(crate) mod tests {
             .identify_receiver_outputs(&mut |_| Ok(true))
             .expect("receiver outputs should be identified");
         assert_eq!(wants_outputs.owned_vouts, vec![0, 1]);
-        assert_eq!(wants_outputs.params.additional_fee_contribution, None);
+        assert_eq!(wants_outputs.original.params.additional_fee_contribution, None);
     }
 
     #[test]

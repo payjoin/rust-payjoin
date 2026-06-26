@@ -180,13 +180,15 @@ impl ReceiveSession {
                 SessionEvent::IdentifiedReceiverOutputs(wants_outputs),
             ) => Ok(state.apply_identified_receiver_outputs(wants_outputs)),
 
-            (ReceiveSession::WantsOutputs(state), SessionEvent::CommittedOutputs(wants_inputs)) =>
-                Ok(state.apply_committed_outputs(wants_inputs)),
+            (
+                ReceiveSession::WantsOutputs(state),
+                SessionEvent::CommittedOutputs { outputs, change_vout },
+            ) => Ok(state.apply_committed_outputs(outputs, change_vout)),
 
             (
                 ReceiveSession::WantsInputs(state),
-                SessionEvent::CommittedInputs(wants_fee_range),
-            ) => Ok(state.apply_committed_inputs(wants_fee_range)),
+                SessionEvent::CommittedInputs { receiver_inputs, payjoin_psbt },
+            ) => Ok(state.apply_committed_inputs(receiver_inputs, payjoin_psbt)),
 
             (ReceiveSession::WantsFeeRange(state), SessionEvent::AppliedFeeRange(psbt_context)) =>
                 Ok(state.apply_applied_fee_range(psbt_context)),
@@ -347,19 +349,19 @@ mod sealed {
 
     impl FallbackTx for super::WantsOutputs {
         fn fallback_tx(&self) -> bitcoin::Transaction {
-            self.inner.original_psbt.clone().extract_tx_unchecked_fee_rate()
+            self.inner.original_psbt().clone().extract_tx_unchecked_fee_rate()
         }
     }
 
     impl FallbackTx for super::WantsInputs {
         fn fallback_tx(&self) -> bitcoin::Transaction {
-            self.inner.original_psbt.clone().extract_tx_unchecked_fee_rate()
+            self.inner.original_psbt().clone().extract_tx_unchecked_fee_rate()
         }
     }
 
     impl FallbackTx for super::WantsFeeRange {
         fn fallback_tx(&self) -> bitcoin::Transaction {
-            self.inner.original_psbt.clone().extract_tx_unchecked_fee_rate()
+            self.inner.original_psbt().clone().extract_tx_unchecked_fee_rate()
         }
     }
 
@@ -1043,23 +1045,28 @@ impl Receiver<WantsOutputs> {
     ///
     /// Outputs cannot be modified after this function is called.
     pub fn commit_outputs(self) -> NextStateTransition<SessionEvent, Receiver<WantsInputs>> {
-        let inner = self.state.inner.clone().commit_outputs();
+        let inner = self.state.inner.commit_outputs();
+        // change_vout, chosen by the output shuffle, can't be recomputed on replay.
         NextStateTransition::success(
-            SessionEvent::CommittedOutputs(self.state.inner.payjoin_psbt.unsigned_tx.output),
+            SessionEvent::CommittedOutputs {
+                outputs: inner.proposal.payjoin_psbt.unsigned_tx.output.clone(),
+                change_vout: inner.proposal.change_vout,
+            },
             Receiver { state: WantsInputs { inner }, session_context: self.session_context },
         )
     }
 
-    pub(crate) fn apply_committed_outputs(self, outputs: Vec<TxOut>) -> ReceiveSession {
-        let mut payjoin_proposal = self.inner.payjoin_psbt.clone();
-        let outputs_len = outputs.len();
-        // Add the outputs that may have been replaced
-        payjoin_proposal.unsigned_tx.output = outputs;
-        payjoin_proposal.outputs = vec![Default::default(); outputs_len];
-
-        let mut inner = self.state.inner.commit_outputs();
-        inner.payjoin_psbt = payjoin_proposal;
-
+    pub(crate) fn apply_committed_outputs(
+        self,
+        outputs: Vec<TxOut>,
+        change_vout: usize,
+    ) -> ReceiveSession {
+        let mut payjoin_psbt = self.state.inner.original.original_psbt.clone();
+        payjoin_psbt.outputs = vec![Default::default(); outputs.len()];
+        payjoin_psbt.unsigned_tx.output = outputs;
+        let proposal =
+            common::WorkingProposal { payjoin_psbt, change_vout, receiver_inputs: vec![] };
+        let inner = common::WantsInputs { original: self.state.inner.original, proposal };
         let new_state =
             Receiver { state: WantsInputs { inner }, session_context: self.session_context };
         ReceiveSession::WantsInputs(new_state)
@@ -1104,24 +1111,26 @@ impl Receiver<WantsInputs> {
     ///
     /// Inputs cannot be modified after this function is called.
     pub fn commit_inputs(self) -> NextStateTransition<SessionEvent, Receiver<WantsFeeRange>> {
-        let inner = self.state.inner.clone().commit_inputs();
+        let inner = self.state.inner.commit_inputs();
+        // The RNG insert order and change bump aren't reconstructable; store the PSBT.
         NextStateTransition::success(
-            SessionEvent::CommittedInputs(inner.receiver_inputs.clone()),
+            SessionEvent::CommittedInputs {
+                receiver_inputs: inner.proposal.receiver_inputs.clone(),
+                payjoin_psbt: inner.proposal.payjoin_psbt.clone(),
+            },
             Receiver { state: WantsFeeRange { inner }, session_context: self.session_context },
         )
     }
 
     pub(crate) fn apply_committed_inputs(
         self,
-        contributed_inputs: Vec<InputPair>,
+        receiver_inputs: Vec<InputPair>,
+        payjoin_psbt: Psbt,
     ) -> ReceiveSession {
-        let inner = common::WantsFeeRange {
-            original_psbt: self.state.inner.original_psbt.clone(),
-            payjoin_psbt: self.state.inner.payjoin_psbt.clone(),
-            params: self.state.inner.params.clone(),
-            change_vout: self.state.inner.change_vout,
-            receiver_inputs: contributed_inputs,
-        };
+        // change_vout is unchanged by contribute_inputs; recover it from the predecessor.
+        let change_vout = self.state.inner.proposal.change_vout;
+        let proposal = common::WorkingProposal { payjoin_psbt, change_vout, receiver_inputs };
+        let inner = common::WantsFeeRange { original: self.state.inner.original, proposal };
         let new_state =
             Receiver { state: WantsFeeRange { inner }, session_context: self.session_context };
         ReceiveSession::WantsFeeRange(new_state)

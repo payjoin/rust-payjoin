@@ -43,6 +43,7 @@
         "./web-vite": "./dist/web/vite.index.js"
     },
     "dependencies": {
-        "uniffi-bindgen-react-native": "github:spacebear21/uniffi-bindgen-react-native#50229433d02f1a37d34f0bdfe7ea615e9a364142"
+        "@ubjs/core": "^0.31.0-3",
+        "uniffi-bindgen-react-native": "github:spacebear21/uniffi-bindgen-react-native#d10f04d83299"
     }
 }

@@ -9,10 +9,10 @@
 # the library and CLI versions causes "unreachable" panics at runtime.
 wasm-bindgen = "=0.2.108"
 
-# uniffi_core 0.30 requires this feature for wasm32 builds to remove the
+# uniffi_core 0.31 requires this feature for wasm32 builds to remove the
 # Send bound on futures, which is not applicable in single-threaded WASM.
 [dependencies.uniffi_core]
-version = "0.30"
+version = "0.31"
 default-features = false
 features = ["wasm-unstable-single-threaded"]
 

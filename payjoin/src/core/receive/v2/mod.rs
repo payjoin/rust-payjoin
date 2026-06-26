@@ -1469,24 +1469,22 @@ pub struct Monitor {
 /// The caller should decide the condition that must be satisfied for the Payjoin to be considered
 /// successful.
 ///
-/// Call [`Receiver<Monitor>::check_for_broadcast`] to confirm the status of the transaction in the
+/// Call [`Receiver<Monitor>::check_for_transaction`] to confirm the status of the transaction in the
 /// network and conclude the Payjoin session.
 impl Receiver<Monitor> {
     /// Checks the network for the Payjoin proposal or the fallback transaction using the passed
-    /// `transaction_exists` closure. Concludes the Payjoin session with a Success if the
-    /// transaction satisfies the condition.
-    ///
-    /// For example, the condition can be if the transaction has been broadcast to the
-    /// network, or if it has some number of confirmations on the blockchain.
+    /// `find_transaction` closure, and concludes the Payjoin session once one is found. The
+    /// closure defines the condition that counts as found — for example presence in the mempool,
+    /// or some number of confirmations on the blockchain.
     ///
     /// If the input address type in the fallback transaction is non-SegWit, then this
     /// function will directly conclude the Payjoin session with a Success without running the
-    /// provided `transaction_exists` closure. `transaction_exists` uses the transaction ID to
+    /// provided `find_transaction` closure. `find_transaction` uses the transaction ID to
     /// search for the transaction in the network. Since a non-SegWit input signature is going to
     /// change the TXID of the Payjoin proposal, it cannot be monitored.
-    pub fn check_for_broadcast(
+    pub fn check_for_transaction(
         &self,
-        transaction_exists: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,
+        find_transaction: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,
     ) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, Error> {
         let fallback_tx = self.state.fallback_tx();
 
@@ -1504,7 +1502,7 @@ impl Receiver<Monitor> {
         // If the sender is spending SegWit-only inputs, then the transaction ID of the Payjoin proposal
         // is not going to change when the sender signs it. So we can use the TXID to check the
         // network for the Payjoin proposal.
-        match transaction_exists(payjoin_txid) {
+        match find_transaction(payjoin_txid) {
             Ok(Some(tx)) => {
                 let tx_id = tx.compute_txid();
                 if tx_id != payjoin_txid {
@@ -1531,7 +1529,7 @@ impl Receiver<Monitor> {
 
         // If the Payjoin proposal was not found, check the fallback transaction, as it is
         // the second of two transactions whose IDs the receiver is aware of.
-        match transaction_exists(fallback_tx.compute_txid()) {
+        match find_transaction(fallback_tx.compute_txid()) {
             Ok(Some(_)) =>
                 return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
                     SessionOutcome::FallbackBroadcasted,
@@ -1699,7 +1697,7 @@ pub mod test {
         // Nothing was spent, should be in the same state
         let persister = InMemoryPersister::default();
         let res = monitor
-            .check_for_broadcast(|_| Ok(None))
+            .check_for_transaction(|_| Ok(None))
             .save(&persister)
             .expect("InMemoryPersister shouldn't fail");
         assert!(matches!(res, OptionalTransitionOutcome::Stasis(_)));
@@ -1709,7 +1707,7 @@ pub mod test {
         // Payjoin was broadcasted, should progress to success
         let persister = InMemoryPersister::default();
         let res = monitor
-            .check_for_broadcast(|_| Ok(Some(payjoin_tx.clone())))
+            .check_for_transaction(|_| Ok(Some(payjoin_tx.clone())))
             .save(&persister)
             .expect("InMemoryPersister shouldn't fail");
 
@@ -1727,7 +1725,7 @@ pub mod test {
         // Fallback was broadcasted, should progress to success
         let persister = InMemoryPersister::default();
         let res = monitor
-            .check_for_broadcast(|txid| {
+            .check_for_transaction(|txid| {
                 // Emulate if one of the fallback outpoints was double spent
                 if txid == original_tx.compute_txid() {
                     Ok(Some(original_tx.clone()))
@@ -1764,8 +1762,8 @@ pub mod test {
 
         let persister = InMemoryPersister::default();
         let res = monitor
-            .check_for_broadcast(|_| {
-                panic!("check_for_broadcast should return before this closure is called")
+            .check_for_transaction(|_| {
+                panic!("check_for_transaction should return before this closure is called")
             })
             .save(&persister)
             .expect("InMemoryPersister shouldn't fail");

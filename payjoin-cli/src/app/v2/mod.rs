@@ -985,7 +985,7 @@ impl App {
             loop {
                 interval.tick().await;
                 let check_result = proposal
-                    .check_for_broadcast(|txid| {
+                    .check_for_transaction(|txid| {
                         self.wallet()
                             .get_raw_transaction(&txid)
                             .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))

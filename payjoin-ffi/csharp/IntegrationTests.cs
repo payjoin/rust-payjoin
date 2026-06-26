@@ -172,16 +172,16 @@ namespace Payjoin.Tests
         {
             var request = receiver.CreatePollRequest(ohttpRelay);
             var response = await _httpClient!.PostAsync(
-                request.request.url,
-                new ByteArrayContent(request.request.body)
+                request.Request.Url,
+                new ByteArrayContent(request.Request.Body)
                 {
-                    Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(request.request.contentType) }
+                    Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(request.Request.ContentType) }
                 },
                 cancellationToken);
 
             var responseBuffer = await response.Content.ReadAsByteArrayAsync(cancellationToken);
 
-            using var transition = receiver.ProcessResponse(responseBuffer, request.clientResponse);
+            using var transition = receiver.ProcessResponse(responseBuffer, request.ClientResponse);
             using var outcome = transition.Save(recvPersister);
 
             if (outcome is InitializedTransitionOutcome.Stasis)
@@ -191,7 +191,7 @@ namespace Payjoin.Tests
 
             if (outcome is InitializedTransitionOutcome.Progress progress)
             {
-                using var proposal = progress.inner;
+                using var proposal = progress.Inner;
                 return await ProcessUncheckedProposal(proposal, receiverRpc, recvPersister);
             }
 
@@ -484,17 +484,17 @@ namespace Payjoin.Tests
             // Create V2 POST request with OHTTP
             using var request = reqCtx.CreateV2PostRequest(ohttpRelay);
             var response = await _httpClient!.PostAsync(
-                request.request.url,
-                new ByteArrayContent(request.request.body)
+                request.Request.Url,
+                new ByteArrayContent(request.Request.Body)
                 {
-                    Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(request.request.contentType) }
+                    Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(request.Request.ContentType) }
                 },
                 cancellationToken);
 
             var responseBuffer = await response.Content.ReadAsByteArrayAsync(cancellationToken);
 
             // Process sender response
-            using var senderResponseTransition = reqCtx.ProcessResponse(responseBuffer, request.ohttpCtx);
+            using var senderResponseTransition = reqCtx.ProcessResponse(responseBuffer, request.OhttpCtx);
             using var sendCtx = senderResponseTransition.Save(senderPersister);
 
             // *********************
@@ -507,15 +507,15 @@ namespace Payjoin.Tests
             // Post the payjoin proposal back to the directory
             using var proposalRequest = payjoinProposal!.CreatePostRequest(ohttpRelay);
             using var proposalResponse = await _httpClient.PostAsync(
-                proposalRequest.request.url,
-                new ByteArrayContent(proposalRequest.request.body)
+                proposalRequest.Request.Url,
+                new ByteArrayContent(proposalRequest.Request.Body)
                 {
-                    Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(proposalRequest.request.contentType) }
+                    Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(proposalRequest.Request.ContentType) }
                 },
                 cancellationToken);
 
             var proposalResponseBuffer = await proposalResponse.Content.ReadAsByteArrayAsync(cancellationToken);
-            payjoinProposal.ProcessResponse(proposalResponseBuffer, proposalRequest.clientResponse);
+            payjoinProposal.ProcessResponse(proposalResponseBuffer, proposalRequest.ClientResponse);
 
             // *******************************
             // SENDER SIDE (FINALIZATION)
@@ -526,15 +526,15 @@ namespace Payjoin.Tests
             {
                 using var pollRequest = sendCtx.CreatePollRequest(ohttpRelay);
                 using var pollResponse = await _httpClient.PostAsync(
-                    pollRequest.request.url,
-                    new ByteArrayContent(pollRequest.request.body)
+                    pollRequest.Request.Url,
+                    new ByteArrayContent(pollRequest.Request.Body)
                     {
-                        Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(pollRequest.request.contentType) }
+                        Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(pollRequest.Request.ContentType) }
                     },
                     cancellationToken);
 
                 var pollResponseBuffer = await pollResponse.Content.ReadAsByteArrayAsync(cancellationToken);
-                using var pollTransition = sendCtx.ProcessResponse(pollResponseBuffer, pollRequest.ohttpCtx);
+                using var pollTransition = sendCtx.ProcessResponse(pollResponseBuffer, pollRequest.OhttpCtx);
                 pollOutcome = pollTransition.Save(senderPersister);
 
                 if (pollOutcome is PollingForProposalTransitionOutcome.Progress)
@@ -553,7 +553,7 @@ namespace Payjoin.Tests
             var progressOutcome = (PollingForProposalTransitionOutcome.Progress)pollOutcome!;
 
             // Sign the payjoin PSBT
-            var payjoinPsbt = progressOutcome.psbtBase64;
+            var payjoinPsbt = progressOutcome.PsbtBase64;
             var processedPsbtJson = RpcCall(sender, "walletprocesspsbt", JsonSerializer.Serialize(payjoinPsbt));
             using var processedDoc = JsonDocument.Parse(processedPsbtJson);
             var processedPsbt = processedDoc.RootElement.GetProperty("psbt").GetString()!;

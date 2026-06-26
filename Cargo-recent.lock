@@ -4932,13 +4932,12 @@ dependencies = [
 
 [[package]]
 name = "uniffi-bindgen-cs"
-version = "0.11.0+v0.30.0"
-source = "git+https://github.com/benalleng/uniffi-bindgen-cs.git?rev=71d6556aa60c29b487d931de47053f26ee8a1af1#71d6556aa60c29b487d931de47053f26ee8a1af1"
+version = "0.11.0+v0.31.0"
+source = "git+https://github.com/NordSecurity/uniffi-bindgen-cs?tag=v0.11.0%2Bv0.31.0#e10ce410eb3a10cc19c7928b93ea8d84e038c034"
 dependencies = [
  "anyhow",
  "askama 0.13.1",
  "camino",
- "cargo_metadata 0.19.2",
  "clap 3.2.25",
  "extend",
  "fs-err 2.11.0",
@@ -4948,15 +4947,15 @@ dependencies = [
  "serde_json",
  "textwrap",
  "toml 0.9.12+spec-1.1.0",
- "uniffi_bindgen 0.30.0",
- "uniffi_meta 0.30.0",
- "uniffi_udl 0.30.0",
+ "uniffi_bindgen 0.31.2",
+ "uniffi_meta 0.31.2",
+ "uniffi_udl 0.31.2",
 ]
 
 [[package]]
 name = "uniffi-dart"
-version = "0.1.0+v0.30.0"
-source = "git+https://github.com/benalleng/uniffi-dart.git?rev=ce97870a934cd6046eef059c5805359ac0d59964#ce97870a934cd6046eef059c5805359ac0d59964"
+version = "0.2.1+v0.31.2"
+source = "git+https://github.com/Uniffi-Dart/uniffi-dart.git?tag=v0.2.1%2Bv0.31.2#872dcacdaa2e0760d787dccec5ca9b2e55e71f55"
 dependencies = [
  "anyhow",
  "camino",
@@ -5064,8 +5063,8 @@ dependencies = [
 
 [[package]]
 name = "uniffi_dart_macro"
-version = "0.1.0+v0.30.0"
-source = "git+https://github.com/benalleng/uniffi-dart.git?rev=ce97870a934cd6046eef059c5805359ac0d59964#ce97870a934cd6046eef059c5805359ac0d59964"
+version = "0.2.1+v0.31.2"
+source = "git+https://github.com/Uniffi-Dart/uniffi-dart.git?tag=v0.2.1%2Bv0.31.2#872dcacdaa2e0760d787dccec5ca9b2e55e71f55"
 dependencies = [
  "futures",
  "proc-macro2",

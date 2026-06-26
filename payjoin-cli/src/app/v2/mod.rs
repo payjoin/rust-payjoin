@@ -615,7 +615,7 @@ impl App {
         if let Err(close_err) = SessionPersister::close(persister) {
             tracing::error!("Failed to close {} session {}: {:?}", role, session_id, close_err);
         } else {
-            tracing::error!("Closed failed {} session: {}", role, session_id);
+            tracing::debug!("Closed failed {} session: {}", role, session_id);
         }
     }
 

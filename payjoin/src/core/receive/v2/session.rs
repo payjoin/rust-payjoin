@@ -231,6 +231,8 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use bitcoin::hashes::Hash;
+    use bitcoin::key::rand::rngs::StdRng;
+    use bitcoin::key::rand::SeedableRng;
     use payjoin_test_utils::{BoxError, EXAMPLE_URL};
 
     use super::*;
@@ -317,16 +319,33 @@ mod tests {
     // persisted delta, so a lossy reconstruction would diverge from the live control.
     #[test]
     fn test_replay_to_wants_inputs_matches_live() {
+        // thread_rng only moves the drain off owned_vouts[0] on some draws, so seed the
+        // shuffle to fix the asserted state and guarantee the drain (and change_vout) moves.
+        const SEED: u64 = 0;
+
         let persister = InMemoryPersister::<SessionEvent>::default();
         let wants_outputs = wants_outputs_with_persister(&persister, original_from_test_vector());
+        let owned_vout = wants_outputs.state.inner.owned_vouts[0];
 
         let (outputs, drain_script) = replacement_outputs();
-        let live_wants_inputs = wants_outputs
-            .replace_receiver_outputs(outputs, drain_script.as_script())
-            .expect("Substitution should succeed")
-            .commit_outputs()
-            .save(&persister)
-            .expect("Save should not fail");
+        let mut rng = StdRng::seed_from_u64(SEED);
+        let inner = wants_outputs
+            .state
+            .inner
+            .replace_receiver_outputs_with_rng(outputs, drain_script.as_script(), &mut rng)
+            .expect("Substitution should succeed");
+        let live_wants_inputs = Receiver {
+            state: WantsOutputs { inner },
+            session_context: wants_outputs.session_context,
+        }
+        .commit_outputs()
+        .save(&persister)
+        .expect("Save should not fail");
+
+        assert_ne!(
+            live_wants_inputs.state.inner.proposal.change_vout, owned_vout,
+            "seed must move the drain off owned_vouts[0]"
+        );
 
         let (replayed, _) = replay_event_log(&persister).expect("replay should succeed");
         let replayed = match replayed {

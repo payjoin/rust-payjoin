@@ -116,10 +116,24 @@ impl WantsOutputs {
         replacement_outputs: impl IntoIterator<Item = TxOut>,
         drain_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
+        self.replace_receiver_outputs_with_rng(
+            replacement_outputs,
+            drain_script,
+            &mut rand::thread_rng(),
+        )
+    }
+
+    /// [`replace_receiver_outputs`](Self::replace_receiver_outputs) with the output-shuffle
+    /// `rng` injected, so tests can seed it and assert against a fixed post-substitution state.
+    pub(crate) fn replace_receiver_outputs_with_rng<R: rand::Rng>(
+        self,
+        replacement_outputs: impl IntoIterator<Item = TxOut>,
+        drain_script: &Script,
+        rng: &mut R,
+    ) -> Result<Self, OutputSubstitutionError> {
         let mut payjoin_psbt = self.original.original_psbt.clone();
         let mut outputs = vec![];
         let mut replacement_outputs: Vec<TxOut> = replacement_outputs.into_iter().collect();
-        let mut rng = rand::thread_rng();
         // Substitute the existing receiver outputs, keeping the sender/receiver output ordering
         for (i, original_output) in
             self.original.original_psbt.unsigned_tx.output.iter().enumerate()
@@ -164,7 +178,7 @@ impl WantsOutputs {
             }
         }
         // Insert all remaining outputs at random indices for privacy
-        interleave_shuffle(&mut outputs, &mut replacement_outputs, &mut rng);
+        interleave_shuffle(&mut outputs, &mut replacement_outputs, rng);
         // Identify the receiver output that will be used for change and fees
         let change_vout = outputs.iter().position(|txo| txo.script_pubkey == *drain_script);
         // Update the payjoin PSBT outputs

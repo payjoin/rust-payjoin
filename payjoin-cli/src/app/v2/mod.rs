@@ -719,24 +719,46 @@ impl App {
         let mut session = sender.clone();
         // Long poll until we get a response
         loop {
-            let (response, ctx) =
-                self.post_via_relay(|relay| session.create_poll_request(relay)).await?;
-            let res = session.process_response(&response.bytes().await?, ctx).save(persister);
-            match res {
-                Ok(OptionalTransitionOutcome::Progress(psbt)) => {
-                    println!("Proposal received. Processing...");
-                    self.process_pj_response(psbt)?;
+            let relay = self.relay_manager.choose_relay()?;
+            let (req, ctx) = match session.create_poll_request(relay.as_str()) {
+                Ok(r) => r,
+                Err(e) if e.is_expired() => {
+                    let pending = session.cancel().save(persister)?;
+                    println!(
+                        "Session expired. Broadcast the fallback transaction manually:\n{}",
+                        serialize_hex(pending.fallback_tx())
+                    );
+                    pending.close().save(persister)?;
                     return Ok(());
                 }
-                Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
-                    println!("No response yet.");
-                    session = current_state;
-                    continue;
+                Err(e) => return Err(e.into()),
+            };
+            match self.post_request(req).await {
+                Ok(response) => {
+                    let bytes = response.bytes().await?;
+                    let res = session.process_response(&bytes, ctx).save(persister);
+                    match res {
+                        Ok(OptionalTransitionOutcome::Progress(psbt)) => {
+                            println!("Proposal received. Processing...");
+                            self.process_pj_response(psbt)?;
+                            return Ok(());
+                        }
+                        Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
+                            println!("No response yet.");
+                            session = current_state;
+                            continue;
+                        }
+                        Err(re) => {
+                            println!("{re}");
+                            tracing::debug!("{re:?}");
+                            return Err(anyhow!("Response error").context(re));
+                        }
+                    }
                 }
-                Err(re) => {
-                    println!("{re}");
-                    tracing::debug!("{re:?}");
-                    return Err(anyhow!("Response error").context(re));
+                Err(e) => {
+                    tracing::debug!("Request to relay {relay} failed: {e:?}");
+                    self.relay_manager.add_failed_relay(relay);
+                    continue;
                 }
             }
         }

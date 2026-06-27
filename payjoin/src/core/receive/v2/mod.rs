@@ -264,6 +264,20 @@ impl ReceiveSession {
             .into()),
         }
     }
+
+    /// Cancel the session, transitioning to [`PendingFallback`] if a fallback
+    /// transaction exists, or closing the session as `Aborted` otherwise.
+    /// This provides type-erased cancellation over the [`ReceiveSession`] enum,
+    /// dispatching to the appropriate per-state `cancel()` implementation.
+    pub fn cancel(self) -> MaybeTerminalTransition<SessionEvent, Receiver<PendingFallback>> {
+        match try_pending_fallback(self) {
+            Ok(ReceiveSession::PendingFallback(pending)) =>
+                MaybeTerminalTransition::advance(SessionEvent::Cancelled, pending),
+            Ok(_) => unreachable!("try_pending_fallback only returns PendingFallback"),
+            Err(_) =>
+                MaybeTerminalTransition::terminate(SessionEvent::Closed(SessionOutcome::Aborted)),
+        }
+    }
 }
 
 fn pending_fallback_from<S: HasFallbackTx>(r: Receiver<S>) -> ReceiveSession {

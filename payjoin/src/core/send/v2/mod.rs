@@ -46,8 +46,8 @@ use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::{
-    MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
-    TerminalTransition,
+    MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, MaybeTerminalTransition,
+    NextStateTransition, TerminalTransition,
 };
 use crate::uri::v2::PjParam;
 use crate::uri::ShortId;
@@ -325,6 +325,27 @@ impl SendSession {
                 Some(Box::new(current_state)),
             )
             .into()),
+        }
+    }
+
+    /// Cancel the session, transitioning to [`PendingFallback`] if the sender
+    /// has an original PSBT, or closing the session as `Aborted` if already
+    /// closed. This provides type-erased cancellation over the [`SendSession`]
+    /// enum.
+    pub fn cancel(self) -> MaybeTerminalTransition<SessionEvent, Sender<PendingFallback>> {
+        match self {
+            SendSession::WithReplyKey(sender) => {
+                let (_, pending) = sender.cancel().deconstruct();
+                MaybeTerminalTransition::advance(SessionEvent::Cancelled(), pending)
+            }
+            SendSession::PollingForProposal(sender) => {
+                let (_, pending) = sender.cancel().deconstruct();
+                MaybeTerminalTransition::advance(SessionEvent::Cancelled(), pending)
+            }
+            SendSession::PendingFallback(sender) =>
+                MaybeTerminalTransition::advance(SessionEvent::Cancelled(), sender),
+            SendSession::Closed(_) =>
+                MaybeTerminalTransition::terminate(SessionEvent::Closed(SessionOutcome::Aborted)),
         }
     }
 }

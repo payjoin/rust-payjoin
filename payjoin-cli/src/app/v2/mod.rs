@@ -334,7 +334,7 @@ impl AppTrait for App {
                         );
                         println!("Session {session_id} receiver failed to replay -  {e}");
                     }
-                    Self::close_failed_session(&recv_persister, &session_id, "receiver");
+                    self.close_failed_receiver_session(e, &recv_persister, &session_id);
                 }
             }
         }
@@ -362,7 +362,7 @@ impl AppTrait for App {
                         tracing::error!("An error {:?} occurred while replaying Sender session", e);
                         println!("Session {session_id} sender failed to replay -  {e}");
                     }
-                    Self::close_failed_session(&sender_persister, &session_id, "sender");
+                    self.close_failed_sender_session(e, &sender_persister, &session_id);
                 }
             }
         }
@@ -608,14 +608,65 @@ impl App {
         Ok(())
     }
 
-    fn close_failed_session<P>(persister: &P, session_id: &SessionId, role: &str)
-    where
-        P: SessionPersister,
-    {
-        if let Err(close_err) = SessionPersister::close(persister) {
-            tracing::error!("Failed to close {} session {}: {:?}", role, session_id, close_err);
-        } else {
-            tracing::debug!("Closed failed {} session: {}", role, session_id);
+    fn close_failed_receiver_session(
+        &self,
+        error: payjoin::error::ReplayError<ReceiveSession, payjoin::receive::v2::SessionEvent>,
+        persister: &ReceiverPersister,
+        session_id: &SessionId,
+    ) {
+        if let Some(session) = error.into_session() {
+            match session.cancel().save(persister) {
+                Ok(Some(pending)) => {
+                    println!(
+                        "Session {session_id} receiver failed. \
+                         Broadcast the fallback transaction manually:\n{}",
+                        serialize_hex(pending.fallback_tx())
+                    );
+                    if let Err(e) = pending.close().save(persister) {
+                        tracing::error!("Failed to close receiver session {session_id}: {e:?}");
+                    }
+                    return;
+                }
+                Ok(None) => {
+                    tracing::debug!("Closed failed receiver session: {session_id}");
+                    return;
+                }
+                Err(e) => tracing::error!("Failed to cancel receiver session {session_id}: {e:?}"),
+            }
+        }
+        if let Err(e) = SessionPersister::close(persister) {
+            tracing::error!("Failed to close receiver session {session_id}: {e:?}");
+        }
+    }
+
+    fn close_failed_sender_session(
+        &self,
+        error: payjoin::error::ReplayError<SendSession, payjoin::send::v2::SessionEvent>,
+        persister: &SenderPersister,
+        session_id: &SessionId,
+    ) {
+        if let Some(session) = error.into_session() {
+            match session.cancel().save(persister) {
+                Ok(Some(pending)) => {
+                    println!(
+                        "Session {session_id} sender failed. \
+                         Broadcast the fallback transaction manually:\n{}",
+                        serialize_hex(pending.fallback_tx())
+                    );
+                    if let Err(e) = pending.close().save(persister) {
+                        tracing::error!("Failed to close sender session {session_id}: {e:?}");
+                    }
+                    return;
+                }
+                Ok(None) => {
+                    tracing::debug!("Closed failed sender session: {session_id}");
+                    return;
+                }
+                Err(e) => tracing::error!("Failed to cancel sender session {session_id}: {e:?}"),
+            }
+        }
+        if let Err(e) = SessionPersister::close(persister) {
+            tracing::error!("Failed to close sender session {session_id}: {e:?}");
         }
     }
 

@@ -26,17 +26,17 @@ fn replay_events(
 
 fn construct_history(
     session_events: Vec<SessionEvent>,
-    receiver: &ReceiveSession,
-) -> Result<SessionHistory, ReplayError<ReceiveSession, SessionEvent>> {
+    receiver: ReceiveSession,
+) -> Result<(ReceiveSession, SessionHistory), ReplayError<ReceiveSession, SessionEvent>> {
     let history = SessionHistory::new(session_events);
     // Closed sessions terminated before expiration; do not surface an expired error for them.
-    if !matches!(receiver, ReceiveSession::Closed(_)) {
+    if !matches!(&receiver, ReceiveSession::Closed(_)) {
         let ctx = history.session_context();
         if ctx.expiration.elapsed() {
-            return Err(InternalReplayError::Expired(ctx.expiration).into());
+            return Err(InternalReplayError::Expired(ctx.expiration, Box::new(receiver)).into());
         }
     }
-    Ok(history)
+    Ok((receiver, history))
 }
 
 /// Replay a receiver event log to get the receiver in its current state [ReceiveSession]
@@ -53,17 +53,9 @@ where
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
 
-    let (receiver, session_events) = match replay_events(logs.map(|e| e.into())) {
-        Ok(r) => r,
-        Err(e) => {
-            persister.close().map_err(|ce| {
-                InternalReplayError::PersistenceFailure(ImplementationError::new(ce))
-            })?;
-            return Err(e);
-        }
-    };
+    let (receiver, session_events) = replay_events(logs.map(|e| e.into()))?;
 
-    let history = construct_history(session_events, &receiver)?;
+    let (receiver, history) = construct_history(session_events, receiver)?;
     Ok((receiver, history))
 }
 
@@ -81,17 +73,9 @@ where
         .await
         .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
 
-    let (receiver, session_events) = match replay_events(logs.map(|e| e.into())) {
-        Ok(r) => r,
-        Err(e) => {
-            persister.close().await.map_err(|ce| {
-                InternalReplayError::PersistenceFailure(ImplementationError::new(ce))
-            })?;
-            return Err(e);
-        }
-    };
+    let (receiver, session_events) = replay_events(logs.map(|e| e.into()))?;
 
-    let history = construct_history(session_events, &receiver)?;
+    let (receiver, history) = construct_history(session_events, receiver)?;
     Ok((receiver, history))
 }
 
@@ -394,18 +378,25 @@ mod tests {
             .save_event(SessionEvent::Created(session_context.clone()))
             .expect("in memory persister save should not fail");
         let err = replay_event_log(&persister).expect_err("session should be expired");
-        let expected_err: ReplayError<ReceiveSession, SessionEvent> =
-            InternalReplayError::Expired(expiration).into();
+        let expected_err: ReplayError<ReceiveSession, SessionEvent> = InternalReplayError::Expired(
+            expiration,
+            Box::new(ReceiveSession::new(session_context)),
+        )
+        .into();
         assert_eq!(err.to_string(), expected_err.to_string());
 
+        let session_context = SessionContext { expiration, ..SHARED_CONTEXT.clone() };
         let persister = InMemoryAsyncPersister::<SessionEvent>::default();
         persister
-            .save_event(SessionEvent::Created(session_context))
+            .save_event(SessionEvent::Created(session_context.clone()))
             .await
             .expect("in memory async persister save should not fail");
         let err = replay_event_log_async(&persister).await.expect_err("session should be expired");
-        let expected_err: ReplayError<ReceiveSession, SessionEvent> =
-            InternalReplayError::Expired(expiration).into();
+        let expected_err: ReplayError<ReceiveSession, SessionEvent> = InternalReplayError::Expired(
+            expiration,
+            Box::new(ReceiveSession::new(session_context)),
+        )
+        .into();
         assert_eq!(err.to_string(), expected_err.to_string());
     }
 
@@ -483,7 +474,6 @@ mod tests {
             )
             .into();
         assert_eq!(err.to_string(), expected_err.to_string());
-        assert!(persister.inner.lock().expect("lock should not be poisoned").is_closed);
 
         let persister = InMemoryAsyncPersister::<SessionEvent>::default();
         persister
@@ -500,7 +490,6 @@ mod tests {
             )
             .into();
         assert_eq!(err.to_string(), expected_err.to_string());
-        assert!(persister.inner.lock().await.is_closed);
     }
 
     #[tokio::test]

@@ -617,6 +617,25 @@ mod tests {
     }
 
     #[test]
+    fn avoid_uih_selects_candidate_when_min_in_greater_than_min_out() {
+        let original = original_from_test_vector();
+        let wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        let candidate = candidate_input_from_test_vector(Amount::from_sat(3_000_000));
+        let result = wants_inputs.avoid_uih(std::slice::from_ref(&candidate));
+        assert_eq!(result.unwrap(), candidate);
+    }
+
+    #[test]
+    fn try_preserving_privacy_falls_back_when_min_in_equals_min_out() {
+        let original = original_from_test_vector();
+        let wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        let small = candidate_input_from_test_vector(Amount::ONE_SAT);
+        let boundary = candidate_input_from_test_vector(Amount::from_sat(2_000_000));
+        let result = wants_inputs.try_preserving_privacy([small.clone(), boundary.clone()]);
+        assert_eq!(result.unwrap(), small);
+    }
+
+    #[test]
     fn try_preserving_privacy_falls_back_when_avoid_uih_unsupported() {
         let original = original_from_test_vector();
         let mut wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();

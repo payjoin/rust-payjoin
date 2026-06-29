@@ -1583,14 +1583,36 @@ pub struct ChainView {
 
 /// Typestate to monitor the network for the Payjoin proposal or fallback transaction.
 ///
-/// After the Payjoin proposal is signed and sent back to the sender, the receiver should monitor
-/// the network and confirm the status of transaction (or the fallback). In this case, the status
-/// can refer to whether the transaction has been broadcast, has some number of confirmations, etc.
-/// The caller should decide the condition that must be satisfied for the Payjoin to be considered
-/// successful.
+/// After the Payjoin proposal is signed and sent back to the sender, the receiver monitors the
+/// chain to learn how the sender's inputs were ultimately spent.
 ///
-/// Call [`Receiver<Monitor>::check_for_transaction`] to confirm the status of the transaction in the
-/// network and conclude the Payjoin session.
+/// # Detection is not settlement
+///
+/// This typestate reports **detection**, which is necessary but not sufficient to tell a user the
+/// Payjoin happened. The Payjoin proposal and the fallback (original) transaction **double-spend
+/// the sender's inputs** ([`contested_outpoints`](Receiver::contested_outpoints)); only one can
+/// confirm. Which one wins is a *privacy* fact (did the coinjoin settle), and a double-spend race
+/// is only resolved by confirmation — never by mempool presence. Confirmation depth is a
+/// confidence dial, not a state transition: a deep reorg or the conflicting transaction can flip
+/// the verdict until it is buried deep enough for the caller's purposes.
+///
+/// # Division of labor
+///
+/// The library knows the *semantics* (which outpoints are contested, which input is the Payjoin
+/// fingerprint, which output set is the proposal's). The **wallet** knows the *ground truth*
+/// (which outpoint was spent by what, at what depth, and holds the spending transaction). So the
+/// library exposes the
+/// primitives ([`payjoin_txid`](Receiver::payjoin_txid),
+/// [`fallback_txid`](Receiver::fallback_txid), [`contested_outpoints`](Receiver::contested_outpoints),
+/// [`receiver_input`](Receiver::receiver_input)) and a pure
+/// [`classify`](Receiver::classify) over a caller-supplied [`ChainView`], while chain access,
+/// poll cadence, and the confidence threshold stay in the wallet. The final user-facing verdict is
+/// the wallet's, combining the library's labels with its own chain tracking.
+///
+/// Recommended flow: poll the chain, build a [`ChainView`], call [`classify`](Receiver::classify),
+/// and when the resulting confidence bar is met, [`conclude`](Receiver::conclude) the session.
+/// [`check_for_transaction`](Receiver::check_for_transaction) is the legacy txid-only convenience
+/// that both detects and concludes in one step.
 impl Receiver<Monitor> {
     /// The txid of the Payjoin proposal as the receiver built it.
     ///
@@ -1781,11 +1803,21 @@ impl Receiver<Monitor> {
     /// closure defines the condition that counts as found — for example presence in the mempool,
     /// or some number of confirmations on the blockchain.
     ///
+    /// This is the legacy, txid-only convenience: it is the degenerate case of
+    /// [`classify`](Receiver::classify) that can only probe the two transaction ids the receiver
+    /// predicts, so it cannot detect a [`SettlementOutcome::Other`] (an unrelated transaction
+    /// spending the contested outpoints leaves both lookups returning `None` forever). It also
+    /// concludes on the first match, so a mempool-satisfying closure can log a `Success` that the
+    /// conflicting fallback could still win — **detection is not settlement** (see the typestate
+    /// docs and the [`classify`](Receiver::classify) / [`conclude`](Receiver::conclude) pair for
+    /// the outpoint-based flow that resolves the double-spend race and salvages the non-SegWit
+    /// case).
+    ///
     /// If the input address type in the fallback transaction is non-SegWit, then this
     /// function will directly conclude the Payjoin session with a Success without running the
     /// provided `find_transaction` closure. `find_transaction` uses the transaction ID to
     /// search for the transaction in the network. Since a non-SegWit input signature is going to
-    /// change the TXID of the Payjoin proposal, it cannot be monitored.
+    /// change the TXID of the Payjoin proposal, it cannot be monitored this way.
     pub fn check_for_transaction(
         &self,
         find_transaction: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,

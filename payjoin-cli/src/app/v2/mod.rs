@@ -82,10 +82,13 @@ impl StatusText for ReceiveSession {
             ReceiveSession::PendingFallback(_) => "Pending fallback handling",
             ReceiveSession::Closed(session_outcome) => match session_outcome {
                 ReceiverSessionOutcome::Aborted => "Session aborted",
-                ReceiverSessionOutcome::Success(_) => "Session success, Payjoin proposal was broadcasted",
+                ReceiverSessionOutcome::Success =>
+                    "Session success, Payjoin settled cooperatively",
                 ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
                 ReceiverSessionOutcome::PayjoinProposalSent =>
                     "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs",
+                ReceiverSessionOutcome::Other(_) => "Settled by an unrecognized transaction",
+                _ => "Session closed",
             },
         }
     }
@@ -437,7 +440,7 @@ impl AppTrait for App {
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Receiver,
-                        status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
+                        status: ReceiveSession::Closed(ReceiverSessionOutcome::aborted()),
                         completed_at: None,
                         error_message: Some(e.to_string()),
                     };
@@ -492,7 +495,7 @@ impl AppTrait for App {
                         let row = SessionHistoryRow {
                             session_id,
                             role: Role::Receiver,
-                            status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
+                            status: ReceiveSession::Closed(ReceiverSessionOutcome::aborted()),
                             completed_at: Some(completed_at),
                             error_message: Some(e.to_string()),
                         };
@@ -619,7 +622,7 @@ impl App {
             },
             ReceiveSession::PendingFallback(receiver) => receiver,
             ReceiveSession::Closed(
-                ReceiverSessionOutcome::Success(_)
+                ReceiverSessionOutcome::Success
                 | ReceiverSessionOutcome::FallbackBroadcasted
                 | ReceiverSessionOutcome::PayjoinProposalSent,
             ) => {
@@ -636,6 +639,10 @@ impl App {
                         "Session {session_id} is already closed. No fallback transaction available."
                     ),
                 }
+                return Ok(());
+            }
+            ReceiveSession::Closed(_) => {
+                println!("Session {session_id} is already closed. Cannot cancel.");
                 return Ok(());
             }
         };

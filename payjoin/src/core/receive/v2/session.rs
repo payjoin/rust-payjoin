@@ -164,9 +164,12 @@ impl SessionHistory {
         // a `Closed` outcome is done regardless of whether its expiration has elapsed.
         match self.events.last() {
             Some(SessionEvent::Closed(outcome)) => match outcome {
-                SessionOutcome::Success(_) | SessionOutcome::PayjoinProposalSent =>
+                SessionOutcome::Success | SessionOutcome::PayjoinProposalSent =>
                     SessionStatus::Completed,
-                SessionOutcome::Aborted => SessionStatus::Failed,
+                // An unrecognized transaction settled the contested outpoints: the privacy-improving
+                // Payjoin did not happen and it is not a clean fallback either, so surface it as a
+                // failure the caller should review.
+                SessionOutcome::Aborted | SessionOutcome::Other(_) => SessionStatus::Failed,
                 SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
             },
             Some(SessionEvent::Cancelled | SessionEvent::ProtocolFailed) =>
@@ -211,10 +214,16 @@ pub enum SessionEvent {
 }
 
 /// Represents all possible outcomes for a closed Payjoin session
+///
+/// This enum is `#[non_exhaustive]`: settlement attribution may grow new terminal labels in a
+/// minor release. Match it with a wildcard arm, and construct the abort sentinel with
+/// [`SessionOutcome::aborted`] rather than naming the variant directly.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SessionOutcome {
-    /// Payjoin completed successfully
-    Success(Vec<(bitcoin::ScriptBuf, bitcoin::Witness)>),
+    /// The Payjoin settled cooperatively (the receiver's contribution was accepted and settled).
+    /// Terminal form of [`SettlementOutcome::Cooperative`](super::SettlementOutcome::Cooperative).
+    Success,
     /// Payjoin was not successful
     Aborted,
     /// Fallback transaction was broadcasted
@@ -223,6 +232,19 @@ pub enum SessionOutcome {
     /// the sender is using non-SegWit inputs which will change the transaction ID
     /// of the proposal
     PayjoinProposalSent,
+    /// The contested outpoints were settled by an unrecognized transaction (neither the Payjoin
+    /// nor the fallback), identified by its txid. This is the terminal form of
+    /// [`SettlementOutcome::Other`](super::SettlementOutcome::Other).
+    Other(bitcoin::Txid),
+}
+
+impl SessionOutcome {
+    /// Construct the [`SessionOutcome::Aborted`] sentinel.
+    ///
+    /// `SessionOutcome` is `#[non_exhaustive]`, so downstream crates cannot name its variants when
+    /// constructing a value. This constructor lets callers build the abort sentinel they use to
+    /// represent, for example, a replay failure.
+    pub fn aborted() -> Self { SessionOutcome::Aborted }
 }
 
 #[cfg(test)]
@@ -416,7 +438,7 @@ mod tests {
 
         let success = SessionHistory::new(vec![
             SessionEvent::Created(session_context.clone()),
-            SessionEvent::Closed(SessionOutcome::Success(vec![])),
+            SessionEvent::Closed(SessionOutcome::Success),
         ]);
         assert_eq!(success.status(), SessionStatus::Completed);
 
@@ -437,6 +459,21 @@ mod tests {
         assert_eq!(still_open.status(), SessionStatus::Expired);
     }
 
+    #[test]
+    fn closed_other_outcome_reports_failed() {
+        use bitcoin::hashes::Hash as _;
+
+        let session_context = SHARED_CONTEXT.clone();
+        let other = SessionHistory::new(vec![
+            SessionEvent::Created(session_context),
+            SessionEvent::Closed(SessionOutcome::Other(bitcoin::Txid::all_zeros())),
+        ]);
+        assert_eq!(other.status(), SessionStatus::Failed);
+
+        // The non-exhaustive abort sentinel is reachable through the public constructor.
+        assert_eq!(SessionOutcome::aborted(), SessionOutcome::Aborted);
+    }
+
     #[tokio::test]
     async fn test_replaying_closed_session_past_expiration_is_not_expired() {
         let expiration = (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap();
@@ -447,11 +484,11 @@ mod tests {
             .save_event(SessionEvent::Created(session_context.clone()))
             .expect("in memory persister save should not fail");
         persister
-            .save_event(SessionEvent::Closed(SessionOutcome::Success(vec![])))
+            .save_event(SessionEvent::Closed(SessionOutcome::Success))
             .expect("in memory persister save should not fail");
         let (state, _) =
             replay_event_log(&persister).expect("closed session should replay successfully");
-        assert!(matches!(state, ReceiveSession::Closed(SessionOutcome::Success(_))));
+        assert!(matches!(state, ReceiveSession::Closed(SessionOutcome::Success)));
 
         let persister = InMemoryAsyncPersister::<SessionEvent>::default();
         persister
@@ -459,13 +496,13 @@ mod tests {
             .await
             .expect("in memory async persister save should not fail");
         persister
-            .save_event(SessionEvent::Closed(SessionOutcome::Success(vec![])))
+            .save_event(SessionEvent::Closed(SessionOutcome::Success))
             .await
             .expect("in memory async persister save should not fail");
         let (state, _) = replay_event_log_async(&persister)
             .await
             .expect("closed session should replay successfully");
-        assert!(matches!(state, ReceiveSession::Closed(SessionOutcome::Success(_))));
+        assert!(matches!(state, ReceiveSession::Closed(SessionOutcome::Success)));
     }
 
     #[tokio::test]
@@ -826,7 +863,7 @@ mod tests {
         ));
         events.push(SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()));
         events.push(SessionEvent::FinalizedProposal(payjoin_proposal.psbt().clone()));
-        events.push(SessionEvent::Closed(SessionOutcome::Success(vec![])));
+        events.push(SessionEvent::Closed(SessionOutcome::Success));
 
         let test = SessionHistoryTest {
             events,
@@ -834,7 +871,7 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
                 expected_status: SessionStatus::Completed,
             },
-            expected_receiver_state: ReceiveSession::Closed(SessionOutcome::Success(vec![])),
+            expected_receiver_state: ReceiveSession::Closed(SessionOutcome::Success),
         };
         run_session_history_test(&test);
         run_session_history_test_async(&test).await;

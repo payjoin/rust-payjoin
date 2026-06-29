@@ -625,23 +625,14 @@ mod integration {
                 .save(&recv_persister)
                 .expect("receiver should successfully monitor for the payment");
 
-            // Receiver session should have completed with a Success, along with information on the
-            // sender signatures on the Payjoin that was broadcasted.
+            // Receiver session should have completed with a cooperative Success.
             let (_session, session_history) = replay_receiver_event_log(&recv_persister)?;
-            let sender_outpoint = session_history.fallback_tx().unwrap().input[0].previous_output;
-            let sender_signatures = {
-                let sender_txin = broadcasted_transaction
-                    .input
-                    .iter()
-                    .find(|txin| txin.previous_output == sender_outpoint)
-                    .expect("sender input must be present in payjoin_tx")
-                    .clone();
-                vec![(sender_txin.clone().script_sig, sender_txin.clone().witness)]
-            };
             assert_eq!(
                 recv_persister.load().unwrap().last(),
-                Some(payjoin::receive::v2::SessionEvent::Closed(payjoin::receive::v2::SessionOutcome::Success(sender_signatures))),
-                "The last event of the persister should be a SessionOutcome::Success with the correct sender signature",
+                Some(payjoin::receive::v2::SessionEvent::Closed(
+                    payjoin::receive::v2::SessionOutcome::Success
+                )),
+                "The last event of the persister should be a cooperative SessionOutcome::Success",
             );
             assert_eq!(session_history.status(), SessionStatus::Completed);
             Ok(())
@@ -707,23 +698,14 @@ mod integration {
                 .save(&recv_persister)
                 .expect("receiver should successfully monitor for the payment");
 
-            // Receiver session should have completed with a Success, along with information on the
-            // sender signatures on the Payjoin that was broadcasted.
+            // Receiver session should have completed with a cooperative Success.
             let (_session, session_history) = replay_receiver_event_log(&recv_persister)?;
-            let sender_outpoint = session_history.fallback_tx().unwrap().input[0].previous_output;
-            let sender_signatures = {
-                let sender_txin = broadcasted_transaction
-                    .input
-                    .iter()
-                    .find(|txin| txin.previous_output == sender_outpoint)
-                    .expect("sender input must be present in payjoin_tx")
-                    .clone();
-                vec![(sender_txin.clone().script_sig, sender_txin.clone().witness)]
-            };
             assert_eq!(
                 recv_persister.load().unwrap().last(),
-                Some(payjoin::receive::v2::SessionEvent::Closed(payjoin::receive::v2::SessionOutcome::Success(sender_signatures))),
-                "The last event of the persister should be a SessionOutcome::Success with the correct sender signature",
+                Some(payjoin::receive::v2::SessionEvent::Closed(
+                    payjoin::receive::v2::SessionOutcome::Success
+                )),
+                "The last event of the persister should be a cooperative SessionOutcome::Success",
             );
             assert_eq!(session_history.status(), SessionStatus::Completed);
             Ok(())

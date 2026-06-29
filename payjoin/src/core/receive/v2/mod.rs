@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
-use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut, Txid};
+use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, Transaction, TxOut, Txid};
 pub use error::{CreateRequestError, SessionError};
 pub(crate) use error::{InternalCreateRequestError, InternalSessionError};
 use serde::de::Deserializer;
@@ -1514,6 +1514,107 @@ pub struct Monitor {
     psbt_context: PsbtContext,
 }
 
+/// Compare two transaction output sets for equality, order-independently.
+///
+/// Cut-through (output-substitution) detection matches a spending transaction's outputs against the
+/// proposal's. BIP69 (or any wallet) may order outputs differently, so the comparison is a multiset
+/// equality rather than a positional one.
+fn output_sets_match(a: &[TxOut], b: &[TxOut]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let key = |out: &&TxOut| (out.value, out.script_pubkey.as_bytes().to_vec());
+    let mut a: Vec<&TxOut> = a.iter().collect();
+    let mut b: Vec<&TxOut> = b.iter().collect();
+    a.sort_by_key(key);
+    b.sort_by_key(key);
+    a == b
+}
+
+/// The settlement state of a monitored Payjoin session, derived from live chain data.
+///
+/// `SettlementStatus` is **detection, not settlement**: it reports what the caller's
+/// [`ChainView`] currently shows, is recomputed on every [`Receiver<Monitor>::classify`] call,
+/// and is never persisted. The proposal and the fallback double-spend the sender's inputs, so a
+/// reorg or the conflicting transaction can still flip a `Detected` verdict; the caller decides
+/// when the `Detected` confirmation count meets its confidence bar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettlementStatus {
+    /// None of the session's contested outpoints are spent yet.
+    Pending,
+    /// A transaction spending the contested outpoints was observed.
+    ///
+    /// `confirmations == 0` means the spend is currently only seen in the mempool.
+    Detected {
+        /// What kind of transaction settled the contested outpoints.
+        outcome: SettlementOutcome,
+        /// The minimum confirmation count over the spends that support `outcome`.
+        /// `0` means mempool-only.
+        confirmations: u32,
+    },
+}
+
+/// What kind of transaction settled a monitored session's contested outpoints.
+///
+/// The distinction that matters is **cooperative vs not**: did the receiver's contribution — a
+/// contributed input and/or an output substitution — get accepted and settle? Whether a
+/// cooperative settlement was input-contributed or a cut-through is a static property of the
+/// *proposal*, derivable from the session log and unrelated to which transaction won the race, so
+/// it is deliberately not modeled here.
+///
+/// Outcome precedence is **Cooperative > Fallback > Other** (see [`Receiver<Monitor>::classify`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SettlementOutcome {
+    /// The Payjoin settled cooperatively: the spending transaction contains the receiver's
+    /// contributed input (the payjoin fingerprint) or, for an output-substitution proposal,
+    /// reproduces the proposal's output set (a cut-through). Detection is structural, not
+    /// txid-based, so it holds even when the on-chain txid differs from the predicted Payjoin
+    /// txid (a non-SegWit sender); the carried txid is the observed settling transaction's.
+    Cooperative(Txid),
+    /// The fallback (original) transaction settled. The payment went through but the privacy gain
+    /// of the Payjoin was lost.
+    Fallback,
+    /// The contested outpoints were spent by an unrecognized transaction (neither the Payjoin nor
+    /// the fallback) — for example the sender re-spending its inputs elsewhere.
+    Other(Txid),
+}
+
+/// A single contested outpoint's spend status, as observed by the caller's chain backend.
+///
+/// The wallet (not the library) is the oracle for which outpoint is spent by what, at what depth.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutpointSpend {
+    /// The contested outpoint this entry describes.
+    pub outpoint: OutPoint,
+    /// The spend of `outpoint`, or `None` if it is unspent / unknown.
+    pub spend: Option<Spend>,
+}
+
+/// A spend of a contested outpoint: the full spending transaction and its confirmation depth.
+///
+/// The transaction is mandatory: structural classification needs the body, and the spending txid
+/// is derived from it rather than carried alongside, so the two can never disagree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spend {
+    /// The full transaction that spent the outpoint.
+    pub tx: Transaction,
+    /// Confirmations of the spend. `0` means mempool-only.
+    pub confirmations: u32,
+}
+
+/// Caller-supplied snapshot of chain facts about a monitored session's contested outpoints.
+///
+/// This is the input to the pure [`Receiver<Monitor>::classify`] classifier. Chain access, poll
+/// cadence, and the confidence threshold all stay in the caller; the library only interprets the
+/// snapshot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChainView {
+    /// Observed spend status for (a subset of) the contested outpoints. Entries for outpoints that
+    /// are not contested are ignored.
+    pub spends: Vec<OutpointSpend>,
+}
+
 /// Typestate to monitor the network for the Payjoin proposal or fallback transaction.
 ///
 /// After the Payjoin proposal is signed and sent back to the sender, the receiver should monitor
@@ -1525,6 +1626,159 @@ pub struct Monitor {
 /// Call [`Receiver<Monitor>::check_for_transaction`] to confirm the status of the transaction in the
 /// network and conclude the Payjoin session.
 impl Receiver<Monitor> {
+    /// The txid of the Payjoin proposal as the receiver built it.
+    ///
+    /// For SegWit-only senders this is the txid that will appear on chain. For senders spending
+    /// non-SegWit inputs the on-chain txid will differ once they sign, which is why
+    /// [`Receiver<Monitor>::classify`] matches structurally rather than by this txid.
+    pub fn payjoin_txid(&self) -> Txid {
+        self.state.psbt_context.payjoin_psbt.unsigned_tx.compute_txid()
+    }
+
+    /// The txid of the fallback (original) transaction the sender can broadcast instead.
+    ///
+    /// Always `Some` for a `Monitor` session; the `Option` mirrors the rest of the API where a
+    /// fallback may be absent.
+    pub fn fallback_txid(&self) -> Option<Txid> { Some(self.state.fallback_tx().compute_txid()) }
+
+    /// The sender's original inputs — the outpoints the Payjoin proposal and the fallback both
+    /// contend to spend; only one transaction can ever spend them.
+    pub fn contested_outpoints(&self) -> Vec<OutPoint> {
+        self.state
+            .psbt_context
+            .original_psbt
+            .unsigned_tx
+            .input
+            .iter()
+            .map(|txin| txin.previous_output)
+            .collect()
+    }
+
+    /// The receiver's contributed input — present in the Payjoin proposal but not in the sender's
+    /// original transaction. Its presence in a spending transaction is the structural payjoin
+    /// fingerprint.
+    ///
+    /// Returns `None` for an output-substitution-only Payjoin, where the receiver substituted
+    /// outputs but contributed no input. Such a proposal has no input fingerprint, so
+    /// [`Receiver<Monitor>::classify`] cannot use the structural Payjoin step for it.
+    pub fn receiver_input(&self) -> Option<OutPoint> {
+        let contested = self.contested_outpoints();
+        self.state
+            .psbt_context
+            .payjoin_psbt
+            .unsigned_tx
+            .input
+            .iter()
+            .map(|txin| txin.previous_output)
+            .find(|outpoint| !contested.contains(outpoint))
+    }
+
+    /// The Payjoin proposal's outputs — the fingerprint for cut-through (output-substitution)
+    /// detection, since such a proposal carries no input fingerprint.
+    fn proposal_outputs(&self) -> &[TxOut] {
+        &self.state.psbt_context.payjoin_psbt.unsigned_tx.output
+    }
+
+    /// Whether the proposal substitutes the sender's original outputs.
+    ///
+    /// Output-substitution (cut-through) detection is only meaningful when the proposal's output
+    /// set actually differs from the original/fallback output set. If they are equal, the proposal
+    /// and the fallback are the same transaction, so a matching spend is the fallback, not a
+    /// cut-through.
+    fn proposal_substitutes_outputs(&self) -> bool {
+        let original = &self.state.psbt_context.original_psbt.unsigned_tx.output;
+        !output_sets_match(self.proposal_outputs(), original)
+    }
+
+    /// Classify the current settlement state from a caller-supplied [`ChainView`].
+    ///
+    /// This is a **pure** function: it performs no I/O, mutates nothing, and persists nothing. The
+    /// caller polls the chain, builds a [`ChainView`], and calls `classify` as often as it likes.
+    ///
+    /// Classification is structural, not txid-based. The outcome precedence is
+    /// **Cooperative > Fallback > Other**:
+    /// 1. No contested outpoint is spent → [`SettlementStatus::Pending`].
+    /// 2. A spend carries either cooperative signal → [`SettlementOutcome::Cooperative`]: it
+    ///    contains the receiver's contributed input ([`Receiver<Monitor>::receiver_input`], absent
+    ///    for an output-substitution-only proposal), or its output set matches the proposal's
+    ///    order-independently, gated on the proposal actually substituting the original outputs.
+    ///    Both signals survive the non-SegWit case where the on-chain txid differs from
+    ///    [`Receiver<Monitor>::payjoin_txid`]; the carried txid is the settling transaction's
+    ///    observed txid, which is why it is reported rather than the prediction.
+    /// 3. Otherwise, a contested outpoint spent by [`Receiver<Monitor>::fallback_txid`] →
+    ///    [`SettlementOutcome::Fallback`].
+    /// 4. Otherwise → [`SettlementOutcome::Other`] carrying the unrecognized spending txid.
+    ///
+    /// If contested outpoints are split across multiple transactions, the precedence above
+    /// decides: Cooperative if *any* spend matches either signal, else Fallback if *any* spend is
+    /// by the fallback txid, else the first unrecognized spend determines `Other`. The reported
+    /// `confirmations` is the minimum over the spends supporting the chosen outcome.
+    pub fn classify(&self, view: &ChainView) -> SettlementStatus {
+        let contested = self.contested_outpoints();
+
+        let relevant: Vec<&Spend> = view
+            .spends
+            .iter()
+            .filter(|os| contested.contains(&os.outpoint))
+            .filter_map(|os| os.spend.as_ref())
+            .collect();
+
+        if relevant.is_empty() {
+            return SettlementStatus::Pending;
+        }
+
+        let min_confirmations = |spends: &[&Spend]| -> u32 {
+            spends.iter().map(|spend| spend.confirmations).min().unwrap_or(0)
+        };
+
+        // 2. Cooperative: either structural signal — the input fingerprint or the output-set match.
+        let receiver_input = self.receiver_input();
+        let substitutes_outputs = self.proposal_substitutes_outputs();
+        let proposal_outputs = self.proposal_outputs();
+        let cooperative_spends: Vec<&Spend> = relevant
+            .iter()
+            .copied()
+            .filter(|spend| {
+                let tx = &spend.tx;
+                let input_fingerprint = receiver_input
+                    .is_some_and(|ri| tx.input.iter().any(|txin| txin.previous_output == ri));
+                let output_substitution =
+                    substitutes_outputs && output_sets_match(&tx.output, proposal_outputs);
+                input_fingerprint || output_substitution
+            })
+            .collect();
+        if !cooperative_spends.is_empty() {
+            return SettlementStatus::Detected {
+                outcome: SettlementOutcome::Cooperative(cooperative_spends[0].tx.compute_txid()),
+                confirmations: min_confirmations(&cooperative_spends),
+            };
+        }
+
+        // 3. Fallback: any spend by the fallback txid.
+        if let Some(fallback_txid) = self.fallback_txid() {
+            let fallback_spends: Vec<&Spend> = relevant
+                .iter()
+                .copied()
+                .filter(|spend| spend.tx.compute_txid() == fallback_txid)
+                .collect();
+            if !fallback_spends.is_empty() {
+                return SettlementStatus::Detected {
+                    outcome: SettlementOutcome::Fallback,
+                    confirmations: min_confirmations(&fallback_spends),
+                };
+            }
+        }
+
+        // 4. Other: spent by an unrecognized transaction.
+        let txid = relevant[0].tx.compute_txid();
+        let other_spends: Vec<&Spend> =
+            relevant.iter().copied().filter(|spend| spend.tx.compute_txid() == txid).collect();
+        SettlementStatus::Detected {
+            outcome: SettlementOutcome::Other(txid),
+            confirmations: min_confirmations(&other_spends),
+        }
+    }
+
     /// Checks the network for the Payjoin proposal or the fallback transaction using the passed
     /// `find_transaction` closure, and concludes the Payjoin session once one is found. The
     /// closure defines the condition that counts as found — for example presence in the mempool,
@@ -1629,7 +1883,7 @@ pub(crate) fn pj_uri<'a>(
 pub mod test {
     use std::str::FromStr;
 
-    use bitcoin::{Amount, FeeRate};
+    use bitcoin::{Amount, FeeRate, ScriptBuf};
     use once_cell::sync::Lazy;
     use payjoin_test_utils::{
         BoxError, EXAMPLE_URL, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL,
@@ -1825,6 +2079,433 @@ pub mod test {
         );
 
         Ok(())
+    }
+
+    fn segwit_monitor() -> Receiver<Monitor> {
+        let psbt_ctx = PsbtContext {
+            original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+            payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+        };
+        Receiver {
+            state: Monitor { psbt_context: psbt_ctx },
+            session_context: SHARED_CONTEXT.clone(),
+        }
+    }
+
+    /// A monitor whose proposal contributes no receiver input and substitutes no outputs: the
+    /// proposal is identical to the sender's original transaction. `receiver_input` is `None`, so
+    /// `classify` must stay total and fall through to Fallback/Other without panicking.
+    fn no_receiver_input_monitor() -> Receiver<Monitor> {
+        let original = PARSED_ORIGINAL_PSBT.clone();
+        let psbt_ctx = PsbtContext { original_psbt: original.clone(), payjoin_psbt: original };
+        Receiver {
+            state: Monitor { psbt_context: psbt_ctx },
+            session_context: SHARED_CONTEXT.clone(),
+        }
+    }
+
+    /// A monitor whose proposal substitutes outputs but contributes no input (output-substitution /
+    /// cut-through Payjoin): same inputs as the sender's original, a different output set.
+    fn cutthrough_monitor() -> Receiver<Monitor> {
+        let original = PARSED_ORIGINAL_PSBT.clone();
+        let mut proposal = original.clone();
+        // Substitute the receiver's output script so the proposal's output set differs from the
+        // original's, while keeping the sender's inputs (no receiver-contributed input).
+        proposal.unsigned_tx.output[0].script_pubkey =
+            ScriptBuf::from_bytes(vec![0x6a, 0x01, 0x2a]);
+        let psbt_ctx = PsbtContext { original_psbt: original, payjoin_psbt: proposal };
+        Receiver {
+            state: Monitor { psbt_context: psbt_ctx },
+            session_context: SHARED_CONTEXT.clone(),
+        }
+    }
+
+    /// The proposal transaction a [`cutthrough_monitor`] is built from.
+    fn cutthrough_proposal_tx(monitor: &Receiver<Monitor>) -> Transaction {
+        monitor.state.psbt_context.payjoin_psbt.unsigned_tx.clone()
+    }
+
+    /// Return a clone of `tx` with a different txid (a non-empty script_sig on the first input),
+    /// simulating a non-SegWit signature changing the txid without changing the input set.
+    fn with_perturbed_txid(mut tx: Transaction) -> Transaction {
+        tx.input[0].script_sig = ScriptBuf::from_bytes(vec![0x51]); // OP_TRUE, arbitrary
+        tx
+    }
+
+    fn spend(outpoint: OutPoint, tx: Transaction, confirmations: u32) -> OutpointSpend {
+        OutpointSpend { outpoint, spend: Some(Spend { tx, confirmations }) }
+    }
+
+    #[test]
+    fn test_monitor_primitive_getters() {
+        let monitor = segwit_monitor();
+        let payjoin_tx = PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx;
+        let original_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("valid tx");
+
+        assert_eq!(monitor.payjoin_txid(), payjoin_tx.compute_txid());
+        assert_eq!(monitor.fallback_txid(), Some(original_tx.compute_txid()));
+
+        let contested = monitor.contested_outpoints();
+        let expected_contested: Vec<OutPoint> =
+            original_tx.input.iter().map(|txin| txin.previous_output).collect();
+        assert_eq!(contested, expected_contested);
+
+        // The receiver input is present in the proposal but not in the sender's original.
+        let receiver_input =
+            monitor.receiver_input().expect("segwit proposal contributes a receiver input");
+        assert!(!contested.contains(&receiver_input));
+        assert!(payjoin_tx.input.iter().any(|txin| txin.previous_output == receiver_input));
+    }
+
+    #[test]
+    fn test_classify_pending() {
+        let monitor = segwit_monitor();
+
+        // Empty view → pending.
+        assert_eq!(monitor.classify(&ChainView::default()), SettlementStatus::Pending);
+
+        // Contested outpoints reported but unspent → pending.
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| OutpointSpend { outpoint, spend: None })
+                .collect(),
+        };
+        assert_eq!(monitor.classify(&view), SettlementStatus::Pending);
+    }
+
+    #[test]
+    fn test_classify_no_receiver_input_is_total() {
+        let monitor = no_receiver_input_monitor();
+        assert!(monitor.receiver_input().is_none());
+
+        // Empty view → Pending, no panic.
+        assert_eq!(monitor.classify(&ChainView::default()), SettlementStatus::Pending);
+
+        // Reported but unspent → Pending, no panic.
+        let unspent = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| OutpointSpend { outpoint, spend: None })
+                .collect(),
+        };
+        assert_eq!(monitor.classify(&unspent), SettlementStatus::Pending);
+    }
+
+    #[test]
+    fn test_classify_fallback_without_receiver_input() {
+        // The structural Payjoin step is skipped (no receiver input), but a spend by the fallback
+        // txid is still detected as Fallback.
+        let monitor = no_receiver_input_monitor();
+        let fallback_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("valid tx");
+
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| spend(outpoint, fallback_tx.clone(), 4))
+                .collect(),
+        };
+
+        assert_eq!(
+            monitor.classify(&view),
+            SettlementStatus::Detected { outcome: SettlementOutcome::Fallback, confirmations: 4 }
+        );
+    }
+
+    #[test]
+    fn test_classify_other_without_receiver_input() {
+        // No receiver input and no recognized txid: an unrelated spend still resolves to Other
+        // rather than panicking.
+        let monitor = no_receiver_input_monitor();
+        let other_tx = with_perturbed_txid(PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("tx"));
+        let other_txid = other_tx.compute_txid();
+        assert_ne!(Some(other_txid), monitor.fallback_txid());
+
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| spend(outpoint, other_tx.clone(), 6))
+                .collect(),
+        };
+
+        assert_eq!(
+            monitor.classify(&view),
+            SettlementStatus::Detected {
+                outcome: SettlementOutcome::Other(other_txid),
+                confirmations: 6,
+            }
+        );
+    }
+
+    #[test]
+    fn test_classify_cooperative_input_fingerprint() {
+        let monitor = segwit_monitor();
+        let payjoin_tx = PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx;
+
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| spend(outpoint, payjoin_tx.clone(), 3))
+                .collect(),
+        };
+
+        assert_eq!(
+            monitor.classify(&view),
+            SettlementStatus::Detected {
+                outcome: SettlementOutcome::Cooperative(payjoin_tx.compute_txid()),
+                confirmations: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn test_classify_cooperative_non_segwit_salvage() {
+        // The on-chain spending tx contains the receiver's input but has a txid that differs from
+        // the predicted payjoin txid (as happens when a non-SegWit sender signs). Classification is
+        // structural, so this is still Cooperative.
+        let monitor = segwit_monitor();
+        let payjoin_tx = PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx;
+        let salvaged_tx = with_perturbed_txid(payjoin_tx.clone());
+        let salvaged_txid = salvaged_tx.compute_txid();
+        assert_ne!(salvaged_txid, monitor.payjoin_txid());
+
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| spend(outpoint, salvaged_tx.clone(), 1))
+                .collect(),
+        };
+
+        assert_eq!(
+            monitor.classify(&view),
+            SettlementStatus::Detected {
+                outcome: SettlementOutcome::Cooperative(salvaged_txid),
+                confirmations: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn test_classify_fallback() {
+        let monitor = segwit_monitor();
+        let fallback_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("valid tx");
+
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| spend(outpoint, fallback_tx.clone(), 2))
+                .collect(),
+        };
+
+        assert_eq!(
+            monitor.classify(&view),
+            SettlementStatus::Detected { outcome: SettlementOutcome::Fallback, confirmations: 2 }
+        );
+    }
+
+    #[test]
+    fn test_classify_other() {
+        // The contested outpoints are spent by a transaction that is neither the Payjoin (no
+        // receiver input) nor the fallback (different txid).
+        let monitor = segwit_monitor();
+        let fallback_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("valid tx");
+        let other_tx = with_perturbed_txid(fallback_tx);
+        let other_txid = other_tx.compute_txid();
+        assert_ne!(Some(other_txid), monitor.fallback_txid());
+
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| spend(outpoint, other_tx.clone(), 5))
+                .collect(),
+        };
+
+        assert_eq!(
+            monitor.classify(&view),
+            SettlementStatus::Detected {
+                outcome: SettlementOutcome::Other(other_txid),
+                confirmations: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn test_classify_cooperative_output_substitution() {
+        // The receiver substituted outputs but contributed no input. The spending tx carries no
+        // input fingerprint, but its output set matches the proposal's, so it is Cooperative
+        // (cut-through).
+        let monitor = cutthrough_monitor();
+        assert!(monitor.receiver_input().is_none());
+
+        let proposal_tx = cutthrough_proposal_tx(&monitor);
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| spend(outpoint, proposal_tx.clone(), 3))
+                .collect(),
+        };
+
+        assert_eq!(
+            monitor.classify(&view),
+            SettlementStatus::Detected {
+                outcome: SettlementOutcome::Cooperative(proposal_tx.compute_txid()),
+                confirmations: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn test_classify_cooperative_output_sub_non_segwit_salvage() {
+        // Output sets are stable under non-SegWit signing, so an output-substitution cooperative
+        // settlement is detected even when the on-chain txid differs from anything the receiver
+        // predicted.
+        let monitor = cutthrough_monitor();
+        let salvaged_tx = with_perturbed_txid(cutthrough_proposal_tx(&monitor));
+        let salvaged_txid = salvaged_tx.compute_txid();
+        assert_ne!(salvaged_txid, monitor.payjoin_txid());
+        assert_ne!(Some(salvaged_txid), monitor.fallback_txid());
+
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| spend(outpoint, salvaged_tx.clone(), 1))
+                .collect(),
+        };
+
+        assert_eq!(
+            monitor.classify(&view),
+            SettlementStatus::Detected {
+                outcome: SettlementOutcome::Cooperative(salvaged_txid),
+                confirmations: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn test_classify_cooperative_output_order_independent() {
+        // BIP69 (or any wallet) may reorder outputs; the output-set match must be order-independent.
+        let monitor = cutthrough_monitor();
+        let mut reordered_tx = cutthrough_proposal_tx(&monitor);
+        reordered_tx.output.reverse();
+
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| spend(outpoint, reordered_tx.clone(), 2))
+                .collect(),
+        };
+
+        assert!(matches!(
+            monitor.classify(&view),
+            SettlementStatus::Detected { outcome: SettlementOutcome::Cooperative(_), .. }
+        ));
+    }
+
+    #[test]
+    fn test_classify_no_substitution_is_fallback_not_cooperative() {
+        // A proposal that neither adds an input nor substitutes outputs is identical to the
+        // fallback. A spend by that transaction is Fallback; the substitution guard keeps the
+        // output-set match from stealing it as Cooperative.
+        let monitor = no_receiver_input_monitor();
+        assert!(monitor.receiver_input().is_none());
+        let fallback_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("valid tx");
+
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| spend(outpoint, fallback_tx.clone(), 2))
+                .collect(),
+        };
+
+        assert_eq!(
+            monitor.classify(&view),
+            SettlementStatus::Detected { outcome: SettlementOutcome::Fallback, confirmations: 2 }
+        );
+    }
+
+    #[test]
+    fn test_classify_cooperative_via_both_signals() {
+        // The segwit proposal both contributes a receiver input and substitutes the receiver's
+        // output, so a spend satisfies both cooperative signals at once. Either alone is enough; the
+        // result is Cooperative.
+        let monitor = segwit_monitor();
+        assert!(monitor.receiver_input().is_some());
+        let payjoin_tx = PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx;
+        assert!(monitor.proposal_substitutes_outputs());
+        assert!(output_sets_match(&payjoin_tx.output, monitor.proposal_outputs()));
+
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| spend(outpoint, payjoin_tx.clone(), 3))
+                .collect(),
+        };
+
+        assert!(matches!(
+            monitor.classify(&view),
+            SettlementStatus::Detected { outcome: SettlementOutcome::Cooperative(_), .. }
+        ));
+    }
+
+    #[test]
+    fn test_classify_confirmations_are_conservative() {
+        // When the same payjoin tx spends several contested outpoints at different observed depths,
+        // classify reports the minimum confirmation count.
+        let monitor = segwit_monitor();
+        let payjoin_tx = PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx;
+
+        let mut confs = (1u32..).step_by(2); // 1, 3, 5, ...
+        let view = ChainView {
+            spends: monitor
+                .contested_outpoints()
+                .into_iter()
+                .map(|outpoint| spend(outpoint, payjoin_tx.clone(), confs.next().unwrap()))
+                .collect(),
+        };
+
+        match monitor.classify(&view) {
+            SettlementStatus::Detected {
+                outcome: SettlementOutcome::Cooperative(_),
+                confirmations,
+            } => assert_eq!(confirmations, 1, "min over contested-outpoint spends"),
+            other => panic!("expected Cooperative, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_classify_ignores_non_contested_spends() {
+        // A spend of an outpoint that is not one of the session's contested outpoints must not
+        // influence the verdict. Here the payjoin settles the (single) contested outpoint while an
+        // unrelated outpoint is spent by some other tx; the result is still Cooperative.
+        let monitor = segwit_monitor();
+        let contested = monitor.contested_outpoints();
+        let unrelated_outpoint = OutPoint { txid: Txid::all_zeros(), vout: 7 };
+
+        let payjoin_tx = PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx;
+        let unrelated_tx = with_perturbed_txid(payjoin_tx.clone());
+
+        let spends = vec![
+            spend(contested[0], payjoin_tx.clone(), 4),
+            spend(unrelated_outpoint, unrelated_tx, 0),
+        ];
+
+        assert!(matches!(
+            monitor.classify(&ChainView { spends }),
+            SettlementStatus::Detected { outcome: SettlementOutcome::Cooperative(_), .. }
+        ));
     }
 
     #[test]

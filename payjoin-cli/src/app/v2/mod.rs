@@ -6,11 +6,11 @@ use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::persist::{OptionalTransitionOutcome, SessionPersister};
 use payjoin::receive::v2::{
-    replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
-    MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
+    replay_event_log as replay_receiver_event_log, ChainView, HasReplyableError, Initialized,
+    MaybeInputsOwned, MaybeInputsSeen, Monitor, OutpointSpend, OutputsUnknown, PayjoinProposal,
     PendingFallback as ReceiverPendingFallback, ProvisionalProposal, ReceiveSession, Receiver,
-    ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload,
-    WantsFeeRange, WantsInputs, WantsOutputs,
+    ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, SettlementOutcome, SettlementStatus,
+    Spend, UncheckedOriginalPayload, WantsFeeRange, WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, PendingFallback as SenderPendingFallback,
@@ -82,10 +82,13 @@ impl StatusText for ReceiveSession {
             ReceiveSession::PendingFallback(_) => "Pending fallback handling",
             ReceiveSession::Closed(session_outcome) => match session_outcome {
                 ReceiverSessionOutcome::Aborted => "Session aborted",
-                ReceiverSessionOutcome::Success(_) => "Session success, Payjoin proposal was broadcasted",
+                ReceiverSessionOutcome::Success =>
+                    "Session success, Payjoin settled cooperatively",
                 ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
                 ReceiverSessionOutcome::PayjoinProposalSent =>
                     "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs",
+                ReceiverSessionOutcome::Other(_) => "Settled by an unrecognized transaction",
+                _ => "Session closed",
             },
         }
     }
@@ -437,7 +440,7 @@ impl AppTrait for App {
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Receiver,
-                        status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
+                        status: ReceiveSession::Closed(ReceiverSessionOutcome::aborted()),
                         completed_at: None,
                         error_message: Some(e.to_string()),
                     };
@@ -492,7 +495,7 @@ impl AppTrait for App {
                         let row = SessionHistoryRow {
                             session_id,
                             role: Role::Receiver,
-                            status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
+                            status: ReceiveSession::Closed(ReceiverSessionOutcome::aborted()),
                             completed_at: Some(completed_at),
                             error_message: Some(e.to_string()),
                         };
@@ -619,7 +622,7 @@ impl App {
             },
             ReceiveSession::PendingFallback(receiver) => receiver,
             ReceiveSession::Closed(
-                ReceiverSessionOutcome::Success(_)
+                ReceiverSessionOutcome::Success
                 | ReceiverSessionOutcome::FallbackBroadcasted
                 | ReceiverSessionOutcome::PayjoinProposalSent,
             ) => {
@@ -636,6 +639,10 @@ impl App {
                         "Session {session_id} is already closed. No fallback transaction available."
                     ),
                 }
+                return Ok(());
+            }
+            ReceiveSession::Closed(_) => {
+                println!("Session {session_id} is already closed. Cannot cancel.");
                 return Ok(());
             }
         };
@@ -967,11 +974,60 @@ impl App {
         return self.monitor_payjoin_proposal(session, persister).await;
     }
 
+    /// Build a [`ChainView`] for the monitored session by querying the wallet.
+    ///
+    /// This demo wallet can only look up the two transactions whose ids the receiver predicts (the
+    /// Payjoin proposal and the fallback), so it cannot attribute a spend to an unrelated third
+    /// transaction. A wallet with a full transaction monitor would instead report the actual
+    /// spender of each contested outpoint, which is what surfaces [`SettlementOutcome::Other`] and
+    /// an output-substitution [`SettlementOutcome::Cooperative`] whose txid the receiver cannot
+    /// predict.
+    fn chain_view(&self, proposal: &Receiver<Monitor>) -> Result<ChainView> {
+        let wallet = self.wallet();
+        let payjoin_txid = proposal.payjoin_txid();
+        let payjoin = wallet.get_raw_transaction_verbose(&payjoin_txid)?;
+        let fallback = match proposal.fallback_txid() {
+            Some(txid) => wallet.get_raw_transaction_verbose(&txid)?,
+            None => None,
+        };
+
+        let mut spends = Vec::new();
+        for outpoint in proposal.contested_outpoints() {
+            if let Some((tx, confirmations)) = &payjoin {
+                if tx.input.iter().any(|txin| txin.previous_output == outpoint) {
+                    spends.push(OutpointSpend {
+                        outpoint,
+                        spend: Some(Spend { tx: tx.clone(), confirmations: *confirmations }),
+                    });
+                    continue;
+                }
+            }
+            if let Some((tx, confirmations)) = &fallback {
+                if tx.input.iter().any(|txin| txin.previous_output == outpoint) {
+                    spends.push(OutpointSpend {
+                        outpoint,
+                        spend: Some(Spend { tx: tx.clone(), confirmations: *confirmations }),
+                    });
+                    continue;
+                }
+            }
+        }
+        Ok(ChainView { spends })
+    }
+
+    // The confidence bar below is configurable; with the default of 0 the `>=` comparison is
+    // trivially true, but it is meaningful once a maintainer raises the bar to require depth.
+    #[allow(clippy::absurd_extreme_comparisons)]
     async fn monitor_payjoin_proposal(
         &self,
         proposal: Receiver<Monitor>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
+        // Confidence bar: conclude once the detected settlement has at least this many
+        // confirmations. 0 concludes as soon as the transaction is seen (mempool) -- fast, but a
+        // reorg or the conflicting double-spend can still flip it. Raise it to require depth.
+        const CONFIRMATION_BAR: u32 = 0;
+
         // On a session resumption, the receiver will resume again in this state.
         let poll_interval = tokio::time::Duration::from_millis(200);
         let timeout_duration = tokio::time::Duration::from_secs(5);
@@ -979,35 +1035,55 @@ impl App {
         let mut interval = tokio::time::interval(poll_interval);
         interval.tick().await;
 
-        tracing::debug!("Polling for payment confirmation");
+        tracing::debug!("Polling for settlement");
 
         let result = tokio::time::timeout(timeout_duration, async {
             loop {
                 interval.tick().await;
-                let check_result = proposal
-                    .check_for_transaction(|txid| {
-                        self.wallet()
-                            .get_raw_transaction(&txid)
-                            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-                    })
-                    .save(persister);
-
-                match check_result {
-                    Ok(OptionalTransitionOutcome::Progress(())) => {
-                        println!("Payjoin transaction detected in the mempool!");
-                        return Ok(());
+                let view = match self.chain_view(&proposal) {
+                    Ok(view) => view,
+                    Err(e) => {
+                        tracing::warn!("Chain query failed, retrying: {e}");
+                        continue;
                     }
-                    Ok(OptionalTransitionOutcome::Stasis(_)) => continue,
-                    Err(_) => continue,
+                };
+
+                match proposal.classify(&view) {
+                    SettlementStatus::Pending => {
+                        println!("Pending: no contested outpoint spent yet");
+                        continue;
+                    }
+                    SettlementStatus::Detected { outcome, confirmations } => {
+                        match &outcome {
+                            SettlementOutcome::Cooperative =>
+                                println!("Payjoin settled ({confirmations} conf)"),
+                            SettlementOutcome::Fallback => println!(
+                                "Fell back to the original transaction ({confirmations} conf)"
+                            ),
+                            SettlementOutcome::Other(txid) => println!(
+                                "Spent by another transaction {txid} ({confirmations} conf)"
+                            ),
+                            // `SettlementOutcome` is #[non_exhaustive]; render any finer label this
+                            // build predates without losing the confirmation count.
+                            _ => println!("Settled ({confirmations} conf)"),
+                        }
+                        if confirmations >= CONFIRMATION_BAR {
+                            return outcome;
+                        }
+                    }
                 }
             }
         })
         .await;
 
         match result {
-            Ok(ok) => ok,
+            Ok(outcome) => {
+                proposal.conclude(outcome).save(persister)?;
+                println!("Session concluded.");
+                Ok(())
+            }
             Err(_) => Err(anyhow!(
-                "No payjoin transaction detected in mempool within {timeout_duration:?}, stopping."
+                "No settlement reached the confidence bar within {timeout_duration:?}, stopping."
             )),
         }
     }

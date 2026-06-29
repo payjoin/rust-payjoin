@@ -1503,6 +1503,78 @@ fn try_deserialize_tx(
         .map_err(|e| ForeignError::InternalError(e.to_string()))
 }
 
+/// A spend of a single contested outpoint, as reported by a [`ChainBackend`].
+///
+/// Returned only for a spent outpoint; an unspent outpoint is reported as `None` from
+/// [`ChainBackend::spend_status`]. The spending transaction is mandatory: it is required to classify
+/// a Payjoin structurally, and the spending txid is derived from it.
+#[derive(Clone, uniffi::Record)]
+pub struct ChainSpend {
+    /// Consensus-encoded spending transaction. Required to classify a Payjoin structurally.
+    pub spending_tx: Vec<u8>,
+    /// Confirmations of the spend. `0` means mempool-only.
+    pub confirmations: u32,
+}
+
+/// A wallet-side chain oracle for settlement attribution.
+///
+/// Implement this to report which transaction (if any) spent each contested outpoint, at what
+/// depth. It is the outpoint-based successor to the txid-only [`TransactionFinder`], driving the
+/// richer [`Monitor::classify`] flow.
+#[uniffi::export(with_foreign)]
+pub trait ChainBackend: Send + Sync {
+    /// Return the spend status of `outpoint`, or `None` if it is unspent / unknown.
+    fn spend_status(&self, outpoint: OutPoint) -> Result<Option<ChainSpend>, ForeignError>;
+}
+
+/// Foreign-facing mirror of [`payjoin::receive::v2::SettlementOutcome`].
+#[derive(Clone, uniffi::Enum)]
+pub enum SettlementOutcome {
+    /// The Payjoin settled cooperatively: the spending transaction either contains the receiver's
+    /// contributed input or reproduces the proposal's output set (a cut-through). The caller already
+    /// holds the spending transaction it reported through its [`ChainBackend`].
+    Cooperative,
+    /// The fallback (original) transaction settled; no privacy gain.
+    Fallback,
+    /// An unrecognized transaction settled the contested outpoints.
+    Other { txid: String },
+}
+
+impl From<payjoin::receive::v2::SettlementOutcome> for SettlementOutcome {
+    fn from(value: payjoin::receive::v2::SettlementOutcome) -> Self {
+        use payjoin::receive::v2::SettlementOutcome as Core;
+        match value {
+            Core::Cooperative => SettlementOutcome::Cooperative,
+            Core::Fallback => SettlementOutcome::Fallback,
+            Core::Other(txid) => SettlementOutcome::Other { txid: txid.to_string() },
+            // `SettlementOutcome` is #[non_exhaustive]; a finer label this binding predates
+            // surfaces as `Other` with an empty txid until the binding is regenerated.
+            _ => SettlementOutcome::Other { txid: String::new() },
+        }
+    }
+}
+
+/// Foreign-facing mirror of [`payjoin::receive::v2::SettlementStatus`].
+#[derive(Clone, uniffi::Enum)]
+pub enum SettlementStatus {
+    /// None of the contested outpoints are spent yet.
+    Pending,
+    /// A transaction spending the contested outpoints was observed. `confirmations == 0` is
+    /// mempool-only.
+    Detected { outcome: SettlementOutcome, confirmations: u32 },
+}
+
+impl From<payjoin::receive::v2::SettlementStatus> for SettlementStatus {
+    fn from(value: payjoin::receive::v2::SettlementStatus) -> Self {
+        use payjoin::receive::v2::SettlementStatus as Core;
+        match value {
+            Core::Pending => SettlementStatus::Pending,
+            Core::Detected { outcome, confirmations } =>
+                SettlementStatus::Detected { outcome: outcome.into(), confirmations },
+        }
+    }
+}
+
 #[uniffi::export]
 impl Monitor {
     pub fn check_for_transaction(
@@ -1517,6 +1589,29 @@ impl Monitor {
                     .map_err(|e| ImplementationError::new(e).into())
             },
         )))))
+    }
+
+    /// Classify the current settlement state by querying `chain_backend` for the spend status of
+    /// each contested outpoint. This is the foreign-facing wrapper over the pure
+    /// [`payjoin::receive::v2::Receiver::classify`]: it performs the outpoint probes, then
+    /// classifies the resulting snapshot. It does not persist anything.
+    pub fn classify(
+        &self,
+        chain_backend: Arc<dyn ChainBackend>,
+    ) -> Result<SettlementStatus, ForeignError> {
+        let mut spends = Vec::new();
+        for outpoint in self.0.contested_outpoints() {
+            let Some(spend) = chain_backend.spend_status(OutPoint::from(outpoint))? else {
+                continue;
+            };
+            let tx = try_deserialize_tx(spend.spending_tx)?;
+            spends.push(payjoin::receive::v2::OutpointSpend {
+                outpoint,
+                spend: Some(payjoin::receive::v2::Spend { tx, confirmations: spend.confirmations }),
+            });
+        }
+        let view = payjoin::receive::v2::ChainView { spends };
+        Ok(self.0.classify(&view).into())
     }
 }
 

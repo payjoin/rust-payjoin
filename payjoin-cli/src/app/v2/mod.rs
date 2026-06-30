@@ -238,6 +238,7 @@ impl AppTrait for App {
                         let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
                         let persister =
                             SenderPersister::new(self.db.clone(), bip21, receiver_pubkey)?;
+                        println!("Send session established: {}", persister.session_id());
                         let sender =
                             SenderBuilder::from_parts(psbt, pj_param, &address, Some(amount))
                                 .build_recommended(fee_rate)?
@@ -246,7 +247,6 @@ impl AppTrait for App {
                         (SendSession::WithReplyKey(sender), persister)
                     }
                 };
-                println!("Send session established: {}", persister.session_id());
                 let mut interrupt = self.interrupt.clone();
                 tokio::select! {
                     res = self.process_sender_session(sender_state, &persister) => {
@@ -297,8 +297,8 @@ impl AppTrait for App {
             receiver_builder = receiver_builder.with_max_fee_rate(max_fee_rate);
         }
         let session = receiver_builder.build().save(&persister)?;
-
         println!("Receive session established: {}", persister.session_id());
+
         let pj_uri = session.pj_uri();
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{pj_uri}");

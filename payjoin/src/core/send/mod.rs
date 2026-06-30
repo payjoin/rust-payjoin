@@ -682,8 +682,8 @@ mod test {
     use bitcoin::taproot::TaprootBuilder;
     use bitcoin::{Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Witness};
     use payjoin_test_utils::{
-        BoxError, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL,
-        PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO,
+        BoxError, ADDITIONAL_FEE_OUTPUT_INDEX, MAX_ADDITIONAL_FEE_CONTRIBUTION,
+        PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL, PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO,
     };
 
     use super::*;
@@ -1363,10 +1363,10 @@ mod test {
             assert!(ctx.clone().process_proposal(proposal.clone()).is_ok());
 
             // When output substitution is disabled still allow increasing the output value
-            proposal.unsigned_tx.output[0].value += Amount::from_sat(182);
+            proposal.unsigned_tx.output[0].value += MAX_ADDITIONAL_FEE_CONTRIBUTION;
             assert!(ctx.clone().process_proposal(proposal.clone()).is_ok());
 
-            proposal.unsigned_tx.output[0].value -= Amount::from_sat(182);
+            proposal.unsigned_tx.output[0].value -= MAX_ADDITIONAL_FEE_CONTRIBUTION;
             ctx.original_psbt.unsigned_tx.output.get_mut(0).unwrap().script_pubkey =
                 ctx.payee.clone();
             std::mem::swap(
@@ -1393,7 +1393,7 @@ mod test {
                 ctx.payee.clone();
             assert!(ctx.clone().process_proposal(proposal.clone()).is_ok());
 
-            proposal.unsigned_tx.output[0].value += Amount::from_sat(182);
+            proposal.unsigned_tx.output[0].value += MAX_ADDITIONAL_FEE_CONTRIBUTION;
             assert!(ctx.clone().process_proposal(proposal.clone()).is_ok());
 
             proposal.unsigned_tx.output[0].value -= Amount::from_sat(364);
@@ -1427,7 +1427,8 @@ mod test {
             ctx.output_substitution = OutputSubstitution::Enabled;
 
             let mut proposal = PARSED_PAYJOIN_PROPOSAL.clone();
-            let original_change = &ctx.original_psbt.unsigned_tx.output[0];
+            let original_change =
+                &ctx.original_psbt.unsigned_tx.output[ADDITIONAL_FEE_OUTPUT_INDEX];
             assert_ne!(original_change.script_pubkey, ctx.payee);
 
             let change_pos = proposal

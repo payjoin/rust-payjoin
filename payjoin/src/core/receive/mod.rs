@@ -484,7 +484,8 @@ pub(crate) mod tests {
         XOnlyPublicKey,
     };
     use payjoin_test_utils::{
-        DUMMY20, DUMMY32, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL, QUERY_PARAMS,
+        DUMMY20, DUMMY32, MAX_ADDITIONAL_FEE_CONTRIBUTION, PARSED_ORIGINAL_PSBT,
+        PARSED_PAYJOIN_PROPOSAL, QUERY_PARAMS,
     };
 
     use super::*;
@@ -1020,7 +1021,7 @@ pub(crate) mod tests {
         // Fee contribution output belongs to the receiver, it should correctly identify owned
         // vouts and ignore the additional fee contribution param
         let params = Params {
-            additional_fee_contribution: Some((Amount::from_sat(182), 1)),
+            additional_fee_contribution: Some((MAX_ADDITIONAL_FEE_CONTRIBUTION, 1)),
             ..original.params
         };
         let original = OriginalPayload { params, ..original };

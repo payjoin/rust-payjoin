@@ -275,12 +275,8 @@ impl PsbtContext {
             filtered_psbt.inputs.push(bitcoin::psbt::Input {
                 witness_utxo: input.witness_utxo.clone(),
                 non_witness_utxo: input.non_witness_utxo.clone(),
-                sighash_type: input.sighash_type,
                 final_script_sig: input.final_script_sig.clone(),
                 final_script_witness: input.final_script_witness.clone(),
-                tap_key_sig: input.tap_key_sig,
-                tap_script_sigs: input.tap_script_sigs.clone(),
-                tap_merkle_root: input.tap_merkle_root,
                 ..Default::default()
             });
         }

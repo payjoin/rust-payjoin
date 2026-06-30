@@ -61,6 +61,9 @@ pub struct Config {
     pub root_certificate: Option<PathBuf>,
     #[cfg(feature = "_manual-tls")]
     pub certificate_key: Option<PathBuf>,
+    #[cfg(feature = "v2")]
+    #[serde(skip)]
+    pub expire_in_secs: Option<u64>,
 }
 
 impl Config {
@@ -157,6 +160,8 @@ impl Config {
             max_fee_rate: built_config.get("max_fee_rate").ok(),
             bitcoind: built_config.get("bitcoind")?,
             version: None,
+            #[cfg(feature = "v2")]
+            expire_in_secs: None,
             #[cfg(feature = "_manual-tls")]
             root_certificate: built_config.get("root_certificate").ok(),
             #[cfg(feature = "_manual-tls")]
@@ -243,6 +248,11 @@ impl Config {
             return Err(ConfigError::Message(
                 "No valid version configuration found for the specified mode".to_string(),
             ));
+        }
+
+        #[cfg(feature = "v2")]
+        if let Commands::Receive { expire_in, .. } = &cli.command {
+            config.expire_in_secs = *expire_in;
         }
 
         tracing::trace!("App config: {config:?}");

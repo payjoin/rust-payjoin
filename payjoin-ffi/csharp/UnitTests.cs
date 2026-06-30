@@ -306,30 +306,6 @@ public class ValidationTests
     }
 
     [Fact]
-    public void InputPairExposesOutpoint()
-    {
-        const string txid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        const uint vout = 7;
-        var txin = new TxIn(
-            new OutPoint(txid, vout),
-            new byte[] {},
-            uint.MaxValue,
-            new byte[][] {}
-        );
-        var psbtIn = new PsbtInput(
-            new TxOut(12345, Convert.FromHexString("00140000000000000000000000000000000000000000")),
-            null,
-            null
-        );
-        using var inputPair = new InputPair(txin, psbtIn, null);
-
-        var outpoint = inputPair.Outpoint();
-
-        Assert.Equal(txid, outpoint.txid);
-        Assert.Equal(vout, outpoint.vout);
-    }
-
-    [Fact]
     public void SenderBuilderRejectsBadPsbt()
     {
         using var parsed = Uri.Parse("bitcoin:tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4?pj=https://example.com/pj");

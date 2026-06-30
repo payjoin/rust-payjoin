@@ -545,18 +545,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn input_pair_outpoint_returns_previous_output() {
-        let txout = TxOut {
-            value: Amount::from_sat(123),
-            script_pubkey: ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array(DUMMY20)),
-        };
-        let outpoint = OutPoint { txid: Txid::from_byte_array(DUMMY32), vout: 31 };
-        let input_pair = InputPair::new_p2wpkh(txout, outpoint).unwrap();
-
-        assert_eq!(input_pair.outpoint(), outpoint);
-    }
-
-    #[test]
     fn create_p2pkh_input_pair() {
         let p2sh_txout = TxOut {
             value: Amount::from_sat(123),

@@ -77,7 +77,7 @@ rpchost = "http://localhost:18443/wallet/sender"
 
 # For v2, our config also requires a payjoin directory server and OHTTP relay
 [v2]
-pj_directory = "https://payjo.in"
+pj_directories = ["https://payjo.in", "https://lets.payjo.in"]
 ohttp_relays = ["https://pj.benalleng.com", "https://pj.bobspacebkk.com", "https://payjoin.achow101.com"]
 ```
 
@@ -92,7 +92,7 @@ rpchost = "http://localhost:18443/wallet/receiver"
 
 # For v2, our config also requires a payjoin directory server and OHTTP relay
 [v2]
-pj_directory = "https://payjo.in"
+pj_directories = ["https://payjo.in", "https://lets.payjo.in"]
 ohttp_relays = ["https://pj.benalleng.com", "https://pj.bobspacebkk.com", "https://payjoin.achow101.com"]
 ```
 

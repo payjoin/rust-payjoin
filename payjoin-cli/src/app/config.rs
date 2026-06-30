@@ -35,7 +35,7 @@ pub struct V2Config {
     #[serde(deserialize_with = "deserialize_ohttp_keys_from_path")]
     pub ohttp_keys: Option<payjoin::OhttpKeys>,
     pub ohttp_relays: Vec<Url>,
-    pub pj_directory: Url,
+    pub pj_directories: Vec<Url>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -207,6 +207,11 @@ impl Config {
                                     "Only one OHTTP relay is configured. Add more ohttp_relays to improve privacy."
                                 );
                             }
+                            if v2.pj_directories.len() < 2 {
+                                tracing::warn!(
+                                    "Only one payjoin directory is configured. Add more pj_directories to enable fallback."
+                                );
+                            }
                             config.version = Some(VersionConfig::V2(v2))
                         }
                         Err(e) => {
@@ -308,11 +313,14 @@ fn add_v1_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
 fn add_v2_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
     // Set default values
     let config = config
-        .set_default("v2.pj_directory", "https://payjo.in")?
+        .set_default("v2.pj_directories", vec!["https://payjo.in", "https://lets.payjo.in"])?
         .set_default("v2.ohttp_keys", None::<String>)?;
 
     // Override config values with command line arguments if applicable
-    let pj_directory = cli.pj_directory.as_ref().map(|s| s.as_str());
+    let pj_directories = cli
+        .pj_directories
+        .as_ref()
+        .map(|urls| urls.iter().map(|url| url.as_str()).collect::<Vec<_>>());
     let ohttp_keys = cli.ohttp_keys.as_ref().map(|p| p.to_string_lossy().into_owned());
     let ohttp_relays = cli
         .ohttp_relays
@@ -320,7 +328,7 @@ fn add_v2_defaults(config: Builder, cli: &Cli) -> Result<Builder, ConfigError> {
         .map(|urls| urls.iter().map(|url| url.as_str()).collect::<Vec<_>>());
 
     config
-        .set_override_option("v2.pj_directory", pj_directory)?
+        .set_override_option("v2.pj_directories", pj_directories)?
         .set_override_option("v2.ohttp_keys", ohttp_keys)?
         .set_override_option("v2.ohttp_relays", ohttp_relays)
 }
@@ -347,7 +355,7 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
             #[cfg(feature = "v1")]
             pj_endpoint,
             #[cfg(feature = "v2")]
-            pj_directory,
+            pj_directories,
             #[cfg(feature = "v2")]
             ohttp_keys,
             ..
@@ -362,8 +370,10 @@ fn handle_subcommands(config: Builder, cli: &Cli) -> Result<Builder, ConfigError
             #[cfg(feature = "v2")]
             let config = config
                 .set_override_option(
-                    "v2.pj_directory",
-                    pj_directory.clone().map(|s| s.to_string()),
+                    "v2.pj_directories",
+                    pj_directories
+                        .as_ref()
+                        .map(|urls| urls.iter().map(|url| url.as_str()).collect::<Vec<_>>()),
                 )?
                 .set_override_option(
                     "v2.ohttp_keys",

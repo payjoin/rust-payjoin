@@ -493,12 +493,19 @@ impl AppTrait for App {
             }
         });
 
-        // Print receiver and sender rows separately
+        // Collect every row (active + inactive, sender + receiver), sort by
+        // session id, and print in a single stable order regardless of which
+        // table or active/inactive bucket the row came from.
+        let mut rows: Vec<(SessionId, String)> = Vec::new();
         for row in send_rows {
-            println!("{row}");
+            rows.push((row.session_id.clone(), format!("{row}")));
         }
         for row in recv_rows {
-            println!("{row}");
+            rows.push((row.session_id.clone(), format!("{row}")));
+        }
+        rows.sort_by_key(|(id, _)| id.clone());
+        for (_, line) in rows {
+            println!("{line}");
         }
 
         Ok(())

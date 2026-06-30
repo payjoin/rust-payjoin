@@ -8,7 +8,7 @@ use rusqlite::params;
 
 use super::*;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct SessionId(pub(crate) uuid::Uuid);
 
 impl std::fmt::Display for SessionId {

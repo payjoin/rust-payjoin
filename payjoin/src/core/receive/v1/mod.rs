@@ -327,9 +327,10 @@ mod tests {
     use std::str::FromStr;
 
     use bitcoin::absolute::{LockTime, Time};
-    use bitcoin::{Address, Amount, Network, Transaction};
+    use bitcoin::{Address, Network, Transaction};
     use payjoin_test_utils::{
-        ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL, QUERY_PARAMS,
+        MAX_ADDITIONAL_FEE_CONTRIBUTION, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT,
+        PARSED_PAYJOIN_PROPOSAL, QUERY_PARAMS,
     };
 
     use super::*;
@@ -397,7 +398,7 @@ mod tests {
         assert_eq!(proposal.original.params.v, Version::One);
         assert_eq!(
             proposal.original.params.additional_fee_contribution,
-            Some((Amount::from_sat(182), 0))
+            Some((MAX_ADDITIONAL_FEE_CONTRIBUTION, 0))
         );
         Ok(())
     }

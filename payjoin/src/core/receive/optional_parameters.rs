@@ -155,7 +155,8 @@ impl std::error::Error for Error {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use bitcoin::{Amount, FeeRate};
+    use bitcoin::FeeRate;
+    use payjoin_test_utils::MAX_ADDITIONAL_FEE_CONTRIBUTION;
 
     use super::*;
     use crate::receive::optional_parameters::Params;
@@ -167,7 +168,7 @@ pub(crate) mod test {
             .expect("Could not parse params from query str");
         assert_eq!(params.v, Version::One);
         assert_eq!(params.output_substitution, OutputSubstitution::Disabled);
-        assert_eq!(params.additional_fee_contribution, Some((Amount::from_sat(182), 0)));
+        assert_eq!(params.additional_fee_contribution, Some((MAX_ADDITIONAL_FEE_CONTRIBUTION, 0)));
         assert_eq!(
             params.min_fee_rate,
             FeeRate::from_sat_per_vb(2).expect("Could not calculate feerate")

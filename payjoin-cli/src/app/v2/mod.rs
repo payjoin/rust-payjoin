@@ -112,16 +112,23 @@ struct SessionHistoryRow<Status> {
     role: Role,
     status: Status,
     error_message: Option<String>,
+    fallback_available: bool,
 }
 
 impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let status_text = match (self.error_message.as_deref(), self.fallback_available) {
+            (Some(err), _) => err.to_string(),
+            (None, true) =>
+                format!("{}, Fallback transaction available", self.status.status_text()),
+            (None, false) => self.status.status_text().to_string(),
+        };
         write!(
             f,
             "{:<W_ID$} {:<W_ROLE$} {:<W_STATUS$}",
             self.session_id.to_string(),
             self.role.as_str(),
-            self.error_message.as_deref().unwrap_or(self.status.status_text())
+            status_text
         )
     }
 }
@@ -400,12 +407,15 @@ impl AppTrait for App {
         self.db.get_send_session_ids()?.into_iter().for_each(|session_id| {
             let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
             match replay_sender_event_log(&persister) {
-                Ok((sender_state, _)) => {
+                Ok((sender_state, _session_history)) => {
+                    let fallback_available =
+                        matches!(sender_state, SendSession::Closed(SenderSessionOutcome::Aborted));
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Sender,
                         status: sender_state.clone(),
                         error_message: None,
+                        fallback_available,
                     };
                     send_rows.push(row);
                 }
@@ -415,6 +425,7 @@ impl AppTrait for App {
                         role: Role::Sender,
                         status: SendSession::Closed(SenderSessionOutcome::Aborted),
                         error_message: Some(e.to_string()),
+                        fallback_available: false,
                     };
                     send_rows.push(row);
                 }
@@ -424,12 +435,17 @@ impl AppTrait for App {
         self.db.get_recv_session_ids()?.into_iter().for_each(|session_id| {
             let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
             match replay_receiver_event_log(&persister) {
-                Ok((receiver_state, _)) => {
+                Ok((receiver_state, session_history)) => {
+                    let fallback_available = matches!(
+                        receiver_state,
+                        ReceiveSession::Closed(ReceiverSessionOutcome::Aborted)
+                    ) && session_history.fallback_tx().is_some();
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Receiver,
                         status: receiver_state.clone(),
                         error_message: None,
+                        fallback_available,
                     };
                     recv_rows.push(row);
                 }
@@ -439,6 +455,7 @@ impl AppTrait for App {
                         role: Role::Receiver,
                         status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
                         error_message: Some(e.to_string()),
+                        fallback_available: false,
                     };
                     recv_rows.push(row);
                 }
@@ -449,11 +466,14 @@ impl AppTrait for App {
             let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
             match replay_sender_event_log(&persister) {
                 Ok((sender_state, _)) => {
+                    let fallback_available =
+                        matches!(sender_state, SendSession::Closed(SenderSessionOutcome::Aborted));
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Sender,
                         status: sender_state.clone(),
                         error_message: None,
+                        fallback_available,
                     };
                     send_rows.push(row);
                 }
@@ -463,6 +483,7 @@ impl AppTrait for App {
                         role: Role::Sender,
                         status: SendSession::Closed(SenderSessionOutcome::Aborted),
                         error_message: Some(e.to_string()),
+                        fallback_available: false,
                     };
                     send_rows.push(row);
                 }
@@ -472,12 +493,17 @@ impl AppTrait for App {
         self.db.get_inactive_recv_session_ids()?.into_iter().for_each(|(session_id, _)| {
             let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
             match replay_receiver_event_log(&persister) {
-                Ok((receiver_state, _)) => {
+                Ok((receiver_state, session_history)) => {
+                    let fallback_available = matches!(
+                        receiver_state,
+                        ReceiveSession::Closed(ReceiverSessionOutcome::Aborted)
+                    ) && session_history.fallback_tx().is_some();
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Receiver,
                         status: receiver_state.clone(),
                         error_message: None,
+                        fallback_available,
                     };
                     recv_rows.push(row);
                 }
@@ -487,6 +513,7 @@ impl AppTrait for App {
                         role: Role::Receiver,
                         status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
                         error_message: Some(e.to_string()),
+                        fallback_available: false,
                     };
                     recv_rows.push(row);
                 }

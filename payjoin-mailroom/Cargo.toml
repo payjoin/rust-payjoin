@@ -56,11 +56,11 @@ hyperloglogplus = "0.4.1"
 ipnet = { version = "2.9", optional = true }
 maxminddb = { version = "0.27", optional = true }
 ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
-opentelemetry = "0.31"
-opentelemetry-otlp = { version = "0.31", optional = true, features = [
+opentelemetry = "0.32"
+opentelemetry-otlp = { version = "0.32", optional = true, features = [
   "reqwest-rustls",
 ] }
-opentelemetry_sdk = "0.31"
+opentelemetry_sdk = "0.32"
 payjoin = { version = "1.0.0-rc.3", features = [
   "directory",
 ], default-features = false }
@@ -89,7 +89,7 @@ ignored = ["unicode-segmentation"]
 
 [dev-dependencies]
 mockito = "1.7.0"
-opentelemetry_sdk = { version = "0.31", features = ["testing"] }
+opentelemetry_sdk = { version = "0.32", features = ["testing"] }
 payjoin-test-utils = { version = "0.0.1" }
 rcgen = "0.12"
 reqwest = { version = "0.12.23", default-features = false, features = [

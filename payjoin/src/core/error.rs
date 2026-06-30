@@ -51,7 +51,7 @@ impl<SessionState: Debug, SessionEvent: Debug> std::fmt::Display
                 Some(session) => write!(f, "Invalid event ({event:?}) for session ({session:?})",),
                 None => write!(f, "Invalid first event ({event:?}) for session",),
             },
-            Expired(time) => write!(f, "Session expired at {time:?}"),
+            Expired(time, _) => write!(f, "Session expired at {time:?}"),
             PersistenceFailure(e) => write!(f, "Persistence failure: {e}"),
         }
     }
@@ -73,7 +73,20 @@ impl<SessionState: Debug, SessionEvent: Debug> From<InternalReplayError<SessionS
 impl<SessionState, SessionEvent> ReplayError<SessionState, SessionEvent> {
     /// Returns `true` if the event log could not be replayed because the
     /// session has expired.
-    pub fn is_expired(&self) -> bool { matches!(self.0, InternalReplayError::Expired(_)) }
+    pub fn is_expired(&self) -> bool { matches!(self.0, InternalReplayError::Expired(..)) }
+
+    /// Returns the fallback transaction that should be broadcast when the
+    /// session has expired, if one is recoverable from the event log.
+    ///
+    /// Returns `None` for non-expired errors, or for an expired session that
+    /// never produced a fallback transaction (e.g. a receiver that expired
+    /// before receiving the sender's original proposal).
+    pub fn fallback_tx(&self) -> Option<&bitcoin::Transaction> {
+        match &self.0 {
+            InternalReplayError::Expired(_, tx) => tx.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(feature = "v2")]
@@ -83,8 +96,8 @@ pub(crate) enum InternalReplayError<SessionState, SessionEvent> {
     NoEvents,
     /// Invalid initial event
     InvalidEvent(Box<SessionEvent>, Option<Box<SessionState>>),
-    /// Session is expired
-    Expired(crate::time::Time),
+    /// Session is expired. Carries the recoverable fallback transaction, if any.
+    Expired(crate::time::Time, Option<bitcoin::Transaction>),
     /// Application storage error
     PersistenceFailure(ImplementationError),
 }
@@ -96,8 +109,10 @@ mod tests {
 
     #[test]
     fn replay_error_is_expired() {
-        let expired: ReplayError<(), ()> = ReplayError(InternalReplayError::Expired(Time::now()));
+        let expired: ReplayError<(), ()> =
+            ReplayError(InternalReplayError::Expired(Time::now(), None));
         assert!(expired.is_expired());
+        assert!(expired.fallback_tx().is_none());
 
         let other: ReplayError<(), ()> = ReplayError(InternalReplayError::NoEvents);
         assert!(!other.is_expired());

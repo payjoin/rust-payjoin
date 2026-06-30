@@ -125,6 +125,11 @@ pub enum Commands {
         /// The path to the ohttp keys file
         #[arg(long = "ohttp-keys", value_parser = value_parser!(PathBuf))]
         ohttp_keys: Option<PathBuf>,
+
+        #[cfg(feature = "v2")]
+        /// Session expiration in seconds from now
+        #[arg(long = "expire-in")]
+        expire_in: Option<u64>,
     },
     /// Resume pending payjoins (BIP77/v2 only)
     #[cfg(feature = "v2")]

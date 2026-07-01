@@ -196,6 +196,36 @@ impl fmt::Display for PayjoinVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { (*self as u8).fmt(f) }
 }
 
+/// Which layer of the directory service recorded an HTTP request.
+///
+/// The same wire request can be counted twice -- once at the outer HTTP
+/// middleware boundary (every byte on the socket) and once after OHTTP
+/// decapsulation (the logical V2 operation it carried). The `layer` label
+/// keeps the two counts distinguishable so dashboards can pick one:
+/// - [`RequestLayer::Gateway`] -- counted by `track_metrics` from the wire
+///   path. Includes gateway-level failures (decapsulation errors, OHTTP key
+///   rejections) and non-V2 traffic (key fetches, health checks).
+/// - [`RequestLayer::V2`] -- counted inside `handle_decapsulated_request`
+///   after OHTTP decapsulation succeeds. One per logical V2 mailbox op.
+///
+/// Both layers share the same bounded `endpoint`/`method`/`status_code`
+/// label sets, so adding `layer` doubles the cardinality at most (still
+/// finite).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RequestLayer {
+    Gateway,
+    V2,
+}
+
+impl RequestLayer {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RequestLayer::Gateway => "gateway",
+            RequestLayer::V2 => "v2",
+        }
+    }
+}
+
 impl MetricsService {
     pub fn new(provider: Option<SdkMeterProvider>) -> Self {
         let has_reader = provider.is_some();
@@ -276,13 +306,20 @@ impl MetricsService {
         }
     }
 
-    pub fn record_http_request(&self, endpoint: &str, method: &str, status_code: u16) {
+    pub fn record_http_request(
+        &self,
+        endpoint: &str,
+        method: &str,
+        status_code: u16,
+        layer: RequestLayer,
+    ) {
         self.http_requests_total.add(
             1,
             &[
                 KeyValue::new("endpoint", endpoint.to_string()),
                 KeyValue::new("method", method.to_string()),
                 KeyValue::new("status_code", status_code.to_string()),
+                KeyValue::new("layer", layer.as_str()),
             ],
         );
     }

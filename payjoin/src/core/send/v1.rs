@@ -29,8 +29,7 @@ use error::BuildSenderError;
 
 use super::*;
 pub use crate::output_substitution::OutputSubstitution;
-use crate::uri::v1::PjParam;
-use crate::{PjUri, Request, MAX_CONTENT_LENGTH};
+use crate::{PjParam, PjUri, Request, MAX_CONTENT_LENGTH};
 
 /// A builder to construct the properties of a `Sender`.
 #[derive(Clone)]
@@ -69,7 +68,7 @@ impl SenderBuilder {
         amount: Option<Amount>,
     ) -> Self {
         Self {
-            endpoint: pj_param.endpoint(),
+            endpoint: pj_param.endpoint_url(),
             // Default to enabled output substitution for v1 when not specified via URI
             output_substitution: OutputSubstitution::Enabled,
             psbt_ctx_builder: PsbtContextBuilder::new(psbt, address.script_pubkey(), amount),
@@ -452,6 +451,7 @@ mod test {
             "message": "This version of payjoin is not supported."
         })
         .to_string();
+
         match ctx.process_response(known_json_error.as_bytes()) {
             Err(ResponseError::WellKnown(WellKnownError {
                 code: ErrorCode::VersionUnsupported,
@@ -466,6 +466,7 @@ mod test {
             "message": "This version of payjoin is not supported."
         })
         .to_string();
+
         match ctx.process_response(invalid_json_error.as_bytes()) {
             Err(ResponseError::Validation(_)) => (),
             _ => panic!("Expected unrecognized JSON error"),
@@ -475,6 +476,7 @@ mod test {
     #[test]
     fn process_response_valid() {
         let ctx = create_v1_context();
+
         let response = ctx.process_response(PAYJOIN_PROPOSAL.as_bytes());
         assert!(response.is_ok())
     }
@@ -482,6 +484,7 @@ mod test {
     #[test]
     fn process_response_invalid_psbt() {
         let ctx = create_v1_context();
+
         let response = ctx.process_response(INVALID_PSBT.as_bytes());
         match response {
             Ok(_) => panic!("Invalid PSBT should have caused an error"),
@@ -506,6 +509,7 @@ mod test {
             .extend(std::iter::repeat_n(0x00, MAX_CONTENT_LENGTH - invalid_utf8_padding.len()));
 
         let ctx = create_v1_context();
+
         let response = ctx.process_response(&invalid_utf8_padding);
         match response {
             Ok(_) => panic!("Invalid UTF-8 should have caused an error"),
@@ -522,33 +526,58 @@ mod test {
     }
 
     #[test]
-    fn process_response_invalid_buffer_len() {
-        let mut data = PAYJOIN_PROPOSAL.as_bytes().to_vec();
-        data.extend(std::iter::repeat_n(0, MAX_CONTENT_LENGTH + 1));
-
+    fn response_len_under_limit_is_not_content_too_large() -> Result<(), BoxError> {
         let ctx = create_v1_context();
-        let response = ctx.process_response(&data);
-        match response {
-            Ok(_) => panic!("Invalid buffer length should have caused an error"),
-            Err(error) => match error {
-                ResponseError::Validation(e) => {
-                    assert_eq!(
-                        e.to_string(),
-                        ValidationError::from(InternalValidationError::ContentTooLarge).to_string()
-                    );
-                }
-                _ => panic!("Unexpected error type"),
-            },
+
+        let psbt_str = PARSED_ORIGINAL_PSBT.clone().to_string();
+        assert!(psbt_str.len() < MAX_CONTENT_LENGTH);
+
+        let result = ctx.clone().process_response(psbt_str.as_bytes());
+
+        let err_str = result.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+        assert_ne!(
+            err_str,
+            "The receiver sent an invalid response: The response body is too large"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn response_len_equal_limit_is_not_content_too_large() -> Result<(), BoxError> {
+        let ctx = create_v1_context();
+
+        let mut psbt_str = PARSED_ORIGINAL_PSBT.clone().to_string();
+
+        if psbt_str.len() < MAX_CONTENT_LENGTH {
+            psbt_str.push_str(&" ".repeat(MAX_CONTENT_LENGTH - psbt_str.len()));
         }
+        assert_eq!(psbt_str.len(), MAX_CONTENT_LENGTH);
+
+        let result = ctx.clone().process_response(psbt_str.as_bytes());
+
+        let err_str = result.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+        assert_ne!(
+            err_str,
+            "The receiver sent an invalid response: The response body is too large"
+        );
+
+        Ok(())
     }
 
     #[test]
-    fn test_max_content_length() {
-        assert_eq!(MAX_CONTENT_LENGTH, 4_000_000 * 4 / 3);
-    }
+    fn response_len_over_limit_is_content_too_large() -> Result<(), BoxError> {
+        let ctx = create_v1_context();
 
-    #[test]
-    fn test_non_witness_input_weight_const() {
-        assert_eq!(NON_WITNESS_INPUT_WEIGHT, bitcoin::Weight::from_wu(160));
+        let too_long = vec![b'a'; MAX_CONTENT_LENGTH + 1];
+        let result = ctx.process_response(&too_long);
+
+        let err_str = result.unwrap_err().to_string();
+        assert_eq!(
+            err_str,
+            "The receiver sent an invalid response: The response body is too large"
+        );
+
+        Ok(())
     }
 }

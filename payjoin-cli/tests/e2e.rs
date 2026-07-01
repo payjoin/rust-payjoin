@@ -35,6 +35,23 @@ mod e2e {
         bip21
     }
 
+    /// Helper function to extract the first session id from history stdout
+    async fn get_session_id_from_role(mut cli_role: tokio::process::Child) -> String {
+        let mut stdout = cli_role.stdout.take().expect("failed to take stdout of child process");
+        let session_id =
+            wait_for_stdout_match(&mut stdout, |line| line.contains("session established: "))
+                .await
+                .expect("payjoin-cli should output a SessionId on session startup")
+                .split_terminator(":")
+                .nth(1)
+                .expect("could not split stdout")
+                .trim()
+                .to_string();
+
+        terminate(cli_role).await.expect("Failed to kill payjoin-cli");
+        session_id
+    }
+
     /// Read lines from `child_stdout` until `match_pattern` is found and the corresponding
     /// line is returned.
     /// Also writes every read line to tokio::io::stdout();
@@ -739,6 +756,7 @@ mod e2e {
             let bip21 = get_bip21_from_receiver(cli_receiver).await;
 
             // Start sender and let it time out waiting for a response
+            // We read its stdout to capture both the session ID and the timeout.
             let cli_sender = Command::new(payjoin_cli)
                 .arg("--root-certificate")
                 .arg(cert_path)
@@ -759,10 +777,7 @@ mod e2e {
                 .spawn()
                 .expect("Failed to execute payjoin-cli sender");
 
-            send_until_request_timeout(cli_sender).await?;
-
-            // There is only one sender session in progress.
-            let session_id = 1i64;
+            let session_id = get_session_id_from_role(cli_sender).await;
 
             // Run `payjoin-cli cancel <session-id>`: cancels and broadcasts the fallback tx
             let mut cli_cancel = Command::new(payjoin_cli)
@@ -777,7 +792,7 @@ mod e2e {
                 .arg("--ohttp-relays")
                 .arg(ohttp_relays)
                 .arg("cancel")
-                .arg(session_id.to_string())
+                .arg(&session_id)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()
@@ -817,7 +832,7 @@ mod e2e {
                 .arg("--ohttp-relays")
                 .arg(ohttp_relays)
                 .arg("cancel")
-                .arg(session_id.to_string())
+                .arg(&session_id)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()
@@ -911,10 +926,8 @@ mod e2e {
                 .stderr(Stdio::inherit())
                 .spawn()
                 .expect("Failed to execute payjoin-cli receiver");
-            let _bip21 = get_bip21_from_receiver(cli_receiver).await;
 
-            // There is only one receiver session in progress.
-            let session_id = 1i64;
+            let session_id = get_session_id_from_role(cli_receiver).await;
 
             // Run `payjoin-cli cancel <session-id> --role receiver`: the session is at
             // Initialized so there is no fallback transaction to broadcast.
@@ -930,7 +943,7 @@ mod e2e {
                 .arg("--ohttp-relays")
                 .arg(ohttp_relays)
                 .arg("cancel")
-                .arg(session_id.to_string())
+                .arg(&session_id)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()
@@ -969,7 +982,7 @@ mod e2e {
                 .arg("--ohttp-relays")
                 .arg(ohttp_relays)
                 .arg("cancel")
-                .arg(session_id.to_string())
+                .arg(&session_id)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()

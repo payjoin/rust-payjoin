@@ -239,6 +239,7 @@ impl AppTrait for App {
                         (SendSession::WithReplyKey(sender), persister)
                     }
                 };
+                println!("Send session established: {}", persister.session_id());
                 let mut interrupt = self.interrupt.clone();
                 tokio::select! {
                     res = self.process_sender_session(sender_state, &persister) => {
@@ -290,7 +291,7 @@ impl AppTrait for App {
         }
         let session = receiver_builder.build().save(&persister)?;
 
-        println!("Receive session established");
+        println!("Receive session established: {}", persister.session_id());
         let pj_uri = session.pj_uri();
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{pj_uri}");
@@ -492,12 +493,19 @@ impl AppTrait for App {
             }
         });
 
-        // Print receiver and sender rows separately
+        // Collect every row (active + inactive, sender + receiver), sort by
+        // session id, and print in a single stable order regardless of which
+        // table or active/inactive bucket the row came from.
+        let mut rows: Vec<(SessionId, String)> = Vec::new();
         for row in send_rows {
-            println!("{row}");
+            rows.push((row.session_id.clone(), format!("{row}")));
         }
         for row in recv_rows {
-            println!("{row}");
+            rows.push((row.session_id.clone(), format!("{row}")));
+        }
+        rows.sort_by_key(|(id, _)| id.clone());
+        for (_, line) in rows {
+            println!("{line}");
         }
 
         Ok(())

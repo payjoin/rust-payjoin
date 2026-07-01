@@ -8,13 +8,8 @@ use rusqlite::params;
 
 use super::*;
 
-#[derive(Debug, Clone)]
-pub(crate) struct SessionId(pub(crate) i64);
-
-impl core::ops::Deref for SessionId {
-    type Target = i64;
-    fn deref(&self) -> &Self::Target { &self.0 }
-}
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct SessionId(pub(crate) uuid::Uuid);
 
 impl std::fmt::Display for SessionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
@@ -50,11 +45,10 @@ impl SenderPersister {
             return Err(Error::DuplicateSendSession(DuplicateKind::ReceiverPubkey));
         }
 
-        // Create a new session in send_sessions and get its ID
-        let session_id: i64 = conn.query_row(
-            "INSERT INTO send_sessions (pj_uri, receiver_pubkey) VALUES (?1, ?2) RETURNING session_id",
-            params![pj_uri, &receiver_pubkey_bytes],
-            |row| row.get(0),
+        let session_id = uuid::Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO send_sessions (session_id, pj_uri, receiver_pubkey) VALUES (?1, ?2, ?3)",
+            params![session_id.to_string(), pj_uri, &receiver_pubkey_bytes],
         )?;
 
         Ok(Self { db, session_id: SessionId(session_id) })
@@ -77,7 +71,7 @@ impl SessionPersister for SenderPersister {
 
         conn.execute(
             "INSERT INTO send_session_events (session_id, event_data, created_at) VALUES (?1, ?2, ?3)",
-            params![*self.session_id, event_data, now()],
+            params![self.session_id.0.to_string(), event_data, now()],
         )?;
 
         Ok(())
@@ -92,7 +86,7 @@ impl SessionPersister for SenderPersister {
             "SELECT event_data FROM send_session_events WHERE session_id = ?1 ORDER BY id ASC",
         )?;
 
-        let event_rows = stmt.query_map(params![*self.session_id], |row| {
+        let event_rows = stmt.query_map(params![self.session_id.0.to_string()], |row| {
             let event_data: String = row.get(0)?;
             Ok(event_data)
         })?;
@@ -113,7 +107,7 @@ impl SessionPersister for SenderPersister {
 
         conn.execute(
             "UPDATE send_sessions SET completed_at = ?1 WHERE session_id = ?2",
-            params![now(), *self.session_id],
+            params![now(), self.session_id.0.to_string()],
         )?;
 
         Ok(())
@@ -130,11 +124,10 @@ impl ReceiverPersister {
     pub fn new(db: Arc<Database>) -> crate::db::Result<Self> {
         let conn = db.get_connection()?;
 
-        // Create a new session in receive_sessions and get its ID
-        let session_id: i64 = conn.query_row(
-            "INSERT INTO receive_sessions (session_id) VALUES (NULL) RETURNING session_id",
-            [],
-            |row| row.get(0),
+        let session_id = uuid::Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO receive_sessions (session_id) VALUES (?1)",
+            params![session_id.to_string()],
         )?;
 
         Ok(Self { db, session_id: SessionId(session_id) })
@@ -158,7 +151,7 @@ impl SessionPersister for ReceiverPersister {
 
         conn.execute(
             "INSERT INTO receive_session_events (session_id, event_data, created_at) VALUES (?1, ?2, ?3)",
-            params![*self.session_id, event_data, now()],
+            params![self.session_id.0.to_string(), event_data, now()],
         )?;
 
         Ok(())
@@ -175,7 +168,7 @@ impl SessionPersister for ReceiverPersister {
             "SELECT event_data FROM receive_session_events WHERE session_id = ?1 ORDER BY id ASC",
         )?;
 
-        let event_rows = stmt.query_map(params![*self.session_id], |row| {
+        let event_rows = stmt.query_map(params![self.session_id.0.to_string()], |row| {
             let event_data: String = row.get(0)?;
             Ok(event_data)
         })?;
@@ -196,7 +189,7 @@ impl SessionPersister for ReceiverPersister {
 
         conn.execute(
             "UPDATE receive_sessions SET completed_at = ?1 WHERE session_id = ?2",
-            params![now(), *self.session_id],
+            params![now(), self.session_id.0.to_string()],
         )?;
 
         Ok(())
@@ -210,7 +203,9 @@ impl Database {
             conn.prepare("SELECT session_id FROM receive_sessions WHERE completed_at IS NULL")?;
 
         let session_rows = stmt.query_map([], |row| {
-            let session_id: i64 = row.get(0)?;
+            let session_id: String = row.get(0)?;
+            let session_id = uuid::Uuid::parse_str(&session_id)
+                .expect("Database corruption: invalid session_id UUID");
             Ok(SessionId(session_id))
         })?;
 
@@ -229,7 +224,9 @@ impl Database {
             conn.prepare("SELECT session_id FROM send_sessions WHERE completed_at IS NULL")?;
 
         let session_rows = stmt.query_map([], |row| {
-            let session_id: i64 = row.get(0)?;
+            let session_id: String = row.get(0)?;
+            let session_id = uuid::Uuid::parse_str(&session_id)
+                .expect("Database corruption: invalid session_id UUID");
             Ok(SessionId(session_id))
         })?;
 
@@ -249,7 +246,8 @@ impl Database {
         let conn = self.get_connection()?;
         let mut stmt =
             conn.prepare("SELECT receiver_pubkey FROM send_sessions WHERE session_id = ?1")?;
-        let receiver_pubkey: Vec<u8> = stmt.query_row(params![session_id.0], |row| row.get(0))?;
+        let receiver_pubkey: Vec<u8> =
+            stmt.query_row(params![session_id.0.to_string()], |row| row.get(0))?;
         Ok(HpkePublicKey::from_compressed_bytes(&receiver_pubkey).expect("Valid receiver pubkey"))
     }
 
@@ -259,7 +257,9 @@ impl Database {
             "SELECT session_id, completed_at FROM send_sessions WHERE completed_at IS NOT NULL",
         )?;
         let session_rows = stmt.query_map([], |row| {
-            let session_id: i64 = row.get(0)?;
+            let session_id: String = row.get(0)?;
+            let session_id = uuid::Uuid::parse_str(&session_id)
+                .expect("Database corruption: invalid session_id UUID");
             let completed_at: u64 = row.get(1)?;
             Ok((SessionId(session_id), completed_at))
         })?;
@@ -278,7 +278,9 @@ impl Database {
             "SELECT session_id, completed_at FROM receive_sessions WHERE completed_at IS NOT NULL",
         )?;
         let session_rows = stmt.query_map([], |row| {
-            let session_id: i64 = row.get(0)?;
+            let session_id: String = row.get(0)?;
+            let session_id = uuid::Uuid::parse_str(&session_id)
+                .expect("Database corruption: invalid session_id UUID");
             let completed_at: u64 = row.get(1)?;
             Ok((SessionId(session_id), completed_at))
         })?;
@@ -296,7 +298,7 @@ impl Database {
         let conn = self.get_connection()?;
         let exists: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM send_sessions WHERE session_id = ?1)",
-            params![session_id.0],
+            params![session_id.0.to_string()],
             |row| row.get(0),
         )?;
         Ok(exists)
@@ -307,7 +309,7 @@ impl Database {
         let conn = self.get_connection()?;
         let exists: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM receive_sessions WHERE session_id = ?1)",
-            params![session_id.0],
+            params![session_id.0.to_string()],
             |row| row.get(0),
         )?;
         Ok(exists)

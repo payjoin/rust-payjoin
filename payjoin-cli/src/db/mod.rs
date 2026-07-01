@@ -40,7 +40,7 @@ impl Database {
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS send_sessions (
-                session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT PRIMARY KEY,
                 pj_uri TEXT NOT NULL,
                 receiver_pubkey BLOB NOT NULL,
                 completed_at INTEGER
@@ -50,7 +50,7 @@ impl Database {
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS receive_sessions (
-                session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT PRIMARY KEY,
                 completed_at INTEGER
             )",
             [],
@@ -59,7 +59,7 @@ impl Database {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS send_session_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
                 event_data TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 FOREIGN KEY(session_id) REFERENCES send_sessions(session_id)
@@ -70,7 +70,7 @@ impl Database {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS receive_session_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
                 event_data TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 FOREIGN KEY(session_id) REFERENCES receive_sessions(session_id)

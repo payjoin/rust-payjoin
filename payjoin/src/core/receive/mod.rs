@@ -348,6 +348,17 @@ impl PsbtContext {
         let payjoin_proposal = self.prepare_psbt(signed_psbt);
         Ok(payjoin_proposal)
     }
+
+    fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
+        let sender_input_indexes = self.sender_input_indexes();
+        self.payjoin_psbt
+            .unsigned_tx
+            .input
+            .iter()
+            .enumerate()
+            .filter(move |(i, _)| !sender_input_indexes.contains(i))
+            .map(|(_, input)| &input.previous_output)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -2554,4 +2554,21 @@ pub mod test {
             other => panic!("Expected HasReplyableError, got {other:?}"),
         }
     }
+
+    #[test]
+    fn poll_transient_directory_error_leaves_session_open() -> Result<(), BoxError> {
+        let receiver = receiver(Initialized {});
+        let (req, ctx) = receiver.create_poll_request(EXAMPLE_URL)?;
+        let response = ohttp_response_for(&req.body, http::StatusCode::INTERNAL_SERVER_ERROR);
+        let persister = InMemoryPersister::<SessionEvent>::default();
+
+        let err = receiver
+            .process_response(&response, ctx)
+            .save(&persister)
+            .expect_err("transient response should error");
+
+        assert!(err.is_transient());
+        assert_events(&persister, &[], false);
+        Ok(())
+    }
 }

@@ -745,6 +745,10 @@ where
         }
     }
 
+    pub fn is_transient(&self) -> bool {
+        matches!(&self.0, InternalPersistedError::Api(ApiError::Transient(_)))
+    }
+
     pub fn error_state(self) -> Option<ErrorState> {
         match self.0 {
             InternalPersistedError::Api(ApiError::FatalWithState(_, state)) => Some(state),
@@ -1596,5 +1600,28 @@ mod tests {
         );
         assert!(transient_error.storage_error_ref().is_none());
         assert!(transient_error.api_error_ref().is_some());
+    }
+
+    #[test]
+    fn is_transient_only_for_transient_api_error() {
+        let transient = PersistedError::<InMemoryTestError, InMemoryTestError>(
+            InternalPersistedError::Api(ApiError::Transient(InMemoryTestError {})),
+        );
+        assert!(transient.is_transient());
+
+        let fatal = PersistedError::<InMemoryTestError, InMemoryTestError>(
+            InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})),
+        );
+        assert!(!fatal.is_transient());
+
+        let storage = PersistedError::<InMemoryTestError, InMemoryTestError>(
+            InternalPersistedError::Storage(InMemoryTestError {}),
+        );
+        assert!(!storage.is_transient());
+
+        let fatal_with_state = PersistedError::<InMemoryTestError, InMemoryTestError>(
+            InternalPersistedError::Api(ApiError::FatalWithState(InMemoryTestError {}, ())),
+        );
+        assert!(!fatal_with_state.is_transient());
     }
 }

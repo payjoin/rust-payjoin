@@ -1098,6 +1098,7 @@ impl App {
         while let Some(relay) = relays.next() {
             let is_last_relay = relays.peek().is_none();
             let (req, ctx) = build_request(&relay.url)?;
+            tracing::info!("Trying OHTTP {request_label} via relay {}", relay.url);
             match self.post_request(req, &relay).await {
                 Ok(response) => return Ok((response, ctx)),
                 Err(RelayAttemptError::Retryable(error)) => {

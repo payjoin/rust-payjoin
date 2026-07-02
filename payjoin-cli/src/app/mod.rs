@@ -29,7 +29,7 @@ pub trait App: Send + Sync {
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()>;
     async fn receive_payjoin(&self, amount: Amount) -> Result<()>;
     #[cfg(feature = "v2")]
-    async fn resume_payjoins(&self) -> Result<()>;
+    async fn resume_payjoins(&self, session_id: Option<SessionId>) -> Result<()>;
     #[cfg(feature = "v2")]
     async fn history(&self) -> Result<()>;
     #[cfg(feature = "v2")]

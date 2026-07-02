@@ -301,9 +301,17 @@ impl AppTrait for App {
         Ok(())
     }
 
-    async fn resume_payjoins(&self) -> Result<()> {
-        let recv_session_ids = self.db.get_recv_session_ids()?;
-        let send_session_ids = self.db.get_send_session_ids()?;
+    async fn resume_payjoins(&self, session_id: Option<SessionId>) -> Result<()> {
+        let mut recv_session_ids = self.db.get_recv_session_ids()?;
+        let mut send_session_ids = self.db.get_send_session_ids()?;
+
+        if let Some(ref target_id) = session_id {
+            recv_session_ids.retain(|id| id == target_id);
+            send_session_ids.retain(|id| id == target_id);
+            if recv_session_ids.is_empty() && send_session_ids.is_empty() {
+                anyhow::bail!("Session {target_id} not found or already completed");
+            }
+        }
 
         if recv_session_ids.is_empty() && send_session_ids.is_empty() {
             println!("No sessions to resume.");

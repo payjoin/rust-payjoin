@@ -128,7 +128,11 @@ pub enum Commands {
     },
     /// Resume pending payjoins (BIP77/v2 only)
     #[cfg(feature = "v2")]
-    Resume,
+    Resume {
+        /// Only resume a specific session
+        #[arg(long = "session-id")]
+        session_id: Option<String>,
+    },
     #[cfg(feature = "v2")]
     /// Show payjoin session history
     History,

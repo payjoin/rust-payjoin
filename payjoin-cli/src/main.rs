@@ -71,8 +71,14 @@ async fn main() -> Result<()> {
             app.receive_payjoin(*amount).await?;
         }
         #[cfg(feature = "v2")]
-        Commands::Resume => {
-            app.resume_payjoins().await?;
+        Commands::Resume { session_id } => {
+            let session_id = match session_id {
+                Some(s) => Some(SessionId(
+                    s.parse().map_err(|e| anyhow::anyhow!("Invalid session ID UUID: {e}"))?,
+                )),
+                None => None,
+            };
+            app.resume_payjoins(session_id).await?;
         }
         #[cfg(feature = "v2")]
         Commands::History => {

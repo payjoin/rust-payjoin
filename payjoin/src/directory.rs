@@ -48,6 +48,24 @@ pub enum ShortIdError {
     IncorrectLength(std::array::TryFromSliceError),
 }
 
+impl std::fmt::Display for ShortIdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ShortIdError::DecodeBech32(e) => write!(f, "Failed to decode short ID: {e}"),
+            ShortIdError::IncorrectLength(e) => write!(f, "Short ID has an incorrect length: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for ShortIdError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ShortIdError::DecodeBech32(e) => Some(e),
+            ShortIdError::IncorrectLength(e) => Some(e),
+        }
+    }
+}
+
 impl std::convert::From<bitcoin::hashes::sha256::Hash> for ShortId {
     fn from(h: bitcoin::hashes::sha256::Hash) -> Self {
         bitcoin::hashes::Hash::as_byte_array(&h)[..8]

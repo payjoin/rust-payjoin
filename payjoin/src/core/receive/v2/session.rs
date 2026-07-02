@@ -33,7 +33,7 @@ fn construct_history(
     if !matches!(receiver, ReceiveSession::Closed(_)) {
         let ctx = history.session_context();
         if ctx.expiration.elapsed() {
-            return Err(InternalReplayError::Expired(ctx.expiration).into());
+            return Err(InternalReplayError::Expired(ctx.expiration, history.fallback_tx()).into());
         }
     }
     Ok(history)
@@ -575,7 +575,7 @@ mod tests {
             .expect("in memory persister save should not fail");
         let err = replay_event_log(&persister).expect_err("session should be expired");
         let expected_err: ReplayError<ReceiveSession, SessionEvent> =
-            InternalReplayError::Expired(expiration).into();
+            InternalReplayError::Expired(expiration, None).into();
         assert_eq!(err.to_string(), expected_err.to_string());
 
         let persister = InMemoryAsyncPersister::<SessionEvent>::default();
@@ -585,7 +585,7 @@ mod tests {
             .expect("in memory async persister save should not fail");
         let err = replay_event_log_async(&persister).await.expect_err("session should be expired");
         let expected_err: ReplayError<ReceiveSession, SessionEvent> =
-            InternalReplayError::Expired(expiration).into();
+            InternalReplayError::Expired(expiration, None).into();
         assert_eq!(err.to_string(), expected_err.to_string());
     }
 

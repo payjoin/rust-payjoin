@@ -30,7 +30,11 @@ fn construct_history(
     if !matches!(sender, SendSession::Closed(_)) {
         let pj_param = history.pj_param();
         if pj_param.expiration().elapsed() {
-            return Err(InternalReplayError::Expired(pj_param.expiration()).into());
+            return Err(InternalReplayError::Expired(
+                pj_param.expiration(),
+                Some(history.fallback_tx()),
+            )
+            .into());
         }
     }
     Ok(history)

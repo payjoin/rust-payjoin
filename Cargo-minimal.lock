@@ -257,6 +257,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "asmap"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "996e3818c450a9497e2f1aff7306d1c56b4198a07880222ee0aa85b6c42ac81f"
+
+[[package]]
 name = "asn1-rs"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2782,6 +2788,7 @@ version = "0.2.0"
 dependencies = [
  "ahash",
  "anyhow",
+ "asmap",
  "async-trait",
  "bitcoind-async-client",
  "clap 4.5.45",

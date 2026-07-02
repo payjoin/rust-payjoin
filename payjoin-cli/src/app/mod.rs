@@ -73,28 +73,28 @@ pub trait App: Send + Sync {
     }
 }
 
-#[cfg(feature = "_manual-tls")]
+#[cfg(feature = "v1")]
 fn http_agent(config: &Config) -> Result<reqwest::Client> {
-    Ok(http_agent_builder(config.root_certificate.as_ref())?.build()?)
+    Ok(http_client_builder(config)?.build()?)
 }
 
-#[cfg(not(feature = "_manual-tls"))]
-fn http_agent(_config: &Config) -> Result<reqwest::Client> {
-    Ok(reqwest::Client::builder().http1_only().build()?)
-}
-
-#[cfg(feature = "_manual-tls")]
-fn http_agent_builder(
-    root_cert_path: Option<&std::path::PathBuf>,
-) -> Result<reqwest::ClientBuilder> {
-    let mut builder = reqwest::ClientBuilder::new().use_rustls_tls().http1_only();
-
-    if let Some(root_cert_path) = root_cert_path {
-        let cert_der = std::fs::read(root_cert_path)?;
-        builder =
-            builder.add_root_certificate(reqwest::tls::Certificate::from_der(cert_der.as_slice())?)
+pub(crate) fn http_client_builder(config: &Config) -> Result<reqwest::ClientBuilder> {
+    #[cfg(feature = "_manual-tls")]
+    {
+        let mut builder = reqwest::ClientBuilder::new().use_rustls_tls().http1_only();
+        if let Some(root_cert_path) = config.root_certificate.as_ref() {
+            let cert_der = std::fs::read(root_cert_path)?;
+            builder = builder
+                .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der.as_slice())?);
+        }
+        Ok(builder)
     }
-    Ok(builder)
+
+    #[cfg(not(feature = "_manual-tls"))]
+    {
+        let _ = config;
+        Ok(reqwest::Client::builder().http1_only())
+    }
 }
 
 async fn handle_interrupt(tx: watch::Sender<()>) {

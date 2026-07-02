@@ -4,6 +4,7 @@ src/*.cs
 # Build outputs
 bin/
 obj/
+artifacts/
 
 # IDE
 .vs/

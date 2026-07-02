@@ -50,7 +50,19 @@ if ($payjoinFfiFeatures) {
     $generatorFeatures = "csharp"
 }
 
-Invoke-Native cargo build --features $generatorFeatures --profile dev -j2
+if ($env:PAYJOIN_FFI_PROFILE) {
+    $payjoinFfiProfile = $env:PAYJOIN_FFI_PROFILE
+} else {
+    $payjoinFfiProfile = "dev"
+}
+
+if ($payjoinFfiProfile -eq "dev") {
+    $targetProfileDir = "debug"
+} else {
+    $targetProfileDir = $payjoinFfiProfile
+}
+
+Invoke-Native cargo build --features $generatorFeatures --profile $payjoinFfiProfile -j2
 
 Write-Host "Cleaning csharp/src/ directory..."
 New-Item -ItemType Directory -Force -Path "csharp/src" | Out-Null
@@ -59,7 +71,7 @@ Get-ChildItem "csharp/src" -Filter "*.cs" -ErrorAction SilentlyContinue | Remove
 $previousUniffiLanguage = $env:UNIFFI_BINDGEN_LANGUAGE
 $env:UNIFFI_BINDGEN_LANGUAGE = "csharp"
 try {
-    Invoke-Native cargo run --features $generatorFeatures --profile dev --bin uniffi-bindgen '--' --library "../target/debug/$libName" --out-dir "csharp/src/"
+    Invoke-Native cargo run --features $generatorFeatures --profile dev --bin uniffi-bindgen '--' --library "../target/$targetProfileDir/$libName" --out-dir "csharp/src/"
 }
 finally {
     if ($null -eq $previousUniffiLanguage) {
@@ -71,6 +83,6 @@ finally {
 
 Write-Host "Copying native library..."
 New-Item -ItemType Directory -Force -Path "csharp/lib" | Out-Null
-Copy-Item "../target/debug/$libName" "csharp/lib/$libName" -Force
+Copy-Item "../target/$targetProfileDir/$libName" "csharp/lib/$libName" -Force
 
 Write-Host "All done!"

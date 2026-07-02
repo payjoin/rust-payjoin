@@ -1,10 +1,50 @@
 # Payjoin C# Bindings
 
-Welcome to the C# language bindings for the [Payjoin Dev Kit](https://payjoindevkit.org/)!
+C# bindings for the [Payjoin Dev Kit](https://payjoindevkit.org/), generated from
+`payjoin-ffi` with UniFFI.
 
-## Running Tests
+The NuGet package is still prepared as a preview while the C# API stabilizes. The
+first release-ready package layout targets .NET 10 and ships a managed
+`Payjoin.dll` plus RID-specific native `payjoin_ffi` libraries.
 
-Follow these steps to clone the repository and run the tests.
+## Install
+
+```shell
+dotnet add package Payjoin --prerelease
+```
+
+## Requirements
+
+- .NET 10.0 or higher
+- A supported RID native asset in the package
+
+The first preview release matrix is:
+
+| OS                  | RID           | Native library         |
+| ------------------- | ------------- | ---------------------- |
+| Linux arm64         | `linux-arm64` | `libpayjoin_ffi.so`    |
+| Linux x64           | `linux-x64`   | `libpayjoin_ffi.so`    |
+| macOS Apple Silicon | `osx-arm64`   | `libpayjoin_ffi.dylib` |
+| macOS x64           | `osx-x64`     | `libpayjoin_ffi.dylib` |
+| Windows arm64       | `win-arm64`   | `payjoin_ffi.dll`      |
+| Windows x64         | `win-x64`     | `payjoin_ffi.dll`      |
+
+The package follows the .NET native asset layout:
+
+- `ref/net10.0/Payjoin.dll`
+- `runtimes/any/lib/net10.0/Payjoin.dll`
+- `runtimes/{rid}/native/{native-library}`
+
+## Minimal Usage
+
+```csharp
+var uri = Payjoin.Url.Parse(
+    "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao");
+
+Console.WriteLine(uri.AsString());
+```
+
+## Development
 
 With nix, the C# development shell provides the Rust toolchain and .NET 10 SDK:
 
@@ -12,91 +52,63 @@ With nix, the C# development shell provides the Rust toolchain and .NET 10 SDK:
 nix develop .#csharp -c bash payjoin-ffi/csharp/contrib/test.sh
 ```
 
+Without nix, a Rust toolchain (MSRV: 1.85.0 for this repository) and the .NET 10
+SDK are required:
+
 ```shell
 git clone https://github.com/payjoin/rust-payjoin.git
 cd rust-payjoin/payjoin-ffi/csharp
 
-# Generate the bindings
 bash ./scripts/generate_bindings.sh
-
-# Build the project
-dotnet build
-
-# Run all tests
-dotnet test
+dotnet build Payjoin.Tests.csproj
+dotnet test Payjoin.Tests.csproj
 ```
 
-### Windows (PowerShell)
+### Windows
 
 ```powershell
 git clone https://github.com/payjoin/rust-payjoin.git
 cd rust-payjoin/payjoin-ffi/csharp
 
-# Generate the bindings
 powershell -ExecutionPolicy Bypass -File .\scripts\generate_bindings.ps1
-
-# Build the project
-dotnet build
-
-# Run all tests
-dotnet test
+dotnet build Payjoin.Tests.csproj
+dotnet test Payjoin.Tests.csproj
 ```
 
-### Windows (Git Bash / MSYS)
+Generation uses the Cargo-managed C# generator pinned in `payjoin-ffi/Cargo.toml`.
+By default, development generation enables `_test-utils` to keep parity with the
+test suite. Set `PAYJOIN_FFI_FEATURES` to an empty value for production bindings.
+
+## Packaging
+
+Build the release native asset for the current host RID:
 
 ```shell
-git clone https://github.com/payjoin/rust-payjoin.git
-cd rust-payjoin/payjoin-ffi/csharp
-bash ./scripts/generate_bindings.sh
-dotnet build
-dotnet test
+PAYJOIN_FFI_FEATURES= bash ./scripts/build_nuget_native.sh
 ```
 
-## Requirements
+On Windows:
 
-- .NET 10.0 or higher
-- Rust toolchain (MSRV: 1.85.0 for this repository)
-- Cargo will fetch the C# generator from `chavic/uniffi-bindgen-cs` at commit `878a3d269eacce64beadcd336ade0b7c8da09824` (pinned in `payjoin-ffi/Cargo.toml`)
+```powershell
+$env:PAYJOIN_FFI_FEATURES = ""
+powershell -ExecutionPolicy Bypass -File .\scripts\build_nuget_native.ps1
+```
 
-## Configuration
-
-Generation uses the Cargo-managed C# generator from `payjoin-ffi/Cargo.toml`.
-
-By default, generation builds `payjoin-ffi` with `_test-utils` enabled to keep parity with other language test scripts. Override via `PAYJOIN_FFI_FEATURES`.
-
-### Unix shells
+To pack, gather every supported RID under `artifacts/runtimes/{rid}/native/`,
+generate production bindings, and run:
 
 ```shell
-export PAYJOIN_FFI_FEATURES=_test-utils     # default behavior
-# export PAYJOIN_FFI_FEATURES=""            # build without extra features
-bash ./scripts/generate_bindings.sh
+PAYJOIN_FFI_FEATURES= PAYJOIN_FFI_PROFILE=release bash ./scripts/generate_bindings.sh
+dotnet pack Payjoin.csproj --configuration Release --output artifacts/packages
 ```
 
-### PowerShell
+Validate the package in a clean sample app:
 
-```powershell
-$env:PAYJOIN_FFI_FEATURES = "_test-utils"   # default behavior
-# $env:PAYJOIN_FFI_FEATURES = ""            # build without extra features
-powershell -ExecutionPolicy Bypass -File .\scripts\generate_bindings.ps1
-dotnet build
+```shell
+bash ./scripts/smoke_nuget_package.sh artifacts/packages 0.24.0-preview.1 linux-x64
 ```
 
-## NuGet Packaging (Draft)
-
-`Payjoin.nuspec` is included for packaging the generated C# source plus native library artifacts.
-
-Before packing, make sure generation has produced:
-
-- `src/payjoin.cs`
-- `lib/*` (native library for the current platform)
-
-Note: this packs the native library currently present in `lib/`. For a cross-platform package, build and include native artifacts from each target platform in CI before publishing.
-
-Example:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\generate_bindings.ps1
-nuget pack .\Payjoin.nuspec -Version 0.24.0
-```
-
-If `nuget` is not installed, install NuGet.CommandLine first (for example via `dotnet tool` or your package manager).
+CI performs the package build from release native assets and runs the smoke test
+on each supported RID before publishing should be considered. The maintainer
+release and publish workflow is documented in
+[`RELEASING.md`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/RELEASING.md).

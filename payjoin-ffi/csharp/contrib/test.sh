@@ -7,4 +7,4 @@ echo "==> Generating FFI bindings..."
 bash ./scripts/generate_bindings.sh
 
 echo "==> Running C# tests..."
-dotnet test --logger "console;verbosity=minimal"
+dotnet test Payjoin.Tests.csproj --logger "console;verbosity=minimal"

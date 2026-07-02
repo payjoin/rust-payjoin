@@ -60,4 +60,147 @@ jobs:
         run: ./scripts/generate_bindings.ps1
 
       - name: Run tests
-        run: dotnet test --logger "console;verbosity=minimal"
+        run: dotnet test Payjoin.Tests.csproj --logger "console;verbosity=minimal"
+
+  build-nuget-native:
+    name: "Build NuGet native asset"
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTUP_TOOLCHAIN: 1.85
+    defaults:
+      run:
+        working-directory: payjoin-ffi/csharp
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: macos-15-intel
+            rid: osx-x64
+          - os: windows-11-arm
+            rid: win-arm64
+          - os: windows-latest
+            rid: win-x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust 1.85.0
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Use cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release native asset (unix)
+        if: "!startsWith(matrix.os, 'windows')"
+        run: |
+          PAYJOIN_FFI_RID=${{ matrix.rid }} bash ./scripts/build_nuget_native.sh
+
+      - name: Build release native asset (windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: |
+          $env:PAYJOIN_FFI_RID = "${{ matrix.rid }}"
+          ./scripts/build_nuget_native.ps1
+
+      - name: Upload NuGet native asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: payjoin-ffi/csharp/artifacts/runtimes/${{ matrix.rid }}/native/*
+          if-no-files-found: error
+
+  pack-nuget:
+    name: "Pack C# NuGet package"
+    runs-on: ubuntu-latest
+    needs: build-nuget-native
+    env:
+      RUSTUP_TOOLCHAIN: 1.85
+    defaults:
+      run:
+        working-directory: payjoin-ffi/csharp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust 1.85.0
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Use cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Download native assets
+        uses: actions/download-artifact@v4
+        with:
+          path: payjoin-ffi/csharp/artifacts/downloaded
+
+      - name: Assemble RID assets
+        run: |
+          for rid in linux-arm64 linux-x64 osx-arm64 osx-x64 win-arm64 win-x64; do
+            mkdir -p "artifacts/runtimes/$rid/native"
+            cp "artifacts/downloaded/$rid"/* "artifacts/runtimes/$rid/native/"
+          done
+
+      - name: Generate production bindings
+        run: |
+          PAYJOIN_FFI_FEATURES= PAYJOIN_FFI_PROFILE=release bash ./scripts/generate_bindings.sh
+
+      - name: Pack NuGet package
+        run: dotnet pack Payjoin.csproj --configuration Release --output artifacts/packages
+
+      - name: Upload NuGet package
+        uses: actions/upload-artifact@v4
+        with:
+          name: payjoin-csharp-nuget-package
+          path: payjoin-ffi/csharp/artifacts/packages/*.nupkg
+          if-no-files-found: error
+
+  smoke-nuget:
+    name: "Smoke test C# NuGet package"
+    runs-on: ${{ matrix.os }}
+    needs: pack-nuget
+    defaults:
+      run:
+        working-directory: payjoin-ffi/csharp
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: macos-15-intel
+            rid: osx-x64
+          - os: windows-11-arm
+            rid: win-arm64
+          - os: windows-latest
+            rid: win-x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Download NuGet package
+        uses: actions/download-artifact@v4
+        with:
+          name: payjoin-csharp-nuget-package
+          path: payjoin-ffi/csharp/artifacts/packages
+
+      - name: Run package smoke test
+        shell: bash
+        run: bash ./scripts/smoke_nuget_package.sh artifacts/packages 0.24.0-preview.1 ${{ matrix.rid }}

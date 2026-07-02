@@ -2,7 +2,7 @@ import os
 import sys
 import httpx
 import json
-from typing import cast, Protocol, Any
+from typing import cast, Protocol, Any, Literal
 
 from payjoin import *
 from payjoin.http import fetch_ohttp_keys
@@ -20,6 +20,9 @@ from .utils import InMemoryReceiverPersister, InMemorySenderPersister
 
 class HasInner(Protocol):
     inner: Any
+
+
+TransitionMode = Literal["callback", "nonblocking"]
 
 
 class TestPayjoin(unittest.IsolatedAsyncioTestCase):
@@ -92,12 +95,14 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         receiver: ReceiveSession,
         recv_persister: InMemoryReceiverPersister,
         ohttp_relay: str,
+        mode: TransitionMode,
     ) -> Optional[ReceiveSession.PAYJOIN_PROPOSAL]:
         if receiver.is_INITIALIZED():
             res = await self.retrieve_receiver_proposal(
                 cast(ReceiveSession.INITIALIZED, receiver).inner,
                 recv_persister,
                 ohttp_relay,
+                mode,
             )
             if res is None:
                 return None
@@ -107,35 +112,49 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             return await self.process_unchecked_proposal(
                 cast(ReceiveSession.UNCHECKED_ORIGINAL_PAYLOAD, receiver).inner,
                 recv_persister,
+                mode,
             )
         if receiver.is_MAYBE_INPUTS_OWNED():
             return await self.process_maybe_inputs_owned(
-                cast(ReceiveSession.MAYBE_INPUTS_OWNED, receiver).inner, recv_persister
+                cast(ReceiveSession.MAYBE_INPUTS_OWNED, receiver).inner,
+                recv_persister,
+                mode,
             )
         if receiver.is_MAYBE_INPUTS_SEEN():
             return await self.process_maybe_inputs_seen(
-                cast(ReceiveSession.MAYBE_INPUTS_SEEN, receiver).inner, recv_persister
+                cast(ReceiveSession.MAYBE_INPUTS_SEEN, receiver).inner,
+                recv_persister,
+                mode,
             )
         if receiver.is_OUTPUTS_UNKNOWN():
             return await self.process_outputs_unknown(
-                cast(ReceiveSession.OUTPUTS_UNKNOWN, receiver).inner, recv_persister
+                cast(ReceiveSession.OUTPUTS_UNKNOWN, receiver).inner,
+                recv_persister,
+                mode,
             )
         if receiver.is_WANTS_OUTPUTS():
             return await self.process_wants_outputs(
-                cast(ReceiveSession.WANTS_OUTPUTS, receiver).inner, recv_persister
+                cast(ReceiveSession.WANTS_OUTPUTS, receiver).inner,
+                recv_persister,
+                mode,
             )
         if receiver.is_WANTS_INPUTS():
             return await self.process_wants_inputs(
-                cast(ReceiveSession.WANTS_INPUTS, receiver).inner, recv_persister
+                cast(ReceiveSession.WANTS_INPUTS, receiver).inner,
+                recv_persister,
+                mode,
             )
         if receiver.is_WANTS_FEE_RANGE():
             return await self.process_wants_fee_range(
-                cast(ReceiveSession.WANTS_FEE_RANGE, receiver).inner, recv_persister
+                cast(ReceiveSession.WANTS_FEE_RANGE, receiver).inner,
+                recv_persister,
+                mode,
             )
         if receiver.is_PROVISIONAL_PROPOSAL():
             return await self.process_provisional_proposal(
                 cast(ReceiveSession.PROVISIONAL_PROPOSAL, receiver).inner,
                 recv_persister,
+                mode,
             )
         if receiver.is_PAYJOIN_PROPOSAL():
             return cast(ReceiveSession.PAYJOIN_PROPOSAL, receiver)
@@ -161,6 +180,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         receiver: Initialized,
         recv_persister: InMemoryReceiverPersister,
         ohttp_relay: str,
+        mode: TransitionMode,
     ):
         agent = httpx.AsyncClient()
         request: RequestResponse = receiver.create_poll_request(ohttp_relay)
@@ -175,80 +195,155 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         if res.is_STASIS():
             return None
         return await self.process_unchecked_proposal(
-            cast(ReceiveSession.UNCHECKED_ORIGINAL_PAYLOAD, res).inner, recv_persister
+            cast(ReceiveSession.UNCHECKED_ORIGINAL_PAYLOAD, res).inner,
+            recv_persister,
+            mode,
         )
 
     async def process_unchecked_proposal(
         self,
         proposal: UncheckedOriginalPayload,
         recv_persister: InMemoryReceiverPersister,
+        mode: TransitionMode,
     ):
-        receiver = proposal.check_broadcast_suitability(
-            None, MempoolAcceptanceCallback(self.receiver)
-        ).save(recv_persister)
-        return await self.process_maybe_inputs_owned(receiver, recv_persister)
+        if mode == "callback":
+            receiver = proposal.check_broadcast_suitability(
+                None, MempoolAcceptanceCallback(self.receiver)
+            ).save(recv_persister)
+        else:
+            can_broadcast = MempoolAcceptanceCallback(self.receiver).callback(
+                proposal.extract_tx_to_check_broadcast_suitability()
+            )
+            receiver = proposal.apply_broadcast_suitability(None, can_broadcast).save(
+                recv_persister
+            )
+        return await self.process_maybe_inputs_owned(receiver, recv_persister, mode)
 
     async def process_maybe_inputs_owned(
         self,
         proposal: MaybeInputsOwned,
         recv_persister: InMemoryReceiverPersister,
+        mode: TransitionMode,
     ):
-        maybe_inputs_owned = proposal.check_inputs_not_owned(
-            IsScriptOwnedCallback(self.receiver)
-        ).save(recv_persister)
-        return await self.process_maybe_inputs_seen(maybe_inputs_owned, recv_persister)
+        if mode == "callback":
+            maybe_inputs_owned = proposal.check_inputs_not_owned(
+                IsScriptOwnedCallback(self.receiver)
+            ).save(recv_persister)
+        else:
+            marked_checklist = [
+                item.mark(IsScriptOwnedCallback(self.receiver).callback(item.value()))
+                for item in proposal.inputs_owned_checklist()
+            ]
+            maybe_inputs_owned = proposal.apply_inputs_owned_checklist(
+                marked_checklist
+            ).save(recv_persister)
+        return await self.process_maybe_inputs_seen(
+            maybe_inputs_owned, recv_persister, mode
+        )
 
     async def process_maybe_inputs_seen(
-        self, proposal: MaybeInputsSeen, recv_persister: InMemoryReceiverPersister
+        self,
+        proposal: MaybeInputsSeen,
+        recv_persister: InMemoryReceiverPersister,
+        mode: TransitionMode,
     ):
-        outputs_unknown = proposal.check_no_inputs_seen_before(
-            CheckInputsNotSeenCallback(self.receiver)
-        ).save(recv_persister)
-        return await self.process_outputs_unknown(outputs_unknown, recv_persister)
+        if mode == "callback":
+            outputs_unknown = proposal.check_no_inputs_seen_before(
+                CheckInputsNotSeenCallback(self.receiver)
+            ).save(recv_persister)
+        else:
+            marked_checklist = [
+                item.mark(
+                    CheckInputsNotSeenCallback(self.receiver).callback(item.value())
+                )
+                for item in proposal.inputs_seen_checklist()
+            ]
+            outputs_unknown = proposal.apply_inputs_seen_checklist(
+                marked_checklist
+            ).save(recv_persister)
+        return await self.process_outputs_unknown(outputs_unknown, recv_persister, mode)
 
     async def process_outputs_unknown(
-        self, proposal: OutputsUnknown, recv_persister: InMemoryReceiverPersister
+        self,
+        proposal: OutputsUnknown,
+        recv_persister: InMemoryReceiverPersister,
+        mode: TransitionMode,
     ):
-        wants_outputs = proposal.identify_receiver_outputs(
-            IsScriptOwnedCallback(self.receiver)
-        ).save(recv_persister)
-        return await self.process_wants_outputs(wants_outputs, recv_persister)
+        if mode == "callback":
+            wants_outputs = proposal.identify_receiver_outputs(
+                IsScriptOwnedCallback(self.receiver)
+            ).save(recv_persister)
+        else:
+            marked_checklist = [
+                item.mark(IsScriptOwnedCallback(self.receiver).callback(item.value()))
+                for item in proposal.outputs_owned_checklist()
+            ]
+            wants_outputs = proposal.apply_outputs_owned_checklist(
+                marked_checklist
+            ).save(recv_persister)
+        return await self.process_wants_outputs(wants_outputs, recv_persister, mode)
 
     async def process_wants_outputs(
-        self, proposal: WantsOutputs, recv_persister: InMemoryReceiverPersister
+        self,
+        proposal: WantsOutputs,
+        recv_persister: InMemoryReceiverPersister,
+        mode: TransitionMode,
     ):
         wants_inputs = proposal.commit_outputs().save(recv_persister)
-        return await self.process_wants_inputs(wants_inputs, recv_persister)
+        return await self.process_wants_inputs(wants_inputs, recv_persister, mode)
 
     async def process_wants_inputs(
-        self, proposal: WantsInputs, recv_persister: InMemoryReceiverPersister
+        self,
+        proposal: WantsInputs,
+        recv_persister: InMemoryReceiverPersister,
+        mode: TransitionMode,
     ):
         provisional_proposal = (
             proposal.contribute_inputs(get_inputs(self.receiver))
             .commit_inputs()
             .save(recv_persister)
         )
-        return await self.process_wants_fee_range(provisional_proposal, recv_persister)
+        return await self.process_wants_fee_range(
+            provisional_proposal, recv_persister, mode
+        )
 
     async def process_wants_fee_range(
-        self, proposal: WantsFeeRange, recv_persister: InMemoryReceiverPersister
+        self,
+        proposal: WantsFeeRange,
+        recv_persister: InMemoryReceiverPersister,
+        mode: TransitionMode,
     ):
         provisional_proposal = proposal.apply_fee_range(1, 10).save(recv_persister)
         return await self.process_provisional_proposal(
-            provisional_proposal, recv_persister
+            provisional_proposal, recv_persister, mode
         )
 
     async def process_provisional_proposal(
         self,
         proposal: ProvisionalProposal,
         recv_persister: InMemoryReceiverPersister,
+        mode: TransitionMode,
     ):
-        payjoin_proposal = proposal.finalize_proposal(
-            ProcessPsbtCallback(self.receiver)
-        ).save(recv_persister)
+        if mode == "callback":
+            payjoin_proposal = proposal.finalize_proposal(
+                ProcessPsbtCallback(self.receiver)
+            ).save(recv_persister)
+        else:
+            signed_psbt = ProcessPsbtCallback(self.receiver).callback(
+                proposal.psbt_to_sign()
+            )
+            payjoin_proposal = proposal.finalize_signed_proposal(signed_psbt).save(
+                recv_persister
+            )
         return ReceiveSession.PAYJOIN_PROPOSAL(payjoin_proposal)
 
-    async def test_integration_v2_to_v2(self):
+    def setUp(self):
+        sender_address = json.loads(self.sender.call("getnewaddress", []))
+        self.sender.call(
+            "generatetoaddress", [json.dumps(101), json.dumps(sender_address)]
+        )
+
+    async def _run_integration_v2_to_v2(self, mode: TransitionMode):
         try:
             receiver_address = json.loads(self.receiver.call("getnewaddress", []))
             init_tracing()
@@ -271,6 +366,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
                 cast(ReceiveSession, ReceiveSession.INITIALIZED(session)),
                 recv_persister,
                 ohttp_relay,
+                mode,
             )
             self.assertIsNone(process_response)
 
@@ -305,6 +401,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
                 cast(ReceiveSession, ReceiveSession.INITIALIZED(session)),
                 recv_persister,
                 ohttp_relay,
+                mode,
             )
             self.assertIsNotNone(payjoin_proposal)
             self.assertEqual(
@@ -384,6 +481,12 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         except Exception as e:
             print("Caught:", e)
             raise
+
+    async def test_integration_v2_to_v2_callback(self):
+        await self._run_integration_v2_to_v2("callback")
+
+    async def test_integration_v2_to_v2_nonblocking(self):
+        await self._run_integration_v2_to_v2("nonblocking")
 
 
 def build_sweep_psbt(sender: RpcClient, pj_uri: PjUri) -> str:

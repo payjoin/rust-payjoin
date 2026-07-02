@@ -13,7 +13,7 @@ use hyper_util::rt::TokioIo;
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v1::{PayjoinProposal, UncheckedOriginalPayload};
-use payjoin::receive::Error;
+use payjoin::receive::{mark_checklist, Error};
 use payjoin::send::v1::SenderBuilder;
 use payjoin::{ImplementationError, IntoUrl, Uri, UriExt};
 use tokio::net::TcpListener;
@@ -348,33 +348,38 @@ impl App {
         let wallet = self.wallet();
 
         // Receive Check 1: Can Broadcast
-        let proposal = proposal.check_broadcast_suitability(None, |tx| {
-            wallet
-                .can_broadcast(tx)
-                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-        })?;
+        let is_broadcast_suitable = wallet
+            .can_broadcast(&proposal.extract_tx_to_check_broadcast_suitability())
+            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+        let proposal = proposal.apply_broadcast_suitability(None, is_broadcast_suitable)?;
         tracing::trace!("check1");
 
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // Receive Check 2: receiver can't sign for proposal inputs
-        let proposal = proposal.check_inputs_not_owned(&mut |input| {
+        let checklist = proposal.inputs_owned_checklist()?;
+        let marked_checklist = mark_checklist(checklist, &mut |input| {
             wallet.is_mine(input).map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
         })?;
+        let proposal = proposal.apply_inputs_owned_checklist(marked_checklist)?;
         tracing::trace!("check2");
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
-        let payjoin = proposal.check_no_inputs_seen_before(&mut |input| {
+        let checklist = proposal.inputs_seen_checklist();
+        let marked_checklist = mark_checklist(checklist, &mut |input| {
             Ok(self.db.insert_input_seen_before(*input)?)
         })?;
+        let payjoin = proposal.apply_inputs_seen_checklist(marked_checklist)?;
         tracing::trace!("check3");
 
-        let payjoin = payjoin.identify_receiver_outputs(&mut |output_script| {
+        let checklist = payjoin.outputs_owned_checklist();
+        let marked_checklist = mark_checklist(checklist, &mut |output_script| {
             wallet
                 .is_mine(output_script)
                 .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
         })?;
+        let payjoin = payjoin.apply_outputs_owned_checklist(marked_checklist)?;
 
         let payjoin = payjoin
             .substitute_receiver_script(
@@ -394,11 +399,12 @@ impl App {
         let provisional_payjoin =
             wants_fee_range.apply_fee_range(None, self.config.max_fee_rate)?;
 
-        let payjoin_proposal = provisional_payjoin.finalize_proposal(|psbt| {
-            self.wallet
-                .process_psbt(psbt)
-                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-        })?;
+        let psbt = provisional_payjoin.psbt_to_sign();
+        let signed_psbt = self
+            .wallet
+            .process_psbt(&psbt)
+            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+        let payjoin_proposal = provisional_payjoin.finalize_signed_proposal(&signed_psbt)?;
         Ok(payjoin_proposal)
     }
 }

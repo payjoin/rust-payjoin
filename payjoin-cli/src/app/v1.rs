@@ -119,7 +119,7 @@ impl AppTrait for App {
     }
 
     #[cfg(feature = "v2")]
-    async fn resume_payjoins(&self) -> Result<()> {
+    async fn resume_payjoins(&self, _session_id: Option<crate::db::v2::SessionId>) -> Result<()> {
         unimplemented!("resume_payjoins not implemented for v1");
     }
 

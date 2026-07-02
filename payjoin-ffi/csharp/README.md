@@ -109,4 +109,6 @@ bash ./scripts/smoke_nuget_package.sh artifacts/packages 0.24.0-preview.1 linux-
 ```
 
 CI performs the package build from release native assets and runs the smoke test
-on each supported RID before publishing should be considered.
+on each supported RID before publishing should be considered. The maintainer
+release and publish workflow is documented in
+[`RELEASING.md`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/RELEASING.md).

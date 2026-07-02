@@ -272,6 +272,7 @@ impl<S: State> Sender<S> {
 /// This provides type erasure for the send session state, allowing the session to be replayed
 /// and the state to be updated with the next event over a uniform interface.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SendSession {
     WithReplyKey(Sender<WithReplyKey>),
     PollingForProposal(Sender<PollingForProposal>),

@@ -21,6 +21,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 ///   and to match the expected wire format.
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Version {
     /// BIP 78 Payjoin
     One = 1,

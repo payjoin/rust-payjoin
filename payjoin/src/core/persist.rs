@@ -557,6 +557,7 @@ impl<Event, T> TerminalTransition<Event, T> {
 
 /// A transition that can result in a succession completion, fatal error, or transient error.
 /// The transition can also result in no state change.
+#[non_exhaustive]
 pub enum MaybeFatalOrSuccessTransition<Event, CurrentState, Err> {
     Success(Event),
     NoResults(CurrentState),
@@ -651,6 +652,7 @@ enum MaybeTerminalSuccessOutcome<Event, NextState, Err> {
 }
 
 /// Wrapper that represents either a successful state transition or indicates no state change occurred
+#[non_exhaustive]
 pub enum AcceptOptionalTransition<Event, NextState, CurrentState> {
     /// A state transition that was successful and returned session event to be persisted
     Success(AcceptNextState<Event, NextState>),
@@ -659,6 +661,7 @@ pub enum AcceptOptionalTransition<Event, NextState, CurrentState> {
 }
 
 /// Wrapper representing a fatal or transient rejection of a state transition.
+#[non_exhaustive]
 pub enum Rejection<Event, Err, ErrorState = ()> {
     Fatal(RejectFatal<Event, Err>),
     Transient(RejectTransient<Err>),
@@ -817,6 +820,7 @@ where
 
 /// Represents a state transition that either progresses to a new state or maintains the current state
 #[derive(Debug, PartialEq)]
+#[non_exhaustive]
 pub enum OptionalTransitionOutcome<NextState, CurrentState> {
     /// A successful state transition that returned a next state
     Progress(NextState),

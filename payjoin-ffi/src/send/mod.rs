@@ -191,6 +191,7 @@ impl From<payjoin::send::v2::SendSession> for SendSession {
                 Self::SenderPendingFallback { inner: Arc::new(inner.into()) },
             SendSession::Closed(session_outcome) =>
                 Self::Closed { inner: Arc::new(session_outcome.into()) },
+            _ => unreachable!("unhandled SendSession variant; payjoin-ffi must be updated"),
         }
     }
 }
@@ -589,6 +590,7 @@ impl
                 Self::Progress { psbt_base64: psbt.to_string() },
             payjoin::persist::OptionalTransitionOutcome::Stasis(state) =>
                 Self::Stasis { inner: Arc::new(state.into()) },
+            _ => unreachable!("unhandled transition outcome; payjoin-ffi must be updated"),
         }
     }
 }

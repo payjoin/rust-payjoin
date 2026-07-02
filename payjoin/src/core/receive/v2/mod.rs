@@ -178,10 +178,10 @@ impl ReceiveSession {
             (
                 ReceiveSession::OutputsUnknown(state),
                 SessionEvent::IdentifiedReceiverOutputs(wants_outputs),
-            ) => Ok(state.apply_identified_receiver_outputs(wants_outputs)),
+            ) => state.apply_identified_receiver_outputs(wants_outputs),
 
             (ReceiveSession::WantsOutputs(state), SessionEvent::CommittedOutputs(wants_inputs)) =>
-                Ok(state.apply_committed_outputs(wants_inputs)),
+                state.apply_committed_outputs(wants_inputs),
 
             (
                 ReceiveSession::WantsInputs(state),
@@ -983,11 +983,26 @@ impl Receiver<OutputsUnknown> {
     pub(crate) fn apply_identified_receiver_outputs(
         self,
         owned_vouts: Vec<usize>,
-    ) -> ReceiveSession {
+    ) -> Result<ReceiveSession, ReplayError<ReceiveSession, SessionEvent>> {
+        if owned_vouts.is_empty() {
+            return Err(InternalReplayError::InvalidEventPayload(
+                "IdentifiedReceiverOutputs must include at least one output".to_string(),
+            )
+            .into());
+        }
+
+        let output_count = self.state.original.psbt.unsigned_tx.output.len();
+        if let Some(index) = owned_vouts.iter().find(|&&index| index >= output_count) {
+            return Err(InternalReplayError::InvalidEventPayload(format!(
+                "IdentifiedReceiverOutputs contains output index {index}, but original PSBT has {output_count} outputs"
+            ))
+            .into());
+        }
+
         let inner = common::WantsOutputs::new(self.state.original, owned_vouts);
         let new_state =
             Receiver { state: WantsOutputs { inner }, session_context: self.session_context };
-        ReceiveSession::WantsOutputs(new_state)
+        Ok(ReceiveSession::WantsOutputs(new_state))
     }
 }
 
@@ -1050,7 +1065,20 @@ impl Receiver<WantsOutputs> {
         )
     }
 
-    pub(crate) fn apply_committed_outputs(self, outputs: Vec<TxOut>) -> ReceiveSession {
+    pub(crate) fn apply_committed_outputs(
+        self,
+        outputs: Vec<TxOut>,
+    ) -> Result<ReceiveSession, ReplayError<ReceiveSession, SessionEvent>> {
+        let change_vout = self.inner.change_vout();
+        if change_vout >= outputs.len() {
+            return Err(InternalReplayError::InvalidEventPayload(format!(
+                "CommittedOutputs has {} outputs, but receiver change output index is {}",
+                outputs.len(),
+                change_vout
+            ))
+            .into());
+        }
+
         let mut payjoin_proposal = self.inner.payjoin_psbt.clone();
         let outputs_len = outputs.len();
         // Add the outputs that may have been replaced
@@ -1062,7 +1090,7 @@ impl Receiver<WantsOutputs> {
 
         let new_state =
             Receiver { state: WantsInputs { inner }, session_context: self.session_context };
-        ReceiveSession::WantsInputs(new_state)
+        Ok(ReceiveSession::WantsInputs(new_state))
     }
 }
 

@@ -503,6 +503,62 @@ mod tests {
         assert!(persister.inner.lock().await.is_closed);
     }
 
+    #[test]
+    fn replaying_empty_identified_receiver_outputs_errors() {
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let session_context = SHARED_CONTEXT.clone();
+        let original = original_from_test_vector();
+
+        for event in [
+            SessionEvent::Created(session_context),
+            SessionEvent::RetrievedOriginalPayload { original, reply_key: None },
+            SessionEvent::CheckedBroadcastSuitability(),
+            SessionEvent::CheckedInputsNotOwned(),
+            SessionEvent::CheckedNoInputsSeenBefore(),
+            SessionEvent::IdentifiedReceiverOutputs(vec![]),
+        ] {
+            persister.save_event(event).expect("in memory persister save should not fail");
+        }
+
+        let err = replay_event_log(&persister).expect_err("session replay should fail");
+        let expected_err: ReplayError<ReceiveSession, SessionEvent> =
+            InternalReplayError::InvalidEventPayload(
+                "IdentifiedReceiverOutputs must include at least one output".to_string(),
+            )
+            .into();
+        assert_eq!(err.to_string(), expected_err.to_string());
+        assert!(persister.inner.lock().expect("lock should not be poisoned").is_closed);
+    }
+
+    #[test]
+    fn replaying_committed_outputs_without_change_output_errors() {
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let session_context = SHARED_CONTEXT.clone();
+        let original = original_from_test_vector();
+        let committed_outputs = vec![original.psbt.unsigned_tx.output[0].clone()];
+
+        for event in [
+            SessionEvent::Created(session_context),
+            SessionEvent::RetrievedOriginalPayload { original, reply_key: None },
+            SessionEvent::CheckedBroadcastSuitability(),
+            SessionEvent::CheckedInputsNotOwned(),
+            SessionEvent::CheckedNoInputsSeenBefore(),
+            SessionEvent::IdentifiedReceiverOutputs(vec![1]),
+            SessionEvent::CommittedOutputs(committed_outputs),
+        ] {
+            persister.save_event(event).expect("in memory persister save should not fail");
+        }
+
+        let err = replay_event_log(&persister).expect_err("session replay should fail");
+        let expected_err: ReplayError<ReceiveSession, SessionEvent> =
+            InternalReplayError::InvalidEventPayload(
+                "CommittedOutputs has 1 outputs, but receiver change output index is 1".to_string(),
+            )
+            .into();
+        assert_eq!(err.to_string(), expected_err.to_string());
+        assert!(persister.inner.lock().expect("lock should not be poisoned").is_closed);
+    }
+
     #[tokio::test]
     async fn test_replaying_unchecked_proposal() {
         let session_context = SHARED_CONTEXT.clone();

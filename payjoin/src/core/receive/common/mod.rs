@@ -56,6 +56,8 @@ impl WantsOutputs {
     /// Returns whether the receiver is allowed to substitute original outputs or not.
     pub fn output_substitution(&self) -> OutputSubstitution { self.params.output_substitution }
 
+    pub(super) fn change_vout(&self) -> usize { self.change_vout }
+
     /// Substitute the receiver output script with the provided script.
     pub fn substitute_receiver_script(
         self,
@@ -414,8 +416,14 @@ impl WantsFeeRange {
                 // Find the sender's specified output in the original psbt.
                 // This step is necessary because the sender output may have shifted if new
                 // receiver outputs were added to the payjoin psbt.
+                let output_count = self.original_psbt.unsigned_tx.output.len();
                 let sender_fee_output =
-                    &self.original_psbt.unsigned_tx.output[additional_fee_output_index];
+                    self.original_psbt.unsigned_tx.output.get(additional_fee_output_index).ok_or(
+                        InternalPayloadError::AdditionalFeeOutputIndexOutOfBounds {
+                            index: additional_fee_output_index,
+                            output_count,
+                        },
+                    )?;
                 // Find the index of that output in the payjoin psbt
                 let sender_fee_vout = payjoin_psbt
                     .unsigned_tx
@@ -507,7 +515,9 @@ mod tests {
         Amount, Network, OutPoint, PubkeyHash, ScriptBuf, Sequence, TapLeafHash, TapNodeHash,
         Transaction, TxIn, TxOut, Weight, Witness,
     };
-    use payjoin_test_utils::{DUMMY20, RECEIVER_INPUT_CONTRIBUTION};
+    use payjoin_test_utils::{
+        DUMMY20, MAX_ADDITIONAL_FEE_CONTRIBUTION, RECEIVER_INPUT_CONTRIBUTION,
+    };
 
     use super::*;
     use crate::receive::tests::original_from_test_vector;
@@ -782,6 +792,31 @@ mod tests {
             _ => panic!(
                 "Payjoin exceeds receiver fee preference and should error or unexpected error type"
             ),
+        }
+    }
+
+    #[test]
+    fn additional_fee_output_index_out_of_bounds_errors() {
+        let mut original = original_from_test_vector();
+        let expected_output_count = original.psbt.unsigned_tx.output.len();
+        original.params.additional_fee_contribution =
+            Some((MAX_ADDITIONAL_FEE_CONTRIBUTION, expected_output_count));
+
+        let payjoin = WantsOutputs::new(original, vec![1])
+            .commit_outputs()
+            .contribute_inputs([candidate_input_from_test_vector(Amount::from_sat(100_000))])
+            .expect("receiver input contribution should succeed")
+            .commit_inputs();
+
+        let err = payjoin
+            .calculate_psbt_with_fee_range(None, Some(FeeRate::from_sat_per_vb_u32(1000)))
+            .expect_err("out-of-bounds additional fee output index should error");
+        match err {
+            InternalPayloadError::AdditionalFeeOutputIndexOutOfBounds { index, output_count } => {
+                assert_eq!(index, expected_output_count);
+                assert_eq!(output_count, expected_output_count);
+            }
+            _ => panic!("Expected AdditionalFeeOutputIndexOutOfBounds error, got: {err:?}"),
         }
     }
 

@@ -297,6 +297,7 @@ impl From<payjoin::receive::v2::ReceiveSession> for ReceiveSession {
                 Self::ReceiverPendingFallback { inner: Arc::new(inner.into()) },
             ReceiveSession::Closed(session_outcome) =>
                 Self::Closed { inner: Arc::new(session_outcome.into()) },
+            _ => unreachable!("unhandled ReceiveSession variant; payjoin-ffi must be updated"),
         }
     }
 }
@@ -673,6 +674,7 @@ impl
                 Self::Progress { inner: Arc::new(payload.into()) },
             payjoin::persist::OptionalTransitionOutcome::Stasis(state) =>
                 Self::Stasis { inner: Arc::new(state.into()) },
+            _ => unreachable!("unhandled transition outcome; payjoin-ffi must be updated"),
         }
     }
 }

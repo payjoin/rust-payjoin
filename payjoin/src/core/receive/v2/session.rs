@@ -180,6 +180,7 @@ impl SessionHistory {
 // Represents the status of a session that can be inferred from the information in the session
 // event log.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SessionStatus {
     Active,
     Expired,
@@ -192,6 +193,7 @@ pub enum SessionStatus {
 /// Represents a piece of information that the receiver has obtained from the session
 /// Each event can be used to transition the receiver state machine to a new state
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SessionEvent {
     Created(SessionContext),
     RetrievedOriginalPayload { original: OriginalPayload, reply_key: Option<crate::HpkePublicKey> },
@@ -212,6 +214,7 @@ pub enum SessionEvent {
 
 /// Represents all possible outcomes for a closed Payjoin session
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SessionOutcome {
     /// Payjoin completed successfully
     Success(Vec<(bitcoin::ScriptBuf, bitcoin::Witness)>),

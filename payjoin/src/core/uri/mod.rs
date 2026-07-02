@@ -77,6 +77,7 @@ impl std::fmt::Display for PjParam {
 
 #[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
+#[non_exhaustive]
 pub enum MaybePayjoinExtras {
     Supported(PayjoinExtras),
     Unsupported,

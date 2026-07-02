@@ -143,6 +143,7 @@ impl<'a> UrlQueryPairs<'a> {
 ///
 /// Re-exported at the crate root as `UrlParseError`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ParseError {
     /// The authority section had no host between `://` and the path.
     EmptyHost,

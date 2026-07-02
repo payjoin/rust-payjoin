@@ -56,8 +56,10 @@ impl StatusText for SendSession {
             SendSession::Closed(session_outcome) => match session_outcome {
                 SenderSessionOutcome::Aborted => "Session aborted",
                 SenderSessionOutcome::Success(_) => "Session success",
+                _ => "Unknown session outcome",
             },
             SendSession::PendingFallback(_) => "Session awaiting fallback",
+            _ => "Unknown session state",
         }
     }
 }
@@ -85,7 +87,9 @@ impl StatusText for ReceiveSession {
                 ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
                 ReceiverSessionOutcome::PayjoinProposalSent =>
                     "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs",
+                _ => "Unknown session outcome",
             },
+            _ => "Unknown session state",
         }
     }
 }
@@ -563,6 +567,7 @@ impl App {
                 );
                 return Ok(());
             }
+            _ => return Err(anyhow!("unsupported session state")),
         };
 
         if no_broadcast {
@@ -636,6 +641,7 @@ impl App {
                 }
                 return Ok(());
             }
+            _ => return Err(anyhow!("unsupported session state")),
         };
 
         if no_broadcast {
@@ -690,6 +696,7 @@ impl App {
                 );
                 return Ok(());
             }
+            _ => return Err(anyhow!("unsupported session state")),
         }
         Ok(())
     }
@@ -728,6 +735,7 @@ impl App {
                     session = current_state;
                     continue;
                 }
+                Ok(_) => return Err(anyhow!("unexpected transition outcome")),
                 Err(re) => {
                     println!("{re}");
                     tracing::debug!("{re:?}");
@@ -759,6 +767,7 @@ impl App {
                     session = current_state;
                     continue;
                 }
+                Ok(_) => return Err(anyhow!("unexpected transition outcome")),
                 Err(e) => return Err(e.into()),
             }
         }
@@ -803,6 +812,7 @@ impl App {
                     return Ok(());
                 }
                 ReceiveSession::Closed(_) => return Err(anyhow!("Session closed")),
+                _ => return Err(anyhow!("unsupported session state")),
             }
         };
         res
@@ -996,6 +1006,7 @@ impl App {
                         return Ok(());
                     }
                     Ok(OptionalTransitionOutcome::Stasis(_)) => continue,
+                    Ok(_) => continue,
                     Err(_) => continue,
                 }
             }

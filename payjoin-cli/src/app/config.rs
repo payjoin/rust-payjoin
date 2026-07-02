@@ -127,6 +127,7 @@ impl Config {
                     "BIP77 (v2) selected but v2 feature not enabled".to_string(),
                 ));
             }
+            _ => return Err(ConfigError::Message("Unsupported payjoin version".to_string())),
         }
 
         config = handle_subcommands(config, cli)?;
@@ -235,6 +236,7 @@ impl Config {
                     "BIP77 (v2) selected but v2 feature not enabled".to_string(),
                 ));
             }
+            _ => return Err(ConfigError::Message("Unsupported payjoin version".to_string())),
         }
 
         if config.version.is_none() {

@@ -143,6 +143,7 @@ impl SessionHistory {
 /// Represents the status of a session that can be inferred from the information in the session
 /// event log.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SessionStatus {
     Expired,
     Active,
@@ -151,6 +152,7 @@ pub enum SessionStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum SessionEvent {
     /// Sender was created with session data
     Created(Box<SessionContext>),
@@ -164,6 +166,7 @@ pub enum SessionEvent {
 
 /// Represents all possible outcomes for a closed Payjoin session
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SessionOutcome {
     /// Successful payjoin
     Success(bitcoin::Psbt),

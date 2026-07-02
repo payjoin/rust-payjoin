@@ -69,6 +69,7 @@ impl<Event> PersistActions<Event> {
 
 /// Handles cases where the transition either succeeds with a final result that ends the session, or hits a static condition and stays in the same state.
 /// State transition may also be a fatal error or transient error.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
 pub struct MaybeSuccessTransitionWithNoResults<Event, SuccessValue, CurrentState, Err>(
     Result<AcceptOptionalTransition<Event, SuccessValue, CurrentState>, Rejection<Event, Err>>,
 );
@@ -156,6 +157,7 @@ where
 }
 
 /// A transition that can result in a state transition, fatal error, or successfully have no results.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
 pub struct MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>(
     Result<AcceptOptionalTransition<Event, NextState, CurrentState>, Rejection<Event, Err>>,
 );
@@ -240,6 +242,7 @@ where
 }
 
 /// A transition that can be either fatal, transient, or a state transition.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
 pub struct MaybeFatalTransition<Event, NextState, Err, ErrorState = ()>(
     pub(crate) Result<AcceptNextState<Event, NextState>, Rejection<Event, Err, ErrorState>>,
 );
@@ -310,6 +313,7 @@ where
 
 /// A transition that can result in a state transition or a transient error.
 /// Fatal errors cannot occur in this transition.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
 pub struct MaybeTransientTransition<Event, NextState, Err>(
     Result<AcceptNextState<Event, NextState>, RejectTransient<Err>>,
 );
@@ -362,6 +366,7 @@ where
 }
 
 /// A transition that always results in a state transition.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
 pub struct NextStateTransition<Event, NextState>(AcceptNextState<Event, NextState>);
 
 impl<Event, NextState> NextStateTransition<Event, NextState> {
@@ -400,6 +405,7 @@ impl<Event, NextState> NextStateTransition<Event, NextState> {
 /// No error path exists. Both outcomes are successful from the protocol's point
 /// of view. The choice is determined by the source typestate's internal data,
 /// not by the caller.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
 pub struct MaybeTerminalTransition<Event, NextState>(MaybeTerminalOutcome<Event, NextState>);
 
 impl<Event, NextState> MaybeTerminalTransition<Event, NextState> {
@@ -446,6 +452,7 @@ impl<Event, NextState> MaybeTerminalTransition<Event, NextState> {
 /// Fatal outcomes still persist an event. When the fatal outcome advances, the
 /// saved event keeps the session live for replay while the caller receives the
 /// fatal protocol error.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
 pub struct MaybeTerminalSuccessTransition<Event, NextState, Err>(
     MaybeTerminalSuccessOutcome<Event, NextState, Err>,
 );
@@ -531,6 +538,7 @@ where
 /// being persisted. This lets callers receive derived data (e.g. a fallback
 /// transaction) through the same `.save()` call pattern used by every other
 /// transition type.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
 pub struct TerminalTransition<Event, T>(Event, T);
 
 impl<Event, T> TerminalTransition<Event, T> {
@@ -557,6 +565,8 @@ impl<Event, T> TerminalTransition<Event, T> {
 
 /// A transition that can result in a succession completion, fatal error, or transient error.
 /// The transition can also result in no state change.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
+#[non_exhaustive]
 pub enum MaybeFatalOrSuccessTransition<Event, CurrentState, Err> {
     Success(Event),
     NoResults(CurrentState),
@@ -651,6 +661,7 @@ enum MaybeTerminalSuccessOutcome<Event, NextState, Err> {
 }
 
 /// Wrapper that represents either a successful state transition or indicates no state change occurred
+#[non_exhaustive]
 pub enum AcceptOptionalTransition<Event, NextState, CurrentState> {
     /// A state transition that was successful and returned session event to be persisted
     Success(AcceptNextState<Event, NextState>),
@@ -659,6 +670,7 @@ pub enum AcceptOptionalTransition<Event, NextState, CurrentState> {
 }
 
 /// Wrapper representing a fatal or transient rejection of a state transition.
+#[non_exhaustive]
 pub enum Rejection<Event, Err, ErrorState = ()> {
     Fatal(RejectFatal<Event, Err>),
     Transient(RejectTransient<Err>),
@@ -817,6 +829,7 @@ where
 
 /// Represents a state transition that either progresses to a new state or maintains the current state
 #[derive(Debug, PartialEq)]
+#[non_exhaustive]
 pub enum OptionalTransitionOutcome<NextState, CurrentState> {
     /// A successful state transition that returned a next state
     Progress(NextState),

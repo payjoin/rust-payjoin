@@ -2814,7 +2814,6 @@ version = "0.24.0"
 dependencies = [
  "async-trait",
  "bdk",
- "bitcoin-ohttp",
  "getrandom 0.2.10",
  "icu_locale_core",
  "icu_provider",

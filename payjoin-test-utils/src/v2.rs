@@ -221,3 +221,26 @@ pub const KEY_ID: KeyId = 1;
 pub const KEM: Kem = Kem::K256Sha256;
 pub const SYMMETRIC: &[SymmetricSuite] =
     &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
+
+/// Derive the test OHTTP key config deterministically so that
+/// [`ohttp_key_config_bytes`] and [`ohttp_server`] agree on the same key pair.
+fn test_key_config() -> ohttp::KeyConfig {
+    ohttp::KeyConfig::derive(KEY_ID, KEM, SYMMETRIC.to_vec(), &crate::DUMMY32)
+        .expect("valid test key config")
+}
+
+/// The encoded OHTTP key config for tests, decodable via the public
+/// `OhttpKeys::decode`.
+///
+/// Returns raw bytes rather than `OhttpKeys` so it is usable from payjoin's own
+/// unit tests, where a helper returning a `payjoin` type would resolve to a
+/// separate crate instance through the dev-dependency cycle.
+pub fn ohttp_key_config_bytes() -> Vec<u8> {
+    test_key_config().encode().expect("valid key config encoding")
+}
+
+/// The OHTTP server matching [`ohttp_key_config_bytes`], for tests that emulate
+/// the directory's OHTTP gateway and must decapsulate client requests.
+pub fn ohttp_server() -> ohttp::Server {
+    ohttp::Server::new(test_key_config()).expect("valid ohttp server")
+}

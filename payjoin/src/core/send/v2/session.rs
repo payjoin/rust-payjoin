@@ -176,7 +176,7 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use bitcoin::{FeeRate, ScriptBuf};
-    use payjoin_test_utils::{KEM, KEY_ID, PARSED_ORIGINAL_PSBT, SYMMETRIC};
+    use payjoin_test_utils::PARSED_ORIGINAL_PSBT;
 
     use super::*;
     use crate::core::Url;
@@ -201,9 +201,8 @@ mod tests {
             endpoint,
             id,
             expiration,
-            crate::OhttpKeys(
-                ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
-            ),
+            crate::OhttpKeys::decode(&payjoin_test_utils::ohttp_key_config_bytes())
+                .expect("valid ohttp keys"),
             HpkeKeyPair::gen_keypair().1,
         );
         let sender_with_reply_key = Sender {
@@ -400,9 +399,8 @@ mod tests {
             endpoint,
             id,
             expiration,
-            crate::OhttpKeys(
-                ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
-            ),
+            crate::OhttpKeys::decode(&payjoin_test_utils::ohttp_key_config_bytes())
+                .expect("valid ohttp keys"),
             HpkeKeyPair::gen_keypair().1,
         );
 

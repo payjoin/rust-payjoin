@@ -543,6 +543,32 @@ impl<'de> serde::Deserialize<'de> for Url {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Host {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        match u.int_in_range(0..=2)? {
+            0 => Ok(Self::Domain(u.arbitrary()?)),
+            1 => Ok(Self::Ipv4(u.arbitrary()?)),
+            _ => Ok(Self::Ipv6(u.arbitrary()?)),
+        }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Url {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Url {
+            raw: u.arbitrary()?,
+            scheme: u.arbitrary()?,
+            host: u.arbitrary()?,
+            port: u.arbitrary()?,
+            path: u.arbitrary()?,
+            query: u.arbitrary()?,
+            fragment: u.arbitrary()?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

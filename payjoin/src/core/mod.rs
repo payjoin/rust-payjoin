@@ -25,7 +25,6 @@ pub use uri::{PjParam, PjParseError, PjUri, Uri, UriExt};
 pub(crate) mod error_codes;
 
 pub(crate) mod output_substitution;
-#[cfg(feature = "v1")]
 pub use output_substitution::OutputSubstitution;
 
 #[cfg(feature = "v2")]

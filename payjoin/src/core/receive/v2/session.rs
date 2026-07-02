@@ -199,8 +199,8 @@ pub enum SessionEvent {
     CheckedInputsNotOwned(),
     CheckedNoInputsSeenBefore(),
     IdentifiedReceiverOutputs(Vec<usize>),
-    CommittedOutputs(Vec<bitcoin::TxOut>),
-    CommittedInputs(Vec<InputPair>),
+    CommittedOutputs { outputs: Vec<bitcoin::TxOut>, change_vout: usize },
+    CommittedInputs { receiver_inputs: Vec<InputPair>, payjoin_psbt: bitcoin::Psbt },
     AppliedFeeRange(PsbtContext),
     FinalizedProposal(bitcoin::Psbt),
     GotReplyableError(JsonReply),
@@ -227,8 +227,12 @@ pub enum SessionOutcome {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use std::time::{Duration, SystemTime};
 
+    use bitcoin::hashes::Hash;
+    use bitcoin::key::rand::rngs::StdRng;
+    use bitcoin::key::rand::SeedableRng;
     use payjoin_test_utils::{BoxError, EXAMPLE_URL};
 
     use super::*;
@@ -237,7 +241,7 @@ mod tests {
     use crate::receive::v2::test::{mock_err, SHARED_CONTEXT};
     use crate::receive::v2::{
         Initialized, MaybeInputsOwned, PendingFallback, ProvisionalProposal, Receiver,
-        UncheckedOriginalPayload,
+        UncheckedOriginalPayload, WantsOutputs,
     };
     use crate::receive::{InternalPayloadError, PayloadError};
 
@@ -246,6 +250,178 @@ mod tests {
             state: UncheckedOriginalPayload { original: original_from_test_vector() },
             session_context: SHARED_CONTEXT.clone(),
         }
+    }
+
+    // Drives a fresh v2 receiver to `WantsOutputs`, persisting each step. Vout 1 is
+    // owned, so a single-script substitution succeeds.
+    fn wants_outputs_with_persister(
+        persister: &InMemoryPersister<SessionEvent>,
+        original: OriginalPayload,
+    ) -> Receiver<WantsOutputs> {
+        let receiver_script = original.psbt.unsigned_tx.output[1].script_pubkey.clone();
+        // Seed the events preceding the directly-constructed receiver so replay can reach it.
+        persister
+            .save_event(SessionEvent::Created(SHARED_CONTEXT.clone()))
+            .expect("In memory persister shouldn't fail");
+        persister
+            .save_event(SessionEvent::RetrievedOriginalPayload {
+                original: original.clone(),
+                reply_key: None,
+            })
+            .expect("In memory persister shouldn't fail");
+        let receiver = Receiver {
+            state: UncheckedOriginalPayload { original },
+            session_context: SHARED_CONTEXT.clone(),
+        };
+        let maybe_inputs_owned =
+            receiver.assume_interactive_receiver().save(persister).expect("Save should not fail");
+        let maybe_inputs_seen = maybe_inputs_owned
+            .check_inputs_not_owned(&mut |_| Ok(false))
+            .save(persister)
+            .expect("No inputs should be owned");
+        let outputs_unknown = maybe_inputs_seen
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
+            .save(persister)
+            .expect("No inputs should be seen before");
+        outputs_unknown
+            .identify_receiver_outputs(&mut |script| Ok(script == receiver_script.as_script()))
+            .save(persister)
+            .expect("Outputs should be identified")
+    }
+
+    // A non-degenerate substitution: the interleave shuffle can move the drain (and thus
+    // `change_vout`) off its original index.
+    fn replacement_outputs() -> (Vec<bitcoin::TxOut>, bitcoin::ScriptBuf) {
+        let drain_script =
+            bitcoin::ScriptBuf::new_p2wsh(&bitcoin::WScriptHash::from_byte_array([0x11; 32]));
+        let outputs = vec![
+            bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(50_000),
+                script_pubkey: drain_script.clone(),
+            },
+            bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(10_000),
+                script_pubkey: bitcoin::ScriptBuf::new_p2wsh(
+                    &bitcoin::WScriptHash::from_byte_array([0x22; 32]),
+                ),
+            },
+            bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(10_000),
+                script_pubkey: bitcoin::ScriptBuf::new_p2wsh(
+                    &bitcoin::WScriptHash::from_byte_array([0x33; 32]),
+                ),
+            },
+        ];
+        (outputs, drain_script)
+    }
+
+    // Replay must reproduce the post-substitution `change_vout`. It rebuilds from the
+    // persisted delta, so a lossy reconstruction would diverge from the live control.
+    #[test]
+    fn test_replay_to_wants_inputs_matches_live() {
+        // thread_rng only moves the drain off owned_vouts[0] on some draws, so seed the
+        // shuffle to fix the asserted state and guarantee the drain (and change_vout) moves.
+        const SEED: u64 = 0;
+
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let wants_outputs = wants_outputs_with_persister(&persister, original_from_test_vector());
+        let owned_vout = wants_outputs.state.inner.owned_vouts[0];
+
+        let (outputs, drain_script) = replacement_outputs();
+        let mut rng = StdRng::seed_from_u64(SEED);
+        let inner = wants_outputs
+            .state
+            .inner
+            .replace_receiver_outputs_with_rng(outputs, drain_script.as_script(), &mut rng)
+            .expect("Substitution should succeed");
+        let live_wants_inputs = Receiver {
+            state: WantsOutputs { inner },
+            session_context: wants_outputs.session_context,
+        }
+        .commit_outputs()
+        .save(&persister)
+        .expect("Save should not fail");
+
+        assert_ne!(
+            live_wants_inputs.state.inner.proposal.change_vout, owned_vout,
+            "seed must move the drain off owned_vouts[0]"
+        );
+
+        let (replayed, _) = replay_event_log(&persister).expect("replay should succeed");
+        let replayed = match replayed {
+            ReceiveSession::WantsInputs(r) => r,
+            other => panic!("Expected WantsInputs, got {other:?}"),
+        };
+        assert_eq!(replayed, live_wants_inputs, "replayed WantsInputs must equal the live state");
+    }
+
+    // Replay at `WantsFeeRange` must reproduce the contributed inputs and the
+    // RNG-driven change increment.
+    #[test]
+    fn test_replay_to_wants_fee_range_matches_live() {
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let wants_outputs = wants_outputs_with_persister(&persister, original_from_test_vector());
+
+        let (outputs, drain_script) = replacement_outputs();
+        let wants_inputs = wants_outputs
+            .replace_receiver_outputs(outputs, drain_script.as_script())
+            .expect("Substitution should succeed")
+            .commit_outputs()
+            .save(&persister)
+            .expect("Save should not fail");
+
+        let proposal_psbt =
+            bitcoin::Psbt::from_str(payjoin_test_utils::RECEIVER_INPUT_CONTRIBUTION)
+                .expect("valid proposal psbt");
+        let input = InputPair::new(
+            proposal_psbt.unsigned_tx.input[1].clone(),
+            proposal_psbt.inputs[1].clone(),
+            None,
+        )
+        .expect("valid input pair");
+        let live_wants_fee_range = wants_inputs
+            .contribute_inputs([input])
+            .expect("Contribution should succeed")
+            .commit_inputs()
+            .save(&persister)
+            .expect("Save should not fail");
+
+        let (replayed, _) = replay_event_log(&persister).expect("replay should succeed");
+        let replayed = match replayed {
+            ReceiveSession::WantsFeeRange(r) => r,
+            other => panic!("Expected WantsFeeRange, got {other:?}"),
+        };
+        assert_eq!(
+            replayed, live_wants_fee_range,
+            "replayed WantsFeeRange must equal the live state"
+        );
+    }
+
+    // The sender aims `additional_fee_contribution` at owned vout 1; BIP78 says ignore
+    // it. The nulling lives in `OriginalContext::new`, which both live and replay route
+    // through, so resuming at `WantsOutputs` proves replay sanitizes like live.
+    #[test]
+    fn test_replay_to_wants_outputs_nulls_owned_fee_contribution() {
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let mut original = original_from_test_vector();
+        original.params.additional_fee_contribution = Some((bitcoin::Amount::from_sat(182), 1));
+
+        let live_wants_outputs = wants_outputs_with_persister(&persister, original);
+        assert_eq!(
+            live_wants_outputs.state.inner.original.params.additional_fee_contribution, None,
+            "live identify must drop a fee contribution pointed at an owned output"
+        );
+
+        let (replayed, _) = replay_event_log(&persister).expect("replay should succeed");
+        let replayed = match replayed {
+            ReceiveSession::WantsOutputs(r) => r,
+            other => panic!("Expected WantsOutputs, got {other:?}"),
+        };
+        assert_eq!(
+            replayed.state.inner.original.params.additional_fee_contribution, None,
+            "replay must apply the same owned-vout nulling as live"
+        );
+        assert_eq!(replayed, live_wants_outputs, "replayed WantsOutputs must equal the live state");
     }
 
     #[test]
@@ -300,10 +476,14 @@ mod tests {
             SessionEvent::CheckedInputsNotOwned(),
             SessionEvent::CheckedNoInputsSeenBefore(),
             SessionEvent::IdentifiedReceiverOutputs(wants_outputs.state.inner.owned_vouts.clone()),
-            SessionEvent::CommittedOutputs(
-                wants_outputs.state.inner.payjoin_psbt.unsigned_tx.output,
-            ),
-            SessionEvent::CommittedInputs(wants_fee_range.state.inner.receiver_inputs.clone()),
+            SessionEvent::CommittedOutputs {
+                outputs: wants_inputs.state.inner.proposal.payjoin_psbt.unsigned_tx.output.clone(),
+                change_vout: wants_inputs.state.inner.proposal.change_vout,
+            },
+            SessionEvent::CommittedInputs {
+                receiver_inputs: wants_fee_range.state.inner.proposal.receiver_inputs.clone(),
+                payjoin_psbt: wants_fee_range.state.inner.proposal.payjoin_psbt.clone(),
+            },
             SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()),
             SessionEvent::FinalizedProposal(payjoin_proposal.psbt().clone()),
             SessionEvent::GotReplyableError(mock_err()),
@@ -739,12 +919,14 @@ mod tests {
         events.push(SessionEvent::IdentifiedReceiverOutputs(
             wants_outputs.state.inner.owned_vouts.clone(),
         ));
-        events.push(SessionEvent::CommittedOutputs(
-            wants_outputs.state.inner.payjoin_psbt.unsigned_tx.output,
-        ));
-        events.push(SessionEvent::CommittedInputs(
-            wants_fee_range.state.inner.receiver_inputs.clone(),
-        ));
+        events.push(SessionEvent::CommittedOutputs {
+            outputs: wants_inputs.state.inner.proposal.payjoin_psbt.unsigned_tx.output.clone(),
+            change_vout: wants_inputs.state.inner.proposal.change_vout,
+        });
+        events.push(SessionEvent::CommittedInputs {
+            receiver_inputs: wants_fee_range.state.inner.proposal.receiver_inputs.clone(),
+            payjoin_psbt: wants_fee_range.state.inner.proposal.payjoin_psbt.clone(),
+        });
         events.push(SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()));
 
         let test = SessionHistoryTest {
@@ -818,12 +1000,14 @@ mod tests {
         events.push(SessionEvent::IdentifiedReceiverOutputs(
             wants_outputs.state.inner.owned_vouts.clone(),
         ));
-        events.push(SessionEvent::CommittedOutputs(
-            wants_outputs.state.inner.payjoin_psbt.unsigned_tx.output,
-        ));
-        events.push(SessionEvent::CommittedInputs(
-            wants_fee_range.state.inner.receiver_inputs.clone(),
-        ));
+        events.push(SessionEvent::CommittedOutputs {
+            outputs: wants_inputs.state.inner.proposal.payjoin_psbt.unsigned_tx.output.clone(),
+            change_vout: wants_inputs.state.inner.proposal.change_vout,
+        });
+        events.push(SessionEvent::CommittedInputs {
+            receiver_inputs: wants_fee_range.state.inner.proposal.receiver_inputs.clone(),
+            payjoin_psbt: wants_fee_range.state.inner.proposal.payjoin_psbt.clone(),
+        });
         events.push(SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()));
         events.push(SessionEvent::FinalizedProposal(payjoin_proposal.psbt().clone()));
         events.push(SessionEvent::Closed(SessionOutcome::Success(vec![])));

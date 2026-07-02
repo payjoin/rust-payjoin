@@ -21,6 +21,37 @@ use crate::output_substitution::OutputSubstitution;
 use crate::psbt::PsbtExt;
 use crate::receive::{InternalPayloadError, OriginalPayload, PsbtContext};
 
+/// The session invariant, fixed once the receiver identifies its outputs: the
+/// sender's original PSBT and sanitized params.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OriginalContext {
+    pub(super) original_psbt: Psbt,
+    pub(super) params: Params,
+}
+
+impl OriginalContext {
+    /// Live and replay both route through here so the param sanitization can't diverge.
+    pub(super) fn new(original_psbt: Psbt, mut params: Params, owned_vouts: &[usize]) -> Self {
+        if let Some((_, additional_fee_output_index)) = params.additional_fee_contribution {
+            // Per BIP78, ignore a fee-contribution index pointing at a receiver output.
+            // https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#optional-parameters
+            if owned_vouts.contains(&additional_fee_output_index) {
+                params.additional_fee_contribution = None;
+            }
+        }
+        Self { original_psbt, params }
+    }
+}
+
+/// The RNG-mutated state under construction. Commit events persist each step's
+/// delta; replay rebuilds this state from them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkingProposal {
+    pub(super) payjoin_psbt: Psbt,
+    pub(super) change_vout: usize,
+    pub(super) receiver_inputs: Vec<InputPair>,
+}
+
 /// Typestate which the receiver may substitute or add outputs to.
 ///
 /// In addition to contributing new inputs to an existing PSBT, Payjoin allows the
@@ -31,9 +62,8 @@ use crate::receive::{InternalPayloadError, OriginalPayload, PsbtContext};
 /// Call [`Self::commit_outputs`] to proceed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsOutputs {
-    pub(super) original_psbt: Psbt,
+    pub(super) original: OriginalContext,
     pub(super) payjoin_psbt: Psbt,
-    pub(super) params: Params,
     change_vout: usize,
     pub(super) owned_vouts: Vec<usize>,
 }
@@ -43,25 +73,27 @@ impl WantsOutputs {
     /// owned outputs.
     ///
     /// The first output in the `owned_vouts` list is used as the `change_vout`.
-    pub(super) fn new(original: OriginalPayload, owned_vouts: Vec<usize>) -> Self {
-        Self {
-            original_psbt: original.psbt.clone(),
-            payjoin_psbt: original.psbt,
-            params: original.params,
-            change_vout: owned_vouts[0],
-            owned_vouts,
-        }
+    pub(super) fn new(payload: OriginalPayload, owned_vouts: Vec<usize>) -> Self {
+        let change_vout = owned_vouts[0];
+        let original = OriginalContext::new(payload.psbt.clone(), payload.params, &owned_vouts);
+        Self { original, payjoin_psbt: payload.psbt, change_vout, owned_vouts }
     }
 
+    /// The sender's original PSBT.
+    #[cfg(feature = "v2")]
+    pub(crate) fn original_psbt(&self) -> &Psbt { &self.original.original_psbt }
+
     /// Returns whether the receiver is allowed to substitute original outputs or not.
-    pub fn output_substitution(&self) -> OutputSubstitution { self.params.output_substitution }
+    pub fn output_substitution(&self) -> OutputSubstitution {
+        self.original.params.output_substitution
+    }
 
     /// Substitute the receiver output script with the provided script.
     pub fn substitute_receiver_script(
         self,
         output_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
-        let output_value = self.original_psbt.unsigned_tx.output[self.change_vout].value;
+        let output_value = self.original.original_psbt.unsigned_tx.output[self.change_vout].value;
         let outputs = [TxOut { value: output_value, script_pubkey: output_script.into() }];
         self.replace_receiver_outputs(outputs, output_script)
     }
@@ -84,12 +116,28 @@ impl WantsOutputs {
         replacement_outputs: impl IntoIterator<Item = TxOut>,
         drain_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
-        let mut payjoin_psbt = self.original_psbt.clone();
+        self.replace_receiver_outputs_with_rng(
+            replacement_outputs,
+            drain_script,
+            &mut rand::thread_rng(),
+        )
+    }
+
+    /// [`replace_receiver_outputs`](Self::replace_receiver_outputs) with the output-shuffle
+    /// `rng` injected, so tests can seed it and assert against a fixed post-substitution state.
+    pub(crate) fn replace_receiver_outputs_with_rng<R: rand::Rng>(
+        self,
+        replacement_outputs: impl IntoIterator<Item = TxOut>,
+        drain_script: &Script,
+        rng: &mut R,
+    ) -> Result<Self, OutputSubstitutionError> {
+        let mut payjoin_psbt = self.original.original_psbt.clone();
         let mut outputs = vec![];
         let mut replacement_outputs: Vec<TxOut> = replacement_outputs.into_iter().collect();
-        let mut rng = rand::thread_rng();
         // Substitute the existing receiver outputs, keeping the sender/receiver output ordering
-        for (i, original_output) in self.original_psbt.unsigned_tx.output.iter().enumerate() {
+        for (i, original_output) in
+            self.original.original_psbt.unsigned_tx.output.iter().enumerate()
+        {
             if self.owned_vouts.contains(&i) {
                 // Receiver output: substitute in-place a provided replacement output
                 if replacement_outputs.is_empty() {
@@ -130,16 +178,15 @@ impl WantsOutputs {
             }
         }
         // Insert all remaining outputs at random indices for privacy
-        interleave_shuffle(&mut outputs, &mut replacement_outputs, &mut rng);
+        interleave_shuffle(&mut outputs, &mut replacement_outputs, rng);
         // Identify the receiver output that will be used for change and fees
         let change_vout = outputs.iter().position(|txo| txo.script_pubkey == *drain_script);
         // Update the payjoin PSBT outputs
         payjoin_psbt.outputs = vec![Default::default(); outputs.len()];
         payjoin_psbt.unsigned_tx.output = outputs;
         Ok(Self {
-            original_psbt: self.original_psbt,
+            original: self.original,
             payjoin_psbt,
-            params: self.params,
             change_vout: change_vout.ok_or(InternalOutputSubstitutionError::InvalidDrainScript)?,
             owned_vouts: self.owned_vouts,
         })
@@ -150,11 +197,12 @@ impl WantsOutputs {
     /// Outputs cannot be modified after this function is called.
     pub fn commit_outputs(self) -> WantsInputs {
         WantsInputs {
-            original_psbt: self.original_psbt,
-            payjoin_psbt: self.payjoin_psbt,
-            params: self.params,
-            change_vout: self.change_vout,
-            receiver_inputs: vec![],
+            original: self.original,
+            proposal: WorkingProposal {
+                payjoin_psbt: self.payjoin_psbt,
+                change_vout: self.change_vout,
+                receiver_inputs: vec![],
+            },
         }
     }
 }
@@ -189,14 +237,15 @@ fn interleave_shuffle<T: Clone, R: rand::Rng>(original: &mut Vec<T>, new: &mut [
 /// Call [`Self::commit_inputs`] to proceed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsInputs {
-    pub(super) original_psbt: Psbt,
-    pub(super) payjoin_psbt: Psbt,
-    pub(super) params: Params,
-    pub(super) change_vout: usize,
-    pub(super) receiver_inputs: Vec<InputPair>,
+    pub(super) original: OriginalContext,
+    pub(super) proposal: WorkingProposal,
 }
 
 impl WantsInputs {
+    /// The sender's original PSBT.
+    #[cfg(feature = "v2")]
+    pub(crate) fn original_psbt(&self) -> &Psbt { &self.original.original_psbt }
+
     /// Selects and returns an input from `candidate_inputs` which will preserve the receiver's privacy by
     /// avoiding the Unnecessary Input Heuristic 2 (UIH2) outlined in [Unnecessary Input
     /// Heuristics and PayJoin Transactions by Ghesmati et al. (2022)](https://eprint.iacr.org/2022/589).
@@ -226,11 +275,12 @@ impl WantsInputs {
         &self,
         candidate_inputs: &[InputPair],
     ) -> Result<InputPair, CoinSelectionError> {
-        if self.payjoin_psbt.outputs.len() != 2 {
+        if self.proposal.payjoin_psbt.outputs.len() != 2 {
             return Err(InternalCoinSelectionError::UnsupportedOutputLength.into());
         }
 
         let min_out_sats = self
+            .proposal
             .payjoin_psbt
             .unsigned_tx
             .output
@@ -240,13 +290,15 @@ impl WantsInputs {
             .unwrap_or(Amount::MAX_MONEY);
 
         let min_in_sats = self
+            .proposal
             .payjoin_psbt
             .input_pairs()
             .filter_map(|input| input.previous_txout().ok().map(|txo| txo.value))
             .min()
             .unwrap_or(Amount::MAX_MONEY);
 
-        let prior_payment_sats = self.payjoin_psbt.unsigned_tx.output[self.change_vout].value;
+        let prior_payment_sats =
+            self.proposal.payjoin_psbt.unsigned_tx.output[self.proposal.change_vout].value;
 
         for input_pair in candidate_inputs {
             let candidate_sats = input_pair.previous_txout().value;
@@ -279,9 +331,10 @@ impl WantsInputs {
         self,
         inputs: impl IntoIterator<Item = InputPair>,
     ) -> Result<WantsInputs, InputContributionError> {
-        let mut payjoin_psbt = self.payjoin_psbt.clone();
+        let mut payjoin_psbt = self.proposal.payjoin_psbt.clone();
         // The payjoin proposal must not introduce mixed input sequence numbers
         let original_sequence = self
+            .original
             .original_psbt
             .unsigned_tx
             .input
@@ -290,8 +343,14 @@ impl WantsInputs {
             .unwrap_or_default();
 
         // Collect existing PSBT outpoints to detect duplicate inputs.
-        let mut seen_outpoints: HashSet<_> =
-            self.payjoin_psbt.unsigned_tx.input.iter().map(|txin| txin.previous_output).collect();
+        let mut seen_outpoints: HashSet<_> = self
+            .proposal
+            .payjoin_psbt
+            .unsigned_tx
+            .input
+            .iter()
+            .map(|txin| txin.previous_output)
+            .collect();
         let inputs: Vec<_> = inputs.into_iter().collect();
         for input in &inputs {
             if !seen_outpoints.insert(input.txin.previous_output) {
@@ -307,7 +366,7 @@ impl WantsInputs {
         let mut receiver_input_amount = Amount::ZERO;
         for input_pair in inputs.clone() {
             receiver_input_amount += input_pair.previous_txout().value;
-            let index = rng.gen_range(0..=self.payjoin_psbt.unsigned_tx.input.len());
+            let index = rng.gen_range(0..=self.proposal.payjoin_psbt.unsigned_tx.input.len());
             payjoin_psbt.inputs.insert(index, input_pair.psbtin);
             payjoin_psbt
                 .unsigned_tx
@@ -319,32 +378,35 @@ impl WantsInputs {
         let receiver_min_input_amount = self.receiver_min_input_amount();
         if receiver_input_amount >= receiver_min_input_amount {
             let change_amount = receiver_input_amount - receiver_min_input_amount;
-            payjoin_psbt.unsigned_tx.output[self.change_vout].value += change_amount;
+            payjoin_psbt.unsigned_tx.output[self.proposal.change_vout].value += change_amount;
         } else {
             return Err(InternalInputContributionError::ValueTooLow.into());
         }
 
-        let mut receiver_inputs = self.receiver_inputs;
+        let mut receiver_inputs = self.proposal.receiver_inputs;
         receiver_inputs.extend(inputs);
 
         Ok(WantsInputs {
-            original_psbt: self.original_psbt,
-            payjoin_psbt,
-            params: self.params,
-            change_vout: self.change_vout,
-            receiver_inputs,
+            original: self.original,
+            proposal: WorkingProposal {
+                payjoin_psbt,
+                change_vout: self.proposal.change_vout,
+                receiver_inputs,
+            },
         })
     }
 
     // Compute the minimum amount that the receiver must contribute to the transaction as input.
     fn receiver_min_input_amount(&self) -> Amount {
         let output_amount = self
+            .proposal
             .payjoin_psbt
             .unsigned_tx
             .output
             .iter()
             .fold(Amount::ZERO, |acc, output| acc + output.value);
         let original_output_amount = self
+            .original
             .original_psbt
             .unsigned_tx
             .output
@@ -357,26 +419,21 @@ impl WantsInputs {
     ///
     /// Inputs cannot be modified after this function is called.
     pub fn commit_inputs(self) -> WantsFeeRange {
-        WantsFeeRange {
-            original_psbt: self.original_psbt,
-            payjoin_psbt: self.payjoin_psbt,
-            params: self.params,
-            change_vout: self.change_vout,
-            receiver_inputs: self.receiver_inputs,
-        }
+        WantsFeeRange { original: self.original, proposal: self.proposal }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WantsFeeRange {
-    pub(super) original_psbt: Psbt,
-    pub(super) payjoin_psbt: Psbt,
-    pub(super) params: Params,
-    pub(super) change_vout: usize,
-    pub(super) receiver_inputs: Vec<InputPair>,
+    pub(super) original: OriginalContext,
+    pub(super) proposal: WorkingProposal,
 }
 
 impl WantsFeeRange {
+    /// The sender's original PSBT.
+    #[cfg(feature = "v2")]
+    pub(crate) fn original_psbt(&self) -> &Psbt { &self.original.original_psbt }
+
     /// Calculate the Payjoin PSBT with the specified fee range.
     ///
     /// This function is idempotent. It can be called multiple times with the same
@@ -388,13 +445,13 @@ impl WantsFeeRange {
     ) -> Result<Psbt, InternalPayloadError> {
         let min_fee_rate = min_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN);
         tracing::trace!("min_fee_rate: {min_fee_rate:?}");
-        tracing::trace!("params.min_fee_rate: {:?}", self.params.min_fee_rate);
-        let min_fee_rate = max(min_fee_rate, self.params.min_fee_rate);
+        tracing::trace!("params.min_fee_rate: {:?}", self.original.params.min_fee_rate);
+        let min_fee_rate = max(min_fee_rate, self.original.params.min_fee_rate);
         tracing::debug!("min_fee_rate: {min_fee_rate:?}");
 
         let max_fee_rate = max_effective_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN);
 
-        let mut payjoin_psbt = self.payjoin_psbt.clone();
+        let mut payjoin_psbt = self.proposal.payjoin_psbt.clone();
 
         // If the sender specified a fee contribution, the receiver is allowed to decrease the
         // sender's fee output to pay for additional input fees. Any fees in excess of
@@ -406,16 +463,16 @@ impl WantsFeeRange {
         if additional_fee >= Amount::ONE_SAT {
             tracing::trace!(
                 "self.params.additional_fee_contribution: {:?}",
-                self.params.additional_fee_contribution
+                self.original.params.additional_fee_contribution
             );
             if let Some((max_additional_fee_contribution, additional_fee_output_index)) =
-                self.params.additional_fee_contribution
+                self.original.params.additional_fee_contribution
             {
                 // Find the sender's specified output in the original psbt.
                 // This step is necessary because the sender output may have shifted if new
                 // receiver outputs were added to the payjoin psbt.
                 let sender_fee_output =
-                    &self.original_psbt.unsigned_tx.output[additional_fee_output_index];
+                    &self.original.original_psbt.unsigned_tx.output[additional_fee_output_index];
                 // Find the index of that output in the payjoin psbt
                 let sender_fee_vout = payjoin_psbt
                     .unsigned_tx
@@ -448,25 +505,28 @@ impl WantsFeeRange {
         }
         if receiver_additional_fee >= Amount::ONE_SAT {
             // Remove additional miner fee from the receiver's specified output
-            payjoin_psbt.unsigned_tx.output[self.change_vout].value -= receiver_additional_fee;
+            payjoin_psbt.unsigned_tx.output[self.proposal.change_vout].value -=
+                receiver_additional_fee;
         }
         Ok(payjoin_psbt)
     }
 
     /// Calculate the additional input weight contributed by the receiver.
     fn additional_input_weight(&self) -> Weight {
-        self.receiver_inputs.iter().map(|input_pair| input_pair.expected_weight).sum()
+        self.proposal.receiver_inputs.iter().map(|input_pair| input_pair.expected_weight).sum()
     }
 
     /// Calculate the additional output weight contributed by the receiver.
     fn additional_output_weight(&self) -> Weight {
         let payjoin_outputs_weight = self
+            .proposal
             .payjoin_psbt
             .unsigned_tx
             .output
             .iter()
             .fold(Weight::ZERO, |acc, txo| acc + txo.weight());
         let original_outputs_weight = self
+            .original
             .original_psbt
             .unsigned_tx
             .output
@@ -487,7 +547,7 @@ impl WantsFeeRange {
     ) -> Result<PsbtContext, InternalPayloadError> {
         let payjoin_psbt =
             self.calculate_psbt_with_fee_range(min_fee_rate, max_effective_fee_rate)?;
-        Ok(PsbtContext { original_psbt: self.original_psbt, payjoin_psbt })
+        Ok(PsbtContext { original_psbt: self.original.original_psbt, payjoin_psbt })
     }
 }
 
@@ -530,12 +590,13 @@ mod tests {
         let mut original = original_from_test_vector();
         original.params.output_substitution = OutputSubstitution::Disabled;
         let wants_outputs = WantsOutputs::new(original, vec![0]);
-        let script_pubkey = &wants_outputs.original_psbt.unsigned_tx.output
+        let script_pubkey = &wants_outputs.original.original_psbt.unsigned_tx.output
             [wants_outputs.change_vout]
             .script_pubkey;
 
-        let output_value =
-            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value;
+        let output_value = wants_outputs.original.original_psbt.unsigned_tx.output
+            [wants_outputs.change_vout]
+            .value;
         let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
         let unchanged_amount =
             wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
@@ -545,9 +606,10 @@ mod tests {
         );
         assert_ne!(wants_outputs.payjoin_psbt, unchanged_amount.unwrap().payjoin_psbt);
 
-        let output_value =
-            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value
-                + Amount::ONE_SAT;
+        let output_value = wants_outputs.original.original_psbt.unsigned_tx.output
+            [wants_outputs.change_vout]
+            .value
+            + Amount::ONE_SAT;
         let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
         let increased_amount =
             wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
@@ -557,9 +619,10 @@ mod tests {
         );
         assert_ne!(wants_outputs.payjoin_psbt, increased_amount.unwrap().payjoin_psbt);
 
-        let output_value =
-            wants_outputs.original_psbt.unsigned_tx.output[wants_outputs.change_vout].value
-                - Amount::ONE_SAT;
+        let output_value = wants_outputs.original.original_psbt.unsigned_tx.output
+            [wants_outputs.change_vout]
+            .value
+            - Amount::ONE_SAT;
         let outputs = vec![TxOut { value: output_value, script_pubkey: script_pubkey.clone() }];
         let decreased_amount =
             wants_outputs.clone().replace_receiver_outputs(outputs, script_pubkey.as_script());
@@ -639,8 +702,8 @@ mod tests {
     fn try_preserving_privacy_falls_back_when_avoid_uih_unsupported() {
         let original = original_from_test_vector();
         let mut wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
-        wants_inputs.payjoin_psbt.unsigned_tx.output.pop();
-        wants_inputs.payjoin_psbt.outputs.pop();
+        wants_inputs.proposal.payjoin_psbt.unsigned_tx.output.pop();
+        wants_inputs.proposal.payjoin_psbt.outputs.pop();
         let candidate = candidate_input_from_test_vector(Amount::ONE_SAT);
 
         let selected = wants_inputs.try_preserving_privacy([candidate.clone()]).unwrap();
@@ -663,7 +726,7 @@ mod tests {
             .contribute_inputs([input.clone()])
             .expect("Failed to contribute inputs");
 
-        payjoin.payjoin_psbt.outputs.pop();
+        payjoin.proposal.payjoin_psbt.outputs.pop();
         let avoid_uih = payjoin.avoid_uih(std::slice::from_ref(&input));
         assert_eq!(
             avoid_uih.unwrap_err(),
@@ -725,8 +788,8 @@ mod tests {
         .unwrap();
 
         let wants_inputs = wants_inputs.contribute_inputs(vec![input_pair_1.clone()]).unwrap();
-        assert_eq!(wants_inputs.receiver_inputs.len(), 1);
-        assert_eq!(wants_inputs.receiver_inputs[0], input_pair_1);
+        assert_eq!(wants_inputs.proposal.receiver_inputs.len(), 1);
+        assert_eq!(wants_inputs.proposal.receiver_inputs[0], input_pair_1);
         // Contribute the same input again (should error) and a new input.
         let duplicate_input = wants_inputs
             .clone()
@@ -738,9 +801,9 @@ mod tests {
         );
         // Contribute only the new input
         let wants_inputs = wants_inputs.contribute_inputs(vec![input_pair_2.clone()]).unwrap();
-        assert_eq!(wants_inputs.receiver_inputs.len(), 2);
-        assert_eq!(wants_inputs.receiver_inputs[0], input_pair_1);
-        assert_eq!(wants_inputs.receiver_inputs[1], input_pair_2);
+        assert_eq!(wants_inputs.proposal.receiver_inputs.len(), 2);
+        assert_eq!(wants_inputs.proposal.receiver_inputs[0], input_pair_1);
+        assert_eq!(wants_inputs.proposal.receiver_inputs[1], input_pair_2);
     }
 
     #[test]
@@ -766,9 +829,11 @@ mod tests {
             .commit_inputs();
         let additional_output = TxOut {
             value: Amount::ZERO,
-            script_pubkey: payjoin.original_psbt.unsigned_tx.output[0].script_pubkey.clone(),
+            script_pubkey: payjoin.original.original_psbt.unsigned_tx.output[0]
+                .script_pubkey
+                .clone(),
         };
-        payjoin.payjoin_psbt.unsigned_tx.output.push(additional_output);
+        payjoin.proposal.payjoin_psbt.unsigned_tx.output.push(additional_output);
         let psbt =
             payjoin.calculate_psbt_with_fee_range(None, Some(FeeRate::from_sat_per_vb_u32(1000)));
         assert!(psbt.is_ok(), "Payjoin should be a valid PSBT");
@@ -776,7 +841,10 @@ mod tests {
             payjoin.calculate_psbt_with_fee_range(None, Some(FeeRate::from_sat_per_vb_u32(995)));
         match psbt {
             Err(InternalPayloadError::FeeTooHigh(proposed, max)) => {
-                assert_eq!(FeeRate::from_str("249630").unwrap(), proposed);
+                // The owned vout (0) is also the sender's `additionalfeeoutputindex`,
+                // so `additional_fee_contribution` is dropped and the receiver pays
+                // the full additional fee.
+                assert_eq!(FeeRate::from_str("250000").unwrap(), proposed);
                 assert_eq!(FeeRate::from_sat_per_vb_u32(995), max);
             }
             _ => panic!(
@@ -791,11 +859,11 @@ mod tests {
         // https://bitcoin.stackexchange.com/questions/84004/how-do-virtual-size-stripped-size-and-raw-size-compare-between-legacy-address-f#84006
         // Input weight for a single P2PKH (legacy) receiver input
         let p2pkh_proposal = WantsFeeRange {
-            original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAb2qhegy47hqffxh/UH5Qjd/G3sBH6cW2QSXZ86nbY3nAAAAAAD9////AhXKBSoBAAAAFgAU4TiLFD14YbpddFVrZa3+Zmz96yQQJwAAAAAAABYAFB4zA2o+5MsNRT/j+0twLi5VbwO9AAAAAAABAIcCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBSgD/////AgDyBSoBAAAAGXapFGUxpU6cGldVpjUm9rV2B+jTlphDiKwAAAAAAAAAACZqJKohqe3i9hw/cdHe/T+pmd+jaVN1XGkGiXmZYrSL69g2l06M+QAAAAABB2pHMEQCIGsOxO/bBv20bd68sBnEU3cxHR8OxEcUroL3ENhhjtN3AiB+9yWuBGKXu41hcfO4KP7IyLLEYc6j8hGowmAlCPCMPAEhA6WNSN4CqJ9F+42YKPlIFN0wJw7qawWbdelGRMkAbBRnACICAsdIAjsfMLKgfL2J9rfIa8yKdO1BOpSGRIFbFMBdTsc9GE4roNNUAACAAQAAgAAAAIABAAAAAAAAAAAA").unwrap(),
-            payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAtTRxwAtk38fRMP3ffdKkIi5r+Ss9AjaO8qEv+eQ/ho3AAAAAAD9////vaqF6DLjuGp9/GH9QflCN38bewEfpxbZBJdnzqdtjecAAAAAAP3///8CgckFKgEAAAAWABThOIsUPXhhul10VWtlrf5mbP3rJBAZBioBAAAAFgAUiDIby0wSbj1kv3MlvwoEKw3vNZUAAAAAAAEAhwIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////AwFoAP////8CAPIFKgEAAAAZdqkUPXhu3I6D9R0wUpvTvvUm+VGNcNuIrAAAAAAAAAAAJmokqiGp7eL2HD9x0d79P6mZ36NpU3VcaQaJeZlitIvr2DaXToz5AAAAAAEBIgDyBSoBAAAAGXapFD14btyOg/UdMFKb0771JvlRjXDbiKwBB2pHMEQCIGzKy8QfhHoAY0+LZCpQ7ZOjyyXqaSBnr89hH3Eg/xsGAiB3n8hPRuXCX/iWtURfXoJNUFu3sLeQVFf1dDFCZPN0dAEhA8rTfrwcq6dEBSNOrUfNb8+dm7q77vCtfdOmWx0HfajRAAEAhwIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////AwFKAP////8CAPIFKgEAAAAZdqkUZTGlTpwaV1WmNSb2tXYH6NOWmEOIrAAAAAAAAAAAJmokqiGp7eL2HD9x0d79P6mZ36NpU3VcaQaJeZlitIvr2DaXToz5AAAAAAAAAA==").unwrap(),
-            params: Params::default(),
-            change_vout: 0,
-            receiver_inputs: vec![
+            original: OriginalContext { original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAb2qhegy47hqffxh/UH5Qjd/G3sBH6cW2QSXZ86nbY3nAAAAAAD9////AhXKBSoBAAAAFgAU4TiLFD14YbpddFVrZa3+Zmz96yQQJwAAAAAAABYAFB4zA2o+5MsNRT/j+0twLi5VbwO9AAAAAAABAIcCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBSgD/////AgDyBSoBAAAAGXapFGUxpU6cGldVpjUm9rV2B+jTlphDiKwAAAAAAAAAACZqJKohqe3i9hw/cdHe/T+pmd+jaVN1XGkGiXmZYrSL69g2l06M+QAAAAABB2pHMEQCIGsOxO/bBv20bd68sBnEU3cxHR8OxEcUroL3ENhhjtN3AiB+9yWuBGKXu41hcfO4KP7IyLLEYc6j8hGowmAlCPCMPAEhA6WNSN4CqJ9F+42YKPlIFN0wJw7qawWbdelGRMkAbBRnACICAsdIAjsfMLKgfL2J9rfIa8yKdO1BOpSGRIFbFMBdTsc9GE4roNNUAACAAQAAgAAAAIABAAAAAAAAAAAA").unwrap(), params: Params::default() },
+            proposal: WorkingProposal {
+                payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAtTRxwAtk38fRMP3ffdKkIi5r+Ss9AjaO8qEv+eQ/ho3AAAAAAD9////vaqF6DLjuGp9/GH9QflCN38bewEfpxbZBJdnzqdtjecAAAAAAP3///8CgckFKgEAAAAWABThOIsUPXhhul10VWtlrf5mbP3rJBAZBioBAAAAFgAUiDIby0wSbj1kv3MlvwoEKw3vNZUAAAAAAAEAhwIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////AwFoAP////8CAPIFKgEAAAAZdqkUPXhu3I6D9R0wUpvTvvUm+VGNcNuIrAAAAAAAAAAAJmokqiGp7eL2HD9x0d79P6mZ36NpU3VcaQaJeZlitIvr2DaXToz5AAAAAAEBIgDyBSoBAAAAGXapFD14btyOg/UdMFKb0771JvlRjXDbiKwBB2pHMEQCIGzKy8QfhHoAY0+LZCpQ7ZOjyyXqaSBnr89hH3Eg/xsGAiB3n8hPRuXCX/iWtURfXoJNUFu3sLeQVFf1dDFCZPN0dAEhA8rTfrwcq6dEBSNOrUfNb8+dm7q77vCtfdOmWx0HfajRAAEAhwIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////AwFKAP////8CAPIFKgEAAAAZdqkUZTGlTpwaV1WmNSb2tXYH6NOWmEOIrAAAAAAAAAAAJmokqiGp7eL2HD9x0d79P6mZ36NpU3VcaQaJeZlitIvr2DaXToz5AAAAAAAAAA==").unwrap(),
+                change_vout: 0,
+                receiver_inputs: vec![
                 InputPair::new(
                     TxIn{
                         previous_output: OutPoint::from_str("371afe90e7bf84ca3bda08f4ace4afb988904af77df7c3441f7f932d00c7d1d4:0").unwrap(),
@@ -808,16 +876,17 @@ mod tests {
                         ..Default::default()
                     }, None)
                 .unwrap()],
+            },
         };
         assert_eq!(p2pkh_proposal.additional_input_weight(), Weight::from_wu(592));
 
         // Input weight for a single nested P2WPKH (nested segwit) receiver input
         let nested_p2wpkh_proposal = WantsFeeRange {
-            original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAeOsT9cRWRz3te+bgmtweG1vDLkdSH4057NuoodDNPFWAAAAAAD9////AhAnAAAAAAAAFgAUtp3bPFM/YWThyxD5Cc9OR4mb8tdMygUqAQAAABYAFODlplDoE6EGlZvmqoUngBgsu8qCAAAAAAABAIUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBZwD/////AgDyBSoBAAAAF6kU2JnIn4Mmcb5kuF3EYeFei8IB43qHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPIFKgEAAAAXqRTYmcifgyZxvmS4XcRh4V6LwgHjeocBBxcWABSPGoPK1yl60X4Z9OfA7IQPUWCgVwEIawJHMEQCICZG3s2cbulPnLTvK4TwlKhsC+cem8tD2GjZZ3eMJD7FAiADh/xwv0ib8ksOrj1M27DYLiw7WFptxkMkE2YgiNMRVgEhAlDMm5DA8kU+QGiPxEWUyV1S8+XGzUOepUOck257ZOhkAAAiAgP+oMbeca66mt+UtXgHm6v/RIFEpxrwG7IvPDim5KWHpBgfVHrXVAAAgAEAAIAAAACAAQAAAAAAAAAA").unwrap(),
-            payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAuXYOTUaVRiB8cPPhEXzcJ72/SgZOPEpPx5pkG0fNeGCAAAAAAD9////46xP1xFZHPe175uCa3B4bW8MuR1IfjTns26ih0M08VYAAAAAAP3///8CEBkGKgEAAAAWABQHuuu4H4fbQWV51IunoJLUtmMTfEzKBSoBAAAAFgAU4OWmUOgToQaVm+aqhSeAGCy7yoIAAAAAAAEBIADyBSoBAAAAF6kUQ4BssmVBS3r0s95c6dl1DQCHCR+HAQQWABQbDc333XiiOeEXroP523OoYNb1aAABAIUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBZwD/////AgDyBSoBAAAAF6kU2JnIn4Mmcb5kuF3EYeFei8IB43qHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPIFKgEAAAAXqRTYmcifgyZxvmS4XcRh4V6LwgHjeocBBxcWABSPGoPK1yl60X4Z9OfA7IQPUWCgVwEIawJHMEQCICZG3s2cbulPnLTvK4TwlKhsC+cem8tD2GjZZ3eMJD7FAiADh/xwv0ib8ksOrj1M27DYLiw7WFptxkMkE2YgiNMRVgEhAlDMm5DA8kU+QGiPxEWUyV1S8+XGzUOepUOck257ZOhkAAAA").unwrap(),
-            params: Params::default(),
-            change_vout: 0,
-            receiver_inputs: vec![
+            original: OriginalContext { original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAeOsT9cRWRz3te+bgmtweG1vDLkdSH4057NuoodDNPFWAAAAAAD9////AhAnAAAAAAAAFgAUtp3bPFM/YWThyxD5Cc9OR4mb8tdMygUqAQAAABYAFODlplDoE6EGlZvmqoUngBgsu8qCAAAAAAABAIUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBZwD/////AgDyBSoBAAAAF6kU2JnIn4Mmcb5kuF3EYeFei8IB43qHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPIFKgEAAAAXqRTYmcifgyZxvmS4XcRh4V6LwgHjeocBBxcWABSPGoPK1yl60X4Z9OfA7IQPUWCgVwEIawJHMEQCICZG3s2cbulPnLTvK4TwlKhsC+cem8tD2GjZZ3eMJD7FAiADh/xwv0ib8ksOrj1M27DYLiw7WFptxkMkE2YgiNMRVgEhAlDMm5DA8kU+QGiPxEWUyV1S8+XGzUOepUOck257ZOhkAAAiAgP+oMbeca66mt+UtXgHm6v/RIFEpxrwG7IvPDim5KWHpBgfVHrXVAAAgAEAAIAAAACAAQAAAAAAAAAA").unwrap(), params: Params::default() },
+            proposal: WorkingProposal {
+                payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAuXYOTUaVRiB8cPPhEXzcJ72/SgZOPEpPx5pkG0fNeGCAAAAAAD9////46xP1xFZHPe175uCa3B4bW8MuR1IfjTns26ih0M08VYAAAAAAP3///8CEBkGKgEAAAAWABQHuuu4H4fbQWV51IunoJLUtmMTfEzKBSoBAAAAFgAU4OWmUOgToQaVm+aqhSeAGCy7yoIAAAAAAAEBIADyBSoBAAAAF6kUQ4BssmVBS3r0s95c6dl1DQCHCR+HAQQWABQbDc333XiiOeEXroP523OoYNb1aAABAIUCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBZwD/////AgDyBSoBAAAAF6kU2JnIn4Mmcb5kuF3EYeFei8IB43qHAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEgAPIFKgEAAAAXqRTYmcifgyZxvmS4XcRh4V6LwgHjeocBBxcWABSPGoPK1yl60X4Z9OfA7IQPUWCgVwEIawJHMEQCICZG3s2cbulPnLTvK4TwlKhsC+cem8tD2GjZZ3eMJD7FAiADh/xwv0ib8ksOrj1M27DYLiw7WFptxkMkE2YgiNMRVgEhAlDMm5DA8kU+QGiPxEWUyV1S8+XGzUOepUOck257ZOhkAAAA").unwrap(),
+                change_vout: 0,
+                receiver_inputs: vec![
                 InputPair::new(
                     TxIn {
                         previous_output: OutPoint::from_str("82e1351f6d90691e3f29f1381928fdf69e70f34584cfc3f18118551a3539d8e5:0").unwrap(),
@@ -832,16 +901,17 @@ mod tests {
                         ..Default::default()
                     }, None)
                 .unwrap()],
+            },
         };
         assert_eq!(nested_p2wpkh_proposal.additional_input_weight(), Weight::from_wu(364));
 
         // Input weight for a single P2WPKH (native segwit) receiver input
         let p2wpkh_proposal = WantsFeeRange {
-            original_psbt: Psbt::from_str("cHNidP8BAHECAAAAASom13OiXZIr3bKk+LtUndZJYqdHQQU8dMs1FZ93IctIAAAAAAD9////AmPKBSoBAAAAFgAU6H98YM9NE1laARQ/t9/90nFraf4QJwAAAAAAABYAFBPJFmYuJBsrIaBBp9ur98pMSKxhAAAAAAABAIQCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBWwD/////AgDyBSoBAAAAFgAUjTJXmC73n+URSNdfgbS6Oa6JyQYAAAAAAAAAACZqJKohqe3i9hw/cdHe/T+pmd+jaVN1XGkGiXmZYrSL69g2l06M+QAAAAABAR8A8gUqAQAAABYAFI0yV5gu95/lEUjXX4G0ujmuickGAQhrAkcwRAIgUqbHS0difIGTRwN56z2/EiqLQFWerfJspyjuwsGSCXcCIA3IRTu8FVgniU5E4gecAMeegVnlTbTVfFyusWhQ2kVVASEDChVRm26KidHNWLdCLBTq5jspGJr+AJyyMqmUkvPkwFsAIgIDeBqmRB3ESjFWIp+wUXn/adGZU3kqWGjdkcnKpk8bAyUY94v8N1QAAIABAACAAAAAgAEAAAAAAAAAAAA=").unwrap(),
-            payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAiom13OiXZIr3bKk+LtUndZJYqdHQQU8dMs1FZ93IctIAAAAAAD9////NG21aH8Vat3thaVmPvWDV/lvRmymFHeePcfUjlyngHIAAAAAAP3///8CH8oFKgEAAAAWABTof3xgz00TWVoBFD+33/3ScWtp/hAZBioBAAAAFgAU1mbnqky3bMxfmm0OgFaQCAs5fsoAAAAAAAEAhAIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////AwFbAP////8CAPIFKgEAAAAWABSNMleYLvef5RFI11+BtLo5ronJBgAAAAAAAAAAJmokqiGp7eL2HD9x0d79P6mZ36NpU3VcaQaJeZlitIvr2DaXToz5AAAAAAEBHwDyBSoBAAAAFgAUjTJXmC73n+URSNdfgbS6Oa6JyQYAAQCEAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP////8DAWcA/////wIA8gUqAQAAABYAFJFtkfHTt3y1EDMaN6CFjjNWtpCRAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEfAPIFKgEAAAAWABSRbZHx07d8tRAzGjeghY4zVraQkQEIawJHMEQCIDTC49IB9AnItqd8zy5RDc05f2ApBAfJ5x4zYfj3bsD2AiAQvvSt5ipScHcUwdlYB9vFnEi68hmh55M5a5e+oWvxMAEhAqErVSVulFb97/r5KQryOS1Xgghff8R7AOuEnvnmslQ5AAAA").unwrap(),
-            params: Params::default(),
-            change_vout: 0,
-            receiver_inputs: vec![
+            original: OriginalContext { original_psbt: Psbt::from_str("cHNidP8BAHECAAAAASom13OiXZIr3bKk+LtUndZJYqdHQQU8dMs1FZ93IctIAAAAAAD9////AmPKBSoBAAAAFgAU6H98YM9NE1laARQ/t9/90nFraf4QJwAAAAAAABYAFBPJFmYuJBsrIaBBp9ur98pMSKxhAAAAAAABAIQCAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wMBWwD/////AgDyBSoBAAAAFgAUjTJXmC73n+URSNdfgbS6Oa6JyQYAAAAAAAAAACZqJKohqe3i9hw/cdHe/T+pmd+jaVN1XGkGiXmZYrSL69g2l06M+QAAAAABAR8A8gUqAQAAABYAFI0yV5gu95/lEUjXX4G0ujmuickGAQhrAkcwRAIgUqbHS0difIGTRwN56z2/EiqLQFWerfJspyjuwsGSCXcCIA3IRTu8FVgniU5E4gecAMeegVnlTbTVfFyusWhQ2kVVASEDChVRm26KidHNWLdCLBTq5jspGJr+AJyyMqmUkvPkwFsAIgIDeBqmRB3ESjFWIp+wUXn/adGZU3kqWGjdkcnKpk8bAyUY94v8N1QAAIABAACAAAAAgAEAAAAAAAAAAAA=").unwrap(), params: Params::default() },
+            proposal: WorkingProposal {
+                payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAiom13OiXZIr3bKk+LtUndZJYqdHQQU8dMs1FZ93IctIAAAAAAD9////NG21aH8Vat3thaVmPvWDV/lvRmymFHeePcfUjlyngHIAAAAAAP3///8CH8oFKgEAAAAWABTof3xgz00TWVoBFD+33/3ScWtp/hAZBioBAAAAFgAU1mbnqky3bMxfmm0OgFaQCAs5fsoAAAAAAAEAhAIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////AwFbAP////8CAPIFKgEAAAAWABSNMleYLvef5RFI11+BtLo5ronJBgAAAAAAAAAAJmokqiGp7eL2HD9x0d79P6mZ36NpU3VcaQaJeZlitIvr2DaXToz5AAAAAAEBHwDyBSoBAAAAFgAUjTJXmC73n+URSNdfgbS6Oa6JyQYAAQCEAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP////8DAWcA/////wIA8gUqAQAAABYAFJFtkfHTt3y1EDMaN6CFjjNWtpCRAAAAAAAAAAAmaiSqIant4vYcP3HR3v0/qZnfo2lTdVxpBol5mWK0i+vYNpdOjPkAAAAAAQEfAPIFKgEAAAAWABSRbZHx07d8tRAzGjeghY4zVraQkQEIawJHMEQCIDTC49IB9AnItqd8zy5RDc05f2ApBAfJ5x4zYfj3bsD2AiAQvvSt5ipScHcUwdlYB9vFnEi68hmh55M5a5e+oWvxMAEhAqErVSVulFb97/r5KQryOS1Xgghff8R7AOuEnvnmslQ5AAAA").unwrap(),
+                change_vout: 0,
+                receiver_inputs: vec![
                 InputPair::new(
                     TxIn {
                         previous_output: OutPoint::from_str("7280a75c8ed4c73d9e7714a66c466ff95783f53e66a585eddd6a157f68b56d34:0").unwrap(),
@@ -854,17 +924,18 @@ mod tests {
                         ..Default::default()
                     }, None)
                 .unwrap()],
+            },
         };
         assert_eq!(p2wpkh_proposal.additional_input_weight(), Weight::from_wu(272));
 
         // Input weight for a single P2TR (taproot) receiver input
         // P2TR without witness requires explicit weight since spend type is unknown.
         let p2tr_proposal = WantsFeeRange {
-            original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAU/CHxd1oi9Lq1xOD2GnHe0hsQdGJ2mkpYkmeasTj+w1AAAAAAD9////Am3KBSoBAAAAFgAUqJL/PDPnHeihhNhukTz8QEdZbZAQJwAAAAAAABYAFInyO0NQF7YR22Sm0YTPGm6yf19YAAAAAAABASsA8gUqAQAAACJRIGOPekNKFs9ASLj3FdlCLiou/jdPUegJGzlA111A80MAAQhCAUC3zX8eSeL8+bAo6xO0cpon83UsJdttiuwfMn/pBwub82rzMsoS6HZNXzg7hfcB3p1uj8JmqsBkZwm8k6fnU2peACICA+u+FjwmhEgWdjhEQbO49D0NG8iCYUoqhlfsj0LN7hiRGOcVI65UAACAAQAAgAAAAIABAAAAAAAAAAAA").unwrap(),
-            payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAk/CHxd1oi9Lq1xOD2GnHe0hsQdGJ2mkpYkmeasTj+w1AAAAAAD9////Fz+ELsYp/55j6+Jl2unG9sGvpHTiSyzSORBvtu1GEB4AAAAAAP3///8CM8oFKgEAAAAWABSokv88M+cd6KGE2G6RPPxAR1ltkBAZBioBAAAAFgAU68J5imRcKy3g5JCT3bEoP9IXEn0AAAAAAAEBKwDyBSoBAAAAIlEgY496Q0oWz0BIuPcV2UIuKi7+N09R6AkbOUDXXUDzQwAAAQErAPIFKgEAAAAiUSCfbbX+FHJbzC71eEFLsMjDouMJbu8ogeR0eNoNxMM9CwEIQwFBeyOLUebV/YwpaLTpLIaTXaSiPS7Dn6o39X4nlUzQLfb6YyvCAsLA5GTxo+Zb0NUINZ8DaRyUWknOpU/Jzuwn2gEAAAA=").unwrap(),
-            params: Params::default(),
-            change_vout: 0,
-            receiver_inputs: vec![
+            original: OriginalContext { original_psbt: Psbt::from_str("cHNidP8BAHECAAAAAU/CHxd1oi9Lq1xOD2GnHe0hsQdGJ2mkpYkmeasTj+w1AAAAAAD9////Am3KBSoBAAAAFgAUqJL/PDPnHeihhNhukTz8QEdZbZAQJwAAAAAAABYAFInyO0NQF7YR22Sm0YTPGm6yf19YAAAAAAABASsA8gUqAQAAACJRIGOPekNKFs9ASLj3FdlCLiou/jdPUegJGzlA111A80MAAQhCAUC3zX8eSeL8+bAo6xO0cpon83UsJdttiuwfMn/pBwub82rzMsoS6HZNXzg7hfcB3p1uj8JmqsBkZwm8k6fnU2peACICA+u+FjwmhEgWdjhEQbO49D0NG8iCYUoqhlfsj0LN7hiRGOcVI65UAACAAQAAgAAAAIABAAAAAAAAAAAA").unwrap(), params: Params::default() },
+            proposal: WorkingProposal {
+                payjoin_psbt: Psbt::from_str("cHNidP8BAJoCAAAAAk/CHxd1oi9Lq1xOD2GnHe0hsQdGJ2mkpYkmeasTj+w1AAAAAAD9////Fz+ELsYp/55j6+Jl2unG9sGvpHTiSyzSORBvtu1GEB4AAAAAAP3///8CM8oFKgEAAAAWABSokv88M+cd6KGE2G6RPPxAR1ltkBAZBioBAAAAFgAU68J5imRcKy3g5JCT3bEoP9IXEn0AAAAAAAEBKwDyBSoBAAAAIlEgY496Q0oWz0BIuPcV2UIuKi7+N09R6AkbOUDXXUDzQwAAAQErAPIFKgEAAAAiUSCfbbX+FHJbzC71eEFLsMjDouMJbu8ogeR0eNoNxMM9CwEIQwFBeyOLUebV/YwpaLTpLIaTXaSiPS7Dn6o39X4nlUzQLfb6YyvCAsLA5GTxo+Zb0NUINZ8DaRyUWknOpU/Jzuwn2gEAAAA=").unwrap(),
+                change_vout: 0,
+                receiver_inputs: vec![
                 InputPair::new(
                     TxIn {
                         previous_output: OutPoint::from_str("1e1046edb66f1039d22c4be274a4afc1f6c6e9da65e2eb639eff29c62e843f17:0").unwrap(),
@@ -877,6 +948,7 @@ mod tests {
                         ..Default::default()
                     }, Some(Weight::from_wu(230)))
                 .unwrap()],
+            },
         };
         assert_eq!(p2tr_proposal.additional_input_weight(), Weight::from_wu(230));
     }
@@ -1034,5 +1106,71 @@ mod tests {
             assert!(output.redeem_script.is_none());
             assert!(output.witness_script.is_none());
         }
+    }
+
+    // `original.original_psbt` and `proposal.payjoin_psbt` are both `Psbt`, so
+    // swapping them type-checks but silently miscomputes fees. Owned vout 1 differs
+    // from the sender's fee index 0, so the contribution survives and is asserted exactly.
+    #[test]
+    fn fee_contribution_decrements_sender_output_exactly() {
+        let original = original_from_test_vector();
+        let sender_script = original.psbt.unsigned_tx.output[0].script_pubkey.clone();
+        let sender_value_before = original.psbt.unsigned_tx.output[0].value;
+        let original_input_count = original.psbt.unsigned_tx.input.len();
+
+        // owned_vouts = [1]: the receiver owns output 1, so the fee index 0 (a sender
+        // output) is not owned and `additional_fee_contribution` survives sanitization.
+        let wants_inputs = WantsOutputs::new(original, vec![1]).commit_outputs();
+
+        let proposal_psbt = Psbt::from_str(RECEIVER_INPUT_CONTRIBUTION).unwrap();
+        let input = InputPair::new(
+            proposal_psbt.unsigned_tx.input[1].clone(),
+            proposal_psbt.inputs[1].clone(),
+            None,
+        )
+        .unwrap();
+        let contributed_outpoint = input.txin.previous_output;
+        let input_weight = input.expected_weight;
+        let wants_fee_range = wants_inputs
+            .contribute_inputs([input])
+            .expect("contribution should succeed")
+            .commit_inputs();
+
+        // Independently recompute the sender's subsidy from the same inputs the
+        // production code uses.
+        let (max_contribution, fee_index) = wants_fee_range
+            .original
+            .params
+            .additional_fee_contribution
+            .expect("contribution should survive sanitization");
+        assert_eq!(fee_index, 0, "fee index must point at the sender output");
+        let min_fee_rate = FeeRate::from_sat_per_vb_u32(10);
+        let effective_min =
+            std::cmp::max(min_fee_rate, wants_fee_range.original.params.min_fee_rate);
+        let additional_fee = input_weight * effective_min;
+        let sender_additional_fee = std::cmp::min(max_contribution, additional_fee);
+        assert!(sender_additional_fee > Amount::ZERO, "subsidy must be exercised");
+
+        let psbt = wants_fee_range
+            .calculate_psbt_with_fee_range(
+                Some(min_fee_rate),
+                Some(FeeRate::from_sat_per_vb_u32(1000)),
+            )
+            .expect("fee range should be valid");
+
+        // The result must be built from the mutated psbt (it carries the receiver
+        // input); a swap that used `original_psbt` as the proposal psbt would drop it.
+        assert_eq!(psbt.unsigned_tx.input.len(), original_input_count + 1);
+        assert!(
+            psbt.unsigned_tx.input.iter().any(|txin| txin.previous_output == contributed_outpoint),
+            "result must contain the contributed receiver input"
+        );
+        let sender_out = psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .find(|txo| txo.script_pubkey == sender_script)
+            .expect("sender output must be present");
+        assert_eq!(sender_out.value, sender_value_before - sender_additional_fee);
     }
 }

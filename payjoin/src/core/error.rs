@@ -51,6 +51,7 @@ impl<SessionState: Debug, SessionEvent: Debug> std::fmt::Display
                 Some(session) => write!(f, "Invalid event ({event:?}) for session ({session:?})",),
                 None => write!(f, "Invalid first event ({event:?}) for session",),
             },
+            InvalidEventPayload(reason) => write!(f, "Invalid event payload: {reason}"),
             Expired(time) => write!(f, "Session expired at {time:?}"),
             PersistenceFailure(e) => write!(f, "Persistence failure: {e}"),
         }
@@ -83,6 +84,8 @@ pub(crate) enum InternalReplayError<SessionState, SessionEvent> {
     NoEvents,
     /// Invalid initial event
     InvalidEvent(Box<SessionEvent>, Option<Box<SessionState>>),
+    /// Event payload cannot be applied to the current session state
+    InvalidEventPayload(String),
     /// Session is expired
     Expired(crate::time::Time),
     /// Application storage error

@@ -198,6 +198,8 @@ pub(crate) enum InternalPayloadError {
     PrevTxOut(crate::psbt::PrevTxOutError),
     /// The Original PSBT has no output for the receiver.
     MissingPayment,
+    /// The sender's additional fee output index is not in the original PSBT.
+    AdditionalFeeOutputIndexOutOfBounds { index: usize, output_count: usize },
     /// The original PSBT transaction fails the broadcast check
     OriginalPsbtNotBroadcastable,
     #[allow(dead_code)]
@@ -227,6 +229,7 @@ impl From<&PayloadError> for JsonReply {
             | InconsistentPsbt(_)
             | PrevTxOut(_)
             | MissingPayment
+            | AdditionalFeeOutputIndexOutOfBounds { .. }
             | OriginalPsbtNotBroadcastable
             | InputOwned(_)
             | InputSeen(_)
@@ -265,6 +268,10 @@ impl fmt::Display for InternalPayloadError {
             InconsistentPsbt(e) => write!(f, "{e}"),
             PrevTxOut(e) => write!(f, "PrevTxOut Error: {e}"),
             MissingPayment => write!(f, "Missing payment."),
+            AdditionalFeeOutputIndexOutOfBounds { index, output_count } => write!(
+                f,
+                "Additional fee output index {index} is out of bounds for {output_count} outputs."
+            ),
             OriginalPsbtNotBroadcastable => write!(f, "Can't broadcast. PSBT rejected by mempool."),
             InputOwned(_) => write!(f, "The receiver rejected the original PSBT."),
             InputSeen(_) => write!(f, "The receiver rejected the original PSBT."),
@@ -292,6 +299,7 @@ impl std::error::Error for PayloadError {
             PsbtBelowFeeRate(_, _) => None,
             FeeTooHigh(_, _) => None,
             MissingPayment => None,
+            AdditionalFeeOutputIndexOutOfBounds { .. } => None,
             OriginalPsbtNotBroadcastable => None,
             InputOwned(_) => None,
             InputSeen(_) => None,

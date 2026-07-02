@@ -460,6 +460,14 @@ impl OriginalPayload {
 
         let mut params = self.params.clone();
         if let Some((_, additional_fee_output_index)) = params.additional_fee_contribution {
+            let output_count = self.psbt.unsigned_tx.output.len();
+            if additional_fee_output_index >= output_count {
+                return Err(InternalPayloadError::AdditionalFeeOutputIndexOutOfBounds {
+                    index: additional_fee_output_index,
+                    output_count,
+                }
+                .into());
+            }
             // If the additional fee output index specified by the sender is pointing to a receiver output,
             // the receiver should ignore the parameter.
             // https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#optional-parameters
@@ -1017,6 +1025,31 @@ pub(crate) mod tests {
             .identify_receiver_outputs(&mut |_| Ok(false))
             .expect_err("should error");
         assert_eq!(wants_outputs.to_string(), "Protocol error: Missing payment.");
+
+        // Sender fee contribution index must refer to an original PSBT output
+        let output_count = original.psbt.unsigned_tx.output.len();
+        let params = Params {
+            additional_fee_contribution: Some((MAX_ADDITIONAL_FEE_CONTRIBUTION, output_count)),
+            ..original.params.clone()
+        };
+        let original_with_invalid_fee_index = OriginalPayload { params, ..original.clone() };
+        let err = original_with_invalid_fee_index
+            .identify_receiver_outputs(&mut |script| {
+                Ok(script == &PARSED_ORIGINAL_PSBT.unsigned_tx.output[1].script_pubkey)
+            })
+            .expect_err("out-of-bounds additional fee output index should error");
+        match err {
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::AdditionalFeeOutputIndexOutOfBounds {
+                    index,
+                    output_count: count,
+                },
+            ))) => {
+                assert_eq!(index, output_count);
+                assert_eq!(count, output_count);
+            }
+            _ => panic!("Expected AdditionalFeeOutputIndexOutOfBounds error, got: {err:?}"),
+        }
 
         // Fee contribution output belongs to the receiver, it should correctly identify owned
         // vouts and ignore the additional fee contribution param

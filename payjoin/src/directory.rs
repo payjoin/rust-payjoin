@@ -42,6 +42,7 @@ impl std::fmt::Display for ShortId {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ShortIdError {
     DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
     IncorrectLength(std::array::TryFromSliceError),

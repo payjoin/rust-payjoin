@@ -1,6 +1,7 @@
 use crate::core::{Url, UrlParseError};
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
     BadScheme,
     ParseError(UrlParseError),

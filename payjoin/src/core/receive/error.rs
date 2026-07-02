@@ -57,6 +57,7 @@ impl error::Error for Error {
 /// 4. Provide errors according to BIP-78 JSON error specifications for return
 ///    after conversion into [`JsonReply`]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ProtocolError {
     /// Error arising from validation of the original PSBT payload
     OriginalPayload(PayloadError),

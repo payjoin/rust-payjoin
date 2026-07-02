@@ -86,6 +86,15 @@ impl Database {
             [],
         )?;
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ohttp_cache (
+                directory_url TEXT PRIMARY KEY,
+                ohttp_keys BLOB NOT NULL,
+                expires_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -103,6 +112,53 @@ impl Database {
         )? == 0;
 
         Ok(was_seen_before)
+    }
+
+    pub(crate) fn get_cached_ohttp_keys(
+        &self,
+        directory_url: &str,
+    ) -> Result<Option<payjoin::OhttpKeys>> {
+        let conn = self.get_connection()?;
+        let result = conn.query_row(
+            "SELECT ohttp_keys FROM ohttp_cache WHERE directory_url = ?1 AND expires_at > ?2",
+            params![directory_url, now()],
+            |row| row.get::<_, Vec<u8>>(0),
+        );
+
+        match result {
+            Ok(bytes) => {
+                let keys = payjoin::OhttpKeys::decode(&bytes)
+                    .map_err(|e| {
+                        tracing::error!("Failed to decode OHTTP keys: {:?}", e);
+                    })
+                    .ok();
+                Ok(keys)
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(Error::Rusqlite(e)),
+        }
+    }
+
+    pub(crate) fn store_ohttp_keys(
+        &self,
+        directory_url: &str,
+        keys: &payjoin::OhttpKeys,
+        expires_at: i64,
+    ) -> Result<()> {
+        let conn = self.get_connection()?;
+        let encoded =
+            keys.encode().map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO ohttp_cache (directory_url, ohttp_keys, expires_at) VALUES (?1, ?2, ?3)
+            ON CONFLICT(directory_url) DO UPDATE SET
+            ohttp_keys = excluded.ohttp_keys,
+            expires_at = excluded.expires_at
+            ",
+            params![directory_url, encoded, expires_at],
+        )?;
+
+        Ok(())
     }
 }
 

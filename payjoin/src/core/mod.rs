@@ -37,7 +37,7 @@ pub use crate::hpke::{HpkeKeyPair, HpkePublicKey};
 #[cfg(feature = "v2")]
 pub(crate) mod ohttp;
 #[cfg(feature = "v2")]
-pub use crate::ohttp::OhttpKeys;
+pub use crate::ohttp::{OhttpKeys, OhttpKeysError, OhttpResponse};
 
 #[cfg(feature = "io")]
 #[cfg_attr(docsrs, doc(cfg(feature = "io")))]

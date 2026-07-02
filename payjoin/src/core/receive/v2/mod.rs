@@ -53,6 +53,7 @@ use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{
     ohttp_encapsulate, process_get_res, process_post_res, OhttpEncapsulationError, OhttpKeys,
+    OhttpResponse,
 };
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
@@ -539,13 +540,13 @@ impl Receiver<Initialized> {
     pub fn create_poll_request(
         &self,
         ohttp_relay: impl IntoUrl,
-    ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
+    ) -> Result<(Request, OhttpResponse), CreateRequestError> {
         if self.session_context.expiration.elapsed() {
             return Err(InternalCreateRequestError::Expired(self.session_context.expiration).into());
         }
         let (body, ohttp_ctx) = self.fallback_req_body()?;
         let req = Request::new_v2(&self.session_context.full_relay_url(ohttp_relay)?, &body);
-        Ok((req, ohttp_ctx))
+        Ok((req, OhttpResponse::new(ohttp_ctx)))
     }
 
     /// Process the response to the Original PSBT poll from the Payjoin Directory.
@@ -559,7 +560,7 @@ impl Receiver<Initialized> {
     pub fn process_response(
         self,
         body: &[u8],
-        context: ohttp::ClientResponse,
+        context: OhttpResponse,
     ) -> MaybeFatalTransitionWithNoResults<
         SessionEvent,
         Receiver<UncheckedOriginalPayload>,
@@ -567,7 +568,7 @@ impl Receiver<Initialized> {
         ProtocolError,
     > {
         let current_state = self.clone();
-        let proposal = match self.inner_process_res(body, context) {
+        let proposal = match self.inner_process_res(body, context.into_inner()) {
             Ok(proposal) => proposal,
             Err(e) => match e {
                 ProtocolError::V2(SessionError(InternalSessionError::DirectoryResponse(
@@ -1276,7 +1277,7 @@ impl Receiver<PayjoinProposal> {
     pub fn create_post_request(
         &self,
         ohttp_relay: impl IntoUrl,
-    ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
+    ) -> Result<(Request, OhttpResponse), CreateRequestError> {
         if self.session_context.expiration.elapsed() {
             return Err(InternalCreateRequestError::Expired(self.session_context.expiration).into());
         }
@@ -1308,7 +1309,7 @@ impl Receiver<PayjoinProposal> {
         )?;
 
         let req = Request::new_v2(&self.session_context.full_relay_url(ohttp_relay)?, &body);
-        Ok((req, ctx))
+        Ok((req, OhttpResponse::new(ctx)))
     }
 
     /// Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
@@ -1321,14 +1322,14 @@ impl Receiver<PayjoinProposal> {
     pub fn process_response(
         self,
         res: &[u8],
-        ohttp_context: ohttp::ClientResponse,
+        ohttp_context: OhttpResponse,
     ) -> MaybeFatalTransition<
         SessionEvent,
         Receiver<Monitor>,
         ProtocolError,
         Receiver<PendingFallback>,
     > {
-        match process_post_res(res, ohttp_context) {
+        match process_post_res(res, ohttp_context.into_inner()) {
             Ok(_) => MaybeFatalTransition::success(
                 SessionEvent::PostedPayjoinProposal(),
                 Receiver {
@@ -1387,7 +1388,7 @@ impl Receiver<HasReplyableError> {
     pub fn create_error_request(
         &self,
         ohttp_relay: impl IntoUrl,
-    ) -> Result<(Request, ohttp::ClientResponse), SessionError> {
+    ) -> Result<(Request, OhttpResponse), SessionError> {
         let session_context = &self.session_context;
         if session_context.expiration.elapsed() {
             return Err(InternalSessionError::Expired(session_context.expiration).into());
@@ -1410,10 +1411,10 @@ impl Receiver<HasReplyableError> {
             }
         };
         let (body, ohttp_ctx) =
-            ohttp_encapsulate(&session_context.ohttp_keys.0, "POST", mailbox.as_str(), Some(&body))
+            ohttp_encapsulate(&session_context.ohttp_keys, "POST", mailbox.as_str(), Some(&body))
                 .map_err(InternalSessionError::OhttpEncapsulation)?;
         let req = Request::new_v2(&session_context.full_relay_url(ohttp_relay)?, &body);
-        Ok((req, ohttp_ctx))
+        Ok((req, OhttpResponse::new(ohttp_ctx)))
     }
 
     /// Process an OHTTP Encapsulated HTTP POST Error response
@@ -1421,7 +1422,7 @@ impl Receiver<HasReplyableError> {
     pub fn process_error_response(
         &self,
         res: &[u8],
-        ohttp_context: ohttp::ClientResponse,
+        ohttp_context: OhttpResponse,
     ) -> MaybeTerminalSuccessTransition<SessionEvent, Receiver<PendingFallback>, ProtocolError>
     {
         let pending = self.pending_fallback_after_protocol_failure();
@@ -1432,7 +1433,7 @@ impl Receiver<HasReplyableError> {
         let protocol_error =
             |e| ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into());
 
-        match (process_post_res(res, ohttp_context), pending) {
+        match (process_post_res(res, ohttp_context.into_inner()), pending) {
             (Ok(_), Some(pending_fallback)) =>
                 MaybeTerminalSuccessTransition::advance(event, pending_fallback),
             (Ok(_), None) => MaybeTerminalSuccessTransition::terminate(event),
@@ -1581,8 +1582,8 @@ pub mod test {
     use bitcoin::{Amount, FeeRate, ScriptBuf, Witness};
     use once_cell::sync::Lazy;
     use payjoin_test_utils::{
-        BoxError, EXAMPLE_URL, KEM, KEY_ID, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT,
-        PARSED_PAYJOIN_PROPOSAL, QUERY_PARAMS, SYMMETRIC,
+        BoxError, EXAMPLE_URL, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL,
+        QUERY_PARAMS,
     };
 
     use super::*;
@@ -1599,9 +1600,8 @@ pub mod test {
             .expect("valid address")
             .assume_checked(),
         directory: Url::from_str(EXAMPLE_URL).expect("Could not parse Url"),
-        ohttp_keys: OhttpKeys(
-            ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
-        ),
+        ohttp_keys: OhttpKeys::decode(&payjoin_test_utils::ohttp_key_config_bytes())
+            .expect("valid ohttp keys"),
         expiration: Time::from_now(Duration::from_secs(60)).expect("Valid timestamp"),
         receiver_key: HpkeKeyPair::gen_keypair(),
         reply_key: None,
@@ -1659,8 +1659,7 @@ pub mod test {
     }
 
     fn ohttp_response_for(req_body: &[u8], status: http::StatusCode) -> Vec<u8> {
-        let server = ohttp::Server::new(SHARED_CONTEXT.ohttp_keys.0.clone())
-            .expect("test OHTTP server should be valid");
+        let server = payjoin_test_utils::ohttp_server();
         let (_, probe_response) = server.decapsulate(req_body).expect("request should decapsulate");
         let response_overhead =
             probe_response.encapsulate(&[]).expect("probe should encrypt").len();

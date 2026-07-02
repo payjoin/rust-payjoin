@@ -1,6 +1,5 @@
 use core::fmt;
 use std::error;
-use std::ops::Deref;
 
 use bitcoin::key::constants::{ELLSWIFT_ENCODING_SIZE, PUBLIC_KEY_SIZE};
 use bitcoin::secp256k1;
@@ -57,7 +56,7 @@ fn pubkey_from_compressed_bytes(pk_bytes: &[u8]) -> Result<HpkePublicKey, HpkeEr
 }
 
 fn compressed_bytes_from_pubkey(pk: &HpkePublicKey) -> [u8; PUBLIC_KEY_SIZE] {
-    let reply_pk_uncompressed = pk.to_bytes();
+    let reply_pk_uncompressed = pk.0.to_bytes();
     secp256k1::PublicKey::from_slice(&reply_pk_uncompressed[..])
         .expect("parsing a pubkey immediately after serializing it must not fail")
         .serialize()
@@ -81,13 +80,7 @@ fn ellswift_bytes_from_encapped_key(
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct HpkeSecretKey(pub SecretKey);
-
-impl Deref for HpkeSecretKey {
-    type Target = SecretKey;
-
-    fn deref(&self) -> &Self::Target { &self.0 }
-}
+pub struct HpkeSecretKey(SecretKey);
 
 impl fmt::Debug for HpkeSecretKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -118,7 +111,7 @@ impl<'de> serde::Deserialize<'de> for HpkeSecretKey {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct HpkePublicKey(pub PublicKey);
+pub struct HpkePublicKey(PublicKey);
 
 impl HpkePublicKey {
     pub fn to_compressed_bytes(&self) -> [u8; 33] {
@@ -133,12 +126,6 @@ impl HpkePublicKey {
             compressed_key.serialize_uncompressed().as_slice(),
         )?))
     }
-}
-
-impl Deref for HpkePublicKey {
-    type Target = PublicKey;
-
-    fn deref(&self) -> &Self::Target { &self.0 }
 }
 
 impl fmt::Debug for HpkePublicKey {

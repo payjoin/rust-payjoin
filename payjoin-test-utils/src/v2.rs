@@ -10,7 +10,7 @@ use ohttp::hpke::{Aead, Kdf, Kem};
 use ohttp::{KeyId, SymmetricSuite};
 use payjoin::io::{fetch_ohttp_keys_with_cert, Error as IOError};
 pub use payjoin::persist::{InMemoryPersister, SessionPersister};
-use payjoin::OhttpKeys;
+use payjoin::{OhttpKeys, Url};
 use rcgen::Certificate;
 use reqwest::{Client, ClientBuilder};
 use rustls::pki_types::CertificateDer;
@@ -110,12 +110,16 @@ impl TestServices {
     }
 
     pub async fn fetch_ohttp_keys(&self) -> Result<OhttpKeys, IOError> {
-        fetch_ohttp_keys_with_cert(
-            self.ohttp_relay_url().as_str(),
-            self.directory_url().as_str(),
-            &self.cert(),
-        )
-        .await
+        let relays: Vec<Url> = self
+            .ohttp_relays
+            .iter()
+            .map(|r| format!("http://localhost:{}", r.0))
+            .map(|s| Url::parse(&s).expect("valid relay URL"))
+            .collect();
+        let (ohttp_keys, _relay) =
+            fetch_ohttp_keys_with_cert(&relays, self.directory_url().as_str(), &self.cert())
+                .await?;
+        Ok(ohttp_keys)
     }
 }
 

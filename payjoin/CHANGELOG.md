@@ -44,6 +44,10 @@ Selected Improvements:
 - Document BIP77 v1 fallback behavior in `create_post_request` (#1593)
 - Remove redundant language from `finalize_proposal` rustdocs (#1567)
 
+### Relay Selection
+
+- Centralize OHTTP relay selection in `payjoin::relay::RelaySelector`; `io::fetch_ohttp_keys` now takes a relay slice and returns the relay that served the keys (breaking: `fetch_ohttp_keys(relay, dir) -> OhttpKeys` becomes `fetch_ohttp_keys(relays, dir) -> (OhttpKeys, Url)`)
+
 ## 0.25.0
 
 Introduce monitoring typestates, replyable error handling, async

@@ -449,16 +449,29 @@ pub struct PendingFallback {
     fallback_tx: bitcoin::Transaction,
 }
 
+/// Typestate holding the fallback transaction after the Payjoin session was cancelled or
+/// failed.
+///
+/// The receiver may broadcast the fallback transaction, then call
+/// [`Receiver<PendingFallback>::close`] to close the session.
 impl Receiver<PendingFallback> {
+    /// Returns the fallback transaction to be broadcast.
     pub fn fallback_tx(&self) -> &bitcoin::Transaction { &self.state.fallback_tx }
 
+    /// Close the Payjoin session.
+    ///
+    /// Returns a [`TerminalTransition`] that, once successfully persisted, closes the
+    /// receiver session.
     pub fn close(self) -> TerminalTransition<SessionEvent, ()> {
         TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Aborted), ())
     }
 }
 
 impl<S: HasFallbackTx> Receiver<S> {
-    /// Cancel the Payjoin session and surface the fallback transaction.
+    /// Cancel the Payjoin session and return pending fallback handling.
+    ///
+    /// Returns a [`NextStateTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<PendingFallback>`].
     pub fn cancel(self) -> NextStateTransition<SessionEvent, Receiver<PendingFallback>> {
         let fallback_tx = self.state.fallback_tx();
         NextStateTransition::success(
@@ -472,7 +485,10 @@ impl<S: HasFallbackTx> Receiver<S> {
 }
 
 impl Receiver<Initialized> {
-    /// Cancel before any fallback transaction exists.
+    /// Cancel the Payjoin session immediately.
+    ///
+    /// Returns a [`TerminalTransition`] that, once successfully persisted, closes the
+    /// receiver session.
     pub fn cancel(self) -> TerminalTransition<SessionEvent, ()> {
         TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Aborted), ())
     }
@@ -541,16 +557,16 @@ impl ReceiverBuilder {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Initialized {}
 
+/// The initial typestate of a Payjoin v2 receiver session.
+///
+/// After sharing the Payjoin URI from [`Receiver<Initialized>::pj_uri`] with the
+/// sender out of band, poll the Payjoin Directory in the PJ URI for the sender's
+/// Original PSBT: build a request with [`Receiver<Initialized>::create_poll_request`],
+/// then pass each response to [`Receiver<Initialized>::process_response`] until it
+/// advances to [`Receiver<UncheckedOriginalPayload>`].
 impl Receiver<Initialized> {
-    /// Create an OHTTP encapsulated HTTP GET request to poll for the Original PSBT
-    /// from the Payjoin Directory.
-    ///
-    /// After the receiver extracts the Payjoin URI with [`Receiver<Initialized>::pj_uri`] and sends it
-    /// to the sender, they should poll the Payjoin Directory in the PJ URI for the sender's
-    /// Original PSBT.
-    ///
-    /// Requests created with this function are OHTTP encapsulated for the configured directory and
-    /// addressed to the `ohttp_relay` parameter.
+    /// Construct an OHTTP encapsulated GET request to be used to poll the Payjoin
+    /// Directory for the sender's Original PSBT.
     pub fn create_poll_request(
         &self,
         ohttp_relay: impl IntoUrl,
@@ -563,14 +579,12 @@ impl Receiver<Initialized> {
         Ok((req, OhttpResponse::new(ohttp_ctx)))
     }
 
-    /// Process the response to the Original PSBT poll from the Payjoin Directory.
+    /// Process the Payjoin directory polling response.
     ///
-    /// The response can either be an [`UncheckedOriginalPayload`] or an ACCEPTED message
-    /// indicating no [`UncheckedOriginalPayload`] is available yet.
-    ///
-    /// If the response contains the Original PSBT from the sender, transition to the next
-    /// typestate. If the response is an ACCEPTED message from the directory which indicates that
-    /// no payload is available yet, continue to poll.
+    /// Returns a [`MaybeFatalTransitionWithNoResults`] that, once successfully
+    /// persisted, yields either a [`Receiver<UncheckedOriginalPayload>`] if the
+    /// sender's Original PSBT is available, or a [`Receiver<Initialized>`] to remain
+    /// in stasis if no proposal has arrived yet.
     pub fn process_response(
         self,
         body: &[u8],
@@ -714,52 +728,39 @@ impl Receiver<Initialized> {
     }
 }
 
-/// The sender's original PSBT and optional parameters
+/// This is the first typestate after retrieving the sender's proposal. Here the
+/// receiver verifies the Original PSBT is broadcastable so it can serve as a
+/// fallback if the payjoin fails.
 ///
-/// This type is used to process the request. It is returned by
-/// [`Receiver::process_response()`].
-///
+/// Non-interactive receivers (e.g. a donation page that generates a fresh QR code
+/// per visit) should call
+/// [`Receiver<UncheckedOriginalPayload>::check_broadcast_suitability`] to confirm
+/// the proposal is broadcastable (and optionally above a minimum fee rate),
+/// guarding against probing attacks that trick the receiver into revealing its
+/// UTXOs. Interactive receivers can skip that check and call
+/// [`Receiver<UncheckedOriginalPayload>::assume_interactive_receiver`] instead.
+/// Either path advances to [`Receiver<MaybeInputsOwned>`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct UncheckedOriginalPayload {
     pub(crate) original: OriginalPayload,
 }
 
 impl Receiver<UncheckedOriginalPayload> {
-    /// Cancel before broadcast suitability has been checked.
+    /// Cancel the Payjoin session immediately.
+    ///
+    /// Returns a [`TerminalTransition`] that, once successfully persisted, closes the
+    /// receiver session.
     pub fn cancel(self) -> TerminalTransition<SessionEvent, ()> {
         TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Aborted), ())
     }
 }
 
-/// The original PSBT and the optional parameters received from the sender.
-///
-/// This is the first typestate after the retrieval of the sender's original proposal in
-/// the receiver's workflow. At this stage, the receiver can verify that the original PSBT they have
-/// received from the sender is broadcastable to the network in the case of a payjoin failure.
-///
-/// The recommended usage of this typestate differs based on whether you are implementing an
-/// interactive (where the receiver takes manual actions to respond to the
-/// payjoin proposal) or a non-interactive (ex. a donation page which automatically generates a new QR code
-/// for each visit) payment receiver. For the latter, you should call [`Receiver<UncheckedOriginalPayload>::check_broadcast_suitability`] to check
-/// that the proposal is actually broadcastable (and, optionally, whether the fee rate is above the
-/// minimum limit you have set). These mechanisms protect the receiver against probing attacks, where
-/// a malicious sender can repeatedly send proposals to have the non-interactive receiver reveal the UTXOs
-/// it owns with the proposals it modifies.
-///
-/// If you are implementing an interactive payment receiver, then such checks are not necessary, and you
-/// can go ahead with calling [`Receiver<UncheckedOriginalPayload>::assume_interactive_receiver`] to move on to the next typestate.
 impl Receiver<UncheckedOriginalPayload> {
-    /// Checks that the original PSBT in the proposal can be broadcasted.
+    /// Check that the sender's Original PSBT is suitable for broadcast, ensuring
+    /// it can be used as a fallback if the payjoin does not complete.
     ///
-    /// If the receiver is a non-interactive payment processor (ex. a donation page which generates
-    /// a new QR code for each visit), then it should make sure that the original PSBT is broadcastable
-    /// as a fallback mechanism in case the payjoin fails. This validation would be equivalent to
-    /// `testmempoolaccept` RPC call returning `{"allowed": true,...}`.
-    ///
-    /// Receiver can optionally set a minimum fee rate which will be enforced on the original PSBT in the proposal.
-    /// This can be used to further prevent probing attacks since the attacker would now need to probe the receiver
-    /// with transactions which are both broadcastable and pay high fee. Unrelated to the probing attack scenario,
-    /// this parameter also makes operating in a high fee environment easier for the receiver.
+    /// Returns a [`MaybeFatalTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<MaybeInputsOwned>`] to continue validation.
     pub fn check_broadcast_suitability(
         self,
         min_fee_rate: Option<FeeRate>,
@@ -792,10 +793,13 @@ impl Receiver<UncheckedOriginalPayload> {
         }
     }
 
-    /// Moves on to the next typestate without any of the current typestate's validations.
+    /// Skip the current typestate's validations.
     ///
-    /// Use this for interactive payment receivers, where there is no risk of a probing attack since the
-    /// receiver needs to manually create payjoin URIs.
+    /// Use this for interactive receivers, which manually create Payjoin URIs and so
+    /// are not exposed to the probing attacks the checks guard against.
+    ///
+    /// Returns a [`NextStateTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<MaybeInputsOwned>`].
     pub fn assume_interactive_receiver(
         self,
     ) -> NextStateTransition<SessionEvent, Receiver<MaybeInputsOwned>> {
@@ -822,26 +826,28 @@ pub struct MaybeInputsOwned {
     original: OriginalPayload,
 }
 
-/// Typestate to check that the original PSBT has no inputs owned by the receiver.
+/// Typestate to check that the Original PSBT has no inputs owned by the receiver.
 ///
-/// At this point, it has been verified that the transaction is broadcastable from previous
-/// typestate. The receiver can call [`Receiver<MaybeInputsOwned>::extract_tx_to_schedule_broadcast`]
-/// to extract the signed original PSBT to schedule a fallback in case the Payjoin process fails.
+/// At this point, the Original PSBT has been verified as broadcastable; the receiver
+/// can call [`Receiver<MaybeInputsOwned>::extract_tx_to_schedule_broadcast`] to
+/// schedule a fallback broadcast in case the payjoin fails.
 ///
-/// Call [`Receiver<MaybeInputsOwned>::check_inputs_not_owned`] to proceed.
+/// Call [`Receiver<MaybeInputsOwned>::check_inputs_not_owned`] to advance to
+/// [`Receiver<MaybeInputsSeen>`] to continue validation.
 impl Receiver<MaybeInputsOwned> {
-    /// Extracts the original transaction received from the sender.
+    /// Extract the transaction from the Original PSBT for scheduling broadcast as a
+    /// fallback in case the payjoin does not complete.
     ///
-    /// Use this for scheduling the broadcast of the original transaction as a fallback
-    /// for the payjoin. Note that this function does not make any validation on whether
-    /// the transaction is broadcastable; it simply extracts it.
+    /// Returns the extracted [`bitcoin::Transaction`].
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
         self.state.fallback_tx()
     }
 
-    /// Check that the original PSBT has no receiver-owned inputs.
+    /// Check that none of the Original PSBT's inputs belong to the receiver,
+    /// preventing an attacker from spending the receiver's own inputs.
     ///
-    /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    /// Returns a [`MaybeFatalTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<MaybeInputsSeen>`] to continue validation.
     pub fn check_inputs_not_owned(
         self,
         is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
@@ -891,18 +897,24 @@ pub struct MaybeInputsSeen {
     original: OriginalPayload,
 }
 
-/// Typestate to check that the original PSBT has no inputs that the receiver has seen before.
+/// Typestate to check that the Original PSBT has no inputs the receiver has seen before.
 ///
-/// Call [`Receiver<MaybeInputsSeen>::check_no_inputs_seen_before`] to proceed.
+/// This check prevents the following attacks:
+/// 1. Probing attacks, where the sender uses the exact same proposal (or with
+///    minimal change) to have the receiver reveal their UTXO set by contributing
+///    to all proposals with different inputs and sending them back to the receiver.
+/// 2. Re-entrant payjoin, where the sender uses the payjoin PSBT of a previous
+///    payjoin as the Original PSBT of the current, new payjoin.
+///
+/// Call [`Receiver<MaybeInputsSeen>::check_no_inputs_seen_before`] to advance to
+/// [`Receiver<OutputsUnknown>`] to continue validation.
 impl Receiver<MaybeInputsSeen> {
-    /// Check that the receiver has never seen the inputs in the original proposal before.
+    /// Check that none of the inputs have been seen before, preventing input
+    /// probing and replay attacks (where inputs have been used in a previous
+    /// payjoin attempt).
     ///
-    /// This check prevents the following attacks:
-    /// 1. Probing attacks, where the sender can use the exact same proposal (or with minimal change)
-    ///    to have the receiver reveal their UTXO set by contributing to all proposals with different inputs
-    ///    and sending them back to the receiver.
-    /// 2. Re-entrant payjoin, where the sender uses the payjoin PSBT of a previous payjoin as the
-    ///    original proposal PSBT of the current, new payjoin.
+    /// Returns a [`MaybeFatalTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<OutputsUnknown>`] to continue validation.
     pub fn check_no_inputs_seen_before(
         self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
@@ -952,23 +964,20 @@ pub struct OutputsUnknown {
     original: OriginalPayload,
 }
 
-/// Typestate to check that the outputs of the original PSBT actually pay to the receiver.
+/// Typestate to check that the outputs of the Original PSBT actually pay the receiver.
 ///
-/// The receiver should only accept the original PSBTs from the sender which actually send them
-/// money.
-///
-/// Call [`Receiver<OutputsUnknown>::identify_receiver_outputs`] to proceed.
+/// The receiver should only accept Original PSBTs from the sender that actually send
+/// them money. Call [`Receiver<OutputsUnknown>::identify_receiver_outputs`] to advance
+/// to [`Receiver<WantsOutputs>`] to continue the proposal.
 impl Receiver<OutputsUnknown> {
-    /// Validates whether the original PSBT contains outputs which pay to the receiver and only
-    /// then proceeds to the next typestate.
+    /// Identify which outputs in the original transaction belong to the receiver
+    /// and ensure at least one output pays the receiver.
     ///
-    /// Additionally, this function also protects the receiver from accidentally subtracting fees
-    /// from their own outputs: when a sender is sending a proposal,
-    /// they can select an output which they want the receiver to subtract fees from to account for
-    /// the increased transaction size. If a sender specifies a receiver output for this purpose, this
-    /// function sets that parameter to None so that it is ignored in subsequent steps of the
-    /// receiver flow. This protects the receiver from accidentally subtracting fees from their own
-    /// outputs.
+    /// If the sender designated a receiver output for fee subtraction, that designation
+    /// is cleared so the receiver does not accidentally subtract fees from their own output.
+    ///
+    /// Returns a [`MaybeFatalTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<WantsOutputs>`] to continue the proposal.
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
@@ -1024,19 +1033,19 @@ pub struct WantsOutputs {
     inner: common::WantsOutputs,
 }
 
-/// Typestate which the receiver may substitute or add outputs to.
+/// Typestate for a checked proposal that the receiver may add or substitute outputs to.
 ///
-/// In addition to contributing new inputs to an existing PSBT, Payjoin allows the
-/// receiver to substitute the original PSBT's outputs to potentially preserve privacy and batch transfers.
-/// The receiver does not have to limit themselves to the address shared with the sender in the
-/// original Payjoin URI, and can make substitutions of the existing outputs in the proposal.
-///
-/// Call [`Receiver<WantsOutputs>::commit_outputs`] to proceed.
+/// Beyond contributing new inputs, Payjoin lets the receiver substitute the Original
+/// PSBT's outputs to preserve privacy or perform batch transfers; the receiver is not
+/// limited to the address shared in the Payjoin URI. Call
+/// [`Receiver<WantsOutputs>::commit_outputs`] to advance to [`Receiver<WantsInputs>`].
 impl Receiver<WantsOutputs> {
-    /// Whether the receiver is allowed to substitute original outputs or not.
+    /// Returns whether output substitution is enabled for this session.
     pub fn output_substitution(&self) -> OutputSubstitution { self.inner.output_substitution() }
 
     /// Substitute the receiver output script with the provided script.
+    ///
+    /// Returns an updated [`Receiver<WantsOutputs>`] with the substituted output.
     pub fn substitute_receiver_script(
         self,
         output_script: &Script,
@@ -1045,19 +1054,15 @@ impl Receiver<WantsOutputs> {
         Ok(Receiver { state: WantsOutputs { inner }, session_context: self.session_context })
     }
 
-    /// Replaces **all** receiver outputs with the one or more provided `replacement_outputs`, and
-    /// sets up the passed `drain_script` as the receiver-owned output which might have its value
-    /// adjusted based on the modifications the receiver makes in the subsequent typestates.
+    /// Replace all receiver outputs with the provided `replacement_outputs`, and set up
+    /// the `drain_script` as the receiver-owned output whose value may be adjusted based
+    /// on modifications in subsequent states.
     ///
-    /// Sender's outputs are not touched. Existing receiver outputs will be replaced with the
-    /// outputs in the `replacement_outputs` argument. The number of replacement outputs should
-    /// match or exceed the number of receiver outputs in the original proposal PSBT.
+    /// For example, when the receiver contributes an input, the drain output's value is
+    /// increased by the same amount; when an output's value must be reduced to cover fees,
+    /// it is taken from the drain output.
     ///
-    /// The drain script is the receiver script which will have its value adjusted based on the
-    /// modifications the receiver makes on the transaction in the subsequent typestates. For
-    /// example, if the receiver adds their own input, then the drain script output will have its
-    /// value increased by the same amount. Or if an output needs to have its value reduced to
-    /// account for fees, the value of the output for this script will be reduced.
+    /// Returns an updated [`Receiver<WantsOutputs>`] with the replaced outputs.
     pub fn replace_receiver_outputs(
         self,
         replacement_outputs: impl IntoIterator<Item = TxOut>,
@@ -1067,9 +1072,10 @@ impl Receiver<WantsOutputs> {
         Ok(Receiver { state: WantsOutputs { inner }, session_context: self.session_context })
     }
 
-    /// Commits the outputs as final, and moves on to the next typestate.
+    /// Commit the output modifications and proceed to input contribution.
     ///
-    /// Outputs cannot be modified after this function is called.
+    /// Returns a [`NextStateTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<WantsInputs>`].
     pub fn commit_outputs(self) -> NextStateTransition<SessionEvent, Receiver<WantsInputs>> {
         let inner = self.state.inner.commit_outputs();
         // change_vout, chosen by the output shuffle, can't be recomputed on replay.
@@ -1113,9 +1119,12 @@ pub struct WantsInputs {
     inner: common::WantsInputs,
 }
 
-/// Typestate for a checked proposal which the receiver may contribute inputs to.
+/// Typestate for a checked proposal that the receiver may contribute inputs to.
 ///
-/// Call [`Receiver<WantsInputs>::commit_inputs`] to proceed.
+/// Optionally pick a privacy-preserving input with
+/// [`Receiver<WantsInputs>::try_preserving_privacy`], add inputs with
+/// [`Receiver<WantsInputs>::contribute_inputs`], then call
+/// [`Receiver<WantsInputs>::commit_inputs`] to advance to [`Receiver<WantsFeeRange>`].
 impl Receiver<WantsInputs> {
     /// Selects and returns an input from `candidate_inputs` which will preserve the receiver's privacy by
     /// avoiding the Unnecessary Input Heuristic 2 (UIH2) outlined in [Unnecessary Input
@@ -1131,9 +1140,10 @@ impl Receiver<WantsInputs> {
         self.inner.try_preserving_privacy(candidate_inputs)
     }
 
-    /// Contributes the provided list of inputs to the transaction at random indices. If the total input
-    /// amount exceeds the total output amount after the contribution, adds all excess amount to
-    /// the receiver change output.
+    /// Add the provided inputs to the payjoin proposal at random indices. Any input value
+    /// exceeding the total output amount is added to the receiver's change output.
+    ///
+    /// Returns an updated [`Receiver<WantsInputs>`] with the contributed inputs.
     pub fn contribute_inputs(
         self,
         inputs: impl IntoIterator<Item = InputPair>,
@@ -1142,9 +1152,10 @@ impl Receiver<WantsInputs> {
         Ok(Receiver { state: WantsInputs { inner }, session_context: self.session_context })
     }
 
-    /// Commits the inputs as final, and moves on to the next typestate.
+    /// Commit the input contributions and proceed to fee negotiation.
     ///
-    /// Inputs cannot be modified after this function is called.
+    /// Returns a [`NextStateTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<WantsFeeRange>`].
     pub fn commit_inputs(self) -> NextStateTransition<SessionEvent, Receiver<WantsFeeRange>> {
         let inner = self.state.inner.commit_inputs();
         // The RNG insert order and change bump aren't reconstructable; store the PSBT.
@@ -1186,6 +1197,11 @@ pub struct WantsFeeRange {
     inner: common::WantsFeeRange,
 }
 
+/// Typestate for a checked proposal that applies additional fee contribution for the
+/// receiver contributed inputs and outputs.
+///
+/// Call [`Receiver<WantsFeeRange>::apply_fee_range`] to advance to
+/// [`Receiver<ProvisionalProposal>`].
 impl Receiver<WantsFeeRange> {
     /// Applies additional fee contribution now that the receiver has contributed inputs
     /// and may have added new outputs.
@@ -1207,6 +1223,9 @@ impl Receiver<WantsFeeRange> {
     ///
     /// The minimum effective fee limit is the highest of the minimum limit set by the sender in
     /// the original proposal parameters and the limit passed in the `min_fee_rate` parameter.
+    ///
+    /// Returns a [`MaybeFatalTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<ProvisionalProposal>`].
     pub fn apply_fee_range(
         self,
         min_fee_rate: Option<FeeRate>,
@@ -1247,16 +1266,16 @@ pub struct ProvisionalProposal {
     psbt_context: PsbtContext,
 }
 
-/// Typestate for a checked proposal which had both the outputs and the inputs modified
-/// by the receiver. The receiver may sign and finalize the Payjoin proposal which will be sent to
-/// the sender for their signature.
+/// Typestate for a checked proposal that the receiver has modified the outputs and
+/// inputs of, and is ready to be signed and finalized.
 ///
-/// Call [`Receiver<ProvisionalProposal>::finalize_proposal`] to return a finalized [`PayjoinProposal`].
+/// Call [`Receiver<ProvisionalProposal>::finalize_proposal`] to advance to
+/// [`Receiver<PayjoinProposal>`].
 impl Receiver<ProvisionalProposal> {
-    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
-    /// they re-sign the transaction and broadcast it to the network.
+    /// Finalize the proposal by signing the PSBT via the `wallet_process_psbt` callback.
     ///
-    /// Finalization consists of signing and finalizing the PSBT using the passed `wallet_process_psbt` signing function.
+    /// Returns a [`MaybeTransientTransition`] that, once successfully persisted, yields the
+    /// final [`Receiver<PayjoinProposal>`].
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
@@ -1280,11 +1299,13 @@ impl Receiver<ProvisionalProposal> {
         )
     }
 
-    /// The Payjoin proposal PSBT that the receiver needs to sign
+    /// Extract the PSBT that needs to be signed by the receiver's wallet.
     ///
-    /// In some applications the entity that progresses the typestate
-    /// is different from the entity that has access to the private keys,
-    /// so the PSBT to sign must be accessible to such implementers.
+    /// In some applications the entity that progresses the typestate is different from the
+    /// entity that has access to the private keys, so the PSBT to sign must be accessible to
+    /// such implementers.
+    ///
+    /// Returns the Payjoin proposal [`Psbt`] to be signed.
     pub fn psbt_to_sign(&self) -> Psbt { self.state.psbt_context.psbt_to_sign() }
 
     pub(crate) fn apply_payjoin_proposal(self, payjoin_psbt: Psbt) -> ReceiveSession {
@@ -1305,10 +1326,15 @@ pub struct PayjoinProposal {
     psbt_context: PsbtContext,
 }
 
-/// A finalized Payjoin proposal, complete with fees and receiver signatures, that the sender
-/// should find acceptable.
+/// Typestate for a signed and finalized Payjoin proposal that is to be sent to the
+/// sender for them to sign and broadcast.
+///
+/// Post the proposal to the Payjoin directory with
+/// [`Receiver<PayjoinProposal>::create_post_request`], then submit the Payjoin directory
+/// response to [`Receiver<PayjoinProposal>::process_response`] to advance to
+/// [`Receiver<Monitor>`].
 impl Receiver<PayjoinProposal> {
-    /// The Payjoin Proposal PSBT.
+    /// Returns the finalized payjoin proposal PSBT.
     pub fn psbt(&self) -> &Psbt { &self.psbt_context.payjoin_psbt }
 
     /// Construct an OHTTP-encapsulated HTTP request carrying the Proposal PSBT.
@@ -1363,13 +1389,10 @@ impl Receiver<PayjoinProposal> {
         Ok((req, OhttpResponse::new(ctx)))
     }
 
-    /// Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
+    /// Process the Payjoin directory response to the posted Payjoin proposal.
     ///
-    /// This function decapsulates the response using the provided OHTTP context. If the response status is successful,
-    /// it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
-    ///
-    /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or
-    /// choose to broadcast the original PSBT.
+    /// Returns a [`MaybeFatalTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<Monitor>`] to watch for the payjoin transaction.
     pub fn process_response(
         self,
         res: &[u8],
@@ -1422,8 +1445,18 @@ pub struct HasReplyableError {
     fallback_tx: Option<bitcoin::Transaction>,
 }
 
+/// Typestate for a receiver that hit a replyable error during validation.
+///
+/// Post the error to the Payjoin directory to communicate it to the sender with
+/// [`Receiver<HasReplyableError>::create_error_request`], then submit the Payjoin
+/// directory response to [`Receiver<HasReplyableError>::process_error_response`].
+/// Alternatively, call [`Receiver<HasReplyableError>::cancel`] to skip posting the error.
 impl Receiver<HasReplyableError> {
-    /// Cancel without sending the error response.
+    /// Cancel the Payjoin session without posting the replyable error to the Payjoin directory.
+    ///
+    /// Returns a [`MaybeTerminalTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<PendingFallback>`] if the session has a validated fallback transaction,
+    /// or otherwise closes the session.
     pub fn cancel(self) -> MaybeTerminalTransition<SessionEvent, Receiver<PendingFallback>> {
         let Receiver { state: HasReplyableError { fallback_tx, .. }, session_context } = self;
         match fallback_tx {
@@ -1436,8 +1469,8 @@ impl Receiver<HasReplyableError> {
         }
     }
 
-    /// Construct an OHTTP Encapsulated HTTP POST request to return
-    /// a Receiver Error Response
+    /// Construct an OHTTP encapsulated POST request to post the replyable error to the
+    /// Payjoin directory so it can be retrieved by the sender.
     pub fn create_error_request(
         &self,
         ohttp_relay: impl IntoUrl,
@@ -1469,8 +1502,11 @@ impl Receiver<HasReplyableError> {
         Ok((req, OhttpResponse::new(ohttp_ctx)))
     }
 
-    /// Process an OHTTP Encapsulated HTTP POST Error response
-    /// to ensure it has been posted properly.
+    /// Process the Payjoin directory response to the posted replyable error.
+    ///
+    /// Returns a [`MaybeTerminalSuccessTransition`] that, once successfully persisted,
+    /// completes the error reporting and yields a [`Receiver<PendingFallback>`] if the
+    /// session has a validated fallback transaction, or otherwise closes the session.
     pub fn process_error_response(
         self,
         res: &[u8],
@@ -1525,16 +1561,12 @@ pub struct Monitor {
 /// Call [`Receiver<Monitor>::check_for_transaction`] to confirm the status of the transaction in the
 /// network and conclude the Payjoin session.
 impl Receiver<Monitor> {
-    /// Checks the network for the Payjoin proposal or the fallback transaction using the passed
-    /// `find_transaction` closure, and concludes the Payjoin session once one is found. The
-    /// closure defines the condition that counts as found — for example presence in the mempool,
-    /// or some number of confirmations on the blockchain.
+    /// Check the network for the payjoin or fallback transaction via the `find_transaction`
+    /// callback.
     ///
-    /// If the input address type in the fallback transaction is non-SegWit, then this
-    /// function will directly conclude the Payjoin session with a Success without running the
-    /// provided `find_transaction` closure. `find_transaction` uses the transaction ID to
-    /// search for the transaction in the network. Since a non-SegWit input signature is going to
-    /// change the TXID of the Payjoin proposal, it cannot be monitored.
+    /// Returns a [`MaybeFatalOrSuccessTransition`] that, once successfully persisted, either
+    /// concludes the session if a transaction is found, or yields a [`Receiver<Monitor>`] to
+    /// remain in stasis if no transaction is found yet.
     pub fn check_for_transaction(
         self,
         find_transaction: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,

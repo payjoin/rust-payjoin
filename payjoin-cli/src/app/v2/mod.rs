@@ -32,7 +32,7 @@ use crate::db::Database;
 mod ohttp;
 
 const W_ID: usize = 36;
-const W_ROLE: usize = 25;
+const W_ROLE: usize = 15;
 const W_STATUS: usize = 15;
 
 /// Delay before retrying a transiently failed state transition, so a
@@ -281,9 +281,9 @@ impl AppTrait for App {
                         }
                     },
                     _ = interrupt.changed() => {
-                        let id = persister.session_id();
+                        let session_id = persister.session_id();
                         println!(
-                            "Session {id} interrupted. Call `send` again to resume, `resume` to resume all sessions, or `payjoin-cli cancel {id}` to cancel and broadcast the original transaction."
+                            "Session {session_id} interrupted. Call `payjoin-cli resume --session-id {session_id}` again to resume, `payjoin-cli resume` to resume all sessions, or `payjoin-cli cancel {session_id}` to cancel and broadcast the original transaction."
                         );
                         return Err(anyhow!("Interrupted"))
                     }
@@ -369,21 +369,19 @@ impl AppTrait for App {
                 }
                 Err(e) => {
                     if e.is_expired() {
+                        println!("Receiver session expired: {session_id}");
                         match e.expiry_fallback_tx() {
                             Some(tx) => println!(
-                                "Session {session_id} receiver expired. Broadcast the original transaction manually:\n{}",
+                                "Broadcast the original transaction manually:\n{}",
                                 serialize_hex(tx)
                             ),
                             None => println!(
-                                "No fallback transaction available for expired receiver session {session_id}."
+                                "No fallback transaction available for expired receiver session: {session_id}"
                             ),
                         }
                     } else {
-                        tracing::error!(
-                            "An error {:?} occurred while replaying receiver session",
-                            e
-                        );
-                        println!("Session {session_id} receiver failed to replay - {e}");
+                        tracing::error!("An error {:?} occurred while replaying session", e);
+                        println!("Session failed to replay: {session_id} - {e}");
                     }
                     Self::close_failed_session(&recv_persister, &session_id, "receiver");
                 }
@@ -405,18 +403,19 @@ impl AppTrait for App {
                 }
                 Err(e) => {
                     if e.is_expired() {
+                        println!("Sender session expired: {session_id}");
                         match e.expiry_fallback_tx() {
                             Some(tx) => println!(
-                                "Session {session_id} sender expired. Broadcast the original transaction manually:\n{}",
+                                "Broadcast the original transaction manually:\n{}",
                                 serialize_hex(tx)
                             ),
                             None => println!(
-                                "No fallback transaction available for expired sender session {session_id}."
+                                "No fallback transaction available for expired sender session: {session_id}"
                             ),
                         }
                     } else {
-                        tracing::error!("An error {:?} occurred while replaying Sender session", e);
-                        println!("Session {session_id} sender failed to replay -  {e}");
+                        tracing::error!("An error {:?} occurred while replaying session", e);
+                        println!("Session failed to replay: {session_id} -  {e}");
                     }
                     Self::close_failed_session(&sender_persister, &session_id, "sender");
                 }

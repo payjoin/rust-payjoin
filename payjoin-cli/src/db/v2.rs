@@ -4,7 +4,7 @@ use payjoin::persist::SessionPersister;
 use payjoin::receive::v2::SessionEvent as ReceiverSessionEvent;
 use payjoin::send::v2::SessionEvent as SenderSessionEvent;
 use payjoin::HpkePublicKey;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use super::*;
 
@@ -239,16 +239,22 @@ impl Database {
         Ok(session_ids)
     }
 
-    pub(crate) fn get_send_session_receiver_pk(
+    pub(crate) fn get_send_session_id_by_receiver_pk(
         &self,
-        session_id: &SessionId,
-    ) -> Result<HpkePublicKey> {
+        receiver_pubkey: &HpkePublicKey,
+    ) -> Result<Option<SessionId>> {
         let conn = self.get_connection()?;
-        let mut stmt =
-            conn.prepare("SELECT receiver_pubkey FROM send_sessions WHERE session_id = ?1")?;
-        let receiver_pubkey: Vec<u8> =
-            stmt.query_row(params![session_id.0.to_string()], |row| row.get(0))?;
-        Ok(HpkePublicKey::from_compressed_bytes(&receiver_pubkey).expect("Valid receiver pubkey"))
+        let receiver_pubkey_bytes = receiver_pubkey.to_compressed_bytes();
+        let mut stmt = conn.prepare(
+            "SELECT session_id FROM send_sessions WHERE receiver_pubkey = ?1 AND completed_at IS NULL",
+        )?;
+        let result = stmt.query_row(params![&receiver_pubkey_bytes], |row| {
+            let session_id: String = row.get(0)?;
+            let session_id = uuid::Uuid::parse_str(&session_id)
+                .expect("Database corruption: invalid session_id UUID");
+            Ok(SessionId(session_id))
+        });
+        Ok(result.optional()?)
     }
 
     pub(crate) fn get_inactive_send_session_ids(&self) -> Result<Vec<(SessionId, u64)>> {

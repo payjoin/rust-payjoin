@@ -130,7 +130,7 @@ impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
 impl AppTrait for App {
     async fn new(config: Config) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
-        let mailroom_manager = MailroomManager::new(config.clone());
+        let mailroom_manager = MailroomManager::new(config.clone())?;
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
         let wallet = BitcoindWallet::new(&config.bitcoind).await?;

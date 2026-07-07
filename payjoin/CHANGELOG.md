@@ -44,6 +44,10 @@ Selected Improvements:
 - Document BIP77 v1 fallback behavior in `create_post_request` (#1593)
 - Remove redundant language from `finalize_proposal` rustdocs (#1567)
 
+### Relay Selection
+
+- Add `payjoin::relay::RelaySelector`, a reusable OHTTP relay-selection primitive (uniform-random over non-failed relays; callers mark failures to fail over), so integrators share one selection policy instead of each diverging
+
 ## 0.25.0
 
 Introduce monitoring typestates, replyable error handling, async

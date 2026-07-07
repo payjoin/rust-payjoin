@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Use `payjoin::RelaySelector` to select OHTTP relays, sharing the library's
+  selection policy instead of hand-rolling one
+
 ## 1.0.0
 
 The first stable payjoin-cli release, tracking payjoin 1.2.0. The CLI adopts

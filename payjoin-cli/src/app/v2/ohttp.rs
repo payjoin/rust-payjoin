@@ -14,6 +14,7 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
+use payjoin::relay::RelaySelector;
 use payjoin::Url;
 
 use super::Config;
@@ -21,25 +22,26 @@ use super::Config;
 #[derive(Debug, Clone)]
 pub struct MailroomManager {
     config: Config,
-    failed_relays: Arc<Mutex<Vec<Url>>>,
+    relay_selector: Arc<Mutex<RelaySelector>>,
     failed_directories: Arc<Mutex<Vec<Url>>>,
 }
 
 impl MailroomManager {
-    pub fn new(config: Config) -> Self {
-        MailroomManager {
+    pub fn new(config: Config) -> Result<Self> {
+        let relay_selector = RelaySelector::new(config.v2()?.ohttp_relays.clone());
+        Ok(MailroomManager {
             config,
-            failed_relays: Arc::new(Mutex::new(Vec::new())),
+            relay_selector: Arc::new(Mutex::new(relay_selector)),
             failed_directories: Arc::new(Mutex::new(Vec::new())),
-        }
+        })
     }
 
     pub fn add_failed_relay(&self, relay: Url) {
-        self.failed_relays.lock().expect("Lock should not be poisoned").push(relay);
+        self.relay_selector.lock().expect("Lock should not be poisoned").mark_failed(&relay);
     }
 
     pub fn clear_failed_relays(&self) {
-        self.failed_relays.lock().expect("Lock should not be poisoned").clear();
+        self.relay_selector.lock().expect("Lock should not be poisoned").clear_failed();
     }
 
     pub fn add_failed_directory(&self, directory: Url) {
@@ -47,20 +49,11 @@ impl MailroomManager {
     }
 
     pub fn choose_relay(&self) -> Result<Url> {
-        use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
-        let relays = &self.config.v2()?.ohttp_relays;
-        let failed_relays = self.failed_relays.lock().expect("Lock should not be poisoned");
-        let remaining_relays: Vec<_> =
-            relays.iter().filter(|r| !failed_relays.contains(r)).cloned().collect();
-
-        if remaining_relays.is_empty() {
-            return Err(anyhow!("No valid relays available"));
-        }
-
-        remaining_relays
-            .choose(&mut payjoin::bitcoin::key::rand::thread_rng())
-            .cloned()
-            .ok_or_else(|| anyhow!("Failed to select from remaining relays"))
+        self.relay_selector
+            .lock()
+            .expect("Lock should not be poisoned")
+            .select(&mut payjoin::bitcoin::key::rand::thread_rng())
+            .ok_or_else(|| anyhow!("No valid relays available"))
     }
 
     pub fn choose_directory(&self) -> Result<Url> {

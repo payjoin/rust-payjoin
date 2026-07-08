@@ -1464,8 +1464,12 @@ impl Receiver<HasReplyableError> {
         &self,
         res: &[u8],
         ohttp_context: OhttpResponse,
-    ) -> MaybeTerminalSuccessTransition<SessionEvent, Receiver<PendingFallback>, ProtocolError>
-    {
+    ) -> MaybeTerminalSuccessTransition<
+        SessionEvent,
+        Receiver<PendingFallback>,
+        ProtocolError,
+        Receiver<HasReplyableError>,
+    > {
         let pending = self.pending_fallback_after_protocol_failure();
         let event = match &pending {
             Some(_) => SessionEvent::ProtocolFailed,
@@ -1479,7 +1483,7 @@ impl Receiver<HasReplyableError> {
                 MaybeTerminalSuccessTransition::advance(event, pending_fallback),
             (Ok(_), None) => MaybeTerminalSuccessTransition::terminate(event),
             (Err(e), _) if !e.is_fatal() =>
-                MaybeTerminalSuccessTransition::transient(protocol_error(e)),
+                MaybeTerminalSuccessTransition::transient(self.clone(), protocol_error(e)),
             (Err(e), Some(pending_fallback)) => MaybeTerminalSuccessTransition::fatal_advance(
                 event,
                 pending_fallback,
@@ -1630,7 +1634,8 @@ pub mod test {
     use super::*;
     use crate::output_substitution::OutputSubstitution;
     use crate::persist::{
-        InMemoryPersister, OptionalTransitionOutcome, RejectTransient, Rejection, SessionPersister,
+        InMemoryPersister, OptionalTransitionOutcome, ProcessedErrorOutcome, RejectTransient,
+        Rejection, SessionPersister,
     };
     use crate::receive::optional_parameters::Params;
     use crate::receive::v2;
@@ -2046,10 +2051,11 @@ pub mod test {
         let response = ohttp_response_for(&req.body, http::StatusCode::OK);
         let persister = InMemoryPersister::<SessionEvent>::default();
 
-        let pending_fallback = receiver
-            .process_error_response(&response, ctx)
-            .save(&persister)?
-            .expect("pending fallback should be returned");
+        let pending_fallback =
+            match receiver.process_error_response(&response, ctx).save(&persister)? {
+                ProcessedErrorOutcome::Delivered(pending) => pending,
+                other => panic!("expected Advance, got {other:?}"),
+            };
 
         assert_eq!(pending_fallback.fallback_tx(), &expected_tx);
         assert_events(&persister, &[SessionEvent::ProtocolFailed], false);
@@ -2063,9 +2069,9 @@ pub mod test {
         let response = ohttp_response_for(&req.body, http::StatusCode::OK);
         let persister = InMemoryPersister::<SessionEvent>::default();
 
-        let pending_fallback = receiver.process_error_response(&response, ctx).save(&persister)?;
+        let outcome = receiver.process_error_response(&response, ctx).save(&persister)?;
 
-        assert!(pending_fallback.is_none());
+        assert!(matches!(outcome, ProcessedErrorOutcome::Terminated));
         assert_events(&persister, &[SessionEvent::Closed(SessionOutcome::Aborted)], true);
         Ok(())
     }
@@ -2121,12 +2127,16 @@ pub mod test {
         let response = ohttp_response_for(&req.body, http::StatusCode::INTERNAL_SERVER_ERROR);
         let persister = InMemoryPersister::<SessionEvent>::default();
 
-        let err = receiver
+        let outcome = receiver
             .process_error_response(&response, ctx)
             .save(&persister)
-            .expect_err("transient response should error");
+            .expect("transient response should succeed with current state");
 
-        assert!(err.api_error_ref().is_some());
+        match outcome {
+            ProcessedErrorOutcome::Transient(returned_session, _err) =>
+                assert_eq!(returned_session, receiver),
+            other => panic!("expected Transient, got {other:?}"),
+        }
         assert_events(&persister, &[], false);
         Ok(())
     }

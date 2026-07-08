@@ -1358,6 +1358,52 @@ impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError
     }
 }
 
+/// Outcome of saving a [`HasReplyableErrorTransition`].
+#[derive(uniffi::Enum)]
+pub enum HasReplyableErrorTransitionOutcome {
+    /// Error reply delivered. Session advanced to pending fallback.
+    Delivered { pending_fallback: Arc<ReceiverPendingFallback> },
+    /// Session terminated — closed successfully.
+    Terminated,
+    /// Transient error — nothing persisted. Retry from the returned state.
+    Transient { current_state: Arc<HasReplyableError>, error: ReceiverPersistedError },
+    /// Fatal error — session may have been persisted with error state to allow retry.
+    Fatal(ReceiverPersistedError),
+}
+
+impl HasReplyableErrorTransitionOutcome {
+    #[allow(clippy::type_complexity)]
+    fn from_core(
+        value: Result<
+            payjoin::persist::ProcessedErrorOutcome<
+                payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>,
+                payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>,
+                payjoin::receive::ProtocolError,
+            >,
+            payjoin::persist::PersistedError<
+                payjoin::receive::ProtocolError,
+                crate::error::ForeignError,
+                payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>,
+            >,
+        >,
+    ) -> Self {
+        match value {
+            Ok(payjoin::persist::ProcessedErrorOutcome::Delivered(pending)) =>
+                HasReplyableErrorTransitionOutcome::Delivered {
+                    pending_fallback: Arc::new(pending.into()),
+                },
+            Ok(payjoin::persist::ProcessedErrorOutcome::Terminated) =>
+                HasReplyableErrorTransitionOutcome::Terminated,
+            Ok(payjoin::persist::ProcessedErrorOutcome::Transient(state, err)) =>
+                HasReplyableErrorTransitionOutcome::Transient {
+                    current_state: Arc::new(state.into()),
+                    error: ReceiverPersistedError::from(ImplementationError::new(err)),
+                },
+            Err(e) => HasReplyableErrorTransitionOutcome::Fatal(e.into()),
+        }
+    }
+}
+
 #[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
 pub struct HasReplyableErrorTransition(
@@ -1368,6 +1414,7 @@ pub struct HasReplyableErrorTransition(
                     payjoin::receive::v2::SessionEvent,
                     payjoin::receive::v2::Receiver<payjoin::receive::v2::PendingFallback>,
                     payjoin::receive::ProtocolError,
+                    payjoin::receive::v2::Receiver<payjoin::receive::v2::HasReplyableError>,
                 >,
             >,
         >,
@@ -1379,29 +1426,28 @@ impl HasReplyableErrorTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
-    ) -> Result<Option<Arc<ReceiverPendingFallback>>, ReceiverPersistedError> {
+    ) -> HasReplyableErrorTransitionOutcome {
         let adapter = CallbackPersisterAdapter::new(persister);
         let mut inner = self.0.write().expect("Lock should not be poisoned");
 
         let value = inner.take().expect("Already saved or moved");
 
-        let pending_fallback = value.save(&adapter).map_err(ReceiverPersistedError::from)?;
-        Ok(pending_fallback.map(|pending_fallback| Arc::new(pending_fallback.into())))
+        let outcome = value.save(&adapter);
+        HasReplyableErrorTransitionOutcome::from_core(outcome)
     }
 
     pub async fn save_async(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersisterAsync>,
-    ) -> Result<Option<Arc<ReceiverPendingFallback>>, ReceiverPersistedError> {
+    ) -> HasReplyableErrorTransitionOutcome {
         let adapter = AsyncCallbackPersisterAdapter::new(persister);
         let value = {
             let mut inner = self.0.write().expect("Lock should not be poisoned");
             inner.take().expect("Already saved or moved")
         };
 
-        let pending_fallback =
-            value.save_async(&adapter).await.map_err(ReceiverPersistedError::from)?;
-        Ok(pending_fallback.map(|pending_fallback| Arc::new(pending_fallback.into())))
+        let outcome = value.save_async(&adapter).await;
+        HasReplyableErrorTransitionOutcome::from_core(outcome)
     }
 }
 

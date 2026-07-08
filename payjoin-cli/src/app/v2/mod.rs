@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::persist::{OptionalTransitionOutcome, SessionPersister};
+use payjoin::persist::{OptionalTransitionOutcome, ProcessedErrorOutcome, SessionPersister};
 use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
     MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
@@ -1014,37 +1014,56 @@ impl App {
     /// Handle error by attempting to send an error response over the directory
     async fn handle_error(
         &self,
-        session: Receiver<HasReplyableError>,
+        mut session: Receiver<HasReplyableError>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let (err_response, err_ctx) = self
-            .post_via_relay(|relay| {
-                session
-                    .create_error_request(relay)
-                    .map_err(|e| anyhow!("Failed to post error request: {}", e))
-            })
-            .await?;
+        let session_id = persister.session_id();
+        for retries in 0..3 {
+            let (err_response, err_ctx) = self
+                .post_via_relay(|relay| {
+                    session
+                        .create_error_request(relay)
+                        .map_err(|e| anyhow!("Failed to post error request: {}", e))
+                })
+                .await?;
 
-        let err_bytes = match err_response.bytes().await {
-            Ok(bytes) => bytes,
-            Err(e) => return Err(anyhow!("Failed to get error response bytes: {}", e)),
-        };
+            let err_bytes = match err_response.bytes().await {
+                Ok(bytes) => bytes,
+                Err(e) => return Err(anyhow!("Failed to get error response bytes: {}", e)),
+            };
 
-        if let Err(e) = session.process_error_response(&err_bytes, err_ctx).save(persister) {
-            if let Some(api_err) = e.api_error_ref() {
-                tracing::warn!("Failed to confirm error response delivery: {api_err}");
-            }
-            match e.error_state() {
-                Some(_) => {
-                    let id = persister.session_id();
-                    println!(
-                        "Session {id} failed. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
-                    );
+            match session.process_error_response(&err_bytes, err_ctx).save(persister) {
+                Ok(ProcessedErrorOutcome::Delivered(_)) => {
+                    println!("Error reply delivered. Run `payjoin-cli cancel {session_id}` to broadcast the fallback transaction.");
+                    return Ok(());
                 }
-                None => return Err(anyhow!("Failed to process error response")),
+                Ok(ProcessedErrorOutcome::Terminated) => {
+                    println!("Session {session_id} aborted. No fallback transaction available.");
+                    return Ok(());
+                }
+                Ok(ProcessedErrorOutcome::Transient(current_session, err)) if retries < 2 => {
+                    tracing::warn!("Transient error posting error reply: {err}; retrying");
+                    session = current_session;
+                    continue;
+                }
+                Err(e) => {
+                    if let Some(api_err) = e.api_error_ref() {
+                        tracing::warn!("Failed to confirm error response delivery: {api_err}");
+                    }
+                    match e.error_state_ref() {
+                        Some(_) => {
+                            println!("Session {session_id} failed. Run `payjoin-cli cancel {session_id}` to cancel and broadcast the fallback transaction.");
+                            return Ok(());
+                        }
+                        None => return Err(e.into()),
+                    }
+                }
+                _ => {
+                    println!("Session {session_id} failed. Run `payjoin-cli cancel {session_id}` to cancel and broadcast the fallback transaction.");
+                    return Err(anyhow!("Giving up after 3 transient errors posting error reply to session {session_id}"));
+                }
             }
         }
-
         Ok(())
     }
 

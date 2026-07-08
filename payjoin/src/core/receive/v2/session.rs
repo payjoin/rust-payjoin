@@ -180,6 +180,7 @@ impl SessionHistory {
 // Represents the status of a session that can be inferred from the information in the session
 // event log.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SessionStatus {
     Active,
     Expired,

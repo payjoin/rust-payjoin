@@ -1422,7 +1422,7 @@ impl HasReplyableError {
     pub fn create_error_request(
         &self,
         ohttp_relay: String,
-    ) -> Result<RequestResponse, SessionError> {
+    ) -> Result<RequestResponse, ReceiverCreateRequestError> {
         self.0.clone().create_error_request(ohttp_relay).map_err(Into::into).map(|(req, ctx)| {
             RequestResponse { request: req.into(), client_response: Arc::new(ctx.into()) }
         })

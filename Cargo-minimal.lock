@@ -2449,7 +2449,11 @@ dependencies = [
  "async-trait",
  "bytes",
  "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "opentelemetry",
+ "tokio",
 ]
 
 [[package]]
@@ -2655,6 +2659,7 @@ name = "payjoin-mailroom"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "axum-server",
  "bhttp",
@@ -2677,6 +2682,7 @@ dependencies = [
  "maxminddb",
  "mockito",
  "opentelemetry",
+ "opentelemetry-http",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "payjoin",

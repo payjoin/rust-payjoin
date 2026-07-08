@@ -291,7 +291,7 @@ impl std::error::Error for PjParseError {
 pub(super) enum ParseOhttpKeysParamError {
     MissingOhttpKeys,
     InvalidFormat,
-    InvalidOhttpKeys(crate::ohttp::ParseOhttpKeysError),
+    InvalidOhttpKeys(crate::ohttp::OhttpKeysError),
     InvalidFragment(ParseFragmentError),
 }
 
@@ -433,7 +433,7 @@ mod tests {
         assert!(matches!(
             ohttp(&too_long_ohttp_url),
             Err(ParseOhttpKeysParamError::InvalidOhttpKeys(
-                crate::ohttp::ParseOhttpKeysError::IncorrectLength(_)
+                crate::ohttp::OhttpKeysError::IncorrectLength(_)
             ))
         ));
 
@@ -443,7 +443,7 @@ mod tests {
         assert!(matches!(
             ohttp(&too_short_ohttp_url),
             Err(ParseOhttpKeysParamError::InvalidOhttpKeys(
-                crate::ohttp::ParseOhttpKeysError::IncorrectLength(_)
+                crate::ohttp::OhttpKeysError::IncorrectLength(_)
             ))
         ));
     }

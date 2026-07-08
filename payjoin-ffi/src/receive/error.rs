@@ -300,16 +300,15 @@ mod tests {
         use payjoin::persist::InMemoryPersister;
         use payjoin::receive::v2::{ReceiverBuilder, SessionEvent};
         use payjoin::OhttpKeys;
-        use payjoin_test_utils::{EXAMPLE_URL, KEM, KEY_ID, SYMMETRIC};
+        use payjoin_test_utils::EXAMPLE_URL;
 
         // Build a receiver whose session is already expired, then surface the
         // expiry error through the dedicated create-request error.
         let address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
             .expect("valid address")
             .assume_checked();
-        let ohttp_keys = OhttpKeys(
-            ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid keys"),
-        );
+        let ohttp_keys = OhttpKeys::decode(&payjoin_test_utils::ohttp_key_config_bytes())
+            .expect("valid ohttp keys");
         let persister = InMemoryPersister::<SessionEvent>::default();
         let receiver = ReceiverBuilder::new(address, EXAMPLE_URL, ohttp_keys)
             .expect("valid builder")

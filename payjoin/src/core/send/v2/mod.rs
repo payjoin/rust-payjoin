@@ -44,7 +44,7 @@ use super::*;
 use crate::core::Url;
 use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
-use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
+use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res, OhttpResponse};
 use crate::persist::{
     MaybeFatalTransition, MaybeSuccessTransitionWithNoResults, NextStateTransition,
     TerminalTransition,
@@ -330,7 +330,7 @@ impl SendSession {
 }
 
 /// A payjoin V2 sender, allowing the construction of a payjoin V2 request
-/// and the resulting [`ClientResponse`].
+/// and the resulting [`OhttpResponse`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithReplyKey;
 
@@ -358,7 +358,7 @@ impl Sender<WithReplyKey> {
     pub fn create_v2_post_request(
         &self,
         ohttp_relay: impl IntoUrl,
-    ) -> Result<(Request, ClientResponse), CreateRequestError> {
+    ) -> Result<(Request, OhttpResponse), CreateRequestError> {
         if self.session_context.pj_param.expiration().elapsed() {
             return Err(InternalCreateRequestError::Expired(
                 self.session_context.pj_param.expiration(),
@@ -375,7 +375,7 @@ impl Sender<WithReplyKey> {
             self.session_context.psbt_ctx.min_fee_rate,
         )?;
         let (request, ohttp_ctx) = extract_request(&self.session_context, ohttp_relay, body)?;
-        Ok((request, ohttp_ctx))
+        Ok((request, OhttpResponse::new(ohttp_ctx)))
     }
 
     /// Processes the response for the initial POST message from the sender
@@ -391,9 +391,9 @@ impl Sender<WithReplyKey> {
     pub fn process_response(
         self,
         response: &[u8],
-        post_ctx: ClientResponse,
+        post_ctx: OhttpResponse,
     ) -> MaybeFatalTransition<SessionEvent, Sender<PollingForProposal>, DecapsulationError> {
-        match process_post_res(response, post_ctx) {
+        match process_post_res(response, post_ctx.into_inner()) {
             Ok(()) => {}
             Err(e) =>
                 if e.is_fatal() {
@@ -481,7 +481,7 @@ impl Sender<PollingForProposal> {
     pub fn create_poll_request(
         &self,
         ohttp_relay: impl IntoUrl,
-    ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
+    ) -> Result<(Request, OhttpResponse), CreateRequestError> {
         if self.session_context.pj_param.expiration().elapsed() {
             return Err(InternalCreateRequestError::Expired(
                 self.session_context.pj_param.expiration(),
@@ -510,7 +510,10 @@ impl Sender<PollingForProposal> {
         let (body, ohttp_ctx) = ohttp_encapsulate(ohttp_keys, "GET", url.as_str(), Some(&body))
             .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
 
-        Ok((Request::new_v2(&self.session_context.full_relay_url(ohttp_relay)?, &body), ohttp_ctx))
+        Ok((
+            Request::new_v2(&self.session_context.full_relay_url(ohttp_relay)?, &body),
+            OhttpResponse::new(ohttp_ctx),
+        ))
     }
 
     /// Processes the response for the final GET message from the sender client
@@ -526,14 +529,14 @@ impl Sender<PollingForProposal> {
     pub fn process_response(
         self,
         response: &[u8],
-        ohttp_ctx: ohttp::ClientResponse,
+        ohttp_ctx: OhttpResponse,
     ) -> MaybeSuccessTransitionWithNoResults<
         SessionEvent,
         Psbt,
         Sender<PollingForProposal>,
         ResponseError,
     > {
-        let body = match process_get_res(response, ohttp_ctx) {
+        let body = match process_get_res(response, ohttp_ctx.into_inner()) {
             Ok(Some(body)) => body,
             Ok(None) => return MaybeSuccessTransitionWithNoResults::no_results(self.clone()),
             Err(e) =>
@@ -617,7 +620,7 @@ mod test {
 
     use bitcoin::hex::FromHex;
     use bitcoin::Address;
-    use payjoin_test_utils::{BoxError, EXAMPLE_URL, KEM, KEY_ID, PARSED_ORIGINAL_PSBT, SYMMETRIC};
+    use payjoin_test_utils::{BoxError, EXAMPLE_URL, PARSED_ORIGINAL_PSBT};
 
     use super::*;
     use crate::persist::InMemoryPersister;
@@ -635,9 +638,8 @@ mod test {
             endpoint,
             crate::uri::ShortId::try_from(&b"12345670"[..]).expect("valid short id"),
             expiration,
-            OhttpKeys(
-                ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
-            ),
+            OhttpKeys::decode(&payjoin_test_utils::ohttp_key_config_bytes())
+                .expect("valid ohttp keys"),
             HpkeKeyPair::gen_keypair().1,
         );
         Ok(super::Sender {
@@ -728,9 +730,8 @@ mod test {
             .expect("valid address")
             .assume_checked();
         let directory = EXAMPLE_URL;
-        let ohttp_keys = OhttpKeys(
-            ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).expect("valid key config"),
-        );
+        let ohttp_keys = OhttpKeys::decode(&payjoin_test_utils::ohttp_key_config_bytes())
+            .expect("valid ohttp keys");
         let pj_uri = ReceiverBuilder::new(address.clone(), directory, ohttp_keys)
             .expect("constructor on test vector should not fail")
             .build()

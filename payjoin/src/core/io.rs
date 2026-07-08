@@ -182,8 +182,6 @@ impl From<InternalErrorInner> for Error {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use http::StatusCode;
     use reqwest::Response;
 
@@ -195,11 +193,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_success_response() {
-        let valid_keys =
-            OhttpKeys::from_str("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC")
-                .expect("valid keys")
-                .encode()
-                .expect("encodevalid keys");
+        let valid_keys = payjoin_test_utils::ohttp_key_config_bytes();
 
         let response = mock_response(StatusCode::OK, valid_keys);
         assert!(parse_ohttp_keys_response(response).await.is_ok(), "expected valid keys response");

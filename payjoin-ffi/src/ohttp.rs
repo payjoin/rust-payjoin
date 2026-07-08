@@ -4,7 +4,7 @@ pub mod error {
     #[derive(Debug, thiserror::Error, uniffi::Object)]
     #[uniffi::export(Debug, Display)]
     #[error(transparent)]
-    pub struct OhttpError(#[from] ohttp::Error);
+    pub struct OhttpError(#[from] payjoin::OhttpKeysError);
 }
 
 impl From<payjoin::OhttpKeys> for OhttpKeys {
@@ -28,15 +28,15 @@ impl OhttpKeys {
 use std::sync::Mutex;
 
 #[derive(uniffi::Object)]
-pub struct ClientResponse(Mutex<Option<ohttp::ClientResponse>>);
+pub struct ClientResponse(Mutex<Option<payjoin::OhttpResponse>>);
 
-impl From<&ClientResponse> for ohttp::ClientResponse {
+impl From<&ClientResponse> for payjoin::OhttpResponse {
     fn from(value: &ClientResponse) -> Self {
         let mut data_guard = value.0.lock().unwrap();
         Option::take(&mut *data_guard).expect("ClientResponse moved out of memory")
     }
 }
 
-impl From<ohttp::ClientResponse> for ClientResponse {
-    fn from(value: ohttp::ClientResponse) -> Self { Self(Mutex::new(Some(value))) }
+impl From<payjoin::OhttpResponse> for ClientResponse {
+    fn from(value: payjoin::OhttpResponse) -> Self { Self(Mutex::new(Some(value))) }
 }

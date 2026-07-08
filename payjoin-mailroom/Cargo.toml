@@ -21,7 +21,7 @@ ws-bootstrap = ["dep:tokio-tungstenite", "dep:rustls"]
 _manual-tls = ["dep:axum-server", "dep:rustls"]
 acme = ["dep:tokio-rustls-acme", "dep:axum-server", "dep:rustls"]
 access-control = ["dep:flate2", "dep:ipnet", "dep:maxminddb", "dep:reqwest"]
-telemetry = ["dep:opentelemetry-otlp"]
+telemetry = ["dep:opentelemetry-otlp", "dep:uuid"]
 
 [dependencies]
 anyhow = "1.0.99"
@@ -82,6 +82,7 @@ tower-http = { version = "0.6.11", features = ["trace"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
 unicode-segmentation = "=1.12.0"
+uuid = { version = "1.18.0", features = ["v4"], optional = true }
 
 # Pinned transitive dependencies that appear unused to cargo-machete
 [package.metadata.cargo-machete]

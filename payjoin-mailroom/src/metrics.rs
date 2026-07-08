@@ -4,6 +4,15 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[cfg(feature = "telemetry")]
+pub fn build_telemetry_resource(operator_domain: &str) -> opentelemetry_sdk::Resource {
+    use opentelemetry::KeyValue;
+    opentelemetry_sdk::Resource::builder()
+        .with_service_name("payjoin-mailroom")
+        .with_attribute(KeyValue::new("operator.domain", operator_domain.to_string()))
+        .build()
+}
+
 use hyperloglogplus::{HyperLogLog, HyperLogLogPlus};
 use opentelemetry::metrics::{Counter, MeterProvider, ObservableGauge, UpDownCounter};
 use opentelemetry::KeyValue;
@@ -337,6 +346,27 @@ impl Drop for InFlightGuard {
 #[cfg(test)]
 mod tests {
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+
+    #[cfg(feature = "telemetry")]
+    #[test]
+    fn telemetry_resource_has_service_name_and_operator_domain() {
+        use opentelemetry::Key;
+
+        use super::build_telemetry_resource;
+
+        let resource = build_telemetry_resource("example.com");
+
+        assert_eq!(
+            resource.get(&Key::from("service.name")),
+            Some(opentelemetry::Value::String("payjoin-mailroom".into())),
+            "service.name must be payjoin-mailroom"
+        );
+        assert_eq!(
+            resource.get(&Key::from("operator.domain")),
+            Some(opentelemetry::Value::String("example.com".into())),
+            "operator.domain must match configured value"
+        );
+    }
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 
     use super::*;

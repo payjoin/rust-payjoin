@@ -59,9 +59,13 @@ impl ReceiverCreateRequestError {
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[error(transparent)]
 pub enum ReceiverPersistedError {
-    /// rust-payjoin receiver error
+    /// A transient error: nothing was persisted, and the failed transition
+    /// can be retried by calling it again on the same receiver object
     #[error(transparent)]
-    Receiver(ReceiverError),
+    Transient(ReceiverError),
+    /// A fatal error: the session is closed or has moved to an error state
+    #[error(transparent)]
+    Fatal(ReceiverError),
     /// Storage error that could occur at application storage layer
     #[error(transparent)]
     Storage(Arc<ImplementationError>),
@@ -88,12 +92,18 @@ macro_rules! impl_persisted_error_from {
                     if let Some(storage_err) = err.storage_error() {
                         return ReceiverPersistedError::from(ImplementationError::new(storage_err));
                     }
-                    return ReceiverPersistedError::Receiver(ReceiverError::Unexpected);
+                    return ReceiverPersistedError::Fatal(ReceiverError::Unexpected);
                 }
+                let is_transient = err.is_transient();
                 if let Some(api_err) = err.api_error() {
-                    return ReceiverPersistedError::Receiver($receiver_arm(api_err));
+                    let receiver_err = $receiver_arm(api_err);
+                    return if is_transient {
+                        ReceiverPersistedError::Transient(receiver_err)
+                    } else {
+                        ReceiverPersistedError::Fatal(receiver_err)
+                    };
                 }
-                ReceiverPersistedError::Receiver(ReceiverError::Unexpected)
+                ReceiverPersistedError::Fatal(ReceiverError::Unexpected)
             }
         }
     };
@@ -320,5 +330,51 @@ mod tests {
         let expired =
             receiver.create_poll_request(EXAMPLE_URL).map(|_| ()).expect_err("session is expired");
         assert!(ReceiverCreateRequestError::from(expired).is_expired());
+    }
+
+    #[cfg(feature = "_test-utils")]
+    #[test]
+    fn persisted_error_classifies_transient_and_fatal() {
+        use std::str::FromStr;
+
+        use payjoin::bitcoin::Address;
+        use payjoin::directory::ENCAPSULATED_MESSAGE_BYTES;
+        use payjoin::persist::InMemoryPersister;
+        use payjoin::receive::v2::{ReceiverBuilder, SessionEvent};
+        use payjoin::OhttpKeys;
+        use payjoin_test_utils::EXAMPLE_URL;
+
+        let address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
+            .expect("valid address")
+            .assume_checked();
+        let ohttp_keys = OhttpKeys::decode(&payjoin_test_utils::ohttp_key_config_bytes())
+            .expect("valid ohttp keys");
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let receiver = ReceiverBuilder::new(address, EXAMPLE_URL, ohttp_keys)
+            .expect("valid builder")
+            .build()
+            .save(&persister)
+            .expect("in-memory persister is infallible");
+
+        // An undersized directory response fails the size check, which is
+        // retryable, so the binding error classifies it as transient.
+        let (_req, ctx) = receiver.create_poll_request(EXAMPLE_URL).expect("valid poll request");
+        let err = receiver
+            .clone()
+            .process_response(&[0u8; 1], ctx)
+            .save(&persister)
+            .expect_err("undersized response should fail");
+        assert!(err.is_transient());
+        assert!(matches!(ReceiverPersistedError::from(err), ReceiverPersistedError::Transient(_)));
+
+        // A right-sized garbage body fails OHTTP decapsulation, which is
+        // fatal, so the binding error classifies it as fatal.
+        let (_req, ctx) = receiver.create_poll_request(EXAMPLE_URL).expect("valid poll request");
+        let err = receiver
+            .process_response(&[0u8; ENCAPSULATED_MESSAGE_BYTES], ctx)
+            .save(&persister)
+            .expect_err("garbage response should fail");
+        assert!(err.is_fatal());
+        assert!(matches!(ReceiverPersistedError::from(err), ReceiverPersistedError::Fatal(_)));
     }
 }

@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
 pub use error::{
-    BuildSenderError, CreateRequestError, DecapsulationError, PsbtParseError, ResponseError,
+    CreateRequestError, DecapsulationError, PsbtParseError, ResponseError, SenderBuilderError,
     SenderInputError,
 };
 

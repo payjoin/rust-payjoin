@@ -59,9 +59,15 @@ impl ReceiverCreateRequestError {
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[error(transparent)]
 pub enum ReceiverPersistedError {
-    /// rust-payjoin receiver error
+    /// Transient rust-payjoin receiver error. No state transition was
+    /// persisted: the session remains in its previous state and the caller
+    /// may retry the same operation later.
     #[error(transparent)]
-    Receiver(ReceiverError),
+    Transient(ReceiverError),
+    /// Fatal rust-payjoin receiver error. The session was closed, or
+    /// transitioned to a terminal error state, and must not be retried.
+    #[error(transparent)]
+    Fatal(ReceiverError),
     /// Storage error that could occur at application storage layer
     #[error(transparent)]
     Storage(Arc<ImplementationError>),
@@ -87,12 +93,18 @@ macro_rules! impl_persisted_error_from {
                     if let Some(storage_err) = err.storage_error() {
                         return ReceiverPersistedError::from(ImplementationError::new(storage_err));
                     }
-                    return ReceiverPersistedError::Receiver(ReceiverError::Unexpected);
+                    return ReceiverPersistedError::Fatal(ReceiverError::Unexpected);
                 }
+                let transient = err.is_transient();
                 if let Some(api_err) = err.api_error() {
-                    return ReceiverPersistedError::Receiver($receiver_arm(api_err));
+                    let receiver_error = $receiver_arm(api_err);
+                    return if transient {
+                        ReceiverPersistedError::Transient(receiver_error)
+                    } else {
+                        ReceiverPersistedError::Fatal(receiver_error)
+                    };
                 }
-                ReceiverPersistedError::Receiver(ReceiverError::Unexpected)
+                ReceiverPersistedError::Fatal(ReceiverError::Unexpected)
             }
         }
     };

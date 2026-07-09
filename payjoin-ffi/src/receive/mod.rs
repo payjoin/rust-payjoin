@@ -1289,18 +1289,6 @@ impl_save_for_transition!(PayjoinProposalTransition, Monitor);
 
 #[uniffi::export]
 impl PayjoinProposal {
-    pub fn utxos_to_be_locked(&self) -> Vec<OutPoint> {
-        let mut outpoints: Vec<OutPoint> = Vec::new();
-        for o in <PayjoinProposal as Into<
-            payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>,
-        >>::into(self.clone())
-        .utxos_to_be_locked()
-        {
-            outpoints.push(OutPoint::from(*o));
-        }
-        outpoints
-    }
-
     pub fn psbt(&self) -> String {
         <PayjoinProposal as Into<
             payjoin::receive::v2::Receiver<payjoin::receive::v2::PayjoinProposal>,

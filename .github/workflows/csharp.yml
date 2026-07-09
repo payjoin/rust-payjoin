@@ -8,6 +8,10 @@ on:
   pull_request:
     paths:
       - payjoin-ffi/**
+      # The unix jobs run inside the flake's csharp dev shell, so changes to
+      # the flake change this workflow's environment.
+      - flake.nix
+      - flake.lock
 
 jobs:
   build-csharp-and-test-unix:

@@ -202,12 +202,13 @@ impl From<ImplementationError> for SenderPersistedError {
     fn from(value: ImplementationError) -> Self { SenderPersistedError::Storage(Arc::new(value)) }
 }
 
-impl<S> From<payjoin::persist::PersistedError<send::v2::DecapsulationError, S>>
+impl<S, C> From<payjoin::persist::PersistedError<send::v2::DecapsulationError, S, (), C>>
     for SenderPersistedError
 where
     S: std::error::Error + Send + Sync + 'static,
+    C: std::fmt::Debug,
 {
-    fn from(err: payjoin::persist::PersistedError<send::v2::DecapsulationError, S>) -> Self {
+    fn from(err: payjoin::persist::PersistedError<send::v2::DecapsulationError, S, (), C>) -> Self {
         if err.storage_error_ref().is_some() {
             if let Some(storage_err) = err.storage_error() {
                 return SenderPersistedError::from(ImplementationError::new(storage_err));
@@ -221,11 +222,13 @@ where
     }
 }
 
-impl<S> From<payjoin::persist::PersistedError<send::ResponseError, S>> for SenderPersistedError
+impl<S, C> From<payjoin::persist::PersistedError<send::ResponseError, S, (), C>>
+    for SenderPersistedError
 where
     S: std::error::Error + Send + Sync + 'static,
+    C: std::fmt::Debug,
 {
-    fn from(err: payjoin::persist::PersistedError<send::ResponseError, S>) -> Self {
+    fn from(err: payjoin::persist::PersistedError<send::ResponseError, S, (), C>) -> Self {
         if err.storage_error_ref().is_some() {
             if let Some(storage_err) = err.storage_error() {
                 return SenderPersistedError::from(ImplementationError::new(storage_err));
@@ -239,11 +242,13 @@ where
     }
 }
 
-impl<S> From<payjoin::persist::PersistedError<send::BuildSenderError, S>> for SenderPersistedError
+impl<S, C> From<payjoin::persist::PersistedError<send::BuildSenderError, S, (), C>>
+    for SenderPersistedError
 where
     S: std::error::Error + Send + Sync + 'static,
+    C: std::fmt::Debug,
 {
-    fn from(err: payjoin::persist::PersistedError<send::BuildSenderError, S>) -> Self {
+    fn from(err: payjoin::persist::PersistedError<send::BuildSenderError, S, (), C>) -> Self {
         if err.storage_error_ref().is_some() {
             if let Some(storage_err) = err.storage_error() {
                 return SenderPersistedError::from(ImplementationError::new(storage_err));

@@ -76,13 +76,14 @@ macro_rules! impl_persisted_error_from {
         $api_error_ty:ty,
         $receiver_arm:expr
     ) => {
-        impl<S, E> From<payjoin::persist::PersistedError<$api_error_ty, S, E>>
+        impl<S, E, C> From<payjoin::persist::PersistedError<$api_error_ty, S, E, C>>
             for ReceiverPersistedError
         where
             S: std::error::Error + Send + Sync + 'static,
             E: std::fmt::Debug,
+            C: std::fmt::Debug,
         {
-            fn from(err: payjoin::persist::PersistedError<$api_error_ty, S, E>) -> Self {
+            fn from(err: payjoin::persist::PersistedError<$api_error_ty, S, E, C>) -> Self {
                 if err.storage_error_ref().is_some() {
                     if let Some(storage_err) = err.storage_error() {
                         return ReceiverPersistedError::from(ImplementationError::new(storage_err));

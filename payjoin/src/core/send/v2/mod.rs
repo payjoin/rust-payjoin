@@ -392,7 +392,8 @@ impl Sender<WithReplyKey> {
         self,
         response: &[u8],
         post_ctx: OhttpResponse,
-    ) -> MaybeFatalTransition<SessionEvent, Sender<PollingForProposal>, DecapsulationError> {
+    ) -> MaybeFatalTransition<SessionEvent, Sender<PollingForProposal>, DecapsulationError, (), Self>
+    {
         match process_post_res(response, post_ctx.into_inner()) {
             Ok(()) => {}
             Err(e) =>
@@ -404,6 +405,7 @@ impl Sender<WithReplyKey> {
                 } else {
                     return MaybeFatalTransition::transient(
                         InternalDecapsulationError::DirectoryResponse(e).into(),
+                        self,
                     );
                 },
         }
@@ -538,7 +540,7 @@ impl Sender<PollingForProposal> {
     > {
         let body = match process_get_res(response, ohttp_ctx.into_inner()) {
             Ok(Some(body)) => body,
-            Ok(None) => return MaybeSuccessTransitionWithNoResults::no_results(self.clone()),
+            Ok(None) => return MaybeSuccessTransitionWithNoResults::no_results(self),
             Err(e) =>
                 if e.is_fatal() {
                     return MaybeSuccessTransitionWithNoResults::fatal(
@@ -548,6 +550,7 @@ impl Sender<PollingForProposal> {
                 } else {
                     return MaybeSuccessTransitionWithNoResults::transient(
                         InternalDecapsulationError::DirectoryResponse(e).into(),
+                        self,
                     );
                 },
         };

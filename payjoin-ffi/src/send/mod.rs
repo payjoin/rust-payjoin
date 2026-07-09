@@ -453,6 +453,8 @@ pub struct WithReplyKeyTransition(
                     payjoin::send::v2::SessionEvent,
                     payjoin::send::v2::Sender<payjoin::send::v2::PollingForProposal>,
                     payjoin::send::v2::DecapsulationError,
+                    (),
+                    payjoin::send::v2::Sender<payjoin::send::v2::WithReplyKey>,
                 >,
             >,
         >,

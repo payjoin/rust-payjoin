@@ -469,6 +469,26 @@ impl<S: HasFallbackTx> Receiver<S> {
             },
         )
     }
+
+    /// Whether the payjoin proposal's transaction ID is knowable in advance.
+    ///
+    /// If every sender input is SegWit, the sender's final signatures live in
+    /// the witness, so the transaction ID computed from the unsigned proposal
+    /// remains valid once the sender re-signs — the receiver can record it
+    /// (e.g. to reconcile an incoming payment) and monitor the network for it.
+    ///
+    /// If any sender input is non-SegWit, the sender's final signature
+    /// rewrites that input's script_sig, which changes the transaction ID.
+    /// Any transaction ID derived from the proposal before the sender signs
+    /// will never appear on the network, and
+    /// [`Receiver<Monitor>::check_for_transaction`] concludes the session
+    /// without monitoring. Receivers that track payments by transaction ID
+    /// can use this to choose a policy up front: decline to contribute and
+    /// let the fallback pay, or reconcile that session by script instead of
+    /// by transaction ID.
+    pub fn proposal_txid_is_stable(&self) -> bool {
+        !self.state.fallback_tx().input.iter().any(|txin| txin.witness.is_empty())
+    }
 }
 
 impl Receiver<Initialized> {
@@ -1544,7 +1564,7 @@ impl Receiver<Monitor> {
         // If the fallback transaction included any non-SegWit inputs, then the transaction ID of
         // the Payjoin proposal is going to change when the sender signs their non-SegWit address
         // one more time. The receiver cannot monitor the transaction, and should conclude the session.
-        if fallback_tx.input.iter().any(|txin| txin.witness.is_empty()) {
+        if !self.proposal_txid_is_stable() {
             return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
                 SessionOutcome::PayjoinProposalSent,
             ));
@@ -1747,6 +1767,9 @@ pub mod test {
             session_context: SHARED_CONTEXT.clone(),
         };
 
+        // The sender's inputs are SegWit, so the proposal's transaction ID is monitorable.
+        assert!(monitor.proposal_txid_is_stable());
+
         let payjoin_tx = PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx;
         let original_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("valid tx");
 
@@ -1817,6 +1840,10 @@ pub mod test {
             state: Monitor { psbt_context: psbt_ctx_p2pkh },
             session_context: SHARED_CONTEXT.clone(),
         };
+
+        // A non-SegWit sender input means the sender's final signature will change
+        // the proposal's transaction ID.
+        assert!(!monitor.proposal_txid_is_stable());
 
         let persister = InMemoryPersister::default();
         let res = monitor

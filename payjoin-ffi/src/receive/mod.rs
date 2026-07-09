@@ -1520,6 +1520,40 @@ impl Monitor {
     }
 }
 
+macro_rules! impl_proposal_txid_is_stable {
+    ($($state:ty),* $(,)?) => {
+        $(
+            #[uniffi::export]
+            impl $state {
+                /// Whether the payjoin proposal's transaction ID is knowable in advance.
+                ///
+                /// If every sender input is SegWit, the transaction ID computed from the
+                /// unsigned proposal remains valid once the sender re-signs, so the
+                /// receiver can record it (e.g. to reconcile an incoming payment) and
+                /// monitor the network for it. If any sender input is non-SegWit, the
+                /// sender's final signature changes the transaction ID: any ID derived
+                /// from the proposal before the sender signs will never appear on the
+                /// network, and monitoring concludes the session without checking.
+                pub fn proposal_txid_is_stable(&self) -> bool {
+                    self.0.proposal_txid_is_stable()
+                }
+            }
+        )*
+    };
+}
+
+impl_proposal_txid_is_stable!(
+    MaybeInputsOwned,
+    MaybeInputsSeen,
+    OutputsUnknown,
+    WantsOutputs,
+    WantsInputs,
+    WantsFeeRange,
+    ProvisionalProposal,
+    PayjoinProposal,
+    Monitor,
+);
+
 #[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]
 pub struct PendingFallbackTransition(

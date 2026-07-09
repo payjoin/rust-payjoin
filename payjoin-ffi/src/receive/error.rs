@@ -228,11 +228,74 @@ impl From<FfiValidationError> for OutputSubstitutionError {
 #[error(transparent)]
 pub struct CoinSelectionError(#[from] receive::CoinSelectionError);
 
+/// The category of a [`CoinSelectionError`].
+///
+/// Mirrors [`payjoin::receive::CoinSelectionErrorKind`], with an `Other`
+/// catch-all so categories added upstream do not break bindings. Unrecognized
+/// categories should be handled conservatively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum CoinSelectionErrorKind {
+    /// No candidates were available for selection.
+    Empty,
+    /// The transaction shape is not supported by the current selection
+    /// implementation. Retrying with different candidates will not help.
+    UnsupportedOutputLength,
+    /// No candidate improved privacy. A different candidate set may succeed.
+    NotFound,
+    /// A category this version of the bindings does not know about.
+    Other,
+}
+
+#[uniffi::export]
+impl CoinSelectionError {
+    /// Returns the category of this error.
+    pub fn kind(&self) -> CoinSelectionErrorKind {
+        match self.0.kind() {
+            receive::CoinSelectionErrorKind::Empty => CoinSelectionErrorKind::Empty,
+            receive::CoinSelectionErrorKind::UnsupportedOutputLength =>
+                CoinSelectionErrorKind::UnsupportedOutputLength,
+            receive::CoinSelectionErrorKind::NotFound => CoinSelectionErrorKind::NotFound,
+            _ => CoinSelectionErrorKind::Other,
+        }
+    }
+}
+
 /// Error that may occur when input contribution fails.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display)]
 #[error(transparent)]
 pub struct InputContributionError(#[from] receive::InputContributionError);
+
+/// The category of an [`InputContributionError`].
+///
+/// Mirrors [`payjoin::receive::InputContributionErrorKind`], with an `Other`
+/// catch-all so categories added upstream do not break bindings. Unrecognized
+/// categories should be handled conservatively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum InputContributionErrorKind {
+    /// Total input value does not cover the additional output value. Removing
+    /// candidates cannot help; only higher-value candidates can.
+    ValueTooLow,
+    /// The selected input's outpoint is already present in the transaction.
+    /// Contribution may succeed with a different candidate.
+    DuplicateInput,
+    /// A category this version of the bindings does not know about.
+    Other,
+}
+
+#[uniffi::export]
+impl InputContributionError {
+    /// Returns the category of this error.
+    pub fn kind(&self) -> InputContributionErrorKind {
+        match self.0.kind() {
+            receive::InputContributionErrorKind::ValueTooLow =>
+                InputContributionErrorKind::ValueTooLow,
+            receive::InputContributionErrorKind::DuplicateInput =>
+                InputContributionErrorKind::DuplicateInput,
+            _ => InputContributionErrorKind::Other,
+        }
+    }
+}
 
 /// Error validating a PSBT Input
 #[derive(Debug, thiserror::Error, uniffi::Object)]

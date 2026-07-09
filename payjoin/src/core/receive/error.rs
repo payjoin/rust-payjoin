@@ -352,9 +352,41 @@ impl std::error::Error for OutputSubstitutionError {
 /// Error that may occur when coin selection fails.
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
-/// You can only display it.
+/// You can display it, or classify it with [`CoinSelectionError::kind`].
 #[derive(Debug, PartialEq, Eq)]
 pub struct CoinSelectionError(InternalCoinSelectionError);
+
+/// The category of a [`CoinSelectionError`].
+///
+/// Unlike the error itself, the kind is a stable, matchable classification
+/// intended to let callers decide how to react — in particular whether trying
+/// again with a different candidate set could succeed. The enum is
+/// non-exhaustive so categories can be added without breaking callers;
+/// unrecognized categories should be handled conservatively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CoinSelectionErrorKind {
+    /// No candidates were available for selection. Selection can only succeed
+    /// once candidates exist.
+    Empty,
+    /// The transaction shape is not supported by the current selection
+    /// implementation. Retrying with different candidates will not help.
+    UnsupportedOutputLength,
+    /// No candidate improved privacy. A different candidate set may succeed.
+    NotFound,
+}
+
+impl CoinSelectionError {
+    /// Returns the category of this error.
+    pub fn kind(&self) -> CoinSelectionErrorKind {
+        match &self.0 {
+            InternalCoinSelectionError::Empty => CoinSelectionErrorKind::Empty,
+            InternalCoinSelectionError::UnsupportedOutputLength =>
+                CoinSelectionErrorKind::UnsupportedOutputLength,
+            InternalCoinSelectionError::NotFound => CoinSelectionErrorKind::NotFound,
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalCoinSelectionError {
@@ -398,9 +430,38 @@ impl From<InternalCoinSelectionError> for CoinSelectionError {
 /// Error that may occur when input contribution fails.
 ///
 /// This is currently opaque type because we aren't sure which variants will stay.
-/// You can only display it.
+/// You can display it, or classify it with [`InputContributionError::kind`].
 #[derive(Debug, PartialEq, Eq)]
 pub struct InputContributionError(InternalInputContributionError);
+
+/// The category of an [`InputContributionError`].
+///
+/// Unlike the error itself, the kind is a stable, matchable classification
+/// intended to let callers decide how to react — in particular whether trying
+/// again with a different candidate set could succeed. The enum is
+/// non-exhaustive so categories can be added without breaking callers;
+/// unrecognized categories should be handled conservatively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InputContributionErrorKind {
+    /// Total input value does not cover the additional output value. Removing
+    /// candidates cannot help; only higher-value candidates can.
+    ValueTooLow,
+    /// The selected input's outpoint is already present in the transaction.
+    /// Contribution may succeed with a different candidate.
+    DuplicateInput,
+}
+
+impl InputContributionError {
+    /// Returns the category of this error.
+    pub fn kind(&self) -> InputContributionErrorKind {
+        match &self.0 {
+            InternalInputContributionError::ValueTooLow => InputContributionErrorKind::ValueTooLow,
+            InternalInputContributionError::DuplicateInput(_) =>
+                InputContributionErrorKind::DuplicateInput,
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InternalInputContributionError {
@@ -438,6 +499,37 @@ impl From<InternalInputContributionError> for InputContributionError {
 mod tests {
     use super::*;
     use crate::ImplementationError;
+
+    #[test]
+    fn test_coin_selection_error_kind_classifies_every_variant() {
+        assert_eq!(
+            CoinSelectionError::from(InternalCoinSelectionError::Empty).kind(),
+            CoinSelectionErrorKind::Empty
+        );
+        assert_eq!(
+            CoinSelectionError::from(InternalCoinSelectionError::UnsupportedOutputLength).kind(),
+            CoinSelectionErrorKind::UnsupportedOutputLength
+        );
+        assert_eq!(
+            CoinSelectionError::from(InternalCoinSelectionError::NotFound).kind(),
+            CoinSelectionErrorKind::NotFound
+        );
+    }
+
+    #[test]
+    fn test_input_contribution_error_kind_classifies_every_variant() {
+        assert_eq!(
+            InputContributionError::from(InternalInputContributionError::ValueTooLow).kind(),
+            InputContributionErrorKind::ValueTooLow
+        );
+        assert_eq!(
+            InputContributionError::from(InternalInputContributionError::DuplicateInput(
+                bitcoin::OutPoint::null()
+            ))
+            .kind(),
+            InputContributionErrorKind::DuplicateInput
+        );
+    }
 
     #[test]
     fn test_json_reply_from_implementation_error() {

@@ -18,8 +18,8 @@ use bitcoin::{
 };
 pub(crate) use error::InternalPayloadError;
 pub use error::{
-    CoinSelectionError, Error, InputContributionError, JsonReply, OutputSubstitutionError,
-    PayloadError, ProtocolError,
+    CoinSelectionError, CoinSelectionErrorKind, Error, InputContributionError,
+    InputContributionErrorKind, JsonReply, OutputSubstitutionError, PayloadError, ProtocolError,
 };
 use optional_parameters::Params;
 use serde::{Deserialize, Serialize};

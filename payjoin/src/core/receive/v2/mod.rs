@@ -2031,6 +2031,58 @@ pub mod test {
     }
 
     #[test]
+    fn transient_error_can_be_retried_from_returned_state() -> Result<(), BoxError> {
+        let persister = InMemoryPersister::default();
+        let receiver = receiver(unchecked_proposal_v2_from_test_vector());
+
+        let err = receiver
+            .check_broadcast_suitability(None, |_| Err("mock transient error".into()))
+            .save(&persister)
+            .expect_err("implementation failure should be transient");
+        assert!(err.is_transient());
+        assert!(!err.is_fatal());
+
+        let receiver =
+            err.transient_state().expect("transient error should return the current state");
+        let _maybe_inputs_owned = receiver
+            .check_broadcast_suitability(None, |_| Ok(true))
+            .save(&persister)
+            .expect("retry from the returned state should succeed");
+
+        // The event log is identical to that of a run that never failed.
+        assert_events(&persister, &[SessionEvent::CheckedBroadcastSuitability()], false);
+        Ok(())
+    }
+
+    #[test]
+    fn transient_state_matches_replay() -> Result<(), BoxError> {
+        let persister = InMemoryPersister::default();
+        persister.save_event(SessionEvent::Created(SHARED_CONTEXT.clone()))?;
+        persister.save_event(SessionEvent::RetrievedOriginalPayload {
+            original: unchecked_proposal_v2_from_test_vector().original,
+            reply_key: None,
+        })?;
+
+        let (session, _history) = replay_event_log(&persister)?;
+        let live_receiver = match session {
+            ReceiveSession::UncheckedOriginalPayload(receiver) => receiver,
+            other => panic!("Expected UncheckedOriginalPayload, got {other:?}"),
+        };
+
+        let err = live_receiver
+            .check_broadcast_suitability(None, |_| Err("mock transient error".into()))
+            .save(&persister)
+            .expect_err("implementation failure should be transient");
+        let state_from_error =
+            err.transient_state().expect("transient error should return the current state");
+
+        // Nothing was persisted, so replaying yields the same state the error carries.
+        let (replayed, _history) = replay_event_log(&persister)?;
+        assert_eq!(replayed, ReceiveSession::UncheckedOriginalPayload(state_from_error));
+        Ok(())
+    }
+
+    #[test]
     fn test_create_error_request() -> Result<(), BoxError> {
         let mock_err = mock_err();
         let expected_json = serde_json::json!({

@@ -844,6 +844,27 @@ where
             _ => None,
         }
     }
+
+    /// True if the transition was rejected transiently: nothing was
+    /// persisted, and the session can be retried in place from the state
+    /// returned by [`Self::transient_state`].
+    pub fn is_transient(&self) -> bool {
+        matches!(self.0, InternalPersistedError::Api(ApiError::Transient(..)))
+    }
+
+    /// True if the transition failed fatally: an event was persisted, and
+    /// the session is closed or has moved to an error state (see
+    /// [`Self::error_state`]).
+    ///
+    /// Storage errors are neither transient nor fatal. They mean the
+    /// transition outcome is unknown, and recovery is replaying the event
+    /// log; detect them with [`Self::storage_error_ref`].
+    pub fn is_fatal(&self) -> bool {
+        matches!(
+            self.0,
+            InternalPersistedError::Api(ApiError::Fatal(_) | ApiError::FatalWithState(..))
+        )
+    }
 }
 
 impl<
@@ -1785,6 +1806,9 @@ mod tests {
         );
         assert!(storage_error.storage_error_ref().is_some());
         assert!(storage_error.api_error_ref().is_none());
+        assert!(!storage_error.is_transient());
+        assert!(!storage_error.is_fatal());
+        assert_eq!(storage_error.transient_state(), None);
 
         // Test Internal API error cases
         let fatal_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
@@ -1792,6 +1816,21 @@ mod tests {
         );
         assert!(fatal_error.storage_error_ref().is_none());
         assert!(fatal_error.api_error_ref().is_some());
+        assert!(!fatal_error.is_transient());
+        assert!(fatal_error.is_fatal());
+        assert_eq!(fatal_error.transient_state(), None);
+
+        let fatal_with_state_error = PersistedError::<InMemoryTestError, InMemoryTestError, String>(
+            InternalPersistedError::Api(ApiError::FatalWithState(
+                api_err.clone(),
+                "Error state".to_string(),
+            )),
+        );
+        assert!(fatal_with_state_error.storage_error_ref().is_none());
+        assert!(fatal_with_state_error.api_error_ref().is_some());
+        assert!(!fatal_with_state_error.is_transient());
+        assert!(fatal_with_state_error.is_fatal());
+        assert_eq!(fatal_with_state_error.error_state(), Some("Error state".to_string()));
 
         let transient_error = PersistedError::<InMemoryTestError, InMemoryTestError, (), String>(
             InternalPersistedError::Api(ApiError::Transient(
@@ -1801,16 +1840,8 @@ mod tests {
         );
         assert!(transient_error.storage_error_ref().is_none());
         assert!(transient_error.api_error_ref().is_some());
+        assert!(transient_error.is_transient());
+        assert!(!transient_error.is_fatal());
         assert_eq!(transient_error.transient_state(), Some("Current state".to_string()));
-
-        let fatal_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
-            InternalPersistedError::Api(ApiError::Fatal(api_err.clone())),
-        );
-        assert_eq!(fatal_error.transient_state(), None);
-
-        let storage_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
-            InternalPersistedError::Storage(InMemoryTestError {}),
-        );
-        assert_eq!(storage_error.transient_state(), None);
     }
 }

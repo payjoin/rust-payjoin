@@ -33,9 +33,12 @@ impl OriginalContext {
     /// Live and replay both route through here so the param sanitization can't diverge.
     pub(super) fn new(original_psbt: Psbt, mut params: Params, owned_vouts: &[usize]) -> Self {
         if let Some((_, additional_fee_output_index)) = params.additional_fee_contribution {
-            // Per BIP78, ignore a fee-contribution index pointing at a receiver output.
+            // Per BIP78, ignore a fee-contribution index that is out of bounds or
+            // pointing at a receiver output.
             // https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#optional-parameters
-            if owned_vouts.contains(&additional_fee_output_index) {
+            if additional_fee_output_index >= original_psbt.unsigned_tx.output.len()
+                || owned_vouts.contains(&additional_fee_output_index)
+            {
                 params.additional_fee_contribution = None;
             }
         }
@@ -1172,5 +1175,42 @@ mod tests {
             .find(|txo| txo.script_pubkey == sender_script)
             .expect("sender output must be present");
         assert_eq!(sender_out.value, sender_value_before - sender_additional_fee);
+    }
+
+    // A sender-supplied `additionalfeeoutputindex` past the end of the original outputs
+    // must be dropped at sanitization. Before the bounds check it survived (an
+    // out-of-bounds index is never an owned vout) and `calculate_psbt_with_fee_range`
+    // panicked indexing `original_psbt.unsigned_tx.output` once the receiver
+    // contributed an input and at least one sat of additional fee was due.
+    #[test]
+    fn out_of_bounds_fee_output_index_is_ignored() {
+        let mut original = original_from_test_vector();
+        let output_count = original.psbt.unsigned_tx.output.len();
+        original.params.additional_fee_contribution = Some((Amount::from_sat(182), output_count));
+
+        let wants_inputs = WantsOutputs::new(original, vec![1]).commit_outputs();
+
+        let proposal_psbt = Psbt::from_str(RECEIVER_INPUT_CONTRIBUTION).unwrap();
+        let input = InputPair::new(
+            proposal_psbt.unsigned_tx.input[1].clone(),
+            proposal_psbt.inputs[1].clone(),
+            None,
+        )
+        .unwrap();
+        let wants_fee_range = wants_inputs
+            .contribute_inputs([input])
+            .expect("contribution should succeed")
+            .commit_inputs();
+
+        assert_eq!(
+            wants_fee_range.original.params.additional_fee_contribution, None,
+            "out-of-bounds fee contribution must be dropped at sanitization"
+        );
+        wants_fee_range
+            .calculate_psbt_with_fee_range(
+                Some(FeeRate::from_sat_per_vb_u32(10)),
+                Some(FeeRate::from_sat_per_vb_u32(1000)),
+            )
+            .expect("fee calculation should succeed without the sender contribution");
     }
 }

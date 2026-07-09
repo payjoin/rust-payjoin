@@ -425,6 +425,80 @@ mod tests {
         assert_eq!(replayed, live_wants_outputs, "replayed WantsOutputs must equal the live state");
     }
 
+    // Events up to (excluding) `IdentifiedReceiverOutputs`, from which the malformed
+    // payload tests below diverge.
+    fn events_to_outputs_unknown() -> Vec<SessionEvent> {
+        vec![
+            SessionEvent::Created(SHARED_CONTEXT.clone()),
+            SessionEvent::RetrievedOriginalPayload {
+                original: original_from_test_vector(),
+                reply_key: None,
+            },
+            SessionEvent::CheckedBroadcastSuitability(),
+            SessionEvent::CheckedInputsNotOwned(),
+            SessionEvent::CheckedNoInputsSeenBefore(),
+        ]
+    }
+
+    fn expect_invalid_payload_on_replay(events: Vec<SessionEvent>) {
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        for event in events {
+            persister.save_event(event).expect("In memory persister shouldn't fail");
+        }
+        let err = replay_event_log(&persister).expect_err("replay should reject the payload");
+        assert!(
+            err.to_string().starts_with("Invalid event payload"),
+            "expected an invalid-payload error, got: {err}"
+        );
+    }
+
+    // Regression tests: an event log is only as trustworthy as its storage, so replaying
+    // a malformed payload must produce a ReplayError instead of panicking in a later
+    // typestate (`owned_vouts[0]` or an out-of-bounds `output[change_vout]`).
+    #[test]
+    fn replay_rejects_empty_owned_vouts() {
+        let mut events = events_to_outputs_unknown();
+        events.push(SessionEvent::IdentifiedReceiverOutputs(vec![]));
+        expect_invalid_payload_on_replay(events);
+    }
+
+    #[test]
+    fn replay_rejects_out_of_bounds_owned_vout() {
+        let mut events = events_to_outputs_unknown();
+        let output_count = original_from_test_vector().psbt.unsigned_tx.output.len();
+        events.push(SessionEvent::IdentifiedReceiverOutputs(vec![output_count]));
+        expect_invalid_payload_on_replay(events);
+    }
+
+    #[test]
+    fn replay_rejects_out_of_bounds_change_vout() {
+        let mut events = events_to_outputs_unknown();
+        let outputs = original_from_test_vector().psbt.unsigned_tx.output.clone();
+        let change_vout = outputs.len();
+        events.push(SessionEvent::IdentifiedReceiverOutputs(vec![1]));
+        events.push(SessionEvent::CommittedOutputs { outputs, change_vout });
+        expect_invalid_payload_on_replay(events);
+    }
+
+    #[test]
+    fn replay_rejects_committed_psbt_missing_change_vout() {
+        let mut events = events_to_outputs_unknown();
+        let original = original_from_test_vector();
+        let outputs = original.psbt.unsigned_tx.output.clone();
+        events.push(SessionEvent::IdentifiedReceiverOutputs(vec![1]));
+        events.push(SessionEvent::CommittedOutputs { outputs, change_vout: 1 });
+        // A committed PSBT with too few outputs no longer contains the predecessor's
+        // change vout.
+        let mut truncated = original.psbt.clone();
+        truncated.unsigned_tx.output.truncate(1);
+        truncated.outputs.truncate(1);
+        events.push(SessionEvent::CommittedInputs {
+            receiver_inputs: vec![],
+            payjoin_psbt: truncated,
+        });
+        expect_invalid_payload_on_replay(events);
+    }
+
     #[test]
     fn test_session_event_serialization_roundtrip() {
         let persister = InMemoryPersister::<SessionEvent>::default();

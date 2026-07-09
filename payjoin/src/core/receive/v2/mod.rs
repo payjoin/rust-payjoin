@@ -178,18 +178,18 @@ impl ReceiveSession {
 
             (
                 ReceiveSession::OutputsUnknown(state),
-                SessionEvent::IdentifiedReceiverOutputs(wants_outputs),
-            ) => Ok(state.apply_identified_receiver_outputs(wants_outputs)),
+                SessionEvent::IdentifiedReceiverOutputs(owned_vouts),
+            ) => state.apply_identified_receiver_outputs(owned_vouts),
 
             (
                 ReceiveSession::WantsOutputs(state),
                 SessionEvent::CommittedOutputs { outputs, change_vout },
-            ) => Ok(state.apply_committed_outputs(outputs, change_vout)),
+            ) => state.apply_committed_outputs(outputs, change_vout),
 
             (
                 ReceiveSession::WantsInputs(state),
                 SessionEvent::CommittedInputs { receiver_inputs, payjoin_psbt },
-            ) => Ok(state.apply_committed_inputs(receiver_inputs, payjoin_psbt)),
+            ) => state.apply_committed_inputs(receiver_inputs, payjoin_psbt),
 
             (ReceiveSession::WantsFeeRange(state), SessionEvent::AppliedFeeRange(psbt_context)) =>
                 Ok(state.apply_applied_fee_range(psbt_context)),
@@ -267,6 +267,18 @@ impl ReceiveSession {
             .into()),
         }
     }
+}
+
+/// Payload validation failure for an otherwise well-sequenced replay event.
+///
+/// The event log is not trusted to uphold the live path's invariants: it is
+/// deserialized from application storage, and a malformed payload would panic
+/// in later typestates if applied unchecked.
+fn invalid_event_payload(
+    event: SessionEvent,
+    reason: String,
+) -> ReplayError<ReceiveSession, SessionEvent> {
+    InternalReplayError::InvalidEventPayload(Box::new(event), reason).into()
 }
 
 fn pending_fallback_from<S: HasFallbackTx>(r: Receiver<S>) -> ReceiveSession {
@@ -986,11 +998,20 @@ impl Receiver<OutputsUnknown> {
     pub(crate) fn apply_identified_receiver_outputs(
         self,
         owned_vouts: Vec<usize>,
-    ) -> ReceiveSession {
+    ) -> Result<ReceiveSession, ReplayError<ReceiveSession, SessionEvent>> {
+        let output_count = self.state.original.psbt.unsigned_tx.output.len();
+        if owned_vouts.is_empty() || owned_vouts.iter().any(|&vout| vout >= output_count) {
+            return Err(invalid_event_payload(
+                SessionEvent::IdentifiedReceiverOutputs(owned_vouts),
+                format!(
+                    "owned vouts must be non-empty and within the original PSBT's {output_count} outputs"
+                ),
+            ));
+        }
         let inner = common::WantsOutputs::new(self.state.original, owned_vouts);
         let new_state =
             Receiver { state: WantsOutputs { inner }, session_context: self.session_context };
-        ReceiveSession::WantsOutputs(new_state)
+        Ok(ReceiveSession::WantsOutputs(new_state))
     }
 }
 
@@ -1061,7 +1082,16 @@ impl Receiver<WantsOutputs> {
         self,
         outputs: Vec<TxOut>,
         change_vout: usize,
-    ) -> ReceiveSession {
+    ) -> Result<ReceiveSession, ReplayError<ReceiveSession, SessionEvent>> {
+        let output_count = outputs.len();
+        if change_vout >= output_count {
+            return Err(invalid_event_payload(
+                SessionEvent::CommittedOutputs { outputs, change_vout },
+                format!(
+                    "change vout {change_vout} is out of bounds; {output_count} outputs committed"
+                ),
+            ));
+        }
         let mut payjoin_psbt = self.state.inner.original.original_psbt.clone();
         payjoin_psbt.outputs = vec![Default::default(); outputs.len()];
         payjoin_psbt.unsigned_tx.output = outputs;
@@ -1070,7 +1100,7 @@ impl Receiver<WantsOutputs> {
         let inner = common::WantsInputs { original: self.state.inner.original, proposal };
         let new_state =
             Receiver { state: WantsInputs { inner }, session_context: self.session_context };
-        ReceiveSession::WantsInputs(new_state)
+        Ok(ReceiveSession::WantsInputs(new_state))
     }
 }
 
@@ -1127,14 +1157,23 @@ impl Receiver<WantsInputs> {
         self,
         receiver_inputs: Vec<InputPair>,
         payjoin_psbt: Psbt,
-    ) -> ReceiveSession {
+    ) -> Result<ReceiveSession, ReplayError<ReceiveSession, SessionEvent>> {
         // change_vout is unchanged by contribute_inputs; recover it from the predecessor.
         let change_vout = self.state.inner.proposal.change_vout;
+        let output_count = payjoin_psbt.unsigned_tx.output.len();
+        if change_vout >= output_count {
+            return Err(invalid_event_payload(
+                SessionEvent::CommittedInputs { receiver_inputs, payjoin_psbt },
+                format!(
+                    "change vout {change_vout} is out of bounds; committed PSBT has {output_count} outputs"
+                ),
+            ));
+        }
         let proposal = common::WorkingProposal { payjoin_psbt, change_vout, receiver_inputs };
         let inner = common::WantsFeeRange { original: self.state.inner.original, proposal };
         let new_state =
             Receiver { state: WantsFeeRange { inner }, session_context: self.session_context };
-        ReceiveSession::WantsFeeRange(new_state)
+        Ok(ReceiveSession::WantsFeeRange(new_state))
     }
 }
 

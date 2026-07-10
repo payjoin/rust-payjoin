@@ -259,16 +259,12 @@
             "payjoin-mailroom-image" = mkContainerImage "payjoin-mailroom" packages.payjoin-mailroom tag;
           };
 
-        # On Darwin the default sdk_10_0 resolves to the source-built VMR, which has
-        # no binaries in the public nix cache: every uncached realization compiles
-        # the entire .NET SDK from source (hours on CI runners and contributor
-        # machines). Use the Microsoft-binary SDK there; Linux keeps the
-        # source-built SDK, which hydra serves from cache.
-        dotnetSdk =
-          if pkgs.stdenv.isDarwin then
-            pkgs.dotnetCorePackages.sdk_10_0_1xx-bin
-          else
-            pkgs.dotnetCorePackages.sdk_10_0;
+        # The default sdk_10_0 resolves to the source-built VMR, whose binaries
+        # are not reliably in the public nix cache on any platform (the pinned
+        # nixpkgs rev's VMR is unbuilt on hydra): every uncached realization
+        # compiles the entire .NET SDK from source (~25 min on Linux CI runners,
+        # hours on macOS). Use the Microsoft-binary SDK everywhere.
+        dotnetSdk = pkgs.dotnetCorePackages.sdk_10_0_1xx-bin;
 
         devShells = builtins.mapAttrs (
           _name: craneLib:

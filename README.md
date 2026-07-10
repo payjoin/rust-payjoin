@@ -1,7 +1,7 @@
 <div align="center">
   <h1>Rust-Payjoin</h1>
 
-  <img src="./static/monad.svg" width="150" />
+  <img src="https://raw.githubusercontent.com/payjoin/rust-payjoin/master/static/monad.svg" alt="payjoin monad logo" width="150" />
 
   <p>
     <strong>Supercharged payment batching to save fees and preserve privacy</strong>

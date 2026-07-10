@@ -35,6 +35,10 @@ const W_ID: usize = 36;
 const W_ROLE: usize = 25;
 const W_STATUS: usize = 15;
 
+/// Delay before retrying a transiently failed state transition, so a
+/// misbehaving directory or relay is not hammered in a tight loop.
+const TRANSIENT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+
 #[derive(Clone)]
 pub(crate) struct App {
     config: Config,
@@ -697,27 +701,37 @@ impl App {
 
     async fn post_original_proposal(
         &self,
-        sender: Sender<WithReplyKey>,
+        mut sender: Sender<WithReplyKey>,
         persister: &SenderPersister,
     ) -> Result<()> {
-        let (response, ctx) =
-            self.post_via_relay(|relay| sender.create_v2_post_request(relay)).await?;
-        let sender = sender.process_response(&response.bytes().await?, ctx).save(persister)?;
-        println!("Posted Original PSBT...");
-        self.get_proposed_payjoin_psbt(sender, persister).await
+        loop {
+            let (response, ctx) =
+                self.post_via_relay(|relay| sender.create_v2_post_request(relay)).await?;
+            match sender.process_response(&response.bytes().await?, ctx).save(persister) {
+                Ok(sender) => {
+                    println!("Posted Original PSBT...");
+                    return self.get_proposed_payjoin_psbt(sender, persister).await;
+                }
+                Err(e) if e.is_transient() => {
+                    tracing::debug!("Transient error posting original proposal, retrying: {e:?}");
+                    sender = e.transient_state().expect("transient error carries current state");
+                    tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
     }
 
     async fn get_proposed_payjoin_psbt(
         &self,
-        sender: Sender<PollingForProposal>,
+        mut sender: Sender<PollingForProposal>,
         persister: &SenderPersister,
     ) -> Result<()> {
-        let mut session = sender.clone();
         // Long poll until we get a response
         loop {
             let (response, ctx) =
-                self.post_via_relay(|relay| session.create_poll_request(relay)).await?;
-            let res = session.process_response(&response.bytes().await?, ctx).save(persister);
+                self.post_via_relay(|relay| sender.create_poll_request(relay)).await?;
+            let res = sender.process_response(&response.bytes().await?, ctx).save(persister);
             match res {
                 Ok(OptionalTransitionOutcome::Progress(psbt)) => {
                     println!("Proposal received. Processing...");
@@ -726,8 +740,12 @@ impl App {
                 }
                 Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
                     println!("No response yet.");
-                    session = current_state;
-                    continue;
+                    sender = current_state;
+                }
+                Err(e) if e.is_transient() => {
+                    tracing::debug!("Transient error polling for proposal, retrying: {e:?}");
+                    sender = e.transient_state().expect("transient error carries current state");
+                    tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
                 }
                 Err(re) => {
                     println!("{re}");
@@ -740,10 +758,9 @@ impl App {
 
     async fn long_poll_fallback(
         &self,
-        session: Receiver<Initialized>,
+        mut session: Receiver<Initialized>,
         persister: &ReceiverPersister,
     ) -> Result<Receiver<UncheckedOriginalPayload>> {
-        let mut session = session;
         loop {
             println!("Polling receive request...");
             let (ohttp_response, context) =
@@ -758,7 +775,11 @@ impl App {
                 }
                 Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
                     session = current_state;
-                    continue;
+                }
+                Err(e) if e.is_transient() => {
+                    tracing::debug!("Transient error polling for request, retrying: {e:?}");
+                    session = e.transient_state().expect("transient error carries current state");
+                    tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -946,24 +967,34 @@ impl App {
 
     async fn send_payjoin_proposal(
         &self,
-        proposal: Receiver<PayjoinProposal>,
+        mut proposal: Receiver<PayjoinProposal>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let (res, ohttp_ctx) = self
-            .post_via_relay(|relay| {
-                proposal
-                    .create_post_request(relay)
-                    .map_err(|e| anyhow!("v2 req extraction failed {}", e))
-            })
-            .await?;
-        let payjoin_psbt = proposal.psbt().clone();
-        let session = proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister)?;
-        println!(
-            "Response successful. Watch mempool for successful Payjoin. TXID: {}",
-            payjoin_psbt.extract_tx_unchecked_fee_rate().compute_txid()
-        );
-
-        return self.monitor_payjoin_proposal(session, persister).await;
+        loop {
+            let (res, ohttp_ctx) = self
+                .post_via_relay(|relay| {
+                    proposal
+                        .create_post_request(relay)
+                        .map_err(|e| anyhow!("v2 req extraction failed {}", e))
+                })
+                .await?;
+            let payjoin_psbt = proposal.psbt().clone();
+            match proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister) {
+                Ok(session) => {
+                    println!(
+                        "Response successful. Watch mempool for successful Payjoin. TXID: {}",
+                        payjoin_psbt.extract_tx_unchecked_fee_rate().compute_txid()
+                    );
+                    return self.monitor_payjoin_proposal(session, persister).await;
+                }
+                Err(e) if e.is_transient() => {
+                    tracing::debug!("Transient error sending payjoin proposal, retrying: {e:?}");
+                    proposal = e.transient_state().expect("transient error carries current state");
+                    tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
     }
 
     async fn monitor_payjoin_proposal(
@@ -1014,38 +1045,47 @@ impl App {
     /// Handle error by attempting to send an error response over the directory
     async fn handle_error(
         &self,
-        session: Receiver<HasReplyableError>,
+        mut session: Receiver<HasReplyableError>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let (err_response, err_ctx) = self
-            .post_via_relay(|relay| {
-                session
-                    .create_error_request(relay)
-                    .map_err(|e| anyhow!("Failed to post error request: {}", e))
-            })
-            .await?;
+        loop {
+            let (err_response, err_ctx) = self
+                .post_via_relay(|relay| {
+                    session
+                        .create_error_request(relay)
+                        .map_err(|e| anyhow!("Failed to post error request: {}", e))
+                })
+                .await?;
 
-        let err_bytes = match err_response.bytes().await {
-            Ok(bytes) => bytes,
-            Err(e) => return Err(anyhow!("Failed to get error response bytes: {}", e)),
-        };
+            let err_bytes = match err_response.bytes().await {
+                Ok(bytes) => bytes,
+                Err(e) => return Err(anyhow!("Failed to get error response bytes: {}", e)),
+            };
 
-        if let Err(e) = session.process_error_response(&err_bytes, err_ctx).save(persister) {
-            if let Some(api_err) = e.api_error_ref() {
-                tracing::warn!("Failed to confirm error response delivery: {api_err}");
-            }
-            match e.error_state() {
-                Some(_) => {
-                    let id = persister.session_id();
-                    println!(
-                        "Session {id} failed. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
-                    );
+            match session.process_error_response(&err_bytes, err_ctx).save(persister) {
+                Ok(_) => return Ok(()),
+                Err(e) if e.is_transient() => {
+                    tracing::debug!("Transient error posting error response, retrying: {e:?}");
+                    session = e.transient_state().expect("transient error carries current state");
+                    tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
                 }
-                None => return Err(anyhow!("Failed to process error response")),
+                Err(e) => {
+                    if let Some(api_err) = e.api_error_ref() {
+                        tracing::warn!("Failed to confirm error response delivery: {api_err}");
+                    }
+                    match e.error_state() {
+                        Some(_) => {
+                            let id = persister.session_id();
+                            println!(
+                                "Session {id} failed. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
+                            );
+                            return Ok(());
+                        }
+                        None => return Err(anyhow!("Failed to process error response")),
+                    }
+                }
             }
         }
-
-        Ok(())
     }
 
     async fn post_request(&self, req: payjoin::Request) -> Result<reqwest::Response> {

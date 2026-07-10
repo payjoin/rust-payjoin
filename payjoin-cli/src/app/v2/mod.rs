@@ -1073,7 +1073,7 @@ impl App {
                     if let Some(api_err) = e.api_error_ref() {
                         tracing::warn!("Failed to confirm error response delivery: {api_err}");
                     }
-                    match e.error_state() {
+                    match e.fatal_state() {
                         Some(_) => {
                             let id = persister.session_id();
                             println!(

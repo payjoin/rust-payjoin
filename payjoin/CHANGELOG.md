@@ -1,5 +1,43 @@
 # Payjoin Changelog
 
+## 1.0.0-rc.4
+
+This release locks down the public API ahead of the 1.0 freeze. It insulates the bitcoin-ohttp and bitcoin-hpke types from the public interface, marks public enums non_exhaustive and persistence transition types must_use, exposes transient versus fatal classification on PersistedError, corrects the create_error_request return type, renames the Receiver<Monitor> check methods, and removes utxos_to_be_locked. It also hardens the receiver against panic paths and fixes bugs in output substitution change handling, session replay, and coin selection.
+
+Selected Improvements:
+
+### API Stabilization
+
+- Insulate `bitcoin-ohttp` and `bitcoin-hpke` from the public API (#1702)
+- Apply 1.0 freeze-required API fixes: `#[non_exhaustive]` enums, `ShortIdError`, `OutputSubstitution` export, and `#[must_use]` transition types (#1703)
+- Expose transient versus fatal classification on `PersistedError` and return current state in transient errors (#1724)
+- Correct `create_error_request` return type (#1715)
+- Rename `Receiver<Monitor>` check methods (`check_for_broadcast` to `check_for_transaction`) (#1661, #1684)
+- Remove `utxos_to_be_locked` (#1719)
+- Add `InputPair::outpoint()` accessor (#1654)
+
+### Bug Fixes and Hardening
+
+- Prevent receiver panic paths (#1704)
+- Fix output substitution change misdirect (#1685)
+- Fix session replay reporting closed sessions as expired (#1672)
+- Fix `try_preserving_privacy` returning `Empty` when candidates exist (#1629)
+- Assert bech32 encoding is uppercase (#1666)
+
+### Dependencies
+
+- Update to bitcoind async client 0.14 (#1646)
+- Downgrade transitive dependencies to match minimal direct dependencies (#1640)
+
+### Testing and Documentation
+
+- Add tests to catch mutants (#1622)
+- Add spec-related consts for readability in tests (#1699)
+- Employ new `fallback_tx` method (#1625)
+- Fix `check_payment` docstring (#1626)
+- Fix commented test assert (#1624)
+- Attach `--no-run` to feature-gated test runs to ensure compilation (#1621)
+
 ## 1.0.0-rc.3
 
 This release introduces sender and receiver cancel() APIs, fallback typestates for both sender and receiver, merges Cancel/Failure error variants and carves out dedicated errors (CoinSelectionError, DecapsulationError, dedicated create-request error), promotes InMemoryTestPersister to InMemoryPersister while removing NoopSessionPersister, replaces the url crate dependency with an internal Url type, adds is_expired and ErrorCode/WellKnownError::code to the error hierarchy, and removes sender sigs from receiver psbt_to_sign.

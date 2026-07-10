@@ -11,16 +11,16 @@ use crate::error::{FfiValidationError, ImplementationError};
 #[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display, Eq)]
 #[error("Error initializing the sender: {msg}")]
-pub struct BuildSenderError {
+pub struct SenderBuilderError {
     msg: String,
 }
 
-impl From<PsbtParseError> for BuildSenderError {
-    fn from(value: PsbtParseError) -> Self { BuildSenderError { msg: value.to_string() } }
+impl From<PsbtParseError> for SenderBuilderError {
+    fn from(value: PsbtParseError) -> Self { SenderBuilderError { msg: value.to_string() } }
 }
 
-impl From<send::BuildSenderError> for BuildSenderError {
-    fn from(value: send::BuildSenderError) -> Self { BuildSenderError { msg: value.to_string() } }
+impl From<send::BuildSenderError> for SenderBuilderError {
+    fn from(value: send::BuildSenderError) -> Self { SenderBuilderError { msg: value.to_string() } }
 }
 
 /// FFI-visible PSBT parsing error surfaced at the sender boundary.
@@ -41,7 +41,7 @@ pub enum SenderInputError {
     #[error(transparent)]
     Psbt(PsbtParseError),
     #[error(transparent)]
-    Build(Arc<BuildSenderError>),
+    Build(Arc<SenderBuilderError>),
     #[error(transparent)]
     FfiValidation(FfiValidationError),
 }
@@ -177,85 +177,89 @@ impl SenderReplayError {
     pub fn is_expired(&self) -> bool { self.0.is_expired() }
 }
 
+/// Error raised by a sender state machine transition
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+#[error(transparent)]
+pub enum SenderError {
+    /// rust-payjoin sender Decapsulation error
+    #[error(transparent)]
+    Decapsulation(Arc<DecapsulationError>),
+    /// rust-payjoin sender response error
+    #[error(transparent)]
+    Response(ResponseError),
+    /// Sender Build error
+    #[error(transparent)]
+    Build(Arc<SenderBuilderError>),
+    /// Unexpected error
+    #[error("An unexpected error occurred")]
+    Unexpected,
+}
+
 /// Error that may occur during state machine transitions
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[error(transparent)]
 pub enum SenderPersistedError {
-    /// rust-payjoin sender Decapsulation error
+    /// A transient error: nothing was persisted, and the failed transition
+    /// can be retried by calling it again on the same sender object
     #[error(transparent)]
-    DecapsulationError(Arc<DecapsulationError>),
-    /// rust-payjoin sender response error
+    Transient(SenderError),
+    /// A fatal error: the session is closed or has moved to an error state
     #[error(transparent)]
-    ResponseError(ResponseError),
-    /// Sender Build error
-    #[error(transparent)]
-    BuildSenderError(Arc<BuildSenderError>),
+    Fatal(SenderError),
     /// Storage error that could occur at application storage layer
     #[error(transparent)]
     Storage(Arc<ImplementationError>),
-    /// Unexpected error
-    #[error("An unexpected error occurred")]
-    Unexpected,
 }
 
 impl From<ImplementationError> for SenderPersistedError {
     fn from(value: ImplementationError) -> Self { SenderPersistedError::Storage(Arc::new(value)) }
 }
 
-impl<S> From<payjoin::persist::PersistedError<send::v2::DecapsulationError, S>>
-    for SenderPersistedError
-where
-    S: std::error::Error + Send + Sync + 'static,
-{
-    fn from(err: payjoin::persist::PersistedError<send::v2::DecapsulationError, S>) -> Self {
-        if err.storage_error_ref().is_some() {
-            if let Some(storage_err) = err.storage_error() {
-                return SenderPersistedError::from(ImplementationError::new(storage_err));
+macro_rules! impl_sender_persisted_error_from {
+    (
+        $api_error_ty:ty,
+        $sender_arm:expr
+    ) => {
+        impl<S, C> From<payjoin::persist::PersistedError<$api_error_ty, S, (), C>>
+            for SenderPersistedError
+        where
+            S: std::error::Error + Send + Sync + 'static,
+            C: std::fmt::Debug,
+        {
+            fn from(err: payjoin::persist::PersistedError<$api_error_ty, S, (), C>) -> Self {
+                if err.storage_error_ref().is_some() {
+                    if let Some(storage_err) = err.storage_error() {
+                        return SenderPersistedError::from(ImplementationError::new(storage_err));
+                    }
+                    return SenderPersistedError::Fatal(SenderError::Unexpected);
+                }
+                let is_transient = err.is_transient();
+                if let Some(api_err) = err.api_error() {
+                    let sender_err = $sender_arm(api_err);
+                    return if is_transient {
+                        SenderPersistedError::Transient(sender_err)
+                    } else {
+                        SenderPersistedError::Fatal(sender_err)
+                    };
+                }
+                SenderPersistedError::Fatal(SenderError::Unexpected)
             }
-            return SenderPersistedError::Unexpected;
         }
-        if let Some(api_err) = err.api_error() {
-            return SenderPersistedError::DecapsulationError(Arc::new(api_err.into()));
-        }
-        SenderPersistedError::Unexpected
-    }
+    };
 }
 
-impl<S> From<payjoin::persist::PersistedError<send::ResponseError, S>> for SenderPersistedError
-where
-    S: std::error::Error + Send + Sync + 'static,
-{
-    fn from(err: payjoin::persist::PersistedError<send::ResponseError, S>) -> Self {
-        if err.storage_error_ref().is_some() {
-            if let Some(storage_err) = err.storage_error() {
-                return SenderPersistedError::from(ImplementationError::new(storage_err));
-            }
-            return SenderPersistedError::Unexpected;
-        }
-        if let Some(api_err) = err.api_error() {
-            return SenderPersistedError::ResponseError(api_err.into());
-        }
-        SenderPersistedError::Unexpected
-    }
-}
+impl_sender_persisted_error_from!(
+    send::v2::DecapsulationError,
+    |api_err: send::v2::DecapsulationError| SenderError::Decapsulation(Arc::new(api_err.into()))
+);
 
-impl<S> From<payjoin::persist::PersistedError<send::BuildSenderError, S>> for SenderPersistedError
-where
-    S: std::error::Error + Send + Sync + 'static,
-{
-    fn from(err: payjoin::persist::PersistedError<send::BuildSenderError, S>) -> Self {
-        if err.storage_error_ref().is_some() {
-            if let Some(storage_err) = err.storage_error() {
-                return SenderPersistedError::from(ImplementationError::new(storage_err));
-            }
-            return SenderPersistedError::Unexpected;
-        }
-        if let Some(api_err) = err.api_error() {
-            return SenderPersistedError::BuildSenderError(Arc::new(api_err.into()));
-        }
-        SenderPersistedError::Unexpected
-    }
-}
+impl_sender_persisted_error_from!(send::ResponseError, |api_err: send::ResponseError| {
+    SenderError::Response(api_err.into())
+});
+
+impl_sender_persisted_error_from!(send::BuildSenderError, |api_err: send::BuildSenderError| {
+    SenderError::Build(Arc::new(api_err.into()))
+});
 
 #[cfg(test)]
 mod tests {

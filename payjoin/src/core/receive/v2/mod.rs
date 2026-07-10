@@ -594,7 +594,7 @@ impl Receiver<Initialized> {
                             e,
                         );
                     } else {
-                        return MaybeFatalTransitionWithNoResults::transient(e);
+                        return MaybeFatalTransitionWithNoResults::transient(e, current_state);
                     },
                 _ =>
                     return MaybeFatalTransitionWithNoResults::fatal(
@@ -769,6 +769,7 @@ impl Receiver<UncheckedOriginalPayload> {
         Receiver<MaybeInputsOwned>,
         Error,
         Receiver<HasReplyableError>,
+        Self,
     > {
         match self.state.original.check_broadcast_suitability(min_fee_rate, can_broadcast) {
             Ok(()) => MaybeFatalTransition::success(
@@ -779,7 +780,7 @@ impl Receiver<UncheckedOriginalPayload> {
                 },
             ),
             Err(Error::Implementation(e)) =>
-                MaybeFatalTransition::transient(Error::Implementation(e)),
+                MaybeFatalTransition::transient(Error::Implementation(e), self),
             Err(e) => MaybeFatalTransition::replyable_error(
                 SessionEvent::GotReplyableError((&e).into()),
                 Receiver {
@@ -849,6 +850,7 @@ impl Receiver<MaybeInputsOwned> {
         Receiver<MaybeInputsSeen>,
         Error,
         Receiver<HasReplyableError>,
+        Self,
     > {
         match self.state.original.check_inputs_not_owned(is_owned) {
             Ok(()) => MaybeFatalTransition::success(
@@ -859,7 +861,7 @@ impl Receiver<MaybeInputsOwned> {
                 },
             ),
             Err(e) => match e {
-                Error::Implementation(_) => MaybeFatalTransition::transient(e),
+                Error::Implementation(_) => MaybeFatalTransition::transient(e, self),
                 _ => MaybeFatalTransition::replyable_error(
                     SessionEvent::GotReplyableError((&e).into()),
                     Receiver {
@@ -909,6 +911,7 @@ impl Receiver<MaybeInputsSeen> {
         Receiver<OutputsUnknown>,
         Error,
         Receiver<HasReplyableError>,
+        Self,
     > {
         match self.state.original.check_no_inputs_seen_before(is_known) {
             Ok(()) => MaybeFatalTransition::success(
@@ -919,7 +922,7 @@ impl Receiver<MaybeInputsSeen> {
                 },
             ),
             Err(e) => match e {
-                Error::Implementation(_) => MaybeFatalTransition::transient(e),
+                Error::Implementation(_) => MaybeFatalTransition::transient(e, self),
                 _ => MaybeFatalTransition::replyable_error(
                     SessionEvent::GotReplyableError((&e).into()),
                     Receiver {
@@ -974,15 +977,16 @@ impl Receiver<OutputsUnknown> {
         Receiver<WantsOutputs>,
         Error,
         Receiver<HasReplyableError>,
+        Self,
     > {
         let fallback_tx = Some(self.state.fallback_tx());
-        match self.state.original.identify_receiver_outputs(is_receiver_output) {
+        match self.state.original.clone().identify_receiver_outputs(is_receiver_output) {
             Ok(inner) => MaybeFatalTransition::success(
                 SessionEvent::IdentifiedReceiverOutputs(inner.owned_vouts.clone()),
                 Receiver { state: WantsOutputs { inner }, session_context: self.session_context },
             ),
             Err(e) => match e {
-                Error::Implementation(_) => MaybeFatalTransition::transient(e),
+                Error::Implementation(_) => MaybeFatalTransition::transient(e, self),
                 _ => MaybeFatalTransition::replyable_error(
                     SessionEvent::GotReplyableError((&e).into()),
                     Receiver {
@@ -1207,12 +1211,14 @@ impl Receiver<WantsFeeRange> {
         self,
         min_fee_rate: Option<FeeRate>,
         max_effective_fee_rate: Option<FeeRate>,
-    ) -> MaybeFatalTransition<SessionEvent, Receiver<ProvisionalProposal>, ProtocolError> {
+    ) -> MaybeFatalTransition<SessionEvent, Receiver<ProvisionalProposal>, ProtocolError, (), Self>
+    {
         let max_effective_fee_rate =
             max_effective_fee_rate.or(Some(self.session_context.max_fee_rate));
         match self
             .state
             .inner
+            .clone()
             .calculate_psbt_context_with_fee_range(min_fee_rate, max_effective_fee_rate)
         {
             Ok(psbt_context) => MaybeFatalTransition::success(
@@ -1222,7 +1228,8 @@ impl Receiver<WantsFeeRange> {
                     session_context: self.session_context,
                 },
             ),
-            Err(e) => MaybeFatalTransition::transient(ProtocolError::OriginalPayload(e.into())),
+            Err(e) =>
+                MaybeFatalTransition::transient(ProtocolError::OriginalPayload(e.into()), self),
         }
     }
 
@@ -1253,16 +1260,19 @@ impl Receiver<ProvisionalProposal> {
     pub fn finalize_proposal(
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, ImplementationError>
+    ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, ImplementationError, Self>
     {
-        let original_psbt = self.state.psbt_context.original_psbt.clone();
-        let payjoin_psbt = match self.state.psbt_context.finalize_proposal(wallet_process_psbt) {
-            Ok(payjoin_psbt) => payjoin_psbt,
-            Err(e) => {
-                return MaybeTransientTransition::transient(e);
-            }
+        let payjoin_psbt =
+            match self.state.psbt_context.clone().finalize_proposal(wallet_process_psbt) {
+                Ok(payjoin_psbt) => payjoin_psbt,
+                Err(e) => {
+                    return MaybeTransientTransition::transient(e, self);
+                }
+            };
+        let psbt_context = PsbtContext {
+            payjoin_psbt: payjoin_psbt.clone(),
+            original_psbt: self.state.psbt_context.original_psbt,
         };
-        let psbt_context = PsbtContext { payjoin_psbt: payjoin_psbt.clone(), original_psbt };
         let payjoin_proposal = PayjoinProposal { psbt_context: psbt_context.clone() };
         MaybeTransientTransition::success(
             SessionEvent::FinalizedProposal(payjoin_psbt),
@@ -1369,6 +1379,7 @@ impl Receiver<PayjoinProposal> {
         Receiver<Monitor>,
         ProtocolError,
         Receiver<PendingFallback>,
+        Self,
     > {
         match process_post_res(res, ohttp_context.into_inner()) {
             Ok(_) => MaybeFatalTransition::success(
@@ -1389,9 +1400,10 @@ impl Receiver<PayjoinProposal> {
                         ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()),
                     )
                 } else {
-                    MaybeFatalTransition::transient(ProtocolError::V2(
-                        InternalSessionError::DirectoryResponse(e).into(),
-                    ))
+                    MaybeFatalTransition::transient(
+                        ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()),
+                        self,
+                    )
                 },
         }
     }
@@ -1461,10 +1473,10 @@ impl Receiver<HasReplyableError> {
     /// Process an OHTTP Encapsulated HTTP POST Error response
     /// to ensure it has been posted properly.
     pub fn process_error_response(
-        &self,
+        self,
         res: &[u8],
         ohttp_context: OhttpResponse,
-    ) -> MaybeTerminalSuccessTransition<SessionEvent, Receiver<PendingFallback>, ProtocolError>
+    ) -> MaybeTerminalSuccessTransition<SessionEvent, Receiver<PendingFallback>, ProtocolError, Self>
     {
         let pending = self.pending_fallback_after_protocol_failure();
         let event = match &pending {
@@ -1479,7 +1491,7 @@ impl Receiver<HasReplyableError> {
                 MaybeTerminalSuccessTransition::advance(event, pending_fallback),
             (Ok(_), None) => MaybeTerminalSuccessTransition::terminate(event),
             (Err(e), _) if !e.is_fatal() =>
-                MaybeTerminalSuccessTransition::transient(protocol_error(e)),
+                MaybeTerminalSuccessTransition::transient(protocol_error(e), self),
             (Err(e), Some(pending_fallback)) => MaybeTerminalSuccessTransition::fatal_advance(
                 event,
                 pending_fallback,
@@ -1548,9 +1560,12 @@ impl Receiver<Monitor> {
             Ok(Some(tx)) => {
                 let tx_id = tx.compute_txid();
                 if tx_id != payjoin_txid {
-                    return MaybeFatalOrSuccessTransition::transient(Error::Implementation(
-                        ImplementationError::from(format!("Payjoin transaction ID mismatch. Expected: {payjoin_txid}, Got: {tx_id}").as_str()),
-                    ));
+                    return MaybeFatalOrSuccessTransition::transient(
+                        Error::Implementation(ImplementationError::from(
+                            format!("Payjoin transaction ID mismatch. Expected: {payjoin_txid}, Got: {tx_id}").as_str(),
+                        )),
+                        self.clone(),
+                    );
                 }
                 // TODO: should we check for witness and scriptsig on the tx?
                 let mut sender_witnesses = vec![];
@@ -1566,7 +1581,11 @@ impl Receiver<Monitor> {
                 ));
             }
             Ok(None) => {}
-            Err(e) => return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e)),
+            Err(e) =>
+                return MaybeFatalOrSuccessTransition::transient(
+                    Error::Implementation(e),
+                    self.clone(),
+                ),
         }
 
         // If the Payjoin proposal was not found, check the fallback transaction, as it is
@@ -1577,7 +1596,11 @@ impl Receiver<Monitor> {
                     SessionOutcome::FallbackBroadcasted,
                 )),
             Ok(None) => {}
-            Err(e) => return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e)),
+            Err(e) =>
+                return MaybeFatalOrSuccessTransition::transient(
+                    Error::Implementation(e),
+                    self.clone(),
+                ),
         }
 
         MaybeFatalOrSuccessTransition::no_results(self.clone())
@@ -1859,6 +1882,7 @@ pub mod test {
         let receiver =
             v2::Receiver { state: unchecked_proposal, session_context: SHARED_CONTEXT.clone() };
 
+        let expected_state = receiver.clone();
         let unchecked_proposal = receiver.check_broadcast_suitability(Some(FeeRate::MIN), |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
@@ -1866,10 +1890,14 @@ pub mod test {
         match unchecked_proposal {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
                 Error::Implementation(error),
-            )))) => assert_eq!(
-                error.to_string(),
-                Error::Implementation("mock error".into()).to_string()
-            ),
+                current_state,
+            )))) => {
+                assert_eq!(
+                    error.to_string(),
+                    Error::Implementation("mock error".into()).to_string()
+                );
+                assert_eq!(current_state, expected_state);
+            }
             _ => panic!("Expected Implementation error"),
         }
 
@@ -1904,6 +1932,7 @@ pub mod test {
             .assume_interactive_receiver()
             .save(&persister)
             .expect("Persister shouldn't fail");
+        let expected_state = maybe_inputs_owned.clone();
         let maybe_inputs_seen = maybe_inputs_owned.check_inputs_not_owned(&mut |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
@@ -1911,10 +1940,14 @@ pub mod test {
         match maybe_inputs_seen {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
                 Error::Implementation(error),
-            )))) => assert_eq!(
-                error.to_string(),
-                Error::Implementation("mock error".into()).to_string()
-            ),
+                current_state,
+            )))) => {
+                assert_eq!(
+                    error.to_string(),
+                    Error::Implementation("mock error".into()).to_string()
+                );
+                assert_eq!(current_state, expected_state);
+            }
             _ => panic!("Expected Implementation error"),
         }
 
@@ -1936,16 +1969,21 @@ pub mod test {
             .check_inputs_not_owned(&mut |_| Ok(false))
             .save(&persister)
             .expect("Persister shouldn't fail");
+        let expected_state = maybe_inputs_seen.clone();
         let outputs_unknown = maybe_inputs_seen.check_no_inputs_seen_before(&mut |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
         match outputs_unknown {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
                 Error::Implementation(error),
-            )))) => assert_eq!(
-                error.to_string(),
-                Error::Implementation("mock error".into()).to_string()
-            ),
+                current_state,
+            )))) => {
+                assert_eq!(
+                    error.to_string(),
+                    Error::Implementation("mock error".into()).to_string()
+                );
+                assert_eq!(current_state, expected_state);
+            }
             _ => panic!("Expected Implementation error"),
         }
 
@@ -1971,19 +2009,76 @@ pub mod test {
             .check_no_inputs_seen_before(&mut |_| Ok(false))
             .save(&persister)
             .expect("Persister should not fail");
+        let expected_state = outputs_unknown.clone();
         let wants_outputs = outputs_unknown.identify_receiver_outputs(&mut |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
         match wants_outputs {
             MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
                 Error::Implementation(error),
-            )))) => assert_eq!(
-                error.to_string(),
-                Error::Implementation("mock error".into()).to_string()
-            ),
+                current_state,
+            )))) => {
+                assert_eq!(
+                    error.to_string(),
+                    Error::Implementation("mock error".into()).to_string()
+                );
+                assert_eq!(current_state, expected_state);
+            }
             _ => panic!("Expected Implementation error"),
         }
 
+        Ok(())
+    }
+
+    #[test]
+    fn transient_error_can_be_retried_from_returned_state() -> Result<(), BoxError> {
+        let persister = InMemoryPersister::default();
+        let receiver = receiver(unchecked_proposal_v2_from_test_vector());
+
+        let err = receiver
+            .check_broadcast_suitability(None, |_| Err("mock transient error".into()))
+            .save(&persister)
+            .expect_err("implementation failure should be transient");
+        assert!(err.is_transient());
+        assert!(!err.is_fatal());
+
+        let receiver =
+            err.transient_state().expect("transient error should return the current state");
+        let _maybe_inputs_owned = receiver
+            .check_broadcast_suitability(None, |_| Ok(true))
+            .save(&persister)
+            .expect("retry from the returned state should succeed");
+
+        // The event log is identical to that of a run that never failed.
+        assert_events(&persister, &[SessionEvent::CheckedBroadcastSuitability()], false);
+        Ok(())
+    }
+
+    #[test]
+    fn transient_state_matches_replay() -> Result<(), BoxError> {
+        let persister = InMemoryPersister::default();
+        persister.save_event(SessionEvent::Created(SHARED_CONTEXT.clone()))?;
+        persister.save_event(SessionEvent::RetrievedOriginalPayload {
+            original: unchecked_proposal_v2_from_test_vector().original,
+            reply_key: None,
+        })?;
+
+        let (session, _history) = replay_event_log(&persister)?;
+        let live_receiver = match session {
+            ReceiveSession::UncheckedOriginalPayload(receiver) => receiver,
+            other => panic!("Expected UncheckedOriginalPayload, got {other:?}"),
+        };
+
+        let err = live_receiver
+            .check_broadcast_suitability(None, |_| Err("mock transient error".into()))
+            .save(&persister)
+            .expect_err("implementation failure should be transient");
+        let state_from_error =
+            err.transient_state().expect("transient error should return the current state");
+
+        // Nothing was persisted, so replaying yields the same state the error carries.
+        let (replayed, _history) = replay_event_log(&persister)?;
+        assert_eq!(replayed, ReceiveSession::UncheckedOriginalPayload(state_from_error));
         Ok(())
     }
 

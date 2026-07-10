@@ -202,12 +202,6 @@ impl From<ProtocolError> for JsonReply {
 #[error(transparent)]
 pub struct SessionError(#[from] receive::v2::SessionError);
 
-#[uniffi::export]
-impl SessionError {
-    /// Returns `true` if the session has expired.
-    pub fn is_expired(&self) -> bool { self.0.is_expired() }
-}
-
 /// Protocol error raised during output substitution.
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display)]
@@ -297,7 +291,6 @@ mod tests {
     #[test]
     fn session_and_replay_errors_expose_is_expired() {
         // uniffi Objects expose the core predicate to bindings.
-        let _: fn(&SessionError) -> bool = SessionError::is_expired;
         let _: fn(&ReceiverReplayError) -> bool = ReceiverReplayError::is_expired;
     }
 

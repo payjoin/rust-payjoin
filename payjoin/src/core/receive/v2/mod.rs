@@ -1441,10 +1441,10 @@ impl Receiver<HasReplyableError> {
     pub fn create_error_request(
         &self,
         ohttp_relay: impl IntoUrl,
-    ) -> Result<(Request, OhttpResponse), SessionError> {
+    ) -> Result<(Request, OhttpResponse), CreateRequestError> {
         let session_context = &self.session_context;
         if session_context.expiration.elapsed() {
-            return Err(InternalSessionError::Expired(session_context.expiration).into());
+            return Err(InternalCreateRequestError::Expired(self.session_context.expiration).into());
         }
         let mailbox =
             mailbox_endpoint(&session_context.directory, &session_context.reply_mailbox_id());
@@ -1454,8 +1454,7 @@ impl Receiver<HasReplyableError> {
                     self.error_reply.to_json().to_string().into_bytes(),
                     &session_context.receiver_key,
                     reply_key,
-                )
-                .map_err(InternalSessionError::Hpke)?
+                )?
             } else {
                 // Post a generic unavailable error message in the case where we don't have a reply key
                 let err =
@@ -1465,7 +1464,7 @@ impl Receiver<HasReplyableError> {
         };
         let (body, ohttp_ctx) =
             ohttp_encapsulate(&session_context.ohttp_keys, "POST", mailbox.as_str(), Some(&body))
-                .map_err(InternalSessionError::OhttpEncapsulation)?;
+                .map_err(InternalCreateRequestError::OhttpEncapsulation)?;
         let req = Request::new_v2(&session_context.full_relay_url(ohttp_relay)?, &body);
         Ok((req, OhttpResponse::new(ohttp_ctx)))
     }
@@ -2122,7 +2121,7 @@ pub mod test {
         match expiration {
             Err(error) => assert_eq!(
                 error.to_string(),
-                SessionError::from(InternalSessionError::Expired(now)).to_string()
+                CreateRequestError::from(InternalCreateRequestError::Expired(now)).to_string()
             ),
             Ok(_) => panic!("Expected session expiration error, got success"),
         }

@@ -16,11 +16,6 @@ impl From<InternalSessionError> for SessionError {
     fn from(value: InternalSessionError) -> Self { SessionError(value) }
 }
 
-impl SessionError {
-    /// Returns `true` if the session has expired.
-    pub fn is_expired(&self) -> bool { matches!(self.0, InternalSessionError::Expired(_)) }
-}
-
 impl From<crate::into_url::Error> for SessionError {
     fn from(e: crate::into_url::Error) -> Self { SessionError(InternalSessionError::ParseUrl(e)) }
 }
@@ -29,10 +24,6 @@ impl From<crate::into_url::Error> for SessionError {
 pub(crate) enum InternalSessionError {
     /// Url parsing failed
     ParseUrl(crate::into_url::Error),
-    /// The session has expired
-    Expired(Time),
-    /// OHTTP Encapsulation failed
-    OhttpEncapsulation(OhttpEncapsulationError),
     /// Hybrid Public Key Encryption failed
     Hpke(HpkeError),
     /// The directory returned a bad response
@@ -45,8 +36,6 @@ impl fmt::Display for SessionError {
 
         match &self.0 {
             ParseUrl(e) => write!(f, "URL parsing failed: {e}"),
-            Expired(expiration) => write!(f, "Session expired at {expiration:?}"),
-            OhttpEncapsulation(e) => write!(f, "OHTTP Encapsulation Error: {e}"),
             Hpke(e) => write!(f, "Hpke decryption failed: {e}"),
             DirectoryResponse(e) => write!(f, "Directory response error: {e}"),
         }
@@ -59,8 +48,6 @@ impl error::Error for SessionError {
 
         match &self.0 {
             ParseUrl(e) => Some(e),
-            Expired(_) => None,
-            OhttpEncapsulation(e) => Some(e),
             Hpke(e) => Some(e),
             DirectoryResponse(e) => Some(e),
         }
@@ -143,15 +130,6 @@ impl From<OhttpEncapsulationError> for CreateRequestError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn session_error_is_expired() {
-        let expired = SessionError(InternalSessionError::Expired(Time::now()));
-        assert!(expired.is_expired());
-
-        let other = SessionError(InternalSessionError::ParseUrl(crate::into_url::Error::BadScheme));
-        assert!(!other.is_expired());
-    }
 
     #[test]
     fn create_request_error_is_expired() {

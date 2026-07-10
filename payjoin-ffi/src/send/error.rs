@@ -11,16 +11,16 @@ use crate::error::{FfiValidationError, ImplementationError};
 #[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display, Eq)]
 #[error("Error initializing the sender: {msg}")]
-pub struct SenderBuilderError {
+pub struct BuildSenderError {
     msg: String,
 }
 
-impl From<PsbtParseError> for SenderBuilderError {
-    fn from(value: PsbtParseError) -> Self { SenderBuilderError { msg: value.to_string() } }
+impl From<PsbtParseError> for BuildSenderError {
+    fn from(value: PsbtParseError) -> Self { BuildSenderError { msg: value.to_string() } }
 }
 
-impl From<send::BuildSenderError> for SenderBuilderError {
-    fn from(value: send::BuildSenderError) -> Self { SenderBuilderError { msg: value.to_string() } }
+impl From<send::BuildSenderError> for BuildSenderError {
+    fn from(value: send::BuildSenderError) -> Self { BuildSenderError { msg: value.to_string() } }
 }
 
 /// FFI-visible PSBT parsing error surfaced at the sender boundary.
@@ -41,7 +41,7 @@ pub enum SenderInputError {
     #[error(transparent)]
     Psbt(PsbtParseError),
     #[error(transparent)]
-    Build(Arc<SenderBuilderError>),
+    Build(Arc<BuildSenderError>),
     #[error(transparent)]
     FfiValidation(FfiValidationError),
 }
@@ -189,7 +189,7 @@ pub enum SenderError {
     Response(ResponseError),
     /// Sender Build error
     #[error(transparent)]
-    Build(Arc<SenderBuilderError>),
+    BuildSender(Arc<BuildSenderError>),
     /// Unexpected error
     #[error("An unexpected error occurred")]
     Unexpected,
@@ -258,7 +258,7 @@ impl_sender_persisted_error_from!(send::ResponseError, |api_err: send::ResponseE
 });
 
 impl_sender_persisted_error_from!(send::BuildSenderError, |api_err: send::BuildSenderError| {
-    SenderError::Build(Arc::new(api_err.into()))
+    SenderError::BuildSender(Arc::new(api_err.into()))
 });
 
 #[cfg(test)]

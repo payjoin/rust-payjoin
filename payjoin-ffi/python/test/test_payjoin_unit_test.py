@@ -269,7 +269,7 @@ class TestSenderCancelAsync(unittest.TestCase):
 
 class TestValidation(unittest.TestCase):
     def test_receiver_builder_rejects_bad_address(self):
-        with self.assertRaises(cast(type[Exception], payjoin.ReceiverBuilderError)):
+        with self.assertRaises(cast(type[Exception], payjoin.BuildReceiverError)):
             payjoin.ReceiverBuilder(
                 "not-an-address",
                 "https://example.com",

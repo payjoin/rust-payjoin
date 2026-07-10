@@ -999,7 +999,7 @@ impl App {
 
     async fn monitor_payjoin_proposal(
         &self,
-        proposal: Receiver<Monitor>,
+        mut proposal: Receiver<Monitor>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
         // On a session resumption, the receiver will resume again in this state.
@@ -1027,8 +1027,17 @@ impl App {
                         println!("Payjoin transaction detected in the mempool!");
                         return Ok(());
                     }
-                    Ok(OptionalTransitionOutcome::Stasis(_)) => continue,
-                    Err(_) => continue,
+                    Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
+                        proposal = current_state;
+                    }
+                    Err(e) if e.is_transient() => {
+                        tracing::debug!(
+                            "Transient error checking for transaction, retrying: {e:?}"
+                        );
+                        proposal =
+                            e.transient_state().expect("transient error carries current state");
+                    }
+                    Err(e) => return Err(e.into()),
                 }
             }
         })

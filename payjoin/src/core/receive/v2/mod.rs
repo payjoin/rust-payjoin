@@ -1536,7 +1536,7 @@ impl Receiver<Monitor> {
     /// search for the transaction in the network. Since a non-SegWit input signature is going to
     /// change the TXID of the Payjoin proposal, it cannot be monitored.
     pub fn check_for_transaction(
-        &self,
+        self,
         find_transaction: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,
     ) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, Error> {
         let fallback_tx = self.state.fallback_tx();
@@ -1563,7 +1563,7 @@ impl Receiver<Monitor> {
                         Error::Implementation(ImplementationError::from(
                             format!("Payjoin transaction ID mismatch. Expected: {payjoin_txid}, Got: {tx_id}").as_str(),
                         )),
-                        self.clone(),
+                        self,
                     );
                 }
                 // TODO: should we check for witness and scriptsig on the tx?
@@ -1581,10 +1581,7 @@ impl Receiver<Monitor> {
             }
             Ok(None) => {}
             Err(e) =>
-                return MaybeFatalOrSuccessTransition::transient(
-                    Error::Implementation(e),
-                    self.clone(),
-                ),
+                return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e), self),
         }
 
         // If the Payjoin proposal was not found, check the fallback transaction, as it is
@@ -1596,13 +1593,10 @@ impl Receiver<Monitor> {
                 )),
             Ok(None) => {}
             Err(e) =>
-                return MaybeFatalOrSuccessTransition::transient(
-                    Error::Implementation(e),
-                    self.clone(),
-                ),
+                return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e), self),
         }
 
-        MaybeFatalOrSuccessTransition::no_results(self.clone())
+        MaybeFatalOrSuccessTransition::no_results(self)
     }
 }
 
@@ -1759,6 +1753,7 @@ pub mod test {
         // Nothing was spent, should be in the same state
         let persister = InMemoryPersister::default();
         let res = monitor
+            .clone()
             .check_for_transaction(|_| Ok(None))
             .save(&persister)
             .expect("InMemoryPersister shouldn't fail");
@@ -1769,6 +1764,7 @@ pub mod test {
         // Payjoin was broadcasted, should progress to success
         let persister = InMemoryPersister::default();
         let res = monitor
+            .clone()
             .check_for_transaction(|_| Ok(Some(payjoin_tx.clone())))
             .save(&persister)
             .expect("InMemoryPersister shouldn't fail");

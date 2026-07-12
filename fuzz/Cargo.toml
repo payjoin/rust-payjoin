@@ -21,7 +21,7 @@ payjoin = { path = "../payjoin", default-features = false, features = [
   "_core",
   "std",
   "v1",
-  "v2",
+  "v2-ohttp",
 ] }
 payjoin-ffi = { path = "../payjoin-ffi" }
 # Without float_roundtrip, serde_json parses floats inexactly, so a float in

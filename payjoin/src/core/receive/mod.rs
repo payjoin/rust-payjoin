@@ -13,16 +13,12 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 use alloc::{format, vec};
-#[cfg(feature = "std")]
-use core::str::FromStr;
 
 pub mod common;
 
 use bitcoin::transaction::InputWeightPrediction;
-#[cfg(feature = "std")]
-use bitcoin::FeeRate;
 use bitcoin::{
-    psbt, AddressType, OutPoint, Psbt, Script, ScriptBuf, Transaction, TxIn, TxOut, Weight,
+    psbt, AddressType, FeeRate, OutPoint, Psbt, Script, ScriptBuf, Transaction, TxIn, TxOut, Weight,
 };
 pub(crate) use error::InternalPayloadError;
 #[cfg(feature = "std")]
@@ -40,9 +36,8 @@ use crate::psbt::{
     NON_WITNESS_INPUT_WEIGHT,
 };
 use crate::ImplementationError;
-#[cfg(feature = "std")]
+#[allow(unused_imports)]
 use crate::Version;
-
 /// Input weight for a P2TR key-spend with default sighash (64-byte signature) and no annex.
 const DEFAULT_SIGHASH_KEY_SPEND_INPUT_WEIGHT: Weight = Weight::from_wu(
     InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH.weight().to_wu()
@@ -250,7 +245,8 @@ pub(crate) fn parse_payload(
     query: &str,
     supported_versions: &'static [Version],
 ) -> Result<(Psbt, Params), PayloadError> {
-    let unchecked_psbt = Psbt::from_str(base64).map_err(InternalPayloadError::ParsePsbt)?;
+    let unchecked_psbt =
+        crate::psbt::psbt_from_base64(base64).map_err(InternalPayloadError::ParsePsbt)?;
 
     let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
     tracing::trace!("Received original psbt: {psbt:?}");
@@ -371,15 +367,11 @@ pub struct OriginalPayload {
 
 impl OriginalPayload {
     // Calculates the fee rate of the original proposal PSBT.
-    #[cfg(feature = "std")]
     fn psbt_fee_rate(&self) -> Result<FeeRate, InternalPayloadError> {
-        let original_psbt_fee = self.psbt.fee().map_err(|e| {
-            InternalPayloadError::ParsePsbt(bitcoin::psbt::PsbtParseError::PsbtEncoding(e))
-        })?;
+        let original_psbt_fee = self.psbt.fee().map_err(InternalPayloadError::ParsePsbt)?;
         Ok(original_psbt_fee / self.psbt.clone().extract_tx_unchecked_fee_rate().weight())
     }
 
-    #[cfg(feature = "std")]
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<FeeRate>,

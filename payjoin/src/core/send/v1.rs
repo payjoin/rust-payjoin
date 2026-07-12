@@ -21,7 +21,7 @@
 //! [`bitmask-core`](https://github.com/diba-io/bitmask-core) BDK integration. Bring your own
 //! wallet and http client.
 
-use core::str::FromStr;
+use alloc::string::{String, ToString};
 
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, Amount, FeeRate};
@@ -32,7 +32,9 @@ use super::*;
 use crate::core::Url;
 pub use crate::output_substitution::OutputSubstitution;
 use crate::uri::v1::PjParam;
-use crate::{PjUri, Request, Version, MAX_CONTENT_LENGTH};
+#[cfg(feature = "std")]
+use crate::PjUri;
+use crate::{Request, Version, MAX_CONTENT_LENGTH};
 
 /// A builder to construct the properties of a `Sender`.
 #[derive(Clone)]
@@ -47,6 +49,7 @@ impl SenderBuilder {
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`Sender`]
+    #[cfg(feature = "std")]
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {
         Self {
             endpoint: uri.extras.pj_param.endpoint_url(),
@@ -175,7 +178,7 @@ impl Sender {
         );
         let mut sanitized_psbt = self.psbt_ctx.original_psbt.clone();
         clear_unneeded_fields(&mut sanitized_psbt);
-        let body = sanitized_psbt.to_string().as_bytes().to_vec();
+        let body = crate::psbt::psbt_to_base64(&sanitized_psbt).into_bytes();
         (
             Request::new_v1(&url, &body),
             V1Context {
@@ -214,29 +217,23 @@ impl V1Context {
         }
 
         let res_str = core::str::from_utf8(response).map_err(|_| InternalValidationError::Parse)?;
-        let proposal = Psbt::from_str(res_str).map_err(|_| {
-            ResponseError::parse_from_str(res_str)
-                .unwrap_or_else(|_| InternalValidationError::Parse.into())
-        })?;
+        let proposal =
+            crate::psbt::psbt_from_base64(res_str).map_err(|_| parse_error_response(res_str))?;
         self.psbt_context.process_proposal(proposal).map_err(Into::into)
     }
 }
 
-impl ResponseError {
-    /// Parse a response from the receiver.
-    ///
-    /// response must be valid JSON string.
-    #[cfg(not(feature = "std"))]
-    pub(crate) fn parse(response: &str) -> Self {
-        match serde_json::from_str(response) {
-            Ok(json) => Self::from_json(json),
-            Err(_) => InternalValidationError::Parse.into(),
-        }
-    }
+#[cfg(feature = "std")]
+fn parse_error_response(res_str: &str) -> ResponseError {
+    ResponseError::parse_from_str(res_str).unwrap_or_else(|_| InternalValidationError::Parse.into())
 }
+
+#[cfg(not(feature = "std"))]
+fn parse_error_response(_res_str: &str) -> ResponseError { InternalValidationError::Parse.into() }
 
 #[cfg(test)]
 mod test {
+    use core::str::FromStr;
     use std::collections::BTreeMap;
 
     use bitcoin::bip32::{self, DerivationPath};

@@ -1,5 +1,3 @@
-#[cfg(feature = "std")]
-use alloc::format;
 use alloc::string::String;
 use core::borrow::Borrow;
 #[cfg(not(feature = "std"))]
@@ -129,14 +127,13 @@ impl Params {
         Ok(params)
     }
 
-    #[cfg(feature = "std")]
     pub fn from_query_str(
         query: &str,
         supported_versions: &'static [Version],
     ) -> Result<Self, Error> {
-        let url = crate::Url::parse(&format!("http://localhost/?{query}"))
-            .map_err(|_| Error::MalformedQuery)?;
-        Self::from_query_pairs(url.query_pairs().into_iter(), supported_versions)
+        let pairs =
+            query.split('&').filter(|s| !s.is_empty()).filter_map(|pair| pair.split_once('='));
+        Self::from_query_pairs(pairs, supported_versions)
     }
 }
 

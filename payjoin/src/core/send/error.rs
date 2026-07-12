@@ -71,7 +71,9 @@ impl fmt::Display for BuildSenderError {
     }
 }
 
-#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+#[cfg(all(not(feature = "std"), any(feature = "v1", feature = "v2-ohttp")))]
+impl core::error::Error for BuildSenderError {}
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
 impl std::error::Error for BuildSenderError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use InternalBuildSenderError::*;
@@ -396,7 +398,7 @@ impl ResponseError {
         }
     }
 
-    #[cfg(any(feature = "v1", test))]
+    #[cfg(any(all(feature = "v1", feature = "std"), test))]
     pub(crate) fn parse_from_str(s: &str) -> Result<Self, serde_json::Error> {
         let json: serde_json::Value = serde_json::from_str(s)?;
         Ok(Self::from_json(json))

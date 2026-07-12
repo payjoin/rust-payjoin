@@ -4,6 +4,8 @@
 use alloc::boxed::Box;
 #[cfg(not(feature = "std"))]
 use alloc::collections::BTreeMap;
+#[cfg(any(feature = "v1", feature = "v2"))]
+use alloc::string::String;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use core::fmt;
@@ -437,6 +439,27 @@ impl std::error::Error for InputWeightError {
 }
 impl From<AddressTypeError> for InputWeightError {
     fn from(value: AddressTypeError) -> Self { Self::AddressType(value) }
+}
+
+/// Base64 (de)serialization for the BIP78 v1 wire format.
+///
+/// `bitcoin`'s own `base64` feature pulls in the `base64` crate with its
+/// default (`std`-only) features enabled, which breaks `no_std` builds.
+/// These helpers use a directly-depended, `alloc`-only build of `base64`
+/// instead, on top of PSBT's always-available binary (de)serialization.
+#[cfg(any(feature = "v1", feature = "v2"))]
+pub(crate) fn psbt_to_base64(psbt: &Psbt) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(psbt.serialize())
+}
+
+#[cfg(any(feature = "v1", feature = "v2"))]
+pub(crate) fn psbt_from_base64(s: &str) -> Result<Psbt, bitcoin::psbt::Error> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(s)
+        .map_err(|_| bitcoin::psbt::Error::InvalidMagic)?;
+    Psbt::deserialize(&bytes)
 }
 
 #[cfg(test)]

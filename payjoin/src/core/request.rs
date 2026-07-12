@@ -1,4 +1,6 @@
 use alloc::string::String;
+#[cfg(feature = "v1")]
+use alloc::string::ToString;
 use alloc::vec::Vec;
 
 #[cfg(any(feature = "v1", feature = "v2-ohttp"))]

@@ -1,23 +1,25 @@
 //! Payjoin URI parsing and validation
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
+use alloc::borrow::Cow;
 #[cfg(feature = "std")]
-mod imports {
-    pub use alloc::borrow::Cow;
-    pub use alloc::boxed::Box;
-    pub use alloc::fmt;
-    pub use alloc::vec::Vec;
-    pub use std::vec;
+use alloc::boxed::Box;
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+use alloc::fmt;
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+use alloc::string::{String, ToString};
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
+use alloc::vec;
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
+use alloc::vec::Vec;
 
-    pub use bitcoin::address::NetworkChecked;
-}
-
+#[cfg(feature = "std")]
+use bitcoin::address::NetworkChecked;
 pub use error::PjParseError;
-#[cfg(feature = "std")]
-use imports::*;
 
 #[cfg(feature = "v2-ohttp")]
 pub(crate) use crate::directory::ShortId;
 use crate::output_substitution::OutputSubstitution;
-#[cfg(feature = "std")]
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 use crate::uri::error::InternalPjParseError;
 
 mod error;
@@ -183,12 +185,12 @@ impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
     }
 }
 
-#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
 impl bitcoin_uri::de::DeserializationError for MaybePayjoinExtras {
     type Error = PjParseError;
 }
 
-#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
 impl bitcoin_uri::de::DeserializeParams<'_> for MaybePayjoinExtras {
     type DeserializationState = DeserializationState;
 }
@@ -214,7 +216,7 @@ impl bitcoin_uri::SerializeParams for &MaybePayjoinExtras {
     }
 }
 
-#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
 impl bitcoin_uri::SerializeParams for &PayjoinExtras {
     type Key = &'static str;
     type Value = String;
@@ -230,7 +232,7 @@ impl bitcoin_uri::SerializeParams for &PayjoinExtras {
     }
 }
 
-#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
 impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
     type Value = MaybePayjoinExtras;
 
@@ -285,7 +287,7 @@ impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
 mod tests {
     use std::convert::TryFrom;
 
-    #[cfg(feature = "v1")]
+    #[cfg(all(feature = "std", feature = "v1"))]
     use bitcoin_uri::SerializeParams;
 
     use super::*;

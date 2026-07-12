@@ -202,8 +202,7 @@ pub(crate) enum InternalPayloadError {
     /// The payload is not valid utf-8
     Utf8(core::str::Utf8Error),
     /// The payload is not a valid PSBT
-    #[cfg(feature = "std")]
-    ParsePsbt(bitcoin::psbt::PsbtParseError),
+    ParsePsbt(bitcoin::psbt::Error),
     /// Invalid sender parameters
     SenderParams(super::optional_parameters::Error),
     /// The raw PSBT fails bip78-specific validation.
@@ -275,7 +274,6 @@ impl fmt::Display for InternalPayloadError {
 
         match &self {
             Utf8(e) => write!(f, "{e}"),
-            #[cfg(feature = "std")]
             ParsePsbt(e) => write!(f, "{e}"),
             SenderParams(e) => write!(f, "{e}"),
             InconsistentPsbt(e) => write!(f, "{e}"),

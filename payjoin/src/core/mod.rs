@@ -29,9 +29,9 @@ pub mod time;
 pub mod uri;
 #[cfg(feature = "std")]
 pub use uri::PjUri;
-pub use uri::{PjParam, PjParseError};
 #[cfg(feature = "std")]
-pub use uri::{Uri, UriExt};
+pub use uri::Uri;
+pub use uri::{PjParam, PjParseError};
 pub(crate) mod error_codes;
 
 pub(crate) mod output_substitution;

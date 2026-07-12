@@ -1,5 +1,3 @@
-#[cfg(feature = "std")]
-use alloc::format;
 use alloc::string::String;
 use core::borrow::Borrow;
 #[cfg(not(feature = "std"))]
@@ -109,7 +107,10 @@ impl Params {
                                 return Err(Error::FeeRate);
                             }
                             // since it's a minimum, we want to round up
-                            let fee_rate_sat_per_kwu = fee_rate_sat_per_kwu.ceil() as u64;
+                            let rounded_fee_rate = fee_rate_sat_per_kwu as u64;
+                            let fee_rate_sat_per_kwu = rounded_fee_rate.saturating_add(u64::from(
+                                (rounded_fee_rate as f32) < fee_rate_sat_per_kwu,
+                            ));
                             // Reject absurd rates before they reach fee arithmetic:
                             // a saturated u64::MAX sat/kwu would overflow the
                             // Weight * FeeRate fee computation.
@@ -141,14 +142,13 @@ impl Params {
         Ok(params)
     }
 
-    #[cfg(feature = "std")]
     pub fn from_query_str(
         query: &str,
         supported_versions: &'static [Version],
     ) -> Result<Self, Error> {
-        let url = crate::Url::parse(&format!("http://localhost/?{query}"))
-            .map_err(|_| Error::MalformedQuery)?;
-        Self::from_query_pairs(url.query_pairs().into_iter(), supported_versions)
+        let pairs =
+            query.split('&').filter(|s| !s.is_empty()).filter_map(|pair| pair.split_once('='));
+        Self::from_query_pairs(pairs, supported_versions)
     }
 }
 

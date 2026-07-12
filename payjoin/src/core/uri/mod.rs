@@ -1,24 +1,25 @@
 //! Payjoin URI parsing and validation
-#[cfg(feature = "std")]
-mod imports {
-    pub use alloc::borrow::Cow;
-    pub use alloc::boxed::Box;
-    pub use alloc::fmt;
-    pub use alloc::vec::Vec;
-    pub use std::vec;
-    pub use core::str::FromStr;
-    pub use bitcoin::address::{NetworkChecked, NetworkUnchecked, NetworkValidation};
-    pub use bitcoin::{Address, Amount};
-}
+use alloc::borrow::Cow;
+use alloc::boxed::Box;
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+use alloc::fmt;
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+use alloc::string::{String, ToString};
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
+use alloc::vec;
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
+use alloc::vec::Vec;
+use core::str::FromStr;
 
+use bitcoin::address::{NetworkChecked, NetworkUnchecked, NetworkValidation};
+use bitcoin::{Address, Amount};
 pub use error::{PjParseError, UriParseError};
-#[cfg(feature = "std")]
-use imports::*;
 
 #[cfg(feature = "v2-ohttp")]
 pub(crate) use crate::directory::ShortId;
 use crate::output_substitution::OutputSubstitution;
 #[cfg(feature = "std")]
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 use crate::uri::error::InternalPjParseError;
 
 mod error;
@@ -129,78 +130,77 @@ pub struct PayjoinExtras {
 
 impl PayjoinExtras {
     pub fn pj_param(&self) -> &PjParam { &self.pj_param }
+
     #[cfg(any(feature = "v1", feature = "v2-ohttp"))]
     pub fn endpoint(&self) -> String { self.pj_param.endpoint() }
+
     pub fn output_substitution(&self) -> OutputSubstitution { self.output_substitution }
 }
 
-    /// A BIP21 URI that may or may not request payjoin.
-    ///
-    /// This newtype wraps [`bitcoin_uri::Uri`] so that a breaking change in that
-    /// crate does not force a breaking change in this crate's public API. Parse one
-    /// with [`Uri::try_from`] or [`str::parse`], validate the address network with
-    /// [`assume_checked`](Self::assume_checked) or
-    /// [`require_network`](Self::require_network), then check for payjoin support
-    /// with [`check_pj_supported`](Self::check_pj_supported).
-    ///
-    /// The URI is always owned, so it carries no lifetime parameter.
-    #[derive(Clone, Debug)]
-    pub struct Uri<NetVal: NetworkValidation>(
-        bitcoin_uri::Uri<'static, NetVal, MaybePayjoinExtrasAdapter>,
-    );
+/// A BIP21 URI that may or may not request payjoin.
+///
+/// This newtype wraps [`bitcoin_uri::Uri`] so that a breaking change in that
+/// crate does not force a breaking change in this crate's public API. Parse one
+/// with [`Uri::try_from`] or [`str::parse`], validate the address network with
+/// [`assume_checked`](Self::assume_checked) or
+/// [`require_network`](Self::require_network), then check for payjoin support
+/// with [`check_pj_supported`](Self::check_pj_supported).
+///
+/// The URI is always owned, so it carries no lifetime parameter.
+#[derive(Clone, Debug)]
+pub struct Uri<NetVal: NetworkValidation>(
+    bitcoin_uri::Uri<'static, NetVal, MaybePayjoinExtrasAdapter>,
+);
 
-    impl<NetVal: NetworkValidation> Uri<NetVal> {
-        /// The address the URI pays to.
-        pub fn address(&self) -> &Address<NetVal> { &self.0.address }
+impl<NetVal: NetworkValidation> Uri<NetVal> {
+    /// The address the URI pays to.
+    pub fn address(&self) -> &Address<NetVal> { &self.0.address }
 
-        /// The amount the URI requests, if any.
-        pub fn amount(&self) -> Option<Amount> { self.0.amount }
+    /// The amount the URI requests, if any.
+    pub fn amount(&self) -> Option<Amount> { self.0.amount }
 
-        /// The label describing the URI, if present and valid UTF-8.
-        pub fn label(&self) -> Option<String> {
-            self.0.label.clone().and_then(|label| String::try_from(label).ok())
-        }
-
-        /// The message describing the URI, if present and valid UTF-8.
-        pub fn message(&self) -> Option<String> {
-            self.0.message.clone().and_then(|message| String::try_from(message).ok())
-        }
-
-        /// The payjoin parameters carried by the URI.
-        pub fn extras(&self) -> &MaybePayjoinExtras { &self.0.extras.0 }
+    /// The label describing the URI, if present and valid UTF-8.
+    pub fn label(&self) -> Option<String> {
+        self.0.label.clone().and_then(|label| String::try_from(label).ok())
     }
 
-    impl Uri<NetworkUnchecked> {
-        /// Marks the URI's address as validated without checking the network.
-        pub fn assume_checked(self) -> Uri<NetworkChecked> { Uri(self.0.assume_checked()) }
-
-        /// Validates that the URI's address is valid for the given network.
-        pub fn require_network(
-            self,
-            network: bitcoin::Network,
-        ) -> Result<Uri<NetworkChecked>, UriParseError> {
-            self.0.require_network(network).map(Uri).map_err(UriParseError::from_bip21_error)
-        }
+    /// The message describing the URI, if present and valid UTF-8.
+    pub fn message(&self) -> Option<String> {
+        self.0.message.clone().and_then(|message| String::try_from(message).ok())
     }
 
-    impl Uri<NetworkChecked> {
-        /// Converts this URI into a [`PjUri`] if it supports payjoin.
-        ///
-        /// If payjoin is unsupported the URI is handed back unchanged in the error
-        /// variant. It is boxed to reduce the size of the `Result` (see
-        /// <https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err>).
-        #[cfg(feature = "std")]
-        pub fn check_pj_supported(self) -> Result<PjUri, Box<Self>> {
-            match self.0.extras.0 {
-                MaybePayjoinExtras::Supported(payjoin) => {
-                    let mut uri =
+    /// The payjoin parameters carried by the URI.
+    pub fn extras(&self) -> &MaybePayjoinExtras { &self.0.extras.0 }
+}
+
+impl Uri<NetworkUnchecked> {
+    /// Marks the URI's address as validated without checking the network.
+    pub fn assume_checked(self) -> Uri<NetworkChecked> { Uri(self.0.assume_checked()) }
+
+    /// Validates that the URI's address is valid for the given network.
+    pub fn require_network(
+        self,
+        network: bitcoin::Network,
+    ) -> Result<Uri<NetworkChecked>, UriParseError> {
+        self.0.require_network(network).map(Uri).map_err(UriParseError::from_bip21_error)
+    }
+}
+
+impl Uri<NetworkChecked> {
+    /// Converts this URI into a [`PjUri`] if it supports payjoin.
+    ///
+    /// If payjoin is unsupported the URI is handed back unchanged in the error
+    /// variant. It is boxed to reduce the size of the `Result` (see
+    /// <https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err>).
+    #[cfg(feature = "std")]
+    pub fn check_pj_supported(self) -> Result<PjUri, Box<Self>> {
+        match self.0.extras.0 {
             MaybePayjoinExtras::Supported(payjoin) => {
                 let mut uri =
                     bitcoin_uri::Uri::with_extras(self.0.address, PayjoinExtrasAdapter(payjoin));
                 uri.amount = self.0.amount;
                 uri.label = self.0.label;
                 uri.message = self.0.message;
-
                 Ok(PjUri(uri))
             }
             MaybePayjoinExtras::Unsupported => {
@@ -211,7 +211,6 @@ impl PayjoinExtras {
                 uri.amount = self.0.amount;
                 uri.label = self.0.label;
                 uri.message = self.0.message;
-
                 Err(Box::new(Uri(uri)))
             }
         }
@@ -345,7 +344,7 @@ impl bitcoin_uri::SerializeParams for &PayjoinExtrasAdapter {
     fn serialize_params(self) -> Self::Iterator { serialize_payjoin_params(&self.0).into_iter() }
 }
 
-#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
 impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
     type Value = MaybePayjoinExtrasAdapter;
 
@@ -410,7 +409,7 @@ pub(crate) fn pj_uri(uri: &str) -> PjUri {
 mod tests {
     use std::convert::TryFrom;
 
-    #[cfg(feature = "v1")]
+    #[cfg(all(feature = "std", feature = "v1"))]
     use bitcoin_uri::SerializeParams;
 
     use super::*;

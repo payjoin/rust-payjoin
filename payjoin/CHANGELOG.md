@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+Payjoin's protocol core can now be built without Rust's standard library,
+enabling integrations on embedded and other `no_std` targets. These builds use
+`alloc`, so an allocator is still required. The existing default features are
+unchanged; the v2 OHTTP and HTTP client integrations (`v2-ohttp` and `io`)
+continue to require `std`.
+
+### Features
+
+- Add an `alloc` feature and make the v1 and v2 protocol cores available in
+  `no_std` builds. Disable default features and enable `alloc,v1` or `alloc,v2`
+  for the corresponding protocol (#1615)
+
 ## 1.2.0
 
 This release adds a non-blocking interface to the receiver state machine.

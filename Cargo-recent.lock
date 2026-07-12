@@ -2466,6 +2466,7 @@ name = "payjoin"
 version = "1.2.0"
 dependencies = [
  "arbitrary",
+ "base64 0.21.7",
  "bhttp",
  "bitcoin",
  "bitcoin-hpke",

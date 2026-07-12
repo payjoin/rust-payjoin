@@ -13,16 +13,13 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 use alloc::{format, vec};
-use core::str::FromStr;
 use core::marker::PhantomData;
 
 pub mod common;
 
 use bitcoin::transaction::InputWeightPrediction;
-#[cfg(feature = "std")]
-use bitcoin::FeeRate;
 use bitcoin::{
-    psbt, AddressType, OutPoint, Psbt, Script, ScriptBuf, Transaction, TxIn, TxOut, Weight,
+    psbt, AddressType, FeeRate, OutPoint, Psbt, Script, ScriptBuf, Transaction, TxIn, TxOut, Weight,
 };
 pub(crate) use error::InternalPayloadError;
 #[cfg(feature = "std")]
@@ -40,9 +37,8 @@ use crate::psbt::{
     NON_WITNESS_INPUT_WEIGHT,
 };
 use crate::ImplementationError;
-#[cfg(feature = "std")]
+#[allow(unused_imports)]
 use crate::Version;
-
 /// Input weight for a P2TR key-spend with default sighash (64-byte signature) and no annex.
 const DEFAULT_SIGHASH_KEY_SPEND_INPUT_WEIGHT: Weight = Weight::from_wu(
     InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH.weight().to_wu()
@@ -254,7 +250,7 @@ mod sealed {
 ///
 /// This trait is sealed and cannot be implemented outside of this crate.
 pub trait ChecklistKind: sealed::ChecklistKind {
-    type Value: Clone + PartialEq + std::fmt::Debug;
+    type Value: Clone + PartialEq + core::fmt::Debug;
 }
 
 /// Checklist kind for checking that the original PSBT inputs are not owned by the receiver.
@@ -376,7 +372,8 @@ pub(crate) fn parse_payload(
     query: &str,
     supported_versions: &'static [Version],
 ) -> Result<(Psbt, Params), PayloadError> {
-    let unchecked_psbt = Psbt::from_str(base64).map_err(InternalPayloadError::ParsePsbt)?;
+    let unchecked_psbt =
+        crate::psbt::psbt_from_base64(base64).map_err(InternalPayloadError::ParsePsbt)?;
 
     let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
     psbt.validate_input_utxos().map_err(InternalPayloadError::InvalidInputUtxo)?;
@@ -517,17 +514,13 @@ pub struct OriginalPayload {
 
 impl OriginalPayload {
     // Calculates the fee rate of the original proposal PSBT.
-    #[cfg(feature = "std")]
     fn psbt_fee_rate(&self) -> Result<FeeRate, InternalPayloadError> {
-        let original_psbt_fee = self.psbt.fee().map_err(|e| {
-            InternalPayloadError::ParsePsbt(bitcoin::psbt::PsbtParseError::PsbtEncoding(e))
-        })?;
+        let original_psbt_fee = self.psbt.fee().map_err(InternalPayloadError::ParsePsbt)?;
         original_psbt_fee
             .div_by_weight_floor(self.psbt.clone().extract_tx_unchecked_fee_rate().weight())
             .ok_or(InternalPayloadError::FeeCalculationOverflow)
     }
 
-    #[cfg(feature = "std")]
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate: Option<FeeRate>,

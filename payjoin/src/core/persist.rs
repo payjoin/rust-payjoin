@@ -1216,16 +1216,13 @@ mod tests {
         success: Option<SuccessState>,
     }
 
-    fn verify_sync<
-        SuccessState: std::fmt::Debug + PartialEq,
-        ErrorState: std::error::Error + PartialEq,
-    >(
+    fn verify_sync<SuccessState, ErrorState>(
         persister: &InMemoryPersister<InMemoryTestEvent>,
         result: Result<SuccessState, ErrorState>,
         expected_result: &ExpectedResult<SuccessState, ErrorState>,
     ) where
         SuccessState: std::fmt::Debug + PartialEq,
-        ErrorState: std::error::Error,
+        ErrorState: std::error::Error + PartialEq,
     {
         let events = persister.load().expect("Persister should not fail").collect::<Vec<_>>();
         assert_eq!(events.len(), expected_result.events.len());

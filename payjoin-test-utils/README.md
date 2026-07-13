@@ -1,4 +1,4 @@
-# payjoin-test-utils
+# Payjoin Test Utils
 
 A collection of testing utilities for Payjoin protocol implementations.
 

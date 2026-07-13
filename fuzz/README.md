@@ -1,12 +1,8 @@
-<h1 align="center">
-  <img src="https://github.com/benalleng/rust-payjoin/blob/fuzzing/static/monad-fuzz.gif" alt="payjoin-fuzz logo" width="150" />
-  <br>
-  Payjoin-fuzz
-</h1>
+# Payjoin-Fuzz
 
 Fuzz tests work by generating a ton of random noise that is morphed into parameter arguments for tests to run and validate that none of it causes unhandled crashes.
 
-### Bootstrapping
+## Bootstrapping
 
 This fuzzer uses [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) (libFuzzer). To get started, enter the nix dev shell and run the fuzzer:
 
@@ -16,7 +12,7 @@ cd fuzz/
 ./fuzz.sh
 ```
 
-### Running fuzzers
+## Running fuzzers
 
 The `fuzz.sh` and `cycle.sh` shell scripts allow for single-pass fuzzing and continuous long-term fuzzing respectively.
 

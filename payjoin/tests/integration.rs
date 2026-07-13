@@ -1631,10 +1631,7 @@ mod integration {
         let psbtin = PsbtInput {
             // NOTE: non_witness_utxo is not necessary because bitcoin-cli always supplies
             // witness_utxo, even for non-witness inputs
-            witness_utxo: Some(TxOut {
-                value: utxo.amount.to_unsigned().expect("amount should be unsigned"),
-                script_pubkey: utxo.script_pubkey,
-            }),
+            witness_utxo: Some(TxOut { value: utxo.amount, script_pubkey: utxo.script_pubkey }),
             redeem_script: utxo.redeem_script,
             //FIXME needs later corepc_node bitcoin version
             //witness_script: utxo.witness_script.clone(),

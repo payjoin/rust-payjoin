@@ -1,3 +1,7 @@
+## [0.1.2]
+
+- Bindings for payjoin-1.0.0-rc.4
+
 ## [0.1.1]
 
 - Initial functional release published to pub.dev.

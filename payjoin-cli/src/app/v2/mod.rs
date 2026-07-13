@@ -293,9 +293,17 @@ impl AppTrait for App {
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{pj_uri}");
 
-        self.process_receiver_session(ReceiveSession::Initialized(session.clone()), &persister)
-            .await?;
-        Ok(())
+        let mut interrupt = self.interrupt.clone();
+        tokio::select! {
+            res = self.process_receiver_session(ReceiveSession::Initialized(session.clone()), &persister) => res,
+            _ = interrupt.changed() => {
+                let id = persister.session_id();
+                println!(
+                    "Session {id} interrupted. Call the `resume` command to resume all sessions, or `payjoin-cli cancel {id}` to cancel the session."
+                );
+                Err(anyhow!("Interrupted"))
+            }
+        }
     }
 
     async fn resume_payjoins(&self, session_id: Option<SessionId>) -> Result<()> {
@@ -803,43 +811,31 @@ impl App {
         }
     }
 
-    #[allow(clippy::incompatible_msrv)]
     async fn read_from_directory(
         &self,
         session: Receiver<Initialized>,
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
-        let poll_once = async {
-            println!("Polling receive request...");
-            let (ohttp_response, context) =
-                self.post_via_relay(|relay| session.create_poll_request(relay)).await?;
-            let state_transition = session
-                .process_response(ohttp_response.bytes().await?.to_vec().as_slice(), context)
-                .save(persister);
-            match state_transition {
-                Ok(OptionalTransitionOutcome::Progress(next_state)) => {
-                    println!("Got a request from the sender. Responding with a Payjoin proposal.");
-                    Ok(ReceiveSession::UncheckedOriginalPayload(next_state))
-                }
-                Ok(OptionalTransitionOutcome::Stasis(current_state)) =>
-                    Ok(ReceiveSession::Initialized(current_state)),
-                Err(e) if e.is_transient() => {
-                    tracing::debug!("Transient error polling for request, retrying: {e:?}");
-                    let session =
-                        e.transient_state().expect("transient error carries current state");
-                    tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
-                    Ok(ReceiveSession::Initialized(session))
-                }
-                Err(e) => Err(e.into()),
+        println!("Polling receive request...");
+        let (ohttp_response, context) =
+            self.post_via_relay(|relay| session.create_poll_request(relay)).await?;
+        let state_transition = session
+            .process_response(ohttp_response.bytes().await?.to_vec().as_slice(), context)
+            .save(persister);
+        match state_transition {
+            Ok(OptionalTransitionOutcome::Progress(next_state)) => {
+                println!("Got a request from the sender. Responding with a Payjoin proposal.");
+                Ok(ReceiveSession::UncheckedOriginalPayload(next_state))
             }
-        };
-        let mut interrupt = self.interrupt.clone();
-        tokio::select! {
-            res = poll_once => res,
-            _ = interrupt.changed() => {
-                println!("Interrupted. Call the `resume` command to resume all sessions.");
-                Err(anyhow!("Interrupted"))
+            Ok(OptionalTransitionOutcome::Stasis(current_state)) =>
+                Ok(ReceiveSession::Initialized(current_state)),
+            Err(e) if e.is_transient() => {
+                tracing::debug!("Transient error polling for request, retrying: {e:?}");
+                let session = e.transient_state().expect("transient error carries current state");
+                tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
+                Ok(ReceiveSession::Initialized(session))
             }
+            Err(e) => Err(e.into()),
         }
     }
 

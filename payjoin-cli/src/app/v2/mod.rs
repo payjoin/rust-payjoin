@@ -164,7 +164,7 @@ impl AppTrait for App {
                 let fallback_tx = psbt.clone().extract_tx()?;
                 let (req, ctx) = payjoin::send::v1::SenderBuilder::from_parts(
                     psbt,
-                    pj_param,
+                    &PjParam::V1(pj_param.clone()),
                     &address,
                     Some(amount),
                 )

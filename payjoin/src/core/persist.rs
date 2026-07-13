@@ -824,7 +824,7 @@ where
         }
     }
 
-    pub fn error_state(self) -> Option<ErrorState> {
+    pub fn fatal_state(self) -> Option<ErrorState> {
         match self.0 {
             InternalPersistedError::Api(ApiError::FatalWithState(_, state)) => Some(state),
             _ => None,
@@ -854,7 +854,7 @@ where
 
     /// True if the transition failed fatally: an event was persisted, and
     /// the session is closed or has moved to an error state (see
-    /// [`Self::error_state`]).
+    /// [`Self::fatal_state`]).
     ///
     /// Storage errors are neither transient nor fatal. They mean the
     /// transition outcome is unknown, and recovery is replaying the event
@@ -1830,7 +1830,7 @@ mod tests {
         assert!(fatal_with_state_error.api_error_ref().is_some());
         assert!(!fatal_with_state_error.is_transient());
         assert!(fatal_with_state_error.is_fatal());
-        assert_eq!(fatal_with_state_error.error_state(), Some("Error state".to_string()));
+        assert_eq!(fatal_with_state_error.fatal_state(), Some("Error state".to_string()));
 
         let transient_error = PersistedError::<InMemoryTestError, InMemoryTestError, (), String>(
             InternalPersistedError::Api(ApiError::Transient(

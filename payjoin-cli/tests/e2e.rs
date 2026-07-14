@@ -53,37 +53,6 @@ mod e2e {
         session_id
     }
 
-    /// Read lines from `child_stderr` until `match_pattern` is found and the corresponding
-    /// line is returned.
-    /// Also writes every read line to tokio::io::stdout();
-    async fn wait_for_stderr_match<F>(
-        child_stderr: &mut tokio::process::ChildStderr,
-        match_pattern: F,
-    ) -> Option<String>
-    where
-        F: Fn(&str) -> bool,
-    {
-        let reader = BufReader::new(child_stderr);
-        let mut lines = reader.lines();
-        let mut res = None;
-
-        let mut stderr = tokio::io::stderr();
-        while let Some(line) = lines.next_line().await.expect("Failed to read line from stdout") {
-            // Write all output to tests stdout
-            stderr
-                .write_all(format!("{line}\n").as_bytes())
-                .await
-                .expect("Failed to write to stderr");
-
-            if match_pattern(&line) {
-                res = Some(line);
-                break;
-            }
-        }
-
-        res
-    }
-
     /// Read lines from `child_stdout` until `match_pattern` is found and the corresponding
     /// line is returned.
     /// Also writes every read line to tokio::io::stdout();
@@ -1208,19 +1177,17 @@ mod e2e {
                 .arg(&ohttp_keys_path)
                 .arg("--expire-in")
                 .arg("5")
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
                 .spawn()
                 .expect("Failed to execute payjoin-cli receiver");
 
-            let mut receiver_stderr =
-                cli_receiver.stderr.take().expect("failed to take stderr of receiver");
+            let mut receiver_stdout =
+                cli_receiver.stdout.take().expect("failed to take stdout of receiver");
             let timeout = tokio::time::Duration::from_secs(60);
             let expired_line = tokio::time::timeout(
                 timeout,
-                wait_for_stderr_match(&mut receiver_stderr, |l| {
-                    l.contains("Error: Receiver session expired:")
-                }),
+                wait_for_stdout_match(&mut receiver_stdout, |l| l.contains("Session expired")),
             )
             .await?;
 

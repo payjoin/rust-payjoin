@@ -52,6 +52,37 @@ mod e2e {
         session_id
     }
 
+    /// Read lines from `child_stderr` until `match_pattern` is found and the corresponding
+    /// line is returned.
+    /// Also writes every read line to tokio::io::stdout();
+    async fn wait_for_stderr_match<F>(
+        child_stderr: &mut tokio::process::ChildStderr,
+        match_pattern: F,
+    ) -> Option<String>
+    where
+        F: Fn(&str) -> bool,
+    {
+        let reader = BufReader::new(child_stderr);
+        let mut lines = reader.lines();
+        let mut res = None;
+
+        let mut stderr = tokio::io::stderr();
+        while let Some(line) = lines.next_line().await.expect("Failed to read line from stdout") {
+            // Write all output to tests stdout
+            stderr
+                .write_all(format!("{line}\n").as_bytes())
+                .await
+                .expect("Failed to write to stderr");
+
+            if match_pattern(&line) {
+                res = Some(line);
+                break;
+            }
+        }
+
+        res
+    }
+
     /// Read lines from `child_stdout` until `match_pattern` is found and the corresponding
     /// line is returned.
     /// Also writes every read line to tokio::io::stdout();
@@ -1009,6 +1040,198 @@ mod e2e {
                 cancel_again_output.contains(&format!("Session {session_id} is already closed")),
                 "cancel on closed session should reference the session id and report it is already closed"
             );
+
+            Ok(())
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "v2")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn sender_expire_v2() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use payjoin_test_utils::{init_tracing, TestServices};
+        use tempfile::TempDir;
+
+        type Result<T> = std::result::Result<T, BoxError>;
+
+        init_tracing();
+        let mut services = TestServices::initialize_with_relays(3).await?;
+        let temp_dir = tempdir()?;
+
+        let result = tokio::select! {
+            res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {res:?}").into()),
+            res = services.take_directory_handle() => Err(format!("Directory server is long running: {res:?}").into()),
+            res = expire_sender_async(&services, &temp_dir) => res,
+        };
+
+        assert!(result.is_ok(), "sender_expire_v2 failed: {:#?}", result.unwrap_err());
+
+        async fn expire_sender_async(services: &TestServices, temp_dir: &TempDir) -> Result<()> {
+            let sender_db_path = temp_dir.path().join("sender_db");
+            let (bitcoind, _sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
+            let cert_path = &temp_dir.path().join("localhost.der");
+            tokio::fs::write(cert_path, services.cert()).await?;
+            services.wait_for_services_ready().await?;
+            let ohttp_keys = services.fetch_ohttp_keys().await?;
+            let ohttp_keys_path = temp_dir.path().join("ohttp_keys");
+            tokio::fs::write(&ohttp_keys_path, ohttp_keys.encode()?).await?;
+
+            let receiver_db_path = temp_dir.path().join("receiver_db");
+            let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
+            let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
+            let cookie_file = &bitcoind.params.cookie_file;
+            let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
+            let directory = &services.directory_url();
+            let ohttp_relays = &services.ohttp_relay_urls();
+
+            // Start receiver with short 15s expiry, get BIP21, kill receiver
+            let cli_receiver = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("receive")
+                .arg(RECEIVE_SATS)
+                .arg("--pj-directories")
+                .arg(directory)
+                .arg("--ohttp-keys")
+                .arg(&ohttp_keys_path)
+                .arg("--expire-in")
+                .arg("5")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli receiver");
+            let bip21 = get_bip21_from_receiver(cli_receiver).await;
+
+            // Start sender with the BIP21 (15s expiry embedded from receiver)
+            // Sender posts original proposal, polls until expiry, auto-cancels
+            let mut cli_sender = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&sender_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&sender_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("send")
+                .arg(&bip21)
+                .arg("--fee-rate")
+                .arg("1")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli sender");
+
+            let mut sender_stdout =
+                cli_sender.stdout.take().expect("failed to take stdout of sender");
+            let timeout = tokio::time::Duration::from_secs(60);
+            let expire_line = tokio::time::timeout(
+                timeout,
+                wait_for_stdout_match(&mut sender_stdout, |l| {
+                    l.contains("Broadcast the original transaction manually")
+                }),
+            )
+            .await?;
+
+            // Process should exit on its own after handling expiry
+            let _ = cli_sender.wait().await;
+
+            assert!(expire_line.is_some(), "sender should print fallback tx hex on expiry");
+
+            Ok(())
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "v2")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn receiver_expire_v2() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use payjoin_test_utils::{init_tracing, TestServices};
+        use tempfile::TempDir;
+
+        type Result<T> = std::result::Result<T, BoxError>;
+
+        init_tracing();
+        let mut services = TestServices::initialize_with_relays(3).await?;
+        let temp_dir = tempdir()?;
+
+        let result = tokio::select! {
+            res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {res:?}").into()),
+            res = services.take_directory_handle() => Err(format!("Directory server is long running: {res:?}").into()),
+            res = expire_receiver_async(&services, &temp_dir) => res,
+        };
+
+        assert!(result.is_ok(), "receiver_expire_v2 failed: {:#?}", result.unwrap_err());
+
+        async fn expire_receiver_async(services: &TestServices, temp_dir: &TempDir) -> Result<()> {
+            let receiver_db_path = temp_dir.path().join("receiver_db");
+            let (bitcoind, _sender, _receiver) = init_bitcoind_sender_receiver(None, None)?;
+            let cert_path = &temp_dir.path().join("localhost.der");
+            tokio::fs::write(cert_path, services.cert()).await?;
+            services.wait_for_services_ready().await?;
+            let ohttp_keys = services.fetch_ohttp_keys().await?;
+            let ohttp_keys_path = temp_dir.path().join("ohttp_keys");
+            tokio::fs::write(&ohttp_keys_path, ohttp_keys.encode()?).await?;
+
+            let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
+            let cookie_file = &bitcoind.params.cookie_file;
+            let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
+            let directory = &services.directory_url();
+            let ohttp_relays = &services.ohttp_relay_urls();
+
+            // Start receiver with short 15s expiry
+            // It will post to directory, poll, detect expiry, auto-cancel
+            let mut cli_receiver = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("receive")
+                .arg(RECEIVE_SATS)
+                .arg("--pj-directories")
+                .arg(directory)
+                .arg("--ohttp-keys")
+                .arg(&ohttp_keys_path)
+                .arg("--expire-in")
+                .arg("5")
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("Failed to execute payjoin-cli receiver");
+
+            let mut receiver_stderr =
+                cli_receiver.stderr.take().expect("failed to take stderr of receiver");
+            let timeout = tokio::time::Duration::from_secs(60);
+            let expired_line = tokio::time::timeout(
+                timeout,
+                wait_for_stderr_match(&mut receiver_stderr, |l| {
+                    l.contains("Error: Receiver session expired:")
+                }),
+            )
+            .await?;
+
+            // Process should exit on its own after handling expiry
+            let _ = cli_receiver.wait().await;
+
+            assert!(expired_line.is_some(), "receiver should print expiry message before exit");
 
             Ok(())
         }

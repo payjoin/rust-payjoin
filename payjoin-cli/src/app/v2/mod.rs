@@ -32,12 +32,36 @@ use crate::db::Database;
 mod ohttp;
 
 const W_ID: usize = 36;
-const W_ROLE: usize = 25;
+const W_ROLE: usize = 15;
 const W_STATUS: usize = 15;
 
 /// Delay before retrying a transiently failed state transition, so a
 /// misbehaving directory or relay is not hammered in a tight loop.
 const TRANSIENT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// A request-construction error that can report whether it was caused by
+/// session expiry. Implemented by the sender/receiver request-building error
+/// types so `post_via_relay` can hand expiry back to the caller (which owns the
+/// typestate needed to react) instead of flattening it into `anyhow::Error`.
+trait RequestExpiry {
+    fn expired(&self) -> bool;
+}
+
+impl RequestExpiry for payjoin::send::v2::CreateRequestError {
+    fn expired(&self) -> bool { self.is_expired() }
+}
+
+impl RequestExpiry for payjoin::receive::v2::CreateRequestError {
+    fn expired(&self) -> bool { self.is_expired() }
+}
+
+/// Outcome of building and posting a request via `post_via_relay`. HTTP
+/// failures are retried against other relays inside the helper; only session
+/// expiry and fatal build errors escape to the caller.
+enum RelayPost<T> {
+    Posted(reqwest::Response, T),
+    Expired,
+}
 
 #[derive(Clone)]
 pub(crate) struct App {
@@ -116,16 +140,23 @@ struct SessionHistoryRow<Status> {
     role: Role,
     status: Status,
     error_message: Option<String>,
+    fallback_available: bool,
 }
 
 impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let status_text = match (self.error_message.as_deref(), self.fallback_available) {
+            (Some(err), _) => err.to_string(),
+            (None, true) =>
+                format!("{}, Fallback transaction available", self.status.status_text()),
+            (None, false) => self.status.status_text().to_string(),
+        };
         write!(
             f,
             "{:<W_ID$} {:<W_ROLE$} {:<W_STATUS$}",
             self.session_id.to_string(),
             self.role.as_str(),
-            self.error_message.as_deref().unwrap_or(self.status.status_text())
+            status_text
         )
     }
 }
@@ -228,6 +259,7 @@ impl AppTrait for App {
                         let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
                         let persister =
                             SenderPersister::new(self.db.clone(), bip21, receiver_pubkey)?;
+                        println!("Send session established: {}", persister.session_id());
                         let sender =
                             SenderBuilder::from_parts(psbt, pj_param, &address, Some(amount))
                                 .build_recommended(fee_rate)?
@@ -236,7 +268,6 @@ impl AppTrait for App {
                         (SendSession::WithReplyKey(sender), persister)
                     }
                 };
-                println!("Send session established: {}", persister.session_id());
                 let mut interrupt = self.interrupt.clone();
                 tokio::select! {
                     res = self.process_sender_session(sender_state, &persister) => {
@@ -250,9 +281,9 @@ impl AppTrait for App {
                         }
                     },
                     _ = interrupt.changed() => {
-                        let id = persister.session_id();
+                        let session_id = persister.session_id();
                         println!(
-                            "Session {id} interrupted. Call `send` again to resume, `resume` to resume all sessions, or `payjoin-cli cancel {id}` to cancel and broadcast the original transaction."
+                            "Session {session_id} interrupted. Call `payjoin-cli resume --session-id {session_id}` again to resume, `payjoin-cli resume` to resume all sessions, or `payjoin-cli cancel {session_id}` to cancel and broadcast the original transaction."
                         );
                         return Err(anyhow!("Interrupted"))
                     }
@@ -286,9 +317,13 @@ impl AppTrait for App {
         if let Some(max_fee_rate) = self.config.max_fee_rate {
             receiver_builder = receiver_builder.with_max_fee_rate(max_fee_rate);
         }
+        if let Some(expire_in_secs) = self.config.expire_in_secs {
+            let expiration = std::time::Duration::from_secs(expire_in_secs);
+            receiver_builder = receiver_builder.with_expiration(expiration);
+        }
         let session = receiver_builder.build().save(&persister)?;
-
         println!("Receive session established: {}", persister.session_id());
+
         let pj_uri = session.pj_uri();
         println!("Request Payjoin by sharing this Payjoin Uri:");
         println!("{pj_uri}");
@@ -334,13 +369,19 @@ impl AppTrait for App {
                 }
                 Err(e) => {
                     if e.is_expired() {
-                        println!("Session {session_id} receiver expired.");
+                        println!("Receiver session expired: {session_id}");
+                        match e.expiry_fallback_tx() {
+                            Some(tx) => println!(
+                                "Broadcast the original transaction manually:\n{}",
+                                serialize_hex(tx)
+                            ),
+                            None => println!(
+                                "No fallback transaction available for expired receiver session: {session_id}"
+                            ),
+                        }
                     } else {
-                        tracing::error!(
-                            "An error {:?} occurred while replaying receiver session",
-                            e
-                        );
-                        println!("Session {session_id} receiver failed to replay -  {e}");
+                        tracing::error!("An error {:?} occurred while replaying session", e);
+                        println!("Session failed to replay: {session_id} - {e}");
                     }
                     Self::close_failed_session(&recv_persister, &session_id, "receiver");
                 }
@@ -362,10 +403,19 @@ impl AppTrait for App {
                 }
                 Err(e) => {
                     if e.is_expired() {
-                        println!("Session {session_id} sender expired.");
+                        println!("Sender session expired: {session_id}");
+                        match e.expiry_fallback_tx() {
+                            Some(tx) => println!(
+                                "Broadcast the original transaction manually:\n{}",
+                                serialize_hex(tx)
+                            ),
+                            None => println!(
+                                "No fallback transaction available for expired sender session: {session_id}"
+                            ),
+                        }
                     } else {
-                        tracing::error!("An error {:?} occurred while replaying Sender session", e);
-                        println!("Session {session_id} sender failed to replay -  {e}");
+                        tracing::error!("An error {:?} occurred while replaying session", e);
+                        println!("Session failed to replay: {session_id} -  {e}");
                     }
                     Self::close_failed_session(&sender_persister, &session_id, "sender");
                 }
@@ -405,12 +455,15 @@ impl AppTrait for App {
         self.db.get_send_session_ids()?.into_iter().for_each(|session_id| {
             let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
             match replay_sender_event_log(&persister) {
-                Ok((sender_state, _)) => {
+                Ok((sender_state, _session_history)) => {
+                    let fallback_available =
+                        matches!(sender_state, SendSession::Closed(SenderSessionOutcome::Aborted));
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Sender,
                         status: sender_state.clone(),
                         error_message: None,
+                        fallback_available,
                     };
                     send_rows.push(row);
                 }
@@ -420,6 +473,7 @@ impl AppTrait for App {
                         role: Role::Sender,
                         status: SendSession::Closed(SenderSessionOutcome::Aborted),
                         error_message: Some(e.to_string()),
+                        fallback_available: false,
                     };
                     send_rows.push(row);
                 }
@@ -429,12 +483,17 @@ impl AppTrait for App {
         self.db.get_recv_session_ids()?.into_iter().for_each(|session_id| {
             let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
             match replay_receiver_event_log(&persister) {
-                Ok((receiver_state, _)) => {
+                Ok((receiver_state, session_history)) => {
+                    let fallback_available = matches!(
+                        receiver_state,
+                        ReceiveSession::Closed(ReceiverSessionOutcome::Aborted)
+                    ) && session_history.fallback_tx().is_some();
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Receiver,
                         status: receiver_state.clone(),
                         error_message: None,
+                        fallback_available,
                     };
                     recv_rows.push(row);
                 }
@@ -444,6 +503,7 @@ impl AppTrait for App {
                         role: Role::Receiver,
                         status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
                         error_message: Some(e.to_string()),
+                        fallback_available: false,
                     };
                     recv_rows.push(row);
                 }
@@ -454,11 +514,14 @@ impl AppTrait for App {
             let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
             match replay_sender_event_log(&persister) {
                 Ok((sender_state, _)) => {
+                    let fallback_available =
+                        matches!(sender_state, SendSession::Closed(SenderSessionOutcome::Aborted));
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Sender,
                         status: sender_state.clone(),
                         error_message: None,
+                        fallback_available,
                     };
                     send_rows.push(row);
                 }
@@ -468,6 +531,7 @@ impl AppTrait for App {
                         role: Role::Sender,
                         status: SendSession::Closed(SenderSessionOutcome::Aborted),
                         error_message: Some(e.to_string()),
+                        fallback_available: false,
                     };
                     send_rows.push(row);
                 }
@@ -477,12 +541,17 @@ impl AppTrait for App {
         self.db.get_inactive_recv_session_ids()?.into_iter().for_each(|(session_id, _)| {
             let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
             match replay_receiver_event_log(&persister) {
-                Ok((receiver_state, _)) => {
+                Ok((receiver_state, session_history)) => {
+                    let fallback_available = matches!(
+                        receiver_state,
+                        ReceiveSession::Closed(ReceiverSessionOutcome::Aborted)
+                    ) && session_history.fallback_tx().is_some();
                     let row = SessionHistoryRow {
                         session_id,
                         role: Role::Receiver,
                         status: receiver_state.clone(),
                         error_message: None,
+                        fallback_available,
                     };
                     recv_rows.push(row);
                 }
@@ -492,6 +561,7 @@ impl AppTrait for App {
                         role: Role::Receiver,
                         status: ReceiveSession::Closed(ReceiverSessionOutcome::Aborted),
                         error_message: Some(e.to_string()),
+                        fallback_available: false,
                     };
                     recv_rows.push(row);
                 }
@@ -547,7 +617,21 @@ impl AppTrait for App {
 impl App {
     fn cancel_sender_session(&self, session_id: SessionId, no_broadcast: bool) -> Result<()> {
         let persister = SenderPersister::from_id(self.db.clone(), session_id.clone());
-        let (session, history) = replay_sender_event_log(&persister)?;
+        let (session, history) = match replay_sender_event_log(&persister) {
+            Ok((session, history)) => (session, history),
+            Err(e) if e.is_expired() => {
+                let tx = e.expiry_fallback_tx().cloned().ok_or_else(|| {
+                    anyhow!("Expired sender session {session_id} has no fallback transaction")
+                })?;
+                println!(
+                    "Session {session_id} expired. Broadcast the original transaction manually:\n{}",
+                    serialize_hex(&tx)
+                );
+                Self::close_failed_session(&persister, &session_id, "sender");
+                return Ok(());
+            }
+            Err(e) => return Err(anyhow!("Failed to replay sender session {session_id}: {:?}", e)),
+        };
 
         let pending: Sender<SenderPendingFallback> = match session {
             SendSession::WithReplyKey(sender) => sender.cancel().save(&persister)?,
@@ -588,7 +672,21 @@ impl App {
 
     fn cancel_receiver_session(&self, session_id: SessionId, no_broadcast: bool) -> Result<()> {
         let persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
-        let (session, history) = replay_receiver_event_log(&persister)?;
+        let (session, history) = match replay_receiver_event_log(&persister) {
+            Ok((session, history)) => (session, history),
+            Err(e) if e.is_expired() => {
+                let tx = e.expiry_fallback_tx().cloned().ok_or_else(|| {
+                    anyhow!("Expired receiver session {session_id} has no fallback transaction")
+                })?;
+                println!(
+                    "Session {session_id} expired. Broadcast the original transaction manually:\n{}",
+                    serialize_hex(&tx)
+                );
+                Self::close_failed_session(&persister, &session_id, "sender");
+                return Ok(());
+            }
+            Err(e) => return Err(anyhow!("Failed to replay sender session {session_id}: {:?}", e)),
+        };
 
         let pending: Receiver<ReceiverPendingFallback> = match session {
             ReceiveSession::Initialized(receiver) => {
@@ -666,8 +764,40 @@ impl App {
         if let Err(close_err) = SessionPersister::close(persister) {
             tracing::error!("Failed to close {} session {}: {:?}", role, session_id, close_err);
         } else {
-            tracing::error!("Closed failed {} session: {}", role, session_id);
+            tracing::debug!("Closed failed {} session: {}", role, session_id);
         }
+    }
+
+    fn finalize_expired_sender(
+        &self,
+        pending: Sender<SenderPendingFallback>,
+        persister: &SenderPersister,
+    ) -> Result<()> {
+        let tx = pending.fallback_tx();
+        let session_id = persister.session_id();
+        println!(
+            "Session {} expired. Broadcast the original transaction manually:\n{}",
+            session_id,
+            serialize_hex(tx)
+        );
+        Self::close_failed_session(persister, &session_id, "sender");
+        Ok(())
+    }
+
+    fn finalize_expired_receiver(
+        &self,
+        pending: Receiver<ReceiverPendingFallback>,
+        persister: &ReceiverPersister,
+    ) -> Result<()> {
+        let tx = pending.fallback_tx();
+        let session_id = persister.session_id();
+        println!(
+            "Session {} expired. Broadcast the original transaction manually:\n{}",
+            session_id,
+            serialize_hex(tx)
+        );
+        Self::close_failed_session(persister, &session_id, "receiver");
+        Ok(())
     }
 
     async fn process_sender_session(
@@ -706,7 +836,12 @@ impl App {
     ) -> Result<()> {
         loop {
             let (response, ctx) =
-                self.post_via_relay(|relay| sender.create_v2_post_request(relay)).await?;
+                match self.post_via_relay(|relay| sender.create_v2_post_request(relay)).await? {
+                    RelayPost::Posted(resp, ctx) => (resp, ctx),
+                    RelayPost::Expired =>
+                        return self
+                            .finalize_expired_sender(sender.cancel().save(persister)?, persister),
+                };
             match sender.process_response(&response.bytes().await?, ctx).save(persister) {
                 Ok(sender) => {
                     println!("Posted Original PSBT...");
@@ -730,8 +865,14 @@ impl App {
         // Long poll until we get a response
         loop {
             let (response, ctx) =
-                self.post_via_relay(|relay| sender.create_poll_request(relay)).await?;
-            let res = sender.process_response(&response.bytes().await?, ctx).save(persister);
+                match self.post_via_relay(|relay| sender.create_poll_request(relay)).await? {
+                    RelayPost::Posted(resp, ctx) => (resp, ctx),
+                    RelayPost::Expired =>
+                        return self
+                            .finalize_expired_sender(sender.cancel().save(persister)?, persister),
+                };
+            let res =
+                sender.clone().process_response(&response.bytes().await?, ctx).save(persister);
             match res {
                 Ok(OptionalTransitionOutcome::Progress(psbt)) => {
                     println!("Proposal received. Processing...");
@@ -764,7 +905,14 @@ impl App {
         loop {
             println!("Polling receive request...");
             let (ohttp_response, context) =
-                self.post_via_relay(|relay| session.create_poll_request(relay)).await?;
+                match self.post_via_relay(|relay| session.create_poll_request(relay)).await? {
+                    RelayPost::Posted(resp, ctx) => (resp, ctx),
+                    RelayPost::Expired => {
+                        let session_id = persister.session_id();
+                        Self::close_failed_session(persister, &session_id, "receiver");
+                        return Err(anyhow!("Receiver session expired: {session_id}"));
+                    }
+                };
             let state_transition = session
                 .process_response(ohttp_response.bytes().await?.to_vec().as_slice(), context)
                 .save(persister);
@@ -971,13 +1119,15 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         loop {
-            let (res, ohttp_ctx) = self
-                .post_via_relay(|relay| {
-                    proposal
-                        .create_post_request(relay)
-                        .map_err(|e| anyhow!("v2 req extraction failed {}", e))
-                })
-                .await?;
+            let (res, ohttp_ctx) = match self
+                .post_via_relay(|relay| proposal.create_post_request(relay))
+                .await?
+            {
+                RelayPost::Posted(resp, ctx) => (resp, ctx),
+                RelayPost::Expired =>
+                    return self
+                        .finalize_expired_receiver(proposal.cancel().save(persister)?, persister),
+            };
             let payjoin_psbt = proposal.psbt().clone();
             match proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister) {
                 Ok(session) => {
@@ -1058,21 +1208,38 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<()> {
         loop {
-            let (err_response, err_ctx) = self
-                .post_via_relay(|relay| {
-                    session
-                        .create_error_request(relay)
-                        .map_err(|e| anyhow!("Failed to post error request: {}", e))
-                })
-                .await?;
-
+            let (err_response, err_ctx) = match self
+                .post_via_relay(|relay| session.create_error_request(relay))
+                .await?
+            {
+                RelayPost::Posted(resp, ctx) => (resp, ctx),
+                RelayPost::Expired => match session.cancel().save(persister)? {
+                    Some(pending) => return self.finalize_expired_receiver(pending, persister),
+                    None => {
+                        let session_id = persister.session_id();
+                        println!(
+                            "Session {session_id} expired before the error reply could be sent. No fallback transaction available."
+                        );
+                        Self::close_failed_session(persister, &session_id, "receiver");
+                        return Ok(());
+                    }
+                },
+            };
             let err_bytes = match err_response.bytes().await {
                 Ok(bytes) => bytes,
                 Err(e) => return Err(anyhow!("Failed to get error response bytes: {}", e)),
             };
 
             match session.process_error_response(&err_bytes, err_ctx).save(persister) {
-                Ok(_) => return Ok(()),
+                Ok(Some(pending)) => {
+                    let session_id = persister.session_id();
+                    println!(
+                                "Session {session_id} delivered error reply. Broadcast the fallback transaction manually:\n{}",
+                                serialize_hex(pending.fallback_tx())
+                            );
+                    return Ok(());
+                }
+                Ok(None) => return Ok(()),
                 Err(e) if e.is_transient() => {
                     tracing::debug!("Transient error posting error response, retrying: {e:?}");
                     session = e.transient_state().expect("transient error carries current state");
@@ -1083,10 +1250,11 @@ impl App {
                         tracing::warn!("Failed to confirm error response delivery: {api_err}");
                     }
                     match e.fatal_state() {
-                        Some(_) => {
-                            let id = persister.session_id();
+                        Some(pending) => {
+                            let session_id = persister.session_id();
                             println!(
-                                "Session {id} failed. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
+                                "Session {session_id} failed to deliver error reply. Broadcast the fallback transaction manually:\n{}",
+                                serialize_hex(pending.fallback_tx())
                             );
                             return Ok(());
                         }
@@ -1108,16 +1276,20 @@ impl App {
             .context("HTTP request failed")
     }
 
-    async fn post_via_relay<F, T, E>(&self, mut build: F) -> Result<(reqwest::Response, T)>
+    async fn post_via_relay<F, T, E>(&self, mut build: F) -> Result<RelayPost<T>>
     where
         F: FnMut(&str) -> std::result::Result<(payjoin::Request, T), E>,
-        E: Into<anyhow::Error>,
+        E: RequestExpiry + Into<anyhow::Error>,
     {
         loop {
             let relay = self.mailroom_manager.choose_relay()?;
-            let (req, ctx) = build(relay.as_str()).map_err(Into::into)?;
+            let (req, ctx) = match build(relay.as_str()) {
+                Ok(r) => r,
+                Err(e) if e.expired() => return Ok(RelayPost::Expired),
+                Err(e) => return Err(e.into()),
+            };
             match self.post_request(req).await {
-                Ok(resp) => return Ok((resp, ctx)),
+                Ok(resp) => return Ok(RelayPost::Posted(resp, ctx)),
                 Err(e) => {
                     tracing::debug!("Request to relay {relay} failed: {e:?}");
                     self.mailroom_manager.add_failed_relay(relay);

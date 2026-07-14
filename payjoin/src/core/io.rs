@@ -1,11 +1,12 @@
 //! IO-related types and functions. Specifically, fetching OHTTP keys from a payjoin directory.
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use http::header::ACCEPT;
-use reqwest::{Client, Proxy};
+use reqwest::{Client, ClientBuilder, Proxy};
 
 use crate::into_url::IntoUrl;
-use crate::OhttpKeys;
+use crate::{OhttpKeys, Url};
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
 ///
@@ -19,16 +20,31 @@ pub async fn fetch_ohttp_keys(
     ohttp_relay: impl IntoUrl,
     payjoin_directory: impl IntoUrl,
 ) -> Result<OhttpKeys, Error> {
-    let ohttp_keys_url = payjoin_directory.into_url()?.join("/.well-known/ohttp-gateway")?;
-    let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
-    let client = Client::builder().proxy(proxy).http1_only().build()?;
-    let res = client
-        .get(ohttp_keys_url.as_str())
-        .timeout(Duration::from_secs(10))
-        .header(ACCEPT, "application/ohttp-keys")
-        .send()
-        .await?;
-    parse_ohttp_keys_response(res).await
+    fetch_ohttp_keys_inner(
+        ohttp_relay.into_url()?,
+        payjoin_directory.into_url()?,
+        Client::builder(),
+        None,
+    )
+    .await
+}
+
+/// Fetch OHTTP keys through a relay using previously resolved relay addresses.
+///
+/// The relay URL remains unchanged for proxy and TLS hostname validation while
+/// its DNS resolution is overridden with `relay_addresses`.
+pub async fn fetch_ohttp_keys_with_relay_addresses(
+    ohttp_relay: impl IntoUrl,
+    payjoin_directory: impl IntoUrl,
+    relay_addresses: &[SocketAddr],
+) -> Result<OhttpKeys, Error> {
+    fetch_ohttp_keys_inner(
+        ohttp_relay.into_url()?,
+        payjoin_directory.into_url()?,
+        Client::builder(),
+        Some(relay_addresses),
+    )
+    .await
 }
 
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
@@ -47,14 +63,49 @@ pub async fn fetch_ohttp_keys_with_cert(
     payjoin_directory: impl IntoUrl,
     cert_der: &[u8],
 ) -> Result<OhttpKeys, Error> {
-    let ohttp_keys_url = payjoin_directory.into_url()?.join("/.well-known/ohttp-gateway")?;
-    let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
-    let client = Client::builder()
-        .use_rustls_tls()
-        .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der)?)
-        .proxy(proxy)
-        .http1_only()
-        .build()?;
+    fetch_ohttp_keys_inner(
+        ohttp_relay.into_url()?,
+        payjoin_directory.into_url()?,
+        Client::builder()
+            .use_rustls_tls()
+            .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der)?),
+        None,
+    )
+    .await
+}
+
+/// Fetch OHTTP keys through a resolved relay using a custom TLS certificate.
+#[cfg(feature = "_manual-tls")]
+pub async fn fetch_ohttp_keys_with_cert_and_relay_addresses(
+    ohttp_relay: impl IntoUrl,
+    payjoin_directory: impl IntoUrl,
+    cert_der: &[u8],
+    relay_addresses: &[SocketAddr],
+) -> Result<OhttpKeys, Error> {
+    fetch_ohttp_keys_inner(
+        ohttp_relay.into_url()?,
+        payjoin_directory.into_url()?,
+        Client::builder()
+            .use_rustls_tls()
+            .add_root_certificate(reqwest::tls::Certificate::from_der(cert_der)?),
+        Some(relay_addresses),
+    )
+    .await
+}
+
+async fn fetch_ohttp_keys_inner(
+    ohttp_relay: Url,
+    payjoin_directory: Url,
+    mut builder: ClientBuilder,
+    relay_addresses: Option<&[SocketAddr]>,
+) -> Result<OhttpKeys, Error> {
+    let ohttp_keys_url = payjoin_directory.join("/.well-known/ohttp-gateway")?;
+    let proxy = Proxy::all(ohttp_relay.as_str())?;
+    builder = builder.proxy(proxy).http1_only();
+    if let (Some(domain), Some(addresses)) = (ohttp_relay.domain(), relay_addresses) {
+        builder = builder.resolve_to_addrs(domain, addresses);
+    }
+    let client = builder.build()?;
     let res = client
         .get(ohttp_keys_url.as_str())
         .timeout(Duration::from_secs(10))
@@ -83,6 +134,17 @@ pub enum Error {
     /// Internal errors that should not be pattern matched by users
     #[doc(hidden)]
     Internal(InternalError),
+}
+
+impl Error {
+    /// Whether retrying the request through another relay may succeed.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::Internal(InternalError(InternalErrorInner::Reqwest(error)))
+                if error.is_timeout() || error.is_connect() || error.is_request()
+        )
+    }
 }
 
 #[derive(Debug)]

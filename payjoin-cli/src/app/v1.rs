@@ -102,7 +102,8 @@ impl AppTrait for App {
             }
         };
 
-        self.process_pj_response(psbt)?;
+        let txid = self.process_pj_response(psbt)?;
+        println!("Payjoin sent. TXID: {txid}");
         Ok(())
     }
 

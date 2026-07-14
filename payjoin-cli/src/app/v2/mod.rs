@@ -122,6 +122,7 @@ fn print_header() {
     println!("{:<W_ID$} {:<W_ROLE$} {:<W_STATUS$}", "Session ID", "Sender/Receiver", "Status");
 }
 
+#[derive(Clone, Copy)]
 enum Role {
     Sender,
     Receiver,
@@ -132,6 +133,34 @@ impl Role {
             Role::Sender => "Sender",
             Role::Receiver => "Receiver",
         }
+    }
+}
+
+/// Print a session-scoped message prefixed with `[<Role> <session id>]`,
+/// with the role padded so sender and receiver messages align in columns.
+/// The prefix lets output interleaved from concurrently resumed sessions be
+/// attributed to its session.
+fn print_session(role: Role, id: &SessionId, msg: impl fmt::Display) {
+    // Pad the role to the widest form, `Receiver`.
+    const W: usize = "Receiver".len();
+    println!("[{:<W$} {id}] {msg}", role.as_str());
+}
+
+/// Session-scoped printing: the persister carries the role and session id
+/// that every user-facing message must be attributed to.
+trait SessionPrint {
+    fn print(&self, msg: impl fmt::Display);
+}
+
+impl SessionPrint for SenderPersister {
+    fn print(&self, msg: impl fmt::Display) {
+        print_session(Role::Sender, &self.session_id(), msg);
+    }
+}
+
+impl SessionPrint for ReceiverPersister {
+    fn print(&self, msg: impl fmt::Display) {
+        print_session(Role::Receiver, &self.session_id(), msg);
     }
 }
 
@@ -236,7 +265,8 @@ impl AppTrait for App {
                     }
                 };
 
-                self.process_pj_response(psbt)?;
+                let txid = self.process_pj_response(psbt)?;
+                println!("Payjoin sent. TXID: {txid}");
                 Ok(())
             }
             PjParam::V2(pj_param) => {
@@ -259,7 +289,7 @@ impl AppTrait for App {
                         let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
                         let persister =
                             SenderPersister::new(self.db.clone(), bip21, receiver_pubkey)?;
-                        println!("Send session established: {}", persister.session_id());
+                        persister.print("Session established");
                         let sender =
                             SenderBuilder::from_parts(psbt, pj_param, &address, Some(amount))
                                 .build_recommended(fee_rate)?
@@ -275,16 +305,16 @@ impl AppTrait for App {
                             Ok(()) => return Ok(()),
                             Err(err) => {
                                 let id = persister.session_id();
-                                println!("Session {id} failed. Run `payjoin-cli cancel {id}` to cancel and broadcast the original transaction.");
+                                persister.print(format_args!("Session failed. Run `payjoin-cli cancel {id}` to cancel and broadcast the original transaction."));
                                 return Err(err);
                             }
                         }
                     },
                     _ = interrupt.changed() => {
                         let session_id = persister.session_id();
-                        println!(
-                            "Session {session_id} interrupted. Call `payjoin-cli resume --session-id {session_id}` again to resume, `payjoin-cli resume` to resume all sessions, or `payjoin-cli cancel {session_id}` to cancel and broadcast the original transaction."
-                        );
+                        persister.print(format_args!(
+                            "Session interrupted. Call `payjoin-cli resume --session-id {session_id}` again to resume, `payjoin-cli resume` to resume all sessions, or `payjoin-cli cancel {session_id}` to cancel and broadcast the original transaction."
+                        ));
                         return Err(anyhow!("Interrupted"))
                     }
                 }
@@ -322,10 +352,10 @@ impl AppTrait for App {
             receiver_builder = receiver_builder.with_expiration(expiration);
         }
         let session = receiver_builder.build().save(&persister)?;
-        println!("Receive session established: {}", persister.session_id());
+        persister.print("Session established");
 
         let pj_uri = session.pj_uri();
-        println!("Request Payjoin by sharing this Payjoin Uri:");
+        persister.print("Request Payjoin by sharing this Payjoin Uri:");
         println!("{pj_uri}");
 
         self.process_receiver_session(ReceiveSession::Initialized(session.clone()), &persister)
@@ -350,7 +380,7 @@ impl AppTrait for App {
             return Ok(());
         }
 
-        let mut tasks: Vec<(String, tokio::task::JoinHandle<Result<()>>)> = Vec::new();
+        let mut tasks: Vec<((Role, SessionId), tokio::task::JoinHandle<Result<()>>)> = Vec::new();
 
         // Process receiver sessions
         for session_id in recv_session_ids {
@@ -359,7 +389,7 @@ impl AppTrait for App {
             match replay_receiver_event_log(&recv_persister) {
                 Ok((receiver_state, _)) => {
                     tasks.push((
-                        session_id.to_string(),
+                        (Role::Receiver, session_id),
                         tokio::spawn(async move {
                             self_clone
                                 .process_receiver_session(receiver_state, &recv_persister)
@@ -376,7 +406,7 @@ impl AppTrait for App {
                 }
                 Err(e) => {
                     tracing::error!("An error {:?} occurred while replaying session", e);
-                    println!("Session failed to replay: {session_id} - {e}");
+                    recv_persister.print(format_args!("Session failed to replay: {e}"));
                     Self::close_failed_session(&recv_persister, &session_id, Role::Receiver);
                 }
             }
@@ -389,7 +419,7 @@ impl AppTrait for App {
                 Ok((sender_state, _)) => {
                     let self_clone = self.clone();
                     tasks.push((
-                        session_id.clone().to_string(),
+                        (Role::Sender, session_id),
                         tokio::spawn(async move {
                             self_clone.process_sender_session(sender_state, &sender_persister).await
                         }),
@@ -404,7 +434,7 @@ impl AppTrait for App {
                 }
                 Err(e) => {
                     tracing::error!("An error {:?} occurred while replaying session", e);
-                    println!("Session failed to replay: {session_id} - {e}");
+                    sender_persister.print(format_args!("Session failed to replay: {e}"));
                     Self::close_failed_session(&sender_persister, &session_id, Role::Sender);
                 }
             }
@@ -414,16 +444,16 @@ impl AppTrait for App {
         tokio::select! {
             _ = async {
 
-                for (session_id, task) in tasks {
+                for ((role, id), task) in tasks {
                     match task.await {
                         Ok(Ok(())) => {
-                            println!("Session {session_id} completed.");
+                            print_session(role, &id, "Session completed.");
                         }
                         Ok(Err(e)) => {
-                            println!("Session {session_id} error: {e:#}");
+                            print_session(role, &id, format_args!("Session error: {e:#}"));
                         }
                         Err(e) => {
-                            println!("Session {session_id} panicked or was cancelled: {e:?}");
+                            print_session(role, &id, format_args!("Session panicked or was cancelled: {e:?}"));
                         }
                     }
                 }
@@ -625,32 +655,30 @@ impl App {
             SendSession::PendingFallback(sender) => sender,
             SendSession::Closed(SenderSessionOutcome::Success(proposal)) => {
                 let txid = proposal.extract_tx_unchecked_fee_rate().compute_txid();
-                println!(
-                    "Session {session_id} already produced payjoin transaction {txid}. \
+                persister.print(format_args!(
+                    "Session already produced payjoin transaction {txid}. \
                      Cannot cancel a completed session."
-                );
+                ));
                 return Ok(());
             }
             SendSession::Closed(SenderSessionOutcome::Aborted) => {
-                println!(
-                    "Session {session_id} was already cancelled. Broadcast the original transaction manually:\n{}",
-                    serialize_hex(&history.fallback_tx())
+                persister.print(
+                    "Session was already cancelled. Broadcast the original transaction manually:",
                 );
+                println!("{}", serialize_hex(&history.fallback_tx()));
                 return Ok(());
             }
         };
 
         if no_broadcast {
-            println!(
-                "Session {session_id} cancelled. Broadcast the original transaction manually:\n{}",
-                serialize_hex(pending.fallback_tx())
-            );
+            persister.print("Session cancelled. Broadcast the original transaction manually:");
+            println!("{}", serialize_hex(pending.fallback_tx()));
         } else {
             self.wallet().broadcast_tx(pending.fallback_tx())?;
-            println!(
+            persister.print(format_args!(
                 "Broadcasted fallback transaction txid: {}",
                 pending.fallback_tx().compute_txid()
-            );
+            ));
         }
         pending.close().save(&persister)?;
         Ok(())
@@ -676,12 +704,12 @@ impl App {
         let pending: Receiver<ReceiverPendingFallback> = match session {
             ReceiveSession::Initialized(receiver) => {
                 receiver.cancel().save(&persister)?;
-                println!("Session {session_id} cancelled. No fallback transaction to broadcast.");
+                persister.print("Session cancelled. No fallback transaction to broadcast.");
                 return Ok(());
             }
             ReceiveSession::UncheckedOriginalPayload(receiver) => {
                 receiver.cancel().save(&persister)?;
-                println!("Session {session_id} cancelled. No fallback transaction to broadcast.");
+                persister.print("Session cancelled. No fallback transaction to broadcast.");
                 return Ok(());
             }
             ReceiveSession::MaybeInputsOwned(receiver) => receiver.cancel().save(&persister)?,
@@ -693,50 +721,47 @@ impl App {
             ReceiveSession::ProvisionalProposal(receiver) => receiver.cancel().save(&persister)?,
             ReceiveSession::PayjoinProposal(receiver) => receiver.cancel().save(&persister)?,
             ReceiveSession::Monitor(receiver) => receiver.cancel().save(&persister)?,
-            ReceiveSession::HasReplyableError(receiver) => match receiver
-                .cancel()
-                .save(&persister)?
-            {
-                Some(pending) => pending,
-                None => {
-                    println!("Session {session_id} cancelled. No fallback transaction available.");
-                    return Ok(());
-                }
-            },
+            ReceiveSession::HasReplyableError(receiver) =>
+                match receiver.cancel().save(&persister)? {
+                    Some(pending) => pending,
+                    None => {
+                        persister.print("Session cancelled. No fallback transaction available.");
+                        return Ok(());
+                    }
+                },
             ReceiveSession::PendingFallback(receiver) => receiver,
             ReceiveSession::Closed(
                 ReceiverSessionOutcome::Success(_)
                 | ReceiverSessionOutcome::FallbackBroadcasted
                 | ReceiverSessionOutcome::PayjoinProposalSent,
             ) => {
-                println!("Session {session_id} already completed successfully. Cannot cancel.");
+                persister.print("Session already completed successfully. Cannot cancel.");
                 return Ok(());
             }
             ReceiveSession::Closed(ReceiverSessionOutcome::Aborted) => {
                 match history.fallback_tx() {
-                    Some(tx) => println!(
-                        "Session {session_id} was already cancelled. Broadcast the fallback transaction manually:\n{}",
-                        serialize_hex(&tx)
-                    ),
-                    None => println!(
-                        "Session {session_id} is already closed. No fallback transaction available."
-                    ),
+                    Some(tx) => {
+                        persister.print(
+                            "Session was already cancelled. Broadcast the fallback transaction manually:",
+                        );
+                        println!("{}", serialize_hex(&tx));
+                    }
+                    None => persister
+                        .print("Session is already closed. No fallback transaction available."),
                 }
                 return Ok(());
             }
         };
 
         if no_broadcast {
-            println!(
-                "Session {session_id} cancelled. Broadcast the fallback transaction manually:\n{}",
-                serialize_hex(pending.fallback_tx())
-            );
+            persister.print("Session cancelled. Broadcast the fallback transaction manually:");
+            println!("{}", serialize_hex(pending.fallback_tx()));
         } else {
             self.wallet().broadcast_tx(pending.fallback_tx())?;
-            println!(
+            persister.print(format_args!(
                 "Broadcasted fallback transaction txid: {}",
                 pending.fallback_tx().compute_txid()
-            );
+            ));
         }
         pending.close().save(&persister)?;
         Ok(())
@@ -770,11 +795,19 @@ impl App {
         P: SessionPersister,
     {
         match fallback_tx {
-            Some(tx) => println!(
-                "Session {session_id} expired. Broadcast the original transaction manually:\n{}",
-                serialize_hex(tx)
+            Some(tx) => {
+                print_session(
+                    role,
+                    session_id,
+                    "Session expired. Broadcast the original transaction manually:",
+                );
+                println!("{}", serialize_hex(tx));
+            }
+            None => print_session(
+                role,
+                session_id,
+                "Session expired. No fallback transaction available.",
             ),
-            None => println!("Session {session_id} expired. No fallback transaction available."),
         }
         Self::close_failed_session(persister, session_id, role);
     }
@@ -790,18 +823,19 @@ impl App {
             SendSession::PollingForProposal(context) =>
                 self.get_proposed_payjoin_psbt(context, persister).await?,
             SendSession::Closed(SenderSessionOutcome::Success(proposal)) => {
-                self.process_pj_response(proposal)?;
+                let txid = self.process_pj_response(proposal)?;
+                persister.print(format_args!("Payjoin sent. TXID: {txid}"));
                 return Ok(());
             }
             SendSession::Closed(SenderSessionOutcome::Aborted) => {
-                println!("Session is closed. Nothing left to do");
+                persister.print("Session is closed. Nothing left to do");
                 return Ok(());
             }
             SendSession::PendingFallback(_) => {
                 let id = persister.session_id();
-                println!(
-                    "Session {id} was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
-                );
+                persister.print(format_args!(
+                    "Session was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
+                ));
                 return Ok(());
             }
         }
@@ -822,7 +856,7 @@ impl App {
                 };
             match sender.process_response(&response.bytes().await?, ctx).save(persister) {
                 Ok(sender) => {
-                    println!("Posted Original PSBT...");
+                    persister.print("Posted Original PSBT...");
                     return self.get_proposed_payjoin_psbt(sender, persister).await;
                 }
                 Err(e) if e.is_transient() => {
@@ -852,12 +886,13 @@ impl App {
                 sender.clone().process_response(&response.bytes().await?, ctx).save(persister);
             match res {
                 Ok(OptionalTransitionOutcome::Progress(psbt)) => {
-                    println!("Proposal received. Processing...");
-                    self.process_pj_response(psbt)?;
+                    persister.print("Proposal received. Processing...");
+                    let txid = self.process_pj_response(psbt)?;
+                    persister.print(format_args!("Payjoin sent. TXID: {txid}"));
                     return Ok(());
                 }
                 Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
-                    println!("No response yet.");
+                    persister.print("No response yet.");
                     sender = current_state;
                 }
                 Err(e) if e.is_transient() => {
@@ -866,7 +901,7 @@ impl App {
                     tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
                 }
                 Err(re) => {
-                    println!("{re}");
+                    persister.print(&re);
                     tracing::debug!("{re:?}");
                     return Err(anyhow!("Response error").context(re));
                 }
@@ -880,7 +915,7 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<Receiver<UncheckedOriginalPayload>> {
         loop {
-            println!("Polling receive request...");
+            persister.print("Polling receive request...");
             let (ohttp_response, context) =
                 match self.post_via_relay(|relay| session.create_poll_request(relay)).await? {
                     RelayPost::Posted(resp, ctx) => (resp, ctx),
@@ -895,7 +930,9 @@ impl App {
                 .save(persister);
             match state_transition {
                 Ok(OptionalTransitionOutcome::Progress(next_state)) => {
-                    println!("Got a request from the sender. Responding with a Payjoin proposal.");
+                    persister.print(
+                        "Got a request from the sender. Responding with a Payjoin proposal.",
+                    );
                     return Ok(next_state);
                 }
                 Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
@@ -944,9 +981,9 @@ impl App {
                     self.monitor_payjoin_proposal(proposal, persister).await,
                 ReceiveSession::PendingFallback(_) => {
                     let id = persister.session_id();
-                    println!(
-                        "Session {id} was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
-                    );
+                    persister.print(format_args!(
+                        "Session was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
+                    ));
                     return Ok(());
                 }
                 ReceiveSession::Closed(_) => return Err(anyhow!("Session closed")),
@@ -965,7 +1002,10 @@ impl App {
         let receiver = tokio::select! {
             res = self.long_poll_fallback(session, persister) => res,
             _ = interrupt.changed() => {
-                println!("Interrupted. Call the `resume` command to resume all sessions.");
+                let session_id = persister.session_id();
+                persister.print(format_args!(
+                    "Session interrupted. Call `payjoin-cli resume --session-id {session_id}` again to resume, `payjoin-cli resume` to resume all sessions, or `payjoin-cli cancel {session_id}` to cancel the session."
+                ));
                 return Err(anyhow!("Interrupted"));
             }
         }?;
@@ -986,7 +1026,9 @@ impl App {
             })
             .save(persister)?;
 
-        println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
+        persister.print(
+            "Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:",
+        );
         println!("{}", serialize_hex(&proposal.extract_tx_to_schedule_broadcast()));
         self.check_inputs_not_owned(proposal, persister).await
     }
@@ -1105,10 +1147,10 @@ impl App {
             let payjoin_psbt = proposal.psbt().clone();
             match proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister) {
                 Ok(session) => {
-                    println!(
+                    persister.print(format_args!(
                         "Response successful. Watch mempool for successful Payjoin. TXID: {}",
                         payjoin_psbt.extract_tx_unchecked_fee_rate().compute_txid()
-                    );
+                    ));
                     return self.monitor_payjoin_proposal(session, persister).await;
                 }
                 Err(e) if e.is_transient() => {
@@ -1148,7 +1190,7 @@ impl App {
 
                 match check_result {
                     Ok(OptionalTransitionOutcome::Progress(())) => {
-                        println!("Payjoin transaction detected in the mempool!");
+                        persister.print("Payjoin transaction detected in the mempool!");
                         return Ok(());
                     }
                     Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
@@ -1195,11 +1237,10 @@ impl App {
 
             match session.process_error_response(&err_bytes, err_ctx).save(persister) {
                 Ok(Some(pending)) => {
-                    let session_id = persister.session_id();
-                    println!(
-                                "Session {session_id} delivered error reply. Broadcast the fallback transaction manually:\n{}",
-                                serialize_hex(pending.fallback_tx())
-                            );
+                    persister.print(
+                        "Session delivered error reply. Broadcast the fallback transaction manually:",
+                    );
+                    println!("{}", serialize_hex(pending.fallback_tx()));
                     return Ok(());
                 }
                 Ok(None) => return Ok(()),
@@ -1214,11 +1255,10 @@ impl App {
                     }
                     match e.fatal_state() {
                         Some(pending) => {
-                            let session_id = persister.session_id();
-                            println!(
-                                "Session {session_id} failed to deliver error reply. Broadcast the fallback transaction manually:\n{}",
-                                serialize_hex(pending.fallback_tx())
+                            persister.print(
+                                "Session failed to deliver error reply. Broadcast the fallback transaction manually:",
                             );
+                            println!("{}", serialize_hex(pending.fallback_tx()));
                             return Ok(());
                         }
                         None => return Err(anyhow!("Failed to process error response")),

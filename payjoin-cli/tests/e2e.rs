@@ -38,14 +38,15 @@ mod e2e {
     /// Helper function to extract the first session id from history stdout
     async fn get_session_id_from_role(mut cli_role: tokio::process::Child) -> String {
         let mut stdout = cli_role.stdout.take().expect("failed to take stdout of child process");
+        // Session-scoped lines are prefixed with `[<Role> <session id>]`.
         let session_id =
-            wait_for_stdout_match(&mut stdout, |line| line.contains("session established: "))
+            wait_for_stdout_match(&mut stdout, |line| line.contains("Session established"))
                 .await
                 .expect("payjoin-cli should output a SessionId on session startup")
-                .split_terminator(":")
+                .split_whitespace()
                 .nth(1)
                 .expect("could not split stdout")
-                .trim()
+                .trim_end_matches(']')
                 .to_string();
 
         terminate(cli_role).await.expect("Failed to kill payjoin-cli");
@@ -537,9 +538,7 @@ mod e2e {
             let timeout = tokio::time::Duration::from_secs(10);
             let res = tokio::time::timeout(
                 timeout,
-                wait_for_stdout_match(&mut stdout, |line| {
-                    line.starts_with("Session") && line.ends_with("completed.")
-                }),
+                wait_for_stdout_match(&mut stdout, |line| line.ends_with("Session completed.")),
             )
             .await?;
 
@@ -554,9 +553,7 @@ mod e2e {
             let timeout = tokio::time::Duration::from_secs(10);
             let res = tokio::time::timeout(
                 timeout,
-                wait_for_stdout_match(&mut stdout, |line| {
-                    line.starts_with("Session") && line.ends_with("completed.")
-                }),
+                wait_for_stdout_match(&mut stdout, |line| line.ends_with("Session completed.")),
             )
             .await?;
             terminate(cli_resumer).await.expect("Failed to kill payjoin-cli");
@@ -841,7 +838,7 @@ mod e2e {
             .await?;
             terminate(cli_cancel).await.expect("Failed to kill payjoin-cli cancel");
             let subcommand_output = broadcast_line.expect("cancel should broadcast fallback tx");
-            let fallback_txid = subcommand_output.split_whitespace().nth(4).unwrap_or("");
+            let fallback_txid = subcommand_output.split_whitespace().last().unwrap_or("");
             let fallback_txid = Txid::from_str(fallback_txid).expect("valid txid");
 
             assert!(
@@ -883,8 +880,7 @@ mod e2e {
                 .expect("Failed to kill payjoin-cli cancel on closed session");
 
             assert!(
-                cancel_again_output
-                    .contains(&format!("Session {session_id} was already cancelled")),
+                cancel_again_output.contains(&format!("[Sender   {session_id}] Session was already cancelled")),
                 "cancel on closed session should reference the session id and report it is already closed; got: {cancel_again_output}"
             );
             assert!(
@@ -995,7 +991,7 @@ mod e2e {
                 cancel_line.expect("cancel should report no fallback transaction");
 
             assert!(
-                subcommand_output.contains(&format!("Session {session_id} cancelled")),
+                subcommand_output.contains(&format!("[Receiver {session_id}] Session cancelled")),
                 "cancel should reference the cancelled session id"
             );
 
@@ -1037,7 +1033,7 @@ mod e2e {
                 .expect("cancel on closed session should report it is already closed");
 
             assert!(
-                cancel_again_output.contains(&format!("Session {session_id} is already closed")),
+                cancel_again_output.contains(&format!("[Receiver {session_id}] Session is already closed")),
                 "cancel on closed session should reference the session id and report it is already closed"
             );
 

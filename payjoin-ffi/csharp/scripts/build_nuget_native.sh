@@ -94,7 +94,7 @@ rid_to_cross_tool() {
             echo "zigbuild"
             ;;
         win-*)
-            echo "xwin build"
+            echo "xwin"
             ;;
     esac
 }
@@ -115,13 +115,18 @@ if [[ ${PAYJOIN_FFI_CROSS:-0} == 1 ]]; then
     # generated here; the pack step generates the production bindings it packages.
     TARGET=$(rid_to_cross_target "$RID")
     TOOL=$(rid_to_cross_tool "$RID")
-    if ! command -v "cargo-${TOOL% *}" >/dev/null; then
-        echo "cargo-${TOOL% *} is required for cross builds: pip install cargo-zigbuild cargo-xwin" >&2
+    if ! command -v "cargo-$TOOL" >/dev/null; then
+        echo "cargo-$TOOL is required for cross builds: pip install cargo-zigbuild cargo-xwin" >&2
         exit 1
     fi
 
+    CROSS_CARGO=(cargo "$TOOL")
+    if [[ $TOOL == xwin ]]; then
+        CROSS_CARGO+=(build)
+    fi
+
     GENERATOR_FEATURES="csharp${PAYJOIN_FFI_FEATURES:+,$PAYJOIN_FFI_FEATURES}"
-    (cd .. && cargo $TOOL --target "$TARGET" --features "$GENERATOR_FEATURES" --profile "$PAYJOIN_FFI_PROFILE" -p payjoin-ffi)
+    (cd .. && "${CROSS_CARGO[@]}" --target "$TARGET" --features "$GENERATOR_FEATURES" --profile "$PAYJOIN_FFI_PROFILE" -p payjoin-ffi)
 
     # Cargo writes to the triple without any zig glibc suffix.
     TARGET_DIR=${TARGET%."$PAYJOIN_FFI_GLIBC_FLOOR"}

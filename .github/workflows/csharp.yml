@@ -63,8 +63,13 @@ jobs:
         run: dotnet test Payjoin.Tests.csproj --logger "console;verbosity=minimal"
 
   build-nuget-native:
+    # Every RID cross-compiles from Linux: cargo-zigbuild links the Linux targets
+    # against a pinned glibc floor and the macOS targets against zig's bundled
+    # libSystem stubs; cargo-xwin links MSVC-ABI Windows targets against the
+    # Microsoft CRT/SDK. The per-RID smoke jobs verify each produced asset on
+    # real hardware.
     name: "Build NuGet native asset"
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     env:
       RUSTUP_TOOLCHAIN: 1.85
     defaults:
@@ -73,39 +78,36 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-24.04-arm
-            rid: linux-arm64
-          - os: ubuntu-latest
-            rid: linux-x64
-          - os: macos-latest
-            rid: osx-arm64
-          - os: macos-15-intel
-            rid: osx-x64
-          - os: windows-11-arm
-            rid: win-arm64
-          - os: windows-latest
-            rid: win-x64
+          - rid: linux-arm64
+            target: aarch64-unknown-linux-gnu
+          - rid: linux-x64
+            target: x86_64-unknown-linux-gnu
+          - rid: osx-arm64
+            target: aarch64-apple-darwin
+          - rid: osx-x64
+            target: x86_64-apple-darwin
+          - rid: win-arm64
+            target: aarch64-pc-windows-msvc
+          - rid: win-x64
+            target: x86_64-pc-windows-msvc
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Install Rust 1.85.0
         uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Use cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Build release native asset (unix)
-        if: "!startsWith(matrix.os, 'windows')"
-        run: |
-          PAYJOIN_FFI_RID=${{ matrix.rid }} bash ./scripts/build_nuget_native.sh
+      - name: Install cross toolchain
+        run: pip install ziglang cargo-zigbuild cargo-xwin
 
-      - name: Build release native asset (windows)
-        if: startsWith(matrix.os, 'windows')
-        shell: pwsh
+      - name: Build release native asset
         run: |
-          $env:PAYJOIN_FFI_RID = "${{ matrix.rid }}"
-          ./scripts/build_nuget_native.ps1
+          PAYJOIN_FFI_CROSS=1 PAYJOIN_FFI_RID=${{ matrix.rid }} bash ./scripts/build_nuget_native.sh
 
       - name: Upload NuGet native asset
         uses: actions/upload-artifact@v4

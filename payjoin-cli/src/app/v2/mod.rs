@@ -300,7 +300,7 @@ impl AppTrait for App {
             let directory = self.mailroom_manager.choose_directory()?;
             match self
                 .mailroom_manager
-                .unwrap_ohttp_keys_or_else_fetch_from_directory(&directory)
+                .unwrap_ohttp_keys_or_else_fetch_from_directory(&directory, self.db.clone())
                 .await
             {
                 Ok(keys) => break (directory, keys.ohttp_keys),

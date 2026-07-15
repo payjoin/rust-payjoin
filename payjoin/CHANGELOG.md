@@ -1,5 +1,25 @@
 # Payjoin Changelog
 
+## 1.0.0-rc.5
+
+This release renames `PersistedError::error_state` to `fatal_state`, makes
+`Monitor::check_for_transaction` consume `self`, and adds
+`ReplayError::expiry_fallback_tx` for recovering the fallback transaction from
+an expired session.
+
+Selected Improvements:
+
+### API Changes
+
+- Rename `PersistedError::error_state()` to `fatal_state()` (#1728)
+- `Monitor::check_for_transaction()` now consumes `self` (#1729)
+- `ReplayError::expiry_fallback_tx()` returns the fallback transaction from an
+  expired session's event log, if available (#1700)
+
+### Dependencies
+
+- Update deps to patch cargo audit vulnerabilities (#1735)
+
 ## 1.0.0-rc.4
 
 This release locks down the public API ahead of the 1.0 freeze. It insulates the bitcoin-ohttp and bitcoin-hpke types from the public interface, marks public enums non_exhaustive and persistence transition types must_use, exposes transient versus fatal classification on PersistedError, corrects the create_error_request return type, renames the Receiver<Monitor> check methods, and removes utxos_to_be_locked. It also hardens the receiver against panic paths and fixes bugs in output substitution change handling, session replay, and coin selection.

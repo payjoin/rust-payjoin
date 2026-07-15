@@ -53,7 +53,7 @@
          bindings means they were not generated for production. -->
     <Error
       Condition="Exists('src/payjoin.cs') and $([System.IO.File]::ReadAllText('src/payjoin.cs').Contains('BitcoindEnv'))"
-      Text="Generated bindings include _test-utils. Regenerate with PAYJOIN_FFI_FEATURES= before packing." />
+      Text="Generated bindings include _test-utils. Regenerate production bindings before packing (bash: PAYJOIN_FFI_FEATURES= ./scripts/generate_bindings.sh; PowerShell: ./scripts/generate_bindings.ps1 -ProductionBindings)." />
   </Target>
 
 </Project>

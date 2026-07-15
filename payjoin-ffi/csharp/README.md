@@ -77,20 +77,23 @@ dotnet test Payjoin.Tests.csproj
 
 Generation uses the Cargo-managed C# generator pinned in `payjoin-ffi/Cargo.toml`.
 By default, development generation enables `_test-utils` to keep parity with the
-test suite. Set `PAYJOIN_FFI_FEATURES` to an empty value for production bindings.
+test suite. For production bindings, set `PAYJOIN_FFI_FEATURES` to an empty value
+(bash) or pass `-ProductionBindings` (PowerShell — Windows cannot represent an
+empty environment variable, so the switch is the only reliable signal there).
 
 ## Packaging
 
-Build the release native asset for the current host RID:
+Build the release native asset for the current host RID (production features are
+the default when `PAYJOIN_FFI_FEATURES` is not set; this step does not regenerate
+the C# bindings):
 
 ```shell
-PAYJOIN_FFI_FEATURES= bash ./scripts/build_nuget_native.sh
+bash ./scripts/build_nuget_native.sh
 ```
 
 On Windows:
 
 ```powershell
-$env:PAYJOIN_FFI_FEATURES = ""
 powershell -ExecutionPolicy Bypass -File .\scripts\build_nuget_native.ps1
 ```
 
@@ -99,6 +102,14 @@ generate production bindings, and run:
 
 ```shell
 PAYJOIN_FFI_FEATURES= PAYJOIN_FFI_PROFILE=release bash ./scripts/generate_bindings.sh
+dotnet pack Payjoin.csproj --configuration Release --output artifacts/packages
+```
+
+On Windows:
+
+```powershell
+$env:PAYJOIN_FFI_PROFILE = "release"
+powershell -ExecutionPolicy Bypass -File .\scripts\generate_bindings.ps1 -ProductionBindings
 dotnet pack Payjoin.csproj --configuration Release --output artifacts/packages
 ```
 

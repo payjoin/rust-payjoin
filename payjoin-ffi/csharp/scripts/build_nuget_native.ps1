@@ -63,9 +63,9 @@ if (-not $env:PAYJOIN_FFI_PROFILE) {
 }
 
 if ($useProductionBindings) {
-    & (Join-Path $csharpDir "scripts/generate_bindings.ps1") -ProductionBindings
+    & (Join-Path $csharpDir "scripts/generate_bindings.ps1") -ProductionBindings -NativeOnly
 } else {
-    & (Join-Path $csharpDir "scripts/generate_bindings.ps1")
+    & (Join-Path $csharpDir "scripts/generate_bindings.ps1") -NativeOnly
 }
 if ($LASTEXITCODE -ne 0) {
     throw "generate_bindings.ps1 failed with exit code $LASTEXITCODE"

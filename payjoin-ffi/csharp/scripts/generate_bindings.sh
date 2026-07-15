@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# --native-only builds the native library without regenerating the C# bindings, for callers
+# (the per-RID packaging jobs) that consume only the native asset.
+NATIVE_ONLY=0
+if [[ ${1:-} == "--native-only" ]]; then
+    NATIVE_ONLY=1
+fi
+
 OS=$(uname -s)
 echo "Running on $OS"
 
@@ -37,15 +44,17 @@ fi
 
 cargo build --features "$GENERATOR_FEATURES" --profile "$PAYJOIN_FFI_PROFILE" -j2
 
-# Clean output directory to prevent duplicate definitions
-echo "Cleaning csharp/src/ directory..."
-mkdir -p csharp/src
-rm -f csharp/src/*.cs
+if [[ $NATIVE_ONLY -eq 0 ]]; then
+    # Clean output directory to prevent duplicate definitions
+    echo "Cleaning csharp/src/ directory..."
+    mkdir -p csharp/src
+    rm -f csharp/src/*.cs
 
-# Use the Cargo-managed C# generator pinned in payjoin-ffi/Cargo.toml.
-UNIFFI_BINDGEN_LANGUAGE=csharp cargo run --features "$GENERATOR_FEATURES" --profile dev --bin uniffi-bindgen -- \
-    --library "../target/$TARGET_PROFILE_DIR/$LIBNAME" \
-    --out-dir csharp/src/
+    # Use the Cargo-managed C# generator pinned in payjoin-ffi/Cargo.toml.
+    UNIFFI_BINDGEN_LANGUAGE=csharp cargo run --features "$GENERATOR_FEATURES" --profile dev --bin uniffi-bindgen -- \
+        --library "../target/$TARGET_PROFILE_DIR/$LIBNAME" \
+        --out-dir csharp/src/
+fi
 
 # Copy native library to csharp/lib/ directory for testing
 echo "Copying native library..."

@@ -2,7 +2,11 @@ param(
     # Force production bindings (no extra cargo features). Windows cannot represent an empty
     # environment variable distinctly from an unset one, so callers signal production through
     # this switch rather than by setting PAYJOIN_FFI_FEATURES to "".
-    [switch] $ProductionBindings
+    [switch] $ProductionBindings,
+
+    # Build the native library without regenerating the C# bindings, for callers (the per-RID
+    # packaging jobs) that consume only the native asset.
+    [switch] $NativeOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -73,20 +77,22 @@ if ($payjoinFfiProfile -eq "dev") {
 
 Invoke-Native cargo build --features $generatorFeatures --profile $payjoinFfiProfile -j2
 
-Write-Host "Cleaning csharp/src/ directory..."
-New-Item -ItemType Directory -Force -Path "csharp/src" | Out-Null
-Get-ChildItem "csharp/src" -Filter "*.cs" -ErrorAction SilentlyContinue | Remove-Item -Force
+if (-not $NativeOnly) {
+    Write-Host "Cleaning csharp/src/ directory..."
+    New-Item -ItemType Directory -Force -Path "csharp/src" | Out-Null
+    Get-ChildItem "csharp/src" -Filter "*.cs" -ErrorAction SilentlyContinue | Remove-Item -Force
 
-$previousUniffiLanguage = $env:UNIFFI_BINDGEN_LANGUAGE
-$env:UNIFFI_BINDGEN_LANGUAGE = "csharp"
-try {
-    Invoke-Native cargo run --features $generatorFeatures --profile dev --bin uniffi-bindgen '--' --library "../target/$targetProfileDir/$libName" --out-dir "csharp/src/"
-}
-finally {
-    if ($null -eq $previousUniffiLanguage) {
-        Remove-Item Env:UNIFFI_BINDGEN_LANGUAGE -ErrorAction SilentlyContinue
-    } else {
-        $env:UNIFFI_BINDGEN_LANGUAGE = $previousUniffiLanguage
+    $previousUniffiLanguage = $env:UNIFFI_BINDGEN_LANGUAGE
+    $env:UNIFFI_BINDGEN_LANGUAGE = "csharp"
+    try {
+        Invoke-Native cargo run --features $generatorFeatures --profile dev --bin uniffi-bindgen '--' --library "../target/$targetProfileDir/$libName" --out-dir "csharp/src/"
+    }
+    finally {
+        if ($null -eq $previousUniffiLanguage) {
+            Remove-Item Env:UNIFFI_BINDGEN_LANGUAGE -ErrorAction SilentlyContinue
+        } else {
+            $env:UNIFFI_BINDGEN_LANGUAGE = $previousUniffiLanguage
+        }
     }
 }
 

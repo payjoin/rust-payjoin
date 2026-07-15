@@ -65,7 +65,7 @@ LIBNAME=$(native_library_name "$RID")
 export PAYJOIN_FFI_FEATURES="${PAYJOIN_FFI_FEATURES-}"
 export PAYJOIN_FFI_PROFILE="${PAYJOIN_FFI_PROFILE:-release}"
 
-bash ./scripts/generate_bindings.sh
+bash ./scripts/generate_bindings.sh --native-only
 
 ARTIFACT_DIR="artifacts/runtimes/$RID/native"
 rm -rf "$ARTIFACT_DIR"

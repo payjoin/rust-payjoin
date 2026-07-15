@@ -107,7 +107,6 @@ impl AppTrait for App {
         Ok(())
     }
 
-    #[allow(clippy::incompatible_msrv)]
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let mut interrupt = self.interrupt.clone();
         tokio::select! {

@@ -79,6 +79,9 @@ jobs:
       run:
         working-directory: payjoin-ffi/csharp
     strategy:
+      # Let every RID report its own result; a failure in one target should not
+      # cancel the signal from the others.
+      fail-fast: false
       matrix:
         include:
           - rid: linux-arm64
@@ -106,7 +109,32 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install cross toolchain
-        run: pip install ziglang cargo-zigbuild cargo-xwin
+        # Version- and hash-pinned: these tools produce the shipped binaries.
+        run: pip install --require-hashes -r scripts/cross-requirements.txt
+
+      - name: Install MSVC toolchain frontends (clang-cl, llvm-lib)
+        if: startsWith(matrix.rid, 'win-')
+        # cargo-xwin compiles C dependencies with clang-cl and archives them with
+        # llvm-lib. The runner image ships LLVM with versioned binary names only,
+        # so expose the unversioned names cc-rs looks for.
+        run: |
+          for tool in clang-cl llvm-lib; do
+            if command -v "$tool" >/dev/null; then
+              continue
+            fi
+            latest=$(ls -1 /usr/bin/"$tool"-* 2>/dev/null | sort -V | tail -n 1)
+            if [ -z "$latest" ]; then
+              sudo apt-get update -q
+              sudo apt-get install -y -q llvm clang
+              latest=$(ls -1 /usr/bin/"$tool"-* 2>/dev/null | sort -V | tail -n 1)
+            fi
+            if [ -z "$latest" ]; then
+              echo "$tool not found on the runner" >&2
+              exit 1
+            fi
+            sudo ln -s "$latest" /usr/local/bin/"$tool"
+          done
+          command -v clang-cl llvm-lib
 
       - name: Build release native asset
         run: |
@@ -124,7 +152,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-nuget-native
     env:
-      RUSTUP_TOOLCHAIN: 1.85
+      # Exact version so the packaged bindings build with the toolchain the
+      # action installs, not an implicitly-installed latest 1.85.x.
+      RUSTUP_TOOLCHAIN: 1.85.0
     defaults:
       run:
         working-directory: payjoin-ffi/csharp

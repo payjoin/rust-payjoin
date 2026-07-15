@@ -38,49 +38,19 @@ mod e2e {
     /// Helper function to extract the first session id from history stdout
     async fn get_session_id_from_role(mut cli_role: tokio::process::Child) -> String {
         let mut stdout = cli_role.stdout.take().expect("failed to take stdout of child process");
+        // Session-scoped lines are prefixed with `[<Role> <session id>]`.
         let session_id =
-            wait_for_stdout_match(&mut stdout, |line| line.contains("session established: "))
+            wait_for_stdout_match(&mut stdout, |line| line.contains("Session established"))
                 .await
                 .expect("payjoin-cli should output a SessionId on session startup")
-                .split_terminator(":")
+                .split_whitespace()
                 .nth(1)
                 .expect("could not split stdout")
-                .trim()
+                .trim_end_matches(']')
                 .to_string();
 
         terminate(cli_role).await.expect("Failed to kill payjoin-cli");
         session_id
-    }
-
-    /// Read lines from `child_stderr` until `match_pattern` is found and the corresponding
-    /// line is returned.
-    /// Also writes every read line to tokio::io::stdout();
-    async fn wait_for_stderr_match<F>(
-        child_stderr: &mut tokio::process::ChildStderr,
-        match_pattern: F,
-    ) -> Option<String>
-    where
-        F: Fn(&str) -> bool,
-    {
-        let reader = BufReader::new(child_stderr);
-        let mut lines = reader.lines();
-        let mut res = None;
-
-        let mut stderr = tokio::io::stderr();
-        while let Some(line) = lines.next_line().await.expect("Failed to read line from stdout") {
-            // Write all output to tests stdout
-            stderr
-                .write_all(format!("{line}\n").as_bytes())
-                .await
-                .expect("Failed to write to stderr");
-
-            if match_pattern(&line) {
-                res = Some(line);
-                break;
-            }
-        }
-
-        res
     }
 
     /// Read lines from `child_stdout` until `match_pattern` is found and the corresponding
@@ -537,9 +507,7 @@ mod e2e {
             let timeout = tokio::time::Duration::from_secs(10);
             let res = tokio::time::timeout(
                 timeout,
-                wait_for_stdout_match(&mut stdout, |line| {
-                    line.starts_with("Session") && line.ends_with("completed.")
-                }),
+                wait_for_stdout_match(&mut stdout, |line| line.ends_with("Session completed.")),
             )
             .await?;
 
@@ -554,9 +522,7 @@ mod e2e {
             let timeout = tokio::time::Duration::from_secs(10);
             let res = tokio::time::timeout(
                 timeout,
-                wait_for_stdout_match(&mut stdout, |line| {
-                    line.starts_with("Session") && line.ends_with("completed.")
-                }),
+                wait_for_stdout_match(&mut stdout, |line| line.ends_with("Session completed.")),
             )
             .await?;
             terminate(cli_resumer).await.expect("Failed to kill payjoin-cli");
@@ -841,7 +807,7 @@ mod e2e {
             .await?;
             terminate(cli_cancel).await.expect("Failed to kill payjoin-cli cancel");
             let subcommand_output = broadcast_line.expect("cancel should broadcast fallback tx");
-            let fallback_txid = subcommand_output.split_whitespace().nth(4).unwrap_or("");
+            let fallback_txid = subcommand_output.split_whitespace().last().unwrap_or("");
             let fallback_txid = Txid::from_str(fallback_txid).expect("valid txid");
 
             assert!(
@@ -883,8 +849,7 @@ mod e2e {
                 .expect("Failed to kill payjoin-cli cancel on closed session");
 
             assert!(
-                cancel_again_output
-                    .contains(&format!("Session {session_id} was already cancelled")),
+                cancel_again_output.contains(&format!("[Sender   {session_id}] Session was already cancelled")),
                 "cancel on closed session should reference the session id and report it is already closed; got: {cancel_again_output}"
             );
             assert!(
@@ -995,7 +960,7 @@ mod e2e {
                 cancel_line.expect("cancel should report no fallback transaction");
 
             assert!(
-                subcommand_output.contains(&format!("Session {session_id} cancelled")),
+                subcommand_output.contains(&format!("[Receiver {session_id}] Session cancelled")),
                 "cancel should reference the cancelled session id"
             );
 
@@ -1037,7 +1002,7 @@ mod e2e {
                 .expect("cancel on closed session should report it is already closed");
 
             assert!(
-                cancel_again_output.contains(&format!("Session {session_id} is already closed")),
+                cancel_again_output.contains(&format!("[Receiver {session_id}] Session is already closed")),
                 "cancel on closed session should reference the session id and report it is already closed"
             );
 
@@ -1212,19 +1177,17 @@ mod e2e {
                 .arg(&ohttp_keys_path)
                 .arg("--expire-in")
                 .arg("5")
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
                 .spawn()
                 .expect("Failed to execute payjoin-cli receiver");
 
-            let mut receiver_stderr =
-                cli_receiver.stderr.take().expect("failed to take stderr of receiver");
+            let mut receiver_stdout =
+                cli_receiver.stdout.take().expect("failed to take stdout of receiver");
             let timeout = tokio::time::Duration::from_secs(60);
             let expired_line = tokio::time::timeout(
                 timeout,
-                wait_for_stderr_match(&mut receiver_stderr, |l| {
-                    l.contains("Error: Receiver session expired:")
-                }),
+                wait_for_stdout_match(&mut receiver_stdout, |l| l.contains("Session expired")),
             )
             .await?;
 

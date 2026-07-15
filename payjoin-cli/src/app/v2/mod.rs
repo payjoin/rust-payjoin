@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
-use payjoin::bitcoin::{Amount, FeeRate};
+use payjoin::bitcoin::{Amount, FeeRate, Transaction};
 use payjoin::persist::{OptionalTransitionOutcome, SessionPersister};
 use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
@@ -122,6 +122,7 @@ fn print_header() {
     println!("{:<W_ID$} {:<W_ROLE$} {:<W_STATUS$}", "Session ID", "Sender/Receiver", "Status");
 }
 
+#[derive(Clone, Copy)]
 enum Role {
     Sender,
     Receiver,
@@ -132,6 +133,34 @@ impl Role {
             Role::Sender => "Sender",
             Role::Receiver => "Receiver",
         }
+    }
+}
+
+/// Print a session-scoped message prefixed with `[<Role> <session id>]`,
+/// with the role padded so sender and receiver messages align in columns.
+/// The prefix lets output interleaved from concurrently resumed sessions be
+/// attributed to its session.
+fn print_session(role: Role, id: &SessionId, msg: impl fmt::Display) {
+    // Pad the role to the widest form, `Receiver`.
+    const W: usize = "Receiver".len();
+    println!("[{:<W$} {id}] {msg}", role.as_str());
+}
+
+/// Session-scoped printing: the persister carries the role and session id
+/// that every user-facing message must be attributed to.
+trait SessionPrint {
+    fn print(&self, msg: impl fmt::Display);
+}
+
+impl SessionPrint for SenderPersister {
+    fn print(&self, msg: impl fmt::Display) {
+        print_session(Role::Sender, &self.session_id(), msg);
+    }
+}
+
+impl SessionPrint for ReceiverPersister {
+    fn print(&self, msg: impl fmt::Display) {
+        print_session(Role::Receiver, &self.session_id(), msg);
     }
 }
 
@@ -236,7 +265,8 @@ impl AppTrait for App {
                     }
                 };
 
-                self.process_pj_response(psbt)?;
+                let txid = self.process_pj_response(psbt)?;
+                println!("Payjoin sent. TXID: {txid}");
                 Ok(())
             }
             PjParam::V2(pj_param) => {
@@ -259,7 +289,7 @@ impl AppTrait for App {
                         let psbt = self.create_original_psbt(&address, amount, fee_rate)?;
                         let persister =
                             SenderPersister::new(self.db.clone(), bip21, receiver_pubkey)?;
-                        println!("Send session established: {}", persister.session_id());
+                        persister.print("Session established");
                         let sender =
                             SenderBuilder::from_parts(psbt, pj_param, &address, Some(amount))
                                 .build_recommended(fee_rate)?
@@ -275,16 +305,16 @@ impl AppTrait for App {
                             Ok(()) => return Ok(()),
                             Err(err) => {
                                 let id = persister.session_id();
-                                println!("Session {id} failed. Run `payjoin-cli cancel {id}` to cancel and broadcast the original transaction.");
+                                persister.print(format_args!("Session failed. Run `payjoin-cli cancel {id}` to cancel and broadcast the original transaction."));
                                 return Err(err);
                             }
                         }
                     },
                     _ = interrupt.changed() => {
                         let session_id = persister.session_id();
-                        println!(
-                            "Session {session_id} interrupted. Call `payjoin-cli resume --session-id {session_id}` again to resume, `payjoin-cli resume` to resume all sessions, or `payjoin-cli cancel {session_id}` to cancel and broadcast the original transaction."
-                        );
+                        persister.print(format_args!(
+                            "Session interrupted. Call `payjoin-cli resume --session-id {session_id}` again to resume, `payjoin-cli resume` to resume all sessions, or `payjoin-cli cancel {session_id}` to cancel and broadcast the original transaction."
+                        ));
                         return Err(anyhow!("Interrupted"))
                     }
                 }
@@ -293,6 +323,7 @@ impl AppTrait for App {
         }
     }
 
+    #[allow(clippy::incompatible_msrv)]
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let persister = ReceiverPersister::new(self.db.clone())?;
@@ -322,14 +353,29 @@ impl AppTrait for App {
             receiver_builder = receiver_builder.with_expiration(expiration);
         }
         let session = receiver_builder.build().save(&persister)?;
-        println!("Receive session established: {}", persister.session_id());
+        persister.print("Session established");
 
         let pj_uri = session.pj_uri();
-        println!("Request Payjoin by sharing this Payjoin Uri:");
+        persister.print("Request Payjoin by sharing this Payjoin Uri:");
         println!("{pj_uri}");
 
-        self.process_receiver_session(ReceiveSession::Initialized(session.clone()), &persister)
-            .await?;
+        // Interrupting is safe at any phase: every transition is saved to the
+        // event log before the next await, so the session resumes from its
+        // last saved state via the resume command.
+        let mut interrupt = self.interrupt.clone();
+        tokio::select! {
+            res = self.process_receiver_session(
+                ReceiveSession::Initialized(session.clone()),
+                &persister,
+            ) => res?,
+            _ = interrupt.changed() => {
+                let session_id = persister.session_id();
+                persister.print(format_args!(
+                    "Session interrupted. Call `payjoin-cli resume --session-id {session_id}` again to resume, `payjoin-cli resume` to resume all sessions, or `payjoin-cli cancel {session_id}` to cancel the session."
+                ));
+                return Err(anyhow!("Interrupted"));
+            }
+        }
         Ok(())
     }
 
@@ -350,7 +396,7 @@ impl AppTrait for App {
             return Ok(());
         }
 
-        let mut tasks: Vec<(String, tokio::task::JoinHandle<Result<()>>)> = Vec::new();
+        let mut tasks: Vec<((Role, SessionId), tokio::task::JoinHandle<Result<()>>)> = Vec::new();
 
         // Process receiver sessions
         for session_id in recv_session_ids {
@@ -359,7 +405,7 @@ impl AppTrait for App {
             match replay_receiver_event_log(&recv_persister) {
                 Ok((receiver_state, _)) => {
                     tasks.push((
-                        session_id.to_string(),
+                        (Role::Receiver, session_id),
                         tokio::spawn(async move {
                             self_clone
                                 .process_receiver_session(receiver_state, &recv_persister)
@@ -367,23 +413,17 @@ impl AppTrait for App {
                         }),
                     ));
                 }
-                Err(e) => {
-                    if e.is_expired() {
-                        println!("Receiver session expired: {session_id}");
-                        match e.expiry_fallback_tx() {
-                            Some(tx) => println!(
-                                "Broadcast the original transaction manually:\n{}",
-                                serialize_hex(tx)
-                            ),
-                            None => println!(
-                                "No fallback transaction available for expired receiver session: {session_id}"
-                            ),
-                        }
-                    } else {
-                        tracing::error!("An error {:?} occurred while replaying session", e);
-                        println!("Session failed to replay: {session_id} - {e}");
+                Err(e) if e.is_expired() => {
+                    if let Err(err) = self.cancel_receiver_session(session_id.clone(), true) {
+                        tracing::error!(
+                            "Failed to cancel expired receiver session {session_id}: {err:?}"
+                        );
                     }
-                    Self::close_failed_session(&recv_persister, &session_id, "receiver");
+                }
+                Err(e) => {
+                    tracing::error!("An error {:?} occurred while replaying session", e);
+                    recv_persister.print(format_args!("Session failed to replay: {e}"));
+                    Self::close_failed_session(&recv_persister, &session_id, Role::Receiver);
                 }
             }
         }
@@ -395,29 +435,23 @@ impl AppTrait for App {
                 Ok((sender_state, _)) => {
                     let self_clone = self.clone();
                     tasks.push((
-                        session_id.clone().to_string(),
+                        (Role::Sender, session_id),
                         tokio::spawn(async move {
                             self_clone.process_sender_session(sender_state, &sender_persister).await
                         }),
                     ));
                 }
-                Err(e) => {
-                    if e.is_expired() {
-                        println!("Sender session expired: {session_id}");
-                        match e.expiry_fallback_tx() {
-                            Some(tx) => println!(
-                                "Broadcast the original transaction manually:\n{}",
-                                serialize_hex(tx)
-                            ),
-                            None => println!(
-                                "No fallback transaction available for expired sender session: {session_id}"
-                            ),
-                        }
-                    } else {
-                        tracing::error!("An error {:?} occurred while replaying session", e);
-                        println!("Session failed to replay: {session_id} -  {e}");
+                Err(e) if e.is_expired() => {
+                    if let Err(err) = self.cancel_sender_session(session_id.clone(), true) {
+                        tracing::error!(
+                            "Failed to cancel expired sender session {session_id}: {err:?}"
+                        );
                     }
-                    Self::close_failed_session(&sender_persister, &session_id, "sender");
+                }
+                Err(e) => {
+                    tracing::error!("An error {:?} occurred while replaying session", e);
+                    sender_persister.print(format_args!("Session failed to replay: {e}"));
+                    Self::close_failed_session(&sender_persister, &session_id, Role::Sender);
                 }
             }
         }
@@ -426,16 +460,16 @@ impl AppTrait for App {
         tokio::select! {
             _ = async {
 
-                for (session_id, task) in tasks {
+                for ((role, id), task) in tasks {
                     match task.await {
                         Ok(Ok(())) => {
-                            println!("Session {session_id} completed.");
+                            print_session(role, &id, "Session completed.");
                         }
                         Ok(Err(e)) => {
-                            println!("Session {session_id} error: {e:#}");
+                            print_session(role, &id, format_args!("Session error: {e:#}"));
                         }
                         Err(e) => {
-                            println!("Session {session_id} panicked or was cancelled: {e:?}");
+                            print_session(role, &id, format_args!("Session panicked or was cancelled: {e:?}"));
                         }
                     }
                 }
@@ -620,14 +654,12 @@ impl App {
         let (session, history) = match replay_sender_event_log(&persister) {
             Ok((session, history)) => (session, history),
             Err(e) if e.is_expired() => {
-                let tx = e.expiry_fallback_tx().cloned().ok_or_else(|| {
-                    anyhow!("Expired sender session {session_id} has no fallback transaction")
-                })?;
-                println!(
-                    "Session {session_id} expired. Broadcast the original transaction manually:\n{}",
-                    serialize_hex(&tx)
+                Self::finalize_expired_session(
+                    &persister,
+                    &session_id,
+                    Role::Sender,
+                    e.expiry_fallback_tx(),
                 );
-                Self::close_failed_session(&persister, &session_id, "sender");
                 return Ok(());
             }
             Err(e) => return Err(anyhow!("Failed to replay sender session {session_id}: {:?}", e)),
@@ -639,32 +671,30 @@ impl App {
             SendSession::PendingFallback(sender) => sender,
             SendSession::Closed(SenderSessionOutcome::Success(proposal)) => {
                 let txid = proposal.extract_tx_unchecked_fee_rate().compute_txid();
-                println!(
-                    "Session {session_id} already produced payjoin transaction {txid}. \
+                persister.print(format_args!(
+                    "Session already produced payjoin transaction {txid}. \
                      Cannot cancel a completed session."
-                );
+                ));
                 return Ok(());
             }
             SendSession::Closed(SenderSessionOutcome::Aborted) => {
-                println!(
-                    "Session {session_id} was already cancelled. Broadcast the original transaction manually:\n{}",
-                    serialize_hex(&history.fallback_tx())
+                persister.print(
+                    "Session was already cancelled. Broadcast the original transaction manually:",
                 );
+                println!("{}", serialize_hex(&history.fallback_tx()));
                 return Ok(());
             }
         };
 
         if no_broadcast {
-            println!(
-                "Session {session_id} cancelled. Broadcast the original transaction manually:\n{}",
-                serialize_hex(pending.fallback_tx())
-            );
+            persister.print("Session cancelled. Broadcast the original transaction manually:");
+            println!("{}", serialize_hex(pending.fallback_tx()));
         } else {
             self.wallet().broadcast_tx(pending.fallback_tx())?;
-            println!(
+            persister.print(format_args!(
                 "Broadcasted fallback transaction txid: {}",
                 pending.fallback_tx().compute_txid()
-            );
+            ));
         }
         pending.close().save(&persister)?;
         Ok(())
@@ -675,28 +705,27 @@ impl App {
         let (session, history) = match replay_receiver_event_log(&persister) {
             Ok((session, history)) => (session, history),
             Err(e) if e.is_expired() => {
-                let tx = e.expiry_fallback_tx().cloned().ok_or_else(|| {
-                    anyhow!("Expired receiver session {session_id} has no fallback transaction")
-                })?;
-                println!(
-                    "Session {session_id} expired. Broadcast the original transaction manually:\n{}",
-                    serialize_hex(&tx)
+                Self::finalize_expired_session(
+                    &persister,
+                    &session_id,
+                    Role::Receiver,
+                    e.expiry_fallback_tx(),
                 );
-                Self::close_failed_session(&persister, &session_id, "sender");
                 return Ok(());
             }
-            Err(e) => return Err(anyhow!("Failed to replay sender session {session_id}: {:?}", e)),
+            Err(e) =>
+                return Err(anyhow!("Failed to replay receiver session {session_id}: {:?}", e)),
         };
 
         let pending: Receiver<ReceiverPendingFallback> = match session {
             ReceiveSession::Initialized(receiver) => {
                 receiver.cancel().save(&persister)?;
-                println!("Session {session_id} cancelled. No fallback transaction to broadcast.");
+                persister.print("Session cancelled. No fallback transaction to broadcast.");
                 return Ok(());
             }
             ReceiveSession::UncheckedOriginalPayload(receiver) => {
                 receiver.cancel().save(&persister)?;
-                println!("Session {session_id} cancelled. No fallback transaction to broadcast.");
+                persister.print("Session cancelled. No fallback transaction to broadcast.");
                 return Ok(());
             }
             ReceiveSession::MaybeInputsOwned(receiver) => receiver.cancel().save(&persister)?,
@@ -708,298 +737,284 @@ impl App {
             ReceiveSession::ProvisionalProposal(receiver) => receiver.cancel().save(&persister)?,
             ReceiveSession::PayjoinProposal(receiver) => receiver.cancel().save(&persister)?,
             ReceiveSession::Monitor(receiver) => receiver.cancel().save(&persister)?,
-            ReceiveSession::HasReplyableError(receiver) => match receiver
-                .cancel()
-                .save(&persister)?
-            {
-                Some(pending) => pending,
-                None => {
-                    println!("Session {session_id} cancelled. No fallback transaction available.");
-                    return Ok(());
-                }
-            },
+            ReceiveSession::HasReplyableError(receiver) =>
+                match receiver.cancel().save(&persister)? {
+                    Some(pending) => pending,
+                    None => {
+                        persister.print("Session cancelled. No fallback transaction available.");
+                        return Ok(());
+                    }
+                },
             ReceiveSession::PendingFallback(receiver) => receiver,
             ReceiveSession::Closed(
                 ReceiverSessionOutcome::Success(_)
                 | ReceiverSessionOutcome::FallbackBroadcasted
                 | ReceiverSessionOutcome::PayjoinProposalSent,
             ) => {
-                println!("Session {session_id} already completed successfully. Cannot cancel.");
+                persister.print("Session already completed successfully. Cannot cancel.");
                 return Ok(());
             }
             ReceiveSession::Closed(ReceiverSessionOutcome::Aborted) => {
                 match history.fallback_tx() {
-                    Some(tx) => println!(
-                        "Session {session_id} was already cancelled. Broadcast the fallback transaction manually:\n{}",
-                        serialize_hex(&tx)
-                    ),
-                    None => println!(
-                        "Session {session_id} is already closed. No fallback transaction available."
-                    ),
+                    Some(tx) => {
+                        persister.print(
+                            "Session was already cancelled. Broadcast the fallback transaction manually:",
+                        );
+                        println!("{}", serialize_hex(&tx));
+                    }
+                    None => persister
+                        .print("Session is already closed. No fallback transaction available."),
                 }
                 return Ok(());
             }
         };
 
         if no_broadcast {
-            println!(
-                "Session {session_id} cancelled. Broadcast the fallback transaction manually:\n{}",
-                serialize_hex(pending.fallback_tx())
-            );
+            persister.print("Session cancelled. Broadcast the fallback transaction manually:");
+            println!("{}", serialize_hex(pending.fallback_tx()));
         } else {
             self.wallet().broadcast_tx(pending.fallback_tx())?;
-            println!(
+            persister.print(format_args!(
                 "Broadcasted fallback transaction txid: {}",
                 pending.fallback_tx().compute_txid()
-            );
+            ));
         }
         pending.close().save(&persister)?;
         Ok(())
     }
 
-    fn close_failed_session<P>(persister: &P, session_id: &SessionId, role: &str)
+    fn close_failed_session<P>(persister: &P, session_id: &SessionId, role: Role)
     where
         P: SessionPersister,
     {
         if let Err(close_err) = SessionPersister::close(persister) {
-            tracing::error!("Failed to close {} session {}: {:?}", role, session_id, close_err);
+            tracing::error!(
+                "Failed to close {} session {}: {:?}",
+                role.as_str(),
+                session_id,
+                close_err
+            );
         } else {
-            tracing::debug!("Closed failed {} session: {}", role, session_id);
+            tracing::debug!("Closed failed {} session: {}", role.as_str(), session_id);
         }
     }
 
-    fn finalize_expired_sender(
-        &self,
-        pending: Sender<SenderPendingFallback>,
-        persister: &SenderPersister,
-    ) -> Result<()> {
-        let tx = pending.fallback_tx();
-        let session_id = persister.session_id();
-        println!(
-            "Session {} expired. Broadcast the original transaction manually:\n{}",
-            session_id,
-            serialize_hex(tx)
-        );
-        Self::close_failed_session(persister, &session_id, "sender");
-        Ok(())
+    /// Report an expired session to the user, pointing at the fallback
+    /// transaction from the event log if one exists, and close the session
+    /// so it is not resumed again.
+    fn finalize_expired_session<P>(
+        persister: &P,
+        session_id: &SessionId,
+        role: Role,
+        fallback_tx: Option<&Transaction>,
+    ) where
+        P: SessionPersister,
+    {
+        match fallback_tx {
+            Some(tx) => {
+                print_session(
+                    role,
+                    session_id,
+                    "Session expired. Broadcast the original transaction manually:",
+                );
+                println!("{}", serialize_hex(tx));
+            }
+            None => print_session(
+                role,
+                session_id,
+                "Session expired. No fallback transaction available.",
+            ),
+        }
+        Self::close_failed_session(persister, session_id, role);
     }
 
-    fn finalize_expired_receiver(
-        &self,
-        pending: Receiver<ReceiverPendingFallback>,
-        persister: &ReceiverPersister,
-    ) -> Result<()> {
-        let tx = pending.fallback_tx();
-        let session_id = persister.session_id();
-        println!(
-            "Session {} expired. Broadcast the original transaction manually:\n{}",
-            session_id,
-            serialize_hex(tx)
-        );
-        Self::close_failed_session(persister, &session_id, "receiver");
-        Ok(())
-    }
-
+    /// Drive the sender state machine until the session terminates. Each
+    /// step function performs one state transition and returns the next
+    /// state; the driver stops on the terminal `Closed` and
+    /// `PendingFallback` states.
     async fn process_sender_session(
         &self,
-        session: SendSession,
+        mut session: SendSession,
         persister: &SenderPersister,
     ) -> Result<()> {
-        match session {
-            SendSession::WithReplyKey(context) =>
-                self.post_original_proposal(context, persister).await?,
-            SendSession::PollingForProposal(context) =>
-                self.get_proposed_payjoin_psbt(context, persister).await?,
-            SendSession::Closed(SenderSessionOutcome::Success(proposal)) => {
-                self.process_pj_response(proposal)?;
-                return Ok(());
-            }
-            SendSession::Closed(SenderSessionOutcome::Aborted) => {
-                println!("Session is closed. Nothing left to do");
-                return Ok(());
-            }
-            SendSession::PendingFallback(_) => {
-                let id = persister.session_id();
-                println!(
-                    "Session {id} was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
-                );
-                return Ok(());
-            }
+        loop {
+            session = match session {
+                SendSession::WithReplyKey(context) =>
+                    self.post_original_proposal(context, persister).await?,
+                SendSession::PollingForProposal(context) =>
+                    self.get_proposed_payjoin_psbt(context, persister).await?,
+                SendSession::Closed(SenderSessionOutcome::Success(proposal)) => {
+                    let txid = self.process_pj_response(proposal)?;
+                    persister.print(format_args!("Payjoin sent. TXID: {txid}"));
+                    return Ok(());
+                }
+                SendSession::Closed(SenderSessionOutcome::Aborted) => return Ok(()),
+                SendSession::PendingFallback(_) => {
+                    let id = persister.session_id();
+                    persister.print(format_args!(
+                        "Session was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
+                    ));
+                    return Ok(());
+                }
+            };
         }
-        Ok(())
     }
 
     async fn post_original_proposal(
         &self,
-        mut sender: Sender<WithReplyKey>,
+        sender: Sender<WithReplyKey>,
         persister: &SenderPersister,
-    ) -> Result<()> {
-        loop {
-            let (response, ctx) =
-                match self.post_via_relay(|relay| sender.create_v2_post_request(relay)).await? {
-                    RelayPost::Posted(resp, ctx) => (resp, ctx),
-                    RelayPost::Expired =>
-                        return self
-                            .finalize_expired_sender(sender.cancel().save(persister)?, persister),
-                };
-            match sender.process_response(&response.bytes().await?, ctx).save(persister) {
-                Ok(sender) => {
-                    println!("Posted Original PSBT...");
-                    return self.get_proposed_payjoin_psbt(sender, persister).await;
+    ) -> Result<SendSession> {
+        let (response, ctx) =
+            match self.post_via_relay(|relay| sender.create_v2_post_request(relay)).await? {
+                RelayPost::Posted(resp, ctx) => (resp, ctx),
+                RelayPost::Expired => {
+                    self.cancel_sender_session(persister.session_id(), true)?;
+                    return Ok(SendSession::Closed(SenderSessionOutcome::Aborted));
                 }
-                Err(e) if e.is_transient() => {
-                    tracing::debug!("Transient error posting original proposal, retrying: {e:?}");
-                    sender = e.transient_state().expect("transient error carries current state");
-                    tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
-                }
-                Err(e) => return Err(e.into()),
+            };
+        match sender.process_response(&response.bytes().await?, ctx).save(persister) {
+            Ok(sender) => {
+                persister.print("Posted Original PSBT...");
+                Ok(SendSession::PollingForProposal(sender))
             }
+            Err(e) if e.is_transient() => {
+                tracing::debug!("Transient error posting original proposal, retrying: {e:?}");
+                let sender = e.transient_state().expect("transient error carries current state");
+                tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
+                Ok(SendSession::WithReplyKey(sender))
+            }
+            Err(e) => Err(e.into()),
         }
     }
 
     async fn get_proposed_payjoin_psbt(
         &self,
-        mut sender: Sender<PollingForProposal>,
+        sender: Sender<PollingForProposal>,
         persister: &SenderPersister,
-    ) -> Result<()> {
-        // Long poll until we get a response
-        loop {
-            let (response, ctx) =
-                match self.post_via_relay(|relay| sender.create_poll_request(relay)).await? {
-                    RelayPost::Posted(resp, ctx) => (resp, ctx),
-                    RelayPost::Expired =>
-                        return self
-                            .finalize_expired_sender(sender.cancel().save(persister)?, persister),
-                };
-            let res =
-                sender.clone().process_response(&response.bytes().await?, ctx).save(persister);
-            match res {
-                Ok(OptionalTransitionOutcome::Progress(psbt)) => {
-                    println!("Proposal received. Processing...");
-                    self.process_pj_response(psbt)?;
-                    return Ok(());
+    ) -> Result<SendSession> {
+        let (response, ctx) =
+            match self.post_via_relay(|relay| sender.create_poll_request(relay)).await? {
+                RelayPost::Posted(resp, ctx) => (resp, ctx),
+                RelayPost::Expired => {
+                    self.cancel_sender_session(persister.session_id(), true)?;
+                    return Ok(SendSession::Closed(SenderSessionOutcome::Aborted));
                 }
-                Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
-                    println!("No response yet.");
-                    sender = current_state;
-                }
-                Err(e) if e.is_transient() => {
-                    tracing::debug!("Transient error polling for proposal, retrying: {e:?}");
-                    sender = e.transient_state().expect("transient error carries current state");
-                    tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
-                }
-                Err(re) => {
-                    println!("{re}");
-                    tracing::debug!("{re:?}");
-                    return Err(anyhow!("Response error").context(re));
-                }
+            };
+        let res = sender.clone().process_response(&response.bytes().await?, ctx).save(persister);
+        match res {
+            Ok(OptionalTransitionOutcome::Progress(psbt)) => {
+                persister.print("Proposal received. Processing...");
+                Ok(SendSession::Closed(SenderSessionOutcome::Success(psbt)))
+            }
+            Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
+                persister.print("No response yet.");
+                Ok(SendSession::PollingForProposal(current_state))
+            }
+            Err(e) if e.is_transient() => {
+                tracing::debug!("Transient error polling for proposal, retrying: {e:?}");
+                let sender = e.transient_state().expect("transient error carries current state");
+                tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
+                Ok(SendSession::PollingForProposal(sender))
+            }
+            Err(re) => {
+                persister.print(&re);
+                tracing::debug!("{re:?}");
+                Err(anyhow!("Response error").context(re))
             }
         }
     }
 
-    async fn long_poll_fallback(
-        &self,
-        mut session: Receiver<Initialized>,
-        persister: &ReceiverPersister,
-    ) -> Result<Receiver<UncheckedOriginalPayload>> {
-        loop {
-            println!("Polling receive request...");
-            let (ohttp_response, context) =
-                match self.post_via_relay(|relay| session.create_poll_request(relay)).await? {
-                    RelayPost::Posted(resp, ctx) => (resp, ctx),
-                    RelayPost::Expired => {
-                        let session_id = persister.session_id();
-                        Self::close_failed_session(persister, &session_id, "receiver");
-                        return Err(anyhow!("Receiver session expired: {session_id}"));
-                    }
-                };
-            let state_transition = session
-                .process_response(ohttp_response.bytes().await?.to_vec().as_slice(), context)
-                .save(persister);
-            match state_transition {
-                Ok(OptionalTransitionOutcome::Progress(next_state)) => {
-                    println!("Got a request from the sender. Responding with a Payjoin proposal.");
-                    return Ok(next_state);
-                }
-                Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
-                    session = current_state;
-                }
-                Err(e) if e.is_transient() => {
-                    tracing::debug!("Transient error polling for request, retrying: {e:?}");
-                    session = e.transient_state().expect("transient error carries current state");
-                    tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
-                }
-                Err(e) => return Err(e.into()),
-            }
-        }
-    }
-
+    /// Drive the receiver state machine until the session terminates. Each
+    /// step function performs one state transition and returns the next
+    /// state; the driver stops on the terminal `Closed` and
+    /// `PendingFallback` states.
     async fn process_receiver_session(
         &self,
-        session: ReceiveSession,
+        mut session: ReceiveSession,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        let res = {
-            match session {
+        loop {
+            session = match session {
                 ReceiveSession::Initialized(proposal) =>
-                    self.read_from_directory(proposal, persister).await,
+                    self.read_from_directory(proposal, persister).await?,
                 ReceiveSession::UncheckedOriginalPayload(proposal) =>
-                    self.check_proposal(proposal, persister).await,
+                    self.check_proposal(proposal, persister)?,
                 ReceiveSession::MaybeInputsOwned(proposal) =>
-                    self.check_inputs_not_owned(proposal, persister).await,
+                    self.check_inputs_not_owned(proposal, persister)?,
                 ReceiveSession::MaybeInputsSeen(proposal) =>
-                    self.check_no_inputs_seen_before(proposal, persister).await,
+                    self.check_no_inputs_seen_before(proposal, persister)?,
                 ReceiveSession::OutputsUnknown(proposal) =>
-                    self.identify_receiver_outputs(proposal, persister).await,
+                    self.identify_receiver_outputs(proposal, persister)?,
                 ReceiveSession::WantsOutputs(proposal) =>
-                    self.commit_outputs(proposal, persister).await,
+                    self.commit_outputs(proposal, persister)?,
                 ReceiveSession::WantsInputs(proposal) =>
-                    self.contribute_inputs(proposal, persister).await,
+                    self.contribute_inputs(proposal, persister)?,
                 ReceiveSession::WantsFeeRange(proposal) =>
-                    self.apply_fee_range(proposal, persister).await,
+                    self.apply_fee_range(proposal, persister)?,
                 ReceiveSession::ProvisionalProposal(proposal) =>
-                    self.finalize_proposal(proposal, persister).await,
+                    self.finalize_proposal(proposal, persister)?,
                 ReceiveSession::PayjoinProposal(proposal) =>
-                    self.send_payjoin_proposal(proposal, persister).await,
+                    self.send_payjoin_proposal(proposal, persister).await?,
                 ReceiveSession::HasReplyableError(error) =>
-                    self.handle_error(error, persister).await,
-                ReceiveSession::Monitor(proposal) =>
-                    self.monitor_payjoin_proposal(proposal, persister).await,
-                ReceiveSession::PendingFallback(_) => {
-                    let id = persister.session_id();
-                    println!(
-                        "Session {id} was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
-                    );
+                    self.handle_error(error, persister).await?,
+                ReceiveSession::Monitor(proposal) => {
+                    self.monitor_payjoin_proposal(proposal, persister).await?;
                     return Ok(());
                 }
-                ReceiveSession::Closed(_) => return Err(anyhow!("Session closed")),
-            }
-        };
-        res
+                ReceiveSession::PendingFallback(_) => {
+                    let id = persister.session_id();
+                    persister.print(format_args!(
+                        "Session was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
+                    ));
+                    return Ok(());
+                }
+                ReceiveSession::Closed(_) => return Ok(()),
+            };
+        }
     }
 
-    #[allow(clippy::incompatible_msrv)]
+    /// Poll the directory once for the sender's original proposal.
     async fn read_from_directory(
         &self,
         session: Receiver<Initialized>,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
-        let mut interrupt = self.interrupt.clone();
-        let receiver = tokio::select! {
-            res = self.long_poll_fallback(session, persister) => res,
-            _ = interrupt.changed() => {
-                println!("Interrupted. Call the `resume` command to resume all sessions.");
-                return Err(anyhow!("Interrupted"));
+    ) -> Result<ReceiveSession> {
+        persister.print("Polling receive request...");
+        let (ohttp_response, context) =
+            match self.post_via_relay(|relay| session.create_poll_request(relay)).await? {
+                RelayPost::Posted(resp, ctx) => (resp, ctx),
+                RelayPost::Expired => {
+                    self.cancel_receiver_session(persister.session_id(), true)?;
+                    return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
+                }
+            };
+        let state_transition = session
+            .process_response(ohttp_response.bytes().await?.to_vec().as_slice(), context)
+            .save(persister);
+        match state_transition {
+            Ok(OptionalTransitionOutcome::Progress(next_state)) => {
+                persister
+                    .print("Got a request from the sender. Responding with a Payjoin proposal.");
+                Ok(ReceiveSession::UncheckedOriginalPayload(next_state))
             }
-        }?;
-        self.check_proposal(receiver, persister).await
+            Ok(OptionalTransitionOutcome::Stasis(current_state)) =>
+                Ok(ReceiveSession::Initialized(current_state)),
+            Err(e) if e.is_transient() => {
+                tracing::debug!("Transient error polling for request, retrying: {e:?}");
+                let session = e.transient_state().expect("transient error carries current state");
+                tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
+                Ok(ReceiveSession::Initialized(session))
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
-    async fn check_proposal(
+    fn check_proposal(
         &self,
         proposal: Receiver<UncheckedOriginalPayload>,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
+    ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
         let proposal = proposal
             .check_broadcast_suitability(None, |tx| {
@@ -1009,16 +1024,18 @@ impl App {
             })
             .save(persister)?;
 
-        println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
+        persister.print(
+            "Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:",
+        );
         println!("{}", serialize_hex(&proposal.extract_tx_to_schedule_broadcast()));
-        self.check_inputs_not_owned(proposal, persister).await
+        Ok(ReceiveSession::MaybeInputsOwned(proposal))
     }
 
-    async fn check_inputs_not_owned(
+    fn check_inputs_not_owned(
         &self,
         proposal: Receiver<MaybeInputsOwned>,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
+    ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
         let proposal = proposal
             .check_inputs_not_owned(&mut |input| {
@@ -1027,27 +1044,27 @@ impl App {
                     .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
             })
             .save(persister)?;
-        self.check_no_inputs_seen_before(proposal, persister).await
+        Ok(ReceiveSession::MaybeInputsSeen(proposal))
     }
 
-    async fn check_no_inputs_seen_before(
+    fn check_no_inputs_seen_before(
         &self,
         proposal: Receiver<MaybeInputsSeen>,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
+    ) -> Result<ReceiveSession> {
         let proposal = proposal
             .check_no_inputs_seen_before(&mut |input| {
                 Ok(self.db.insert_input_seen_before(*input)?)
             })
             .save(persister)?;
-        self.identify_receiver_outputs(proposal, persister).await
+        Ok(ReceiveSession::OutputsUnknown(proposal))
     }
 
-    async fn identify_receiver_outputs(
+    fn identify_receiver_outputs(
         &self,
         proposal: Receiver<OutputsUnknown>,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
+    ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
         let proposal = proposal
             .identify_receiver_outputs(&mut |output_script| {
@@ -1056,23 +1073,23 @@ impl App {
                     .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
             })
             .save(persister)?;
-        self.commit_outputs(proposal, persister).await
+        Ok(ReceiveSession::WantsOutputs(proposal))
     }
 
-    async fn commit_outputs(
+    fn commit_outputs(
         &self,
         proposal: Receiver<WantsOutputs>,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
+    ) -> Result<ReceiveSession> {
         let proposal = proposal.commit_outputs().save(persister)?;
-        self.contribute_inputs(proposal, persister).await
+        Ok(ReceiveSession::WantsInputs(proposal))
     }
 
-    async fn contribute_inputs(
+    fn contribute_inputs(
         &self,
         proposal: Receiver<WantsInputs>,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
+    ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
         let candidate_inputs = wallet.list_unspent()?;
 
@@ -1085,23 +1102,23 @@ impl App {
         let selected_input = proposal.try_preserving_privacy(candidate_inputs)?;
         let proposal =
             proposal.contribute_inputs(vec![selected_input])?.commit_inputs().save(persister)?;
-        self.apply_fee_range(proposal, persister).await
+        Ok(ReceiveSession::WantsFeeRange(proposal))
     }
 
-    async fn apply_fee_range(
+    fn apply_fee_range(
         &self,
         proposal: Receiver<WantsFeeRange>,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
+    ) -> Result<ReceiveSession> {
         let proposal = proposal.apply_fee_range(None, self.config.max_fee_rate).save(persister)?;
-        self.finalize_proposal(proposal, persister).await
+        Ok(ReceiveSession::ProvisionalProposal(proposal))
     }
 
-    async fn finalize_proposal(
+    fn finalize_proposal(
         &self,
         proposal: Receiver<ProvisionalProposal>,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
+    ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
         let proposal = proposal
             .finalize_proposal(|psbt| {
@@ -1110,43 +1127,44 @@ impl App {
                     .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
             })
             .save(persister)?;
-        self.send_payjoin_proposal(proposal, persister).await
+        Ok(ReceiveSession::PayjoinProposal(proposal))
     }
 
     async fn send_payjoin_proposal(
         &self,
-        mut proposal: Receiver<PayjoinProposal>,
+        proposal: Receiver<PayjoinProposal>,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
-        loop {
-            let (res, ohttp_ctx) = match self
-                .post_via_relay(|relay| proposal.create_post_request(relay))
-                .await?
-            {
+    ) -> Result<ReceiveSession> {
+        let (res, ohttp_ctx) =
+            match self.post_via_relay(|relay| proposal.create_post_request(relay)).await? {
                 RelayPost::Posted(resp, ctx) => (resp, ctx),
-                RelayPost::Expired =>
-                    return self
-                        .finalize_expired_receiver(proposal.cancel().save(persister)?, persister),
+                RelayPost::Expired => {
+                    self.cancel_receiver_session(persister.session_id(), true)?;
+                    return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
+                }
             };
-            let payjoin_psbt = proposal.psbt().clone();
-            match proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister) {
-                Ok(session) => {
-                    println!(
-                        "Response successful. Watch mempool for successful Payjoin. TXID: {}",
-                        payjoin_psbt.extract_tx_unchecked_fee_rate().compute_txid()
-                    );
-                    return self.monitor_payjoin_proposal(session, persister).await;
-                }
-                Err(e) if e.is_transient() => {
-                    tracing::debug!("Transient error sending payjoin proposal, retrying: {e:?}");
-                    proposal = e.transient_state().expect("transient error carries current state");
-                    tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
-                }
-                Err(e) => return Err(e.into()),
+        let payjoin_psbt = proposal.psbt().clone();
+        match proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister) {
+            Ok(session) => {
+                persister.print(format_args!(
+                    "Response successful. Watch mempool for successful Payjoin. TXID: {}",
+                    payjoin_psbt.extract_tx_unchecked_fee_rate().compute_txid()
+                ));
+                Ok(ReceiveSession::Monitor(session))
             }
+            Err(e) if e.is_transient() => {
+                tracing::debug!("Transient error sending payjoin proposal, retrying: {e:?}");
+                let proposal = e.transient_state().expect("transient error carries current state");
+                tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
+                Ok(ReceiveSession::PayjoinProposal(proposal))
+            }
+            Err(e) => Err(e.into()),
         }
     }
 
+    /// Watch the mempool for the payjoin transaction until it appears or a
+    /// timeout elapses. The poll/timeout loop is one logical step from the
+    /// session's perspective, so it stays local rather than in the driver.
     async fn monitor_payjoin_proposal(
         &self,
         mut proposal: Receiver<Monitor>,
@@ -1174,7 +1192,7 @@ impl App {
 
                 match check_result {
                     Ok(OptionalTransitionOutcome::Progress(())) => {
-                        println!("Payjoin transaction detected in the mempool!");
+                        persister.print("Payjoin transaction detected in the mempool!");
                         return Ok(());
                     }
                     Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
@@ -1204,62 +1222,50 @@ impl App {
     /// Handle error by attempting to send an error response over the directory
     async fn handle_error(
         &self,
-        mut session: Receiver<HasReplyableError>,
+        session: Receiver<HasReplyableError>,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
-        loop {
-            let (err_response, err_ctx) = match self
-                .post_via_relay(|relay| session.create_error_request(relay))
-                .await?
-            {
+    ) -> Result<ReceiveSession> {
+        let (err_response, err_ctx) =
+            match self.post_via_relay(|relay| session.create_error_request(relay)).await? {
                 RelayPost::Posted(resp, ctx) => (resp, ctx),
-                RelayPost::Expired => match session.cancel().save(persister)? {
-                    Some(pending) => return self.finalize_expired_receiver(pending, persister),
-                    None => {
-                        let session_id = persister.session_id();
-                        println!(
-                            "Session {session_id} expired before the error reply could be sent. No fallback transaction available."
-                        );
-                        Self::close_failed_session(persister, &session_id, "receiver");
-                        return Ok(());
-                    }
-                },
+                RelayPost::Expired => {
+                    self.cancel_receiver_session(persister.session_id(), true)?;
+                    return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
+                }
             };
-            let err_bytes = match err_response.bytes().await {
-                Ok(bytes) => bytes,
-                Err(e) => return Err(anyhow!("Failed to get error response bytes: {}", e)),
-            };
+        let err_bytes = match err_response.bytes().await {
+            Ok(bytes) => bytes,
+            Err(e) => return Err(anyhow!("Failed to get error response bytes: {}", e)),
+        };
 
-            match session.process_error_response(&err_bytes, err_ctx).save(persister) {
-                Ok(Some(pending)) => {
-                    let session_id = persister.session_id();
-                    println!(
-                                "Session {session_id} delivered error reply. Broadcast the fallback transaction manually:\n{}",
-                                serialize_hex(pending.fallback_tx())
-                            );
-                    return Ok(());
+        match session.process_error_response(&err_bytes, err_ctx).save(persister) {
+            Ok(Some(pending)) => {
+                persister.print(
+                    "Session delivered error reply. Broadcast the fallback transaction manually:",
+                );
+                println!("{}", serialize_hex(pending.fallback_tx()));
+                Ok(ReceiveSession::PendingFallback(pending))
+            }
+            Ok(None) => Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted)),
+            Err(e) if e.is_transient() => {
+                tracing::debug!("Transient error posting error response, retrying: {e:?}");
+                let session = e.transient_state().expect("transient error carries current state");
+                tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
+                Ok(ReceiveSession::HasReplyableError(session))
+            }
+            Err(e) => {
+                if let Some(api_err) = e.api_error_ref() {
+                    tracing::warn!("Failed to confirm error response delivery: {api_err}");
                 }
-                Ok(None) => return Ok(()),
-                Err(e) if e.is_transient() => {
-                    tracing::debug!("Transient error posting error response, retrying: {e:?}");
-                    session = e.transient_state().expect("transient error carries current state");
-                    tokio::time::sleep(TRANSIENT_RETRY_DELAY).await;
-                }
-                Err(e) => {
-                    if let Some(api_err) = e.api_error_ref() {
-                        tracing::warn!("Failed to confirm error response delivery: {api_err}");
+                match e.fatal_state() {
+                    Some(pending) => {
+                        persister.print(
+                            "Session failed to deliver error reply. Broadcast the fallback transaction manually:",
+                        );
+                        println!("{}", serialize_hex(pending.fallback_tx()));
+                        Ok(ReceiveSession::PendingFallback(pending))
                     }
-                    match e.fatal_state() {
-                        Some(pending) => {
-                            let session_id = persister.session_id();
-                            println!(
-                                "Session {session_id} failed to deliver error reply. Broadcast the fallback transaction manually:\n{}",
-                                serialize_hex(pending.fallback_tx())
-                            );
-                            return Ok(());
-                        }
-                        None => return Err(anyhow!("Failed to process error response")),
-                    }
+                    None => Err(anyhow!("Failed to process error response")),
                 }
             }
         }

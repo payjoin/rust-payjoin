@@ -67,8 +67,6 @@ pub trait App: Send + Sync {
         let tx = signed.extract_tx()?;
 
         let txid = self.wallet().broadcast_tx(&tx)?;
-
-        println!("Payjoin sent. TXID: {txid}");
         Ok(txid)
     }
 }

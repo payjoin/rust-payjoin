@@ -71,7 +71,10 @@ jobs:
     name: "Build NuGet native asset"
     runs-on: ubuntu-latest
     env:
-      RUSTUP_TOOLCHAIN: 1.85
+      # Must match the dtolnay/rust-toolchain version exactly: the cross-target
+      # std components are installed for that toolchain, and a partial version
+      # here selects a different rustup toolchain entry without them (E0463).
+      RUSTUP_TOOLCHAIN: 1.85.0
     defaults:
       run:
         working-directory: payjoin-ffi/csharp

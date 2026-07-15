@@ -1,5 +1,55 @@
 # payjoin-cli Changelog
 
+## 1.0.0-rc.0
+
+The 1.0.0-rc.0 release rewrites payjoin-cli's foundations. Session storage migrated from
+sled to SQLite, and the Bitcoin RPC client was replaced twice, landing on bitcoind-async-
+client with official mainnet/testnet support. New CLI commands include cancel and directory
+fallback behavior. Error handling was stabilized with better messages and max fee rate gated
+to v2-only config. Concurrent sends are guarded with exclusive DB locks. Bugs fixed include
+premature resume success, RPC error regression, send-log ordering, and spendable UTXO checks.
+OHTTP relay got documented relay selection guidance and enforced fixed-config selection.  
+Testing and code quality improved across the board.
+
+Selected Improvements:
+
+- Remove redundant clones by @shinghim in [#845](https://github.com/payjoin/rust-payjoin/pull/845)
+- Use tempfile for temporary e2e test directories by @spacebear21 in [#868](https://github.com/payjoin/rust-payjoin/pull/868)
+- Migrate payjoin-cli from sled to rusqlite by @Mshehu5 in [#873](https://github.com/payjoin/rust-payjoin/pull/873)
+- Add default directory to payjoin-cli by @zealsham in [#874](https://github.com/payjoin/rust-payjoin/pull/874)
+- e2e test concurrency fixes by @nothingmuch in [#913](https://github.com/payjoin/rust-payjoin/pull/913)
+- Replace bitcoincore-rpc with custom reqwest client by @bc1cindy in [#945](https://github.com/payjoin/rust-payjoin/pull/945)
+- Update msrv deps by @benalleng in [#959](https://github.com/payjoin/rust-payjoin/pull/959)
+- Fix RPC error message regression in reqwest client by @bc1cindy in [#971](https://github.com/payjoin/rust-payjoin/pull/971)
+- Replace String clones with references in CLI RPC methods by @bc1cindy in [#977](https://github.com/payjoin/rust-payjoin/pull/977)
+- Add receiver pk to session metadata by @arminsabouri in [#995](https://github.com/payjoin/rust-payjoin/pull/995)
+- Simplify session id pj cli by @arminsabouri in [#999](https://github.com/payjoin/rust-payjoin/pull/999)
+- FFI: tighten error conversions by @chavic in [#1029](https://github.com/payjoin/rust-payjoin/pull/1029)
+- Remove optional return types from session history methods by @0xZaddyy in [#1055](https://github.com/payjoin/rust-payjoin/pull/1055)
+- Replace custom RPC client with bitcoind-async-client by @arminsabouri in [#1063](https://github.com/payjoin/rust-payjoin/pull/1063)
+- Check for spendable UTXOs before payjoin operations by @0xZaddyy in [#1071](https://github.com/payjoin/rust-payjoin/pull/1071)
+- Remove redundant try_for_each in history method by @arminsabouri in [#1139](https://github.com/payjoin/rust-payjoin/pull/1139)
+- Nixos stable 25.11 by @benalleng in [#1210](https://github.com/payjoin/rust-payjoin/pull/1210)
+- Skip check_payment in Receiver<Monitor> for non-segwit addresses by @mehmetefeumit in [#1218](https://github.com/payjoin/rust-payjoin/pull/1218)
+- Guard concurrent sends with exclusive DB lock and URI/RK checks by @Mshehu5 in [#1376](https://github.com/payjoin/rust-payjoin/pull/1376)
+- Document OHTTP relay random selection guidance by @bc1cindy in [#1380](https://github.com/payjoin/rust-payjoin/pull/1380)
+- Ensure random relay selection with fixed ohttp-keys config by @benalleng in [#1390](https://github.com/payjoin/rust-payjoin/pull/1390)
+- Use official bitcoind-async-client release with mainnet and testnet support by @benalleng in [#1441](https://github.com/payjoin/rust-payjoin/pull/1441)
+- Only set max_fee_rate when configured in v2 by @codaMW in [#1490](https://github.com/payjoin/rust-payjoin/pull/1490)
+- Fix send success log error and order by @Arowolokehinde in [#1498](https://github.com/payjoin/rust-payjoin/pull/1498)
+- Fix mailroom reject post requests over capacity by @va-an in [#1509](https://github.com/payjoin/rust-payjoin/pull/1509)
+- Fix resume succeeding prematurely by @zealsham in [#1573](https://github.com/payjoin/rust-payjoin/pull/1573)
+- Stabilize 1.0 errors by carving out errors used in state machine control flow by @DanGould in [#1602](https://github.com/payjoin/rust-payjoin/pull/1602)
+- Improve error when config file is missing by @benalleng in [#1632](https://github.com/payjoin/rust-payjoin/pull/1632)
+- Rename Monitor method by @spacebear21 in [#1661](https://github.com/payjoin/rust-payjoin/pull/1661)
+- Fix spelling mistakes by @chavic in [#1665](https://github.com/payjoin/rust-payjoin/pull/1665)
+- Add directory fallback behavior by @benalleng in [#1695](https://github.com/payjoin/rust-payjoin/pull/1695)
+- Cli cancel UX by @benalleng in [#1700](https://github.com/payjoin/rust-payjoin/pull/1700)
+- Look up RK instead of looping by @benalleng in [#1706](https://github.com/payjoin/rust-payjoin/pull/1706)
+- Cleanup readmes for 1.0 by @benalleng in [#1727](https://github.com/payjoin/rust-payjoin/pull/1727)
+- Consume self in Monitor check_for_transaction by @xstoicunicornx in [#1729](https://github.com/payjoin/rust-payjoin/pull/1729)
+- Cli Refactor by @xstoicunicornx in [#1737](https://github.com/payjoin/rust-payjoin/pull/1737)
+
 ## 0.2.0
 
 - Support sender and receiver being generic over their typestate ([#728](https://github.com/payjoin/rust-payjoin/pull/728), [#719](https://github.com/payjoin/rust-payjoin/pull/719))

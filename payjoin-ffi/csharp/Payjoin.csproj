@@ -20,11 +20,15 @@
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <NoPackageAnalysis>true</NoPackageAnalysis>
     <!-- Accepted warnings from UniFFI-generated code: CS0108 (generated exception
          Message types hide Exception.Message) and CS0659 (generated classes override
-         Equals without GetHashCode). Regenerate rather than hand-edit src/payjoin.cs. -->
-    <NoWarn>$(NoWarn);CS0108;CS0659</NoWarn>
+         Equals without GetHashCode). Regenerate rather than hand-edit src/payjoin.cs.
+         NU5131 fires because the package ships a ref/net10.0 assembly (the intentional
+         native-asset layout: compile against ref/, run from runtimes/) and csproj-based
+         pack cannot emit the nuspec references group the analysis asks for; consumption
+         is covered by the per-RID smoke tests. Keep every other package-analysis warning
+         visible. -->
+    <NoWarn>$(NoWarn);CS0108;CS0659;NU5131</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

@@ -92,8 +92,9 @@ bash ./scripts/build_nuget_native.sh
 ```
 
 Any supported RID can also be cross-compiled from a Linux host, which is how CI
-builds every native asset (`pip install ziglang cargo-zigbuild cargo-xwin` and
-`rustup target add` the matching triple first):
+builds every native asset (`pip install -r scripts/cross-requirements.txt` for
+the version- and hash-pinned toolchain CI uses, and `rustup target add` the
+matching triple first):
 
 ```shell
 PAYJOIN_FFI_CROSS=1 PAYJOIN_FFI_RID=osx-arm64 bash ./scripts/build_nuget_native.sh

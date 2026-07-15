@@ -1,0 +1,19 @@
+# Pinned cross-compilation toolchain for the CI native-asset job (Linux runners).
+# These tools produce the exact binaries shipped in the NuGet package, so they
+# are pinned by version and hash: a floating install would let an upstream
+# release or a compromised PyPI package silently change the shipped artifacts.
+# Update deliberately, never implicitly. Hashes cover the x86_64 and aarch64
+# manylinux wheels.
+ziglang==0.16.0 \
+    --hash=sha256:9fcda73f62b851dd72a54b710ad40a209896db14cfb13649e62191243556342b \
+    --hash=sha256:e27d409812b11e0fb89ed0200cf2e55b6464d43f9461553104e4a4f9a94a1fd5
+cargo-zigbuild==0.23.0 \
+    --hash=sha256:3a2e021435a5e3c8b3a70bfc490580a3af6952185aa5ffb722b005d1fbe000c9 \
+    --hash=sha256:d984af93da7a230606452ef5f6df47e6a081b12dcead8a3e8e5ff024728c94f0
+cargo-xwin==0.22.0 \
+    --hash=sha256:eebe464a84371c98c9a3e2d24a87b6c0fdc575146f6670f49823a366158027bf \
+    --hash=sha256:8a6d3f235590a1e583286884cbdf0b2af67164713f8a81d292f3312e0fa2355e
+# Transitive dependency of cargo-xwin.
+ninja==1.13.0 \
+    --hash=sha256:fb46acf6b93b8dd0322adc3a4945452a4e774b75b91293bafcc7b7f8e6517dfa \
+    --hash=sha256:3d00c692fb717fd511abeb44b8c5d00340c36938c12d6538ba989fe764e79630

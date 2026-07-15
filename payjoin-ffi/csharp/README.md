@@ -113,10 +113,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\generate_bindings.ps1 -Produc
 dotnet pack Payjoin.csproj --configuration Release --output artifacts/packages
 ```
 
-Validate the package in a clean sample app:
+Validate the package in a clean sample app (`auto` derives the version from the
+packed artifact; an explicit version is also accepted):
 
 ```shell
-bash ./scripts/smoke_nuget_package.sh artifacts/packages 0.24.0-preview.1 linux-x64
+bash ./scripts/smoke_nuget_package.sh artifacts/packages auto linux-x64
 ```
 
 CI performs the package build from release native assets and runs the smoke test

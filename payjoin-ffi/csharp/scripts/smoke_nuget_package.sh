@@ -2,13 +2,28 @@
 set -euo pipefail
 
 if [[ $# -lt 2 || $# -gt 3 ]]; then
-    echo "usage: $0 <package-source> <package-version> [runtime-id]" >&2
+    echo "usage: $0 <package-source> <package-version|auto> [runtime-id]" >&2
+    echo "  'auto' derives the version from the single Payjoin.*.nupkg in <package-source>." >&2
     exit 1
 fi
 
 PACKAGE_SOURCE=$(cd "$1" && pwd)
 PACKAGE_VERSION=$2
 RID=${3:-}
+
+if [[ $PACKAGE_VERSION == auto ]]; then
+    shopt -s nullglob
+    packages=("$PACKAGE_SOURCE"/Payjoin.*.nupkg)
+    shopt -u nullglob
+    if [[ ${#packages[@]} -ne 1 ]]; then
+        echo "Expected exactly one Payjoin.*.nupkg in $PACKAGE_SOURCE to derive the version; found ${#packages[@]}." >&2
+        exit 1
+    fi
+    PACKAGE_VERSION=$(basename "${packages[0]}")
+    PACKAGE_VERSION=${PACKAGE_VERSION#Payjoin.}
+    PACKAGE_VERSION=${PACKAGE_VERSION%.nupkg}
+    echo "Derived package version $PACKAGE_VERSION from ${packages[0]}"
+fi
 WORKDIR=$(mktemp -d)
 trap 'rm -rf "$WORKDIR"' EXIT
 export DOTNET_CLI_HOME="$WORKDIR/dotnet-home"

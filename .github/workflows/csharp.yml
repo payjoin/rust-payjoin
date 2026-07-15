@@ -203,4 +203,6 @@ jobs:
 
       - name: Run package smoke test
         shell: bash
-        run: bash ./scripts/smoke_nuget_package.sh artifacts/packages 0.24.0-preview.1 ${{ matrix.rid }}
+        # 'auto' derives the version from the packed artifact, so Payjoin.csproj
+        # stays the only place the package version is maintained.
+        run: bash ./scripts/smoke_nuget_package.sh artifacts/packages auto ${{ matrix.rid }}

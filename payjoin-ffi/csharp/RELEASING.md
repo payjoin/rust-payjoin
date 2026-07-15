@@ -13,8 +13,8 @@ package readme.
   follow [SemVer], per NuGet's [package versioning] guidance.
 - Bump only the `-preview.N` suffix for packaging-only fixes. Bump
   `MAJOR.MINOR.PATCH` together with a `payjoin-ffi` version bump.
-- The smoke test invocation in `.github/workflows/csharp.yml` pins the same
-  version string. Update both places in the same commit.
+- `Payjoin.csproj` is the only place the version is maintained: the CI smoke
+  test derives the version from the packed artifact.
 
 ## Producing a release candidate
 
@@ -57,9 +57,8 @@ Review before every publish to nuget.org. Grounded in the NuGet
 - [ ] Native assets are release-profile builds without `_test-utils` (the
       pack step's validation target enforces both; confirm it ran in CI).
 - [ ] The package is under nuget.org's 250 MB size limit.
-- [ ] Package version matches `payjoin-ffi`'s crate version plus the intended
-      pre-release suffix, in both `Payjoin.csproj` and the workflow smoke
-      step.
+- [ ] Package version in `Payjoin.csproj` matches `payjoin-ffi`'s crate
+      version plus the intended pre-release suffix.
 
 ### Metadata and trust
 

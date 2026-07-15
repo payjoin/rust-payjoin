@@ -1,3 +1,10 @@
+param(
+    # Force production bindings (no extra cargo features). Windows cannot represent an empty
+    # environment variable distinctly from an unset one, so callers signal production through
+    # this switch rather than by setting PAYJOIN_FFI_FEATURES to "".
+    [switch] $ProductionBindings
+)
+
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 
@@ -37,7 +44,9 @@ $payjoinFfiDir = Resolve-Path (Join-Path $scriptDir "..\..")
 Set-Location $payjoinFfiDir
 
 Write-Host "Generating payjoin C#..."
-if ($null -ne $env:PAYJOIN_FFI_FEATURES) {
+if ($ProductionBindings) {
+    $payjoinFfiFeatures = ""
+} elseif ($null -ne $env:PAYJOIN_FFI_FEATURES) {
     $payjoinFfiFeatures = $env:PAYJOIN_FFI_FEATURES
 } else {
     # Keep parity with other language test scripts: include _test-utils by default.

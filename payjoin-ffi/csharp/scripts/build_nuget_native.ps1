@@ -53,14 +53,20 @@ if ($env:PAYJOIN_FFI_RID) {
 
 $libName = Get-NativeLibraryName -Rid $rid
 
-if ($null -eq $env:PAYJOIN_FFI_FEATURES) {
-    $env:PAYJOIN_FFI_FEATURES = ""
-}
+# On Windows, assigning "" to an environment variable removes it, so we cannot mark production
+# bindings by clearing PAYJOIN_FFI_FEATURES the way the bash script does. When the caller has not
+# requested specific features, ask generate_bindings.ps1 for production bindings explicitly; an
+# explicitly-set PAYJOIN_FFI_FEATURES is still forwarded through the environment.
+$useProductionBindings = $null -eq $env:PAYJOIN_FFI_FEATURES
 if (-not $env:PAYJOIN_FFI_PROFILE) {
     $env:PAYJOIN_FFI_PROFILE = "release"
 }
 
-& (Join-Path $csharpDir "scripts/generate_bindings.ps1")
+if ($useProductionBindings) {
+    & (Join-Path $csharpDir "scripts/generate_bindings.ps1") -ProductionBindings
+} else {
+    & (Join-Path $csharpDir "scripts/generate_bindings.ps1")
+}
 if ($LASTEXITCODE -ne 0) {
     throw "generate_bindings.ps1 failed with exit code $LASTEXITCODE"
 }

@@ -1566,17 +1566,10 @@ impl Receiver<Monitor> {
                         self,
                     );
                 }
-                // TODO: should we check for witness and scriptsig on the tx?
-                let mut sender_witnesses = vec![];
-
-                for i in self.state.psbt_context.sender_input_indexes() {
-                    let input =
-                        tx.input.get(i).expect("sender_input_indexes should return valid indices");
-                    sender_witnesses.push((input.script_sig.clone(), input.witness.clone()));
-                }
-                // Payjoin transaction with SegWit inputs was detected. Log the signatures and complete the session.
+                // Payjoin transaction with SegWit inputs was detected. Complete the session,
+                // recording the txid of the transaction that settled it.
                 return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                    SessionOutcome::Success(sender_witnesses),
+                    SessionOutcome::Success(tx_id),
                 ));
             }
             Ok(None) => {}
@@ -1636,7 +1629,7 @@ pub(crate) fn pj_uri<'a>(
 pub mod test {
     use std::str::FromStr;
 
-    use bitcoin::{Amount, FeeRate, ScriptBuf, Witness};
+    use bitcoin::{Amount, FeeRate};
     use once_cell::sync::Lazy;
     use payjoin_test_utils::{
         BoxError, EXAMPLE_URL, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL,
@@ -1774,10 +1767,7 @@ pub mod test {
         assert_eq!(persister.inner.lock().expect("Shouldn't be poisoned").events.len(), 1);
         assert_eq!(
             persister.inner.lock().expect("Shouldn't be poisoned").events.last(),
-            Some(&SessionEvent::Closed(SessionOutcome::Success(vec![(
-                ScriptBuf::default(),
-                Witness::default()
-            )])))
+            Some(&SessionEvent::Closed(SessionOutcome::Success(payjoin_tx.compute_txid())))
         );
 
         // Fallback was broadcasted, should progress to success

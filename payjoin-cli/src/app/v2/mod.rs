@@ -73,11 +73,11 @@ pub(crate) struct App {
 }
 
 trait StatusText {
-    fn status_text(&self) -> &'static str;
+    fn status_text(&self) -> String;
 }
 
 impl StatusText for SendSession {
-    fn status_text(&self) -> &'static str {
+    fn status_text(&self) -> String {
         match self {
             SendSession::WithReplyKey(_) | SendSession::PollingForProposal(_) =>
                 "Waiting for proposal",
@@ -87,13 +87,14 @@ impl StatusText for SendSession {
             },
             SendSession::PendingFallback(_) => "Session awaiting fallback",
         }
+        .to_string()
     }
 }
 
 impl StatusText for ReceiveSession {
-    fn status_text(&self) -> &'static str {
+    fn status_text(&self) -> String {
         match self {
-            ReceiveSession::Initialized(_) => "Waiting for original proposal",
+            ReceiveSession::Initialized(_) => "Waiting for original proposal".to_string(),
             ReceiveSession::UncheckedOriginalPayload(_)
             | ReceiveSession::MaybeInputsOwned(_)
             | ReceiveSession::MaybeInputsSeen(_)
@@ -101,18 +102,21 @@ impl StatusText for ReceiveSession {
             | ReceiveSession::WantsOutputs(_)
             | ReceiveSession::WantsInputs(_)
             | ReceiveSession::WantsFeeRange(_)
-            | ReceiveSession::ProvisionalProposal(_) => "Processing original proposal",
-            ReceiveSession::PayjoinProposal(_) => "Payjoin proposal sent",
+            | ReceiveSession::ProvisionalProposal(_) => "Processing original proposal".to_string(),
+            ReceiveSession::PayjoinProposal(_) => "Payjoin proposal sent".to_string(),
             ReceiveSession::HasReplyableError(_) =>
-                "Session failure, waiting to post error response",
-            ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
-            ReceiveSession::PendingFallback(_) => "Pending fallback handling",
+                "Session failure, waiting to post error response".to_string(),
+            ReceiveSession::Monitor(_) => "Monitoring payjoin proposal".to_string(),
+            ReceiveSession::PendingFallback(_) => "Pending fallback handling".to_string(),
             ReceiveSession::Closed(session_outcome) => match session_outcome {
-                ReceiverSessionOutcome::Aborted => "Session aborted",
-                ReceiverSessionOutcome::Success(_) => "Session success, Payjoin proposal was broadcasted",
-                ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
+                ReceiverSessionOutcome::Aborted => "Session aborted".to_string(),
+                ReceiverSessionOutcome::Success(txid) =>
+                    format!("Session success, Payjoin transaction {txid} was broadcasted"),
+                ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted".to_string(),
                 ReceiverSessionOutcome::PayjoinProposalSent =>
-                    "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs",
+                    "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs".to_string(),
+                ReceiverSessionOutcome::Other(txid) =>
+                    format!("Settled by an unrecognized transaction {txid}"),
             },
         }
     }
@@ -178,7 +182,7 @@ impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
             (Some(err), _) => err.to_string(),
             (None, true) =>
                 format!("{}, Fallback transaction available", self.status.status_text()),
-            (None, false) => self.status.status_text().to_string(),
+            (None, false) => self.status.status_text(),
         };
         write!(
             f,
@@ -763,6 +767,12 @@ impl App {
                     None => persister
                         .print("Session is already closed. No fallback transaction available."),
                 }
+                return Ok(());
+            }
+            ReceiveSession::Closed(ReceiverSessionOutcome::Other(txid)) => {
+                persister.print(format_args!(
+                    "Session was already settled by an unrecognized transaction {txid}. Cannot cancel."
+                ));
                 return Ok(());
             }
         };

@@ -231,10 +231,6 @@ pub enum SessionOutcome {
     PayjoinProposalSent,
     /// The contested outpoints were settled by an unrecognized transaction (neither the
     /// Payjoin nor the fallback), identified by its txid.
-    ///
-    /// Nothing in this release produces this variant. It is reserved now because this enum is
-    /// deliberately exhaustive, so a new variant after 1.0 would be a semver-breaking API
-    /// change; naming it before the freeze lets the settlement classifier land additively.
     Other(bitcoin::Txid),
 }
 

@@ -1779,6 +1779,24 @@ impl Receiver<Monitor> {
         }
     }
 
+    /// Conclude the monitoring session with a terminal [`SettlementOutcome`] once the caller's
+    /// confidence bar — e.g. a confirmation depth observed via [`Receiver<Monitor>::classify`] —
+    /// is met. Persists a single `Closed` event, mapping the outcome to the persisted
+    /// [`SessionOutcome`]: [`SettlementOutcome::Cooperative`] → [`SessionOutcome::Success`],
+    /// [`SettlementOutcome::Fallback`] → [`SessionOutcome::FallbackBroadcasted`], and
+    /// [`SettlementOutcome::Other`] → [`SessionOutcome::Other`].
+    ///
+    /// When to conclude is the caller's call: a 0-confirmation conclusion can still be reorged or
+    /// out-raced by the conflicting transaction.
+    pub fn conclude(self, outcome: SettlementOutcome) -> TerminalTransition<SessionEvent, ()> {
+        let session_outcome = match outcome {
+            SettlementOutcome::Cooperative(txid) => SessionOutcome::Success(txid),
+            SettlementOutcome::Fallback => SessionOutcome::FallbackBroadcasted,
+            SettlementOutcome::Other(txid) => SessionOutcome::Other(txid),
+        };
+        TerminalTransition::new(SessionEvent::Closed(session_outcome), ())
+    }
+
     /// Checks the network for the Payjoin proposal or the fallback transaction using the passed
     /// `find_transaction` closure, and concludes the Payjoin session once one is found. The
     /// closure defines the condition that counts as found — for example presence in the mempool,
@@ -1804,11 +1822,10 @@ impl Receiver<Monitor> {
             ));
         }
 
-        let payjoin_proposal = &self.state.psbt_context.payjoin_psbt;
-        let payjoin_txid = payjoin_proposal.unsigned_tx.compute_txid();
-        // If the sender is spending SegWit-only inputs, then the transaction ID of the Payjoin proposal
-        // is not going to change when the sender signs it. So we can use the TXID to check the
-        // network for the Payjoin proposal.
+        let payjoin_txid = self.payjoin_txid();
+        // If the sender is spending SegWit-only inputs, then the transaction ID of the Payjoin
+        // proposal is not going to change when the sender signs it. So we can use the TXID to check
+        // the network for the Payjoin proposal.
         match find_transaction(payjoin_txid) {
             Ok(Some(tx)) => {
                 let tx_id = tx.compute_txid();
@@ -1820,11 +1837,18 @@ impl Receiver<Monitor> {
                         self,
                     );
                 }
-                // Payjoin transaction with SegWit inputs was detected. Complete the session,
-                // recording the txid of the transaction that settled it.
-                return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                    SessionOutcome::Success(tx_id),
-                ));
+                let view = ChainView { spends: self.spends_from_tx(&tx) };
+                if let SettlementStatus::Detected {
+                    outcome: SettlementOutcome::Cooperative(settled_txid),
+                    ..
+                } = self.classify(&view)
+                {
+                    // Payjoin transaction was detected. Complete the session, recording the
+                    // txid of the transaction that settled it.
+                    return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                        SessionOutcome::Success(settled_txid),
+                    ));
+                }
             }
             Ok(None) => {}
             Err(e) =>
@@ -1833,17 +1857,38 @@ impl Receiver<Monitor> {
 
         // If the Payjoin proposal was not found, check the fallback transaction, as it is
         // the second of two transactions whose IDs the receiver is aware of.
-        match find_transaction(fallback_tx.compute_txid()) {
-            Ok(Some(_)) =>
-                return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                    SessionOutcome::FallbackBroadcasted,
-                )),
+        let fallback_txid = fallback_tx.compute_txid();
+        match find_transaction(fallback_txid) {
+            Ok(Some(tx)) => {
+                let view = ChainView { spends: self.spends_from_tx(&tx) };
+                if let SettlementStatus::Detected { outcome: SettlementOutcome::Fallback, .. } =
+                    self.classify(&view)
+                {
+                    return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                        SessionOutcome::FallbackBroadcasted,
+                    ));
+                }
+            }
             Ok(None) => {}
             Err(e) =>
                 return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e), self),
         }
 
         MaybeFatalOrSuccessTransition::no_results(self)
+    }
+
+    /// Build [`OutpointSpend`] entries for every contested outpoint that `tx` spends. Used to drive
+    /// [`Receiver<Monitor>::classify`] from a single known transaction (the legacy txid probe).
+    /// `confirmations` is left at `0` because the txid-only probe carries no depth information.
+    fn spends_from_tx(&self, tx: &Transaction) -> Vec<OutpointSpend> {
+        self.contested_outpoints()
+            .into_iter()
+            .filter(|outpoint| tx.input.iter().any(|txin| txin.previous_output == *outpoint))
+            .map(|outpoint| OutpointSpend {
+                outpoint,
+                spend: Some(Spend { tx: tx.clone(), confirmations: 0 }),
+            })
+            .collect()
     }
 }
 
@@ -2506,6 +2551,31 @@ pub mod test {
             monitor.classify(&ChainView { spends }),
             SettlementStatus::Detected { outcome: SettlementOutcome::Cooperative(_), .. }
         ));
+    }
+
+    #[test]
+    fn test_monitor_conclude_maps_outcomes() {
+        use bitcoin::hashes::Hash as _;
+
+        let cases = [
+            (
+                SettlementOutcome::Cooperative(Txid::all_zeros()),
+                SessionOutcome::Success(Txid::all_zeros()),
+            ),
+            (SettlementOutcome::Fallback, SessionOutcome::FallbackBroadcasted),
+            (SettlementOutcome::Other(Txid::all_zeros()), SessionOutcome::Other(Txid::all_zeros())),
+        ];
+
+        for (outcome, expected) in cases {
+            let persister = InMemoryPersister::default();
+            segwit_monitor()
+                .conclude(outcome)
+                .save(&persister)
+                .expect("InMemoryPersister shouldn't fail");
+            let inner = persister.inner.lock().expect("Shouldn't be poisoned");
+            assert!(inner.is_closed, "conclude must close the session");
+            assert_eq!(inner.events.last(), Some(&SessionEvent::Closed(expected)));
+        }
     }
 
     #[test]

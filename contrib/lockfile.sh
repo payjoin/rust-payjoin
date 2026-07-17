@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LOCKFILE="Cargo.lock"
-LOCKDIR=".bak"
-LOCKFILE_BAK="${LOCKDIR}/${LOCKFILE}"
+# Absolute paths so the EXIT trap restores the lockfile even if the sourcing
+# script changes directory after calling use_lockfile.
+LOCKFILE="${PWD}/Cargo.lock"
+LOCKDIR="${PWD}/.bak"
+LOCKFILE_BAK="${LOCKDIR}/Cargo.lock"
 
 _cleanup_lockfile() {
     if [ -f "$LOCKFILE_BAK" ]; then

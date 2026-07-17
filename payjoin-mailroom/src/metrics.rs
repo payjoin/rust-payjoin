@@ -4,6 +4,16 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[cfg(feature = "telemetry")]
+pub fn build_telemetry_resource(operator_domain: &str) -> opentelemetry_sdk::Resource {
+    use opentelemetry::KeyValue;
+    opentelemetry_sdk::Resource::builder()
+        .with_service_name("payjoin-mailroom")
+        .with_attribute(KeyValue::new("operator.domain", operator_domain.to_string()))
+        .with_attribute(KeyValue::new("service.instance.id", uuid::Uuid::new_v4().to_string()))
+        .build()
+}
+
 use hyperloglogplus::{HyperLogLog, HyperLogLogPlus};
 use opentelemetry::metrics::{Counter, MeterProvider, ObservableGauge, UpDownCounter};
 use opentelemetry::KeyValue;
@@ -337,6 +347,41 @@ impl Drop for InFlightGuard {
 #[cfg(test)]
 mod tests {
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+
+    #[cfg(feature = "telemetry")]
+    #[test]
+    fn telemetry_resource_attributes() {
+        use opentelemetry::Key;
+
+        use super::build_telemetry_resource;
+
+        let r1 = build_telemetry_resource("example.com");
+
+        assert_eq!(
+            r1.get(&Key::from("service.name")),
+            Some(opentelemetry::Value::String("payjoin-mailroom".into())),
+            "service.name must be payjoin-mailroom"
+        );
+        assert_eq!(
+            r1.get(&Key::from("operator.domain")),
+            Some(opentelemetry::Value::String("example.com".into())),
+            "operator.domain must match configured value"
+        );
+
+        let id1 = r1
+            .get(&Key::from("service.instance.id"))
+            .expect("service.instance.id must be present")
+            .to_string();
+        assert!(!id1.is_empty(), "service.instance.id must not be empty");
+        uuid::Uuid::parse_str(&id1).expect("service.instance.id must parse as a UUID");
+
+        let r2 = build_telemetry_resource("example.com");
+        let id2 = r2
+            .get(&Key::from("service.instance.id"))
+            .expect("service.instance.id must be present in second resource")
+            .to_string();
+        assert_ne!(id1, id2, "service.instance.id must differ across constructions");
+    }
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
 
     use super::*;

@@ -36,14 +36,10 @@ fn init_tracing() -> Option<SdkMeterProvider> {
 
 #[cfg(feature = "telemetry")]
 fn init_tracing_with_telemetry(telemetry: &config::TelemetryConfig) -> SdkMeterProvider {
-    use opentelemetry::KeyValue;
     use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
-    use opentelemetry_sdk::Resource;
+    use payjoin_mailroom::metrics::build_telemetry_resource;
 
-    let resource = Resource::builder()
-        .with_service_name("payjoin-mailroom")
-        .with_attribute(KeyValue::new("operator.domain", telemetry.operator_domain.clone()))
-        .build();
+    let resource = build_telemetry_resource(&telemetry.operator_domain);
 
     let headers: std::collections::HashMap<String, String> =
         [("Authorization".to_string(), format!("Basic {}", telemetry.auth_token))].into();

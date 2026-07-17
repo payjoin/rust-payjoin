@@ -36,6 +36,20 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $payjoinFfiDir = Resolve-Path (Join-Path $scriptDir "..\..")
 Set-Location $payjoinFfiDir
 
+# Build against the maintained lockfile instead of resolving the dependency
+# graph fresh on every run; mirrors contrib/lockfile.sh for this Windows entry
+# point. The previous lockfile state is restored before the script exits.
+$repoRoot = Resolve-Path (Join-Path $payjoinFfiDir "..")
+$lockFile = Join-Path $repoRoot "Cargo.lock"
+$lockBackup = $null
+if (Test-Path $lockFile) {
+    $lockBackup = "$lockFile.bak"
+    Move-Item $lockFile $lockBackup -Force
+}
+Copy-Item (Join-Path $repoRoot "Cargo-recent.lock") $lockFile -Force
+
+try {
+
 Write-Host "Generating payjoin C#..."
 if ($null -ne $env:PAYJOIN_FFI_FEATURES) {
     $payjoinFfiFeatures = $env:PAYJOIN_FFI_FEATURES
@@ -72,5 +86,13 @@ finally {
 Write-Host "Copying native library..."
 New-Item -ItemType Directory -Force -Path "csharp/lib" | Out-Null
 Copy-Item "../target/debug/$libName" "csharp/lib/$libName" -Force
+
+}
+finally {
+    Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+    if ($null -ne $lockBackup) {
+        Move-Item $lockBackup $lockFile -Force
+    }
+}
 
 Write-Host "All done!"

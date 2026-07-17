@@ -193,7 +193,6 @@ pub enum SessionStatus {
 /// Represents a piece of information that the receiver has obtained from the session
 /// Each event can be used to transition the receiver state machine to a new state
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-// TODO Explore why this lint is not consistent and only fails on 1.85.0 unlike the Sender
 #[allow(clippy::large_enum_variant)]
 pub enum SessionEvent {
     Created(SessionContext),

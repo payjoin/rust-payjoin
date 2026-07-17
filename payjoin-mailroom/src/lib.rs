@@ -26,6 +26,8 @@ pub mod key_config;
 pub mod metrics;
 pub mod middleware;
 pub mod ohttp_relay;
+#[cfg(feature = "telemetry")]
+pub mod telemetry;
 
 use crate::metrics::MetricsService;
 use crate::middleware::{track_connections, track_metrics};

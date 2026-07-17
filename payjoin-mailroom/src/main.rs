@@ -36,29 +36,11 @@ fn init_tracing() -> Option<SdkMeterProvider> {
 
 #[cfg(feature = "telemetry")]
 fn init_tracing_with_telemetry(telemetry: &config::TelemetryConfig) -> SdkMeterProvider {
-    use opentelemetry::KeyValue;
-    use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
-    use opentelemetry_sdk::Resource;
-
-    let resource = Resource::builder()
-        .with_service_name("payjoin-mailroom")
-        .with_attribute(KeyValue::new("operator.domain", telemetry.operator_domain.clone()))
-        .build();
-
-    let headers: std::collections::HashMap<String, String> =
-        [("Authorization".to_string(), format!("Basic {}", telemetry.auth_token))].into();
-
-    // Initialize metric exporter and provider
-    let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
-        .with_http()
-        .with_endpoint(format!("{}/v1/metrics", telemetry.endpoint))
-        .with_headers(headers)
-        .build()
-        .expect("Failed to build OTLP metric exporter");
-    let meter_provider = SdkMeterProvider::builder()
-        .with_periodic_exporter(metric_exporter)
-        .with_resource(resource)
-        .build();
+    let meter_provider = payjoin_mailroom::telemetry::build_otlp_meter_provider(
+        &telemetry.endpoint,
+        &telemetry.auth_token,
+        &telemetry.operator_domain,
+    );
 
     let env_filter =
         EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy();

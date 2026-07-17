@@ -51,7 +51,7 @@ impl From<payjoin::PjUri<'static>> for PjUri {
     fn from(value: payjoin::PjUri<'static>) -> Self { Self(value) }
 }
 
-impl<'a> From<PjUri> for payjoin::PjUri<'a> {
+impl From<PjUri> for payjoin::PjUri<'_> {
     fn from(value: PjUri) -> Self { value.0 }
 }
 

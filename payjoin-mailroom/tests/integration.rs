@@ -141,7 +141,7 @@ mod integration {
         Ok(res)
     }
 
-    async fn ohttp_req(relay_port: u16, cert: CertificateDer<'static>, gateway: GatewayUri) -> () {
+    async fn ohttp_req(relay_port: u16, cert: CertificateDer<'static>, gateway: GatewayUri) {
         for gw_path in ["", &gateway.to_uri().to_string()] {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             let mut req = Request::new(full(Vec::from_hex(ENCAPSULATED_REQ).unwrap()).boxed());

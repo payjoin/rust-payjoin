@@ -88,7 +88,7 @@ pub struct PathSegmentsMut<'a> {
     url: &'a mut Url,
 }
 
-impl<'a> PathSegmentsMut<'a> {
+impl PathSegmentsMut<'_> {
     /// Append a single path segment, inserting a `/` separator if needed.
     ///
     /// The segment is pushed verbatim — no percent-encoding is applied.
@@ -100,7 +100,7 @@ impl<'a> PathSegmentsMut<'a> {
     }
 }
 
-impl<'a> Drop for PathSegmentsMut<'a> {
+impl Drop for PathSegmentsMut<'_> {
     fn drop(&mut self) { self.url.rebuild_raw(); }
 }
 

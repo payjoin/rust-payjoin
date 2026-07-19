@@ -21,8 +21,18 @@ from standup_lib import (
 CATEGORY_NODE_ID = os.environ["DISCUSSION_CATEGORY_NODE_ID"]
 
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "standup-contributors.yml"
-with open(_CONFIG_PATH) as _f:
-    CONTRIBUTORS = [c["username"] for c in yaml.safe_load(_f)["contributors"]]
+
+
+def load_contributors():
+    """Return configured proactive check-in prompts, if any."""
+    if not _CONFIG_PATH.exists():
+        return []
+    with open(_CONFIG_PATH) as f:
+        data = yaml.safe_load(f) or {}
+    return [c["username"] for c in data.get("contributors", [])]
+
+
+CONTRIBUTORS = load_contributors()
 
 
 def get_repo_node_id():
@@ -171,11 +181,21 @@ def main():
 
     repo_node_id = get_repo_node_id()
     title = f"Weekly Check-in: {week_label}"
+    if CONTRIBUTORS:
+        intro = (
+            "Weekly standup — each contributor has a thread below "
+            "with auto-gathered activity.\n\n"
+            "**Reply to your thread by end-of-day Monday (your timezone).** "
+        )
+    else:
+        intro = (
+            "Weekly standup — comment `/check-in` by end-of-day Monday "
+            "(your timezone) for an auto-gathered activity thread.\n\n"
+        )
+
     body = (
-        "Weekly standup — each contributor has a thread below "
-        "with auto-gathered activity.\n\n"
-        "**Reply to your thread by end-of-day Monday (your timezone).** "
-        "Copy the template below and fill it in:\n\n"
+        intro
+        + "Copy the template below and fill it in:\n\n"
         "```markdown\n"
         "### Shipped\n"
         "<!-- Add anything the bot missed: design work, specs, "

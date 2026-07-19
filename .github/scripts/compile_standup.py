@@ -2,6 +2,7 @@
 """Update the latest Weekly Check-in Discussion body with participation summary."""
 
 import os
+import re
 from pathlib import Path
 
 import requests
@@ -16,8 +17,21 @@ HEADERS = {
 }
 
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "standup-contributors.yml"
-with open(_CONFIG_PATH) as _f:
-    CONTRIBUTORS = [c["username"] for c in yaml.safe_load(_f)["contributors"]]
+
+
+def load_contributors():
+    """Return configured proactive check-in prompts, if any."""
+    if not _CONFIG_PATH.exists():
+        return []
+    with open(_CONFIG_PATH) as f:
+        data = yaml.safe_load(f) or {}
+    return [c["username"] for c in data.get("contributors", [])]
+
+
+CONTRIBUTORS = load_contributors()
+BOT_LOGIN = "payjoin-bot"
+SUCCESS_MARKER = "### Shipped"
+TRIGGER_RE = re.compile(r"(?im)(^|\s)/check-in\b")
 
 
 def graphql(query, variables=None):
@@ -70,8 +84,10 @@ def get_discussion_comments(discussion_id):
               comments(first: 50) {
                 nodes {
                   body
+                  author { login }
                   replies(first: 50) {
                     nodes {
+                      body
                       author { login }
                     }
                   }
@@ -87,8 +103,9 @@ def get_discussion_comments(discussion_id):
 
 
 def check_participation(comments):
-    """Return list of contributors who replied to their thread."""
+    """Return list of contributors who participated in this check-in."""
     participated = []
+    seen = set()
     for comment in comments:
         body = comment["body"]
         for user in CONTRIBUTORS:
@@ -97,8 +114,19 @@ def check_participation(comments):
             reply_authors = {
                 r["author"]["login"] for r in comment["replies"]["nodes"] if r["author"]
             }
-            if user in reply_authors:
+            if user in reply_authors and user not in seen:
                 participated.append(user)
+                seen.add(user)
+        author = (comment.get("author") or {}).get("login")
+        if not author or author in seen or not TRIGGER_RE.search(body):
+            continue
+        for reply in comment["replies"]["nodes"]:
+            reply_author = (reply.get("author") or {}).get("login")
+            reply_body = reply.get("body") or ""
+            if reply_author == BOT_LOGIN and reply_body.startswith(SUCCESS_MARKER):
+                participated.append(author)
+                seen.add(author)
+                break
     return participated
 
 

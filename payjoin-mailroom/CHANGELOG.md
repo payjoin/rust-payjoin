@@ -14,6 +14,7 @@
 - Enable HTTP/2 multiplexing on relay-directory hop (#1655)
 - Bound OHTTP bootstrap tunnel resource usage and export its metrics (#1610)
 - Add per-request metrics middleware (#1674)
+- Export only settled weekly windows with small-count suppression, quantization, and an attribute allowlist; precise metrics stay local
 
 ## 0.1.1
 

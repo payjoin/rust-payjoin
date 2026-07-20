@@ -15,6 +15,7 @@
 - Bound OHTTP bootstrap tunnel resource usage and export its metrics (#1610)
 - Add per-request metrics middleware (#1674)
 - Add a top-level `log_format` key; a `[telemetry]` section no longer switches logs to JSON (#1754)
+- Export only four settled-week counts with no attributes; drop the unique short ID count; persist the weekly buckets; push hourly. Precise per-request metrics are no longer exported (#1754)
 
 ## 0.1.1
 

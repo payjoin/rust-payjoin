@@ -18,16 +18,20 @@
 # log_format = "text"
 
 # --- Telemetry (requires `telemetry` feature) ---
+# Logs are never exported. What leaves this machine is described under
+# "Telemetry" in README.md: five settled-week counts, no attributes.
 # [telemetry]
 
-# OpenTelemetry Protocol (OTLP) endpoint to export telemetry to
+# OpenTelemetry Protocol (OTLP) endpoint to export metrics to
 # endpoint = "https://otlp-gateway-prod-us-west-0.grafana.net/otlp"
 
-# Authentication token for the OTLP endpoint 
+# Authentication token for the OTLP endpoint
 # auth_token = "<base64 instanceID:token>"
 
-# The domain you are running the payjoin-mailroom from.
-# This serves as an identifier for metrics collection.
+# Label attached to every exported metric. Chosen by you; your public domain
+# is expected and it is required. Run one mailroom process per value: two
+# processes sharing it each report their own share of the week to the same
+# series.
 # operator_domain = "your-domain.example.com"
 
 # --- Access-control (requires `access-control` feature) ---

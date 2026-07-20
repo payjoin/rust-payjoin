@@ -194,8 +194,7 @@ def main():
         )
 
     body = (
-        intro
-        + "Copy the template below and fill it in:\n\n"
+        intro + "Copy the template below and fill it in:\n\n"
         "```markdown\n"
         "### Shipped\n"
         "<!-- Add anything the bot missed: design work, specs, "

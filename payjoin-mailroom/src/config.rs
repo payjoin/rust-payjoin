@@ -55,7 +55,38 @@ pub struct V1Config {
 pub struct TelemetryConfig {
     pub endpoint: String,
     pub auth_token: String,
-    pub operator_domain: String,
+    /// Operator-chosen label attached to every exported metric as the
+    /// `operator.domain` resource attribute. Using your public domain is
+    /// expected: it is the label the Foundation's dashboards group by, and it
+    /// is the only attribute besides the service name that leaves the process.
+    /// Run one mailroom process per value; two processes sharing a value each
+    /// report their own share of the week to the same series.
+    pub operator_domain: OperatorDomain,
+}
+
+/// A non-blank `operator_domain`. Every exported series is keyed by it, so a
+/// blank one would collapse this operator into an unlabelled series shared
+/// with anyone else who left it blank; the type makes that unrepresentable.
+#[cfg(feature = "telemetry")]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct OperatorDomain(String);
+
+#[cfg(feature = "telemetry")]
+impl TryFrom<String> for OperatorDomain {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.trim().is_empty() {
+            return Err("telemetry.operator_domain must be set".into());
+        }
+        Ok(Self(value))
+    }
+}
+
+#[cfg(feature = "telemetry")]
+impl OperatorDomain {
+    pub fn as_str(&self) -> &str { &self.0 }
 }
 
 #[cfg(feature = "acme")]
@@ -186,5 +217,13 @@ mod tests {
         assert_eq!(parse("").log_format, LogFormat::Text);
         assert_eq!(parse("log_format = \"text\"").log_format, LogFormat::Text);
         assert_eq!(parse("log_format = \"json\"").log_format, LogFormat::Json);
+    }
+
+    #[cfg(feature = "telemetry")]
+    #[test]
+    fn operator_domain_rejects_blank() {
+        assert!(OperatorDomain::try_from(String::new()).is_err());
+        assert!(OperatorDomain::try_from("   ".to_string()).is_err());
+        assert_eq!(OperatorDomain::try_from("payjo.in".to_string()).unwrap().as_str(), "payjo.in");
     }
 }

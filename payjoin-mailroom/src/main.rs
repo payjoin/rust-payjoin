@@ -39,13 +39,13 @@ fn init_tracing(format: LogFormat) {
 
 #[cfg(feature = "telemetry")]
 fn init_telemetry(telemetry: &config::TelemetryConfig) -> SdkMeterProvider {
-    let meter_provider = payjoin_mailroom::telemetry::build_otlp_meter_provider(
+    // The export provider is deliberately not installed as the global meter
+    // provider. Only the coarse settled-week gauges belong on it, and an
+    // instrument created through the global API would bypass the
+    // export-surface test in metrics.rs.
+    payjoin_mailroom::telemetry::build_otlp_meter_provider(
         &telemetry.endpoint,
         &telemetry.auth_token,
         &telemetry.operator_domain,
-    );
-
-    opentelemetry::global::set_meter_provider(meter_provider.clone());
-
-    meter_provider
+    )
 }

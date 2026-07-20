@@ -46,7 +46,7 @@ struct Services {
 
 pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> anyhow::Result<()> {
     let sentinel_tag = generate_sentinel_tag();
-    let metrics = MetricsService::new(meter_provider);
+    let metrics = build_metrics(meter_provider);
 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
@@ -169,7 +169,7 @@ pub async fn serve_acme(
         .ok_or_else(|| anyhow::anyhow!("ACME configuration is required for serve_acme"))?;
 
     let sentinel_tag = generate_sentinel_tag();
-    let metrics = MetricsService::new(meter_provider);
+    let metrics = build_metrics(meter_provider);
 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
@@ -228,6 +228,19 @@ pub async fn serve_acme(
 /// The relay and directory share this tag in a best-effort attempt
 /// at detecting self loops.
 fn generate_sentinel_tag() -> SentinelTag { SentinelTag::new(rand::thread_rng().r#gen()) }
+
+/// Builds the metrics service for a server process.
+///
+/// Precise instruments always stay in-process. When an export provider is
+/// present, the only instruments registered on it are the coarse
+/// settled-window gauges: nothing precise or live leaves the operator
+/// boundary.
+fn build_metrics(export_provider: Option<SdkMeterProvider>) -> MetricsService {
+    match export_provider {
+        Some(provider) => MetricsService::with_export(&provider),
+        None => MetricsService::new(None),
+    }
+}
 
 #[cfg(feature = "access-control")]
 impl Connected<IncomingStream<'_, Listener>> for middleware::MaybePeerIp {

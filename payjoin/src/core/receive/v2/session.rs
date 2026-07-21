@@ -166,7 +166,8 @@ impl SessionHistory {
             Some(SessionEvent::Closed(outcome)) => match outcome {
                 SessionOutcome::Success(_) | SessionOutcome::PayjoinProposalSent =>
                     SessionStatus::Completed,
-                SessionOutcome::Aborted => SessionStatus::Failed,
+                // Other: the Payjoin did not happen and it was not a clean fallback either.
+                SessionOutcome::Aborted | SessionOutcome::Other(_) => SessionStatus::Failed,
                 SessionOutcome::FallbackBroadcasted => SessionStatus::FallbackBroadcasted,
             },
             Some(SessionEvent::Cancelled | SessionEvent::ProtocolFailed) =>
@@ -213,10 +214,14 @@ pub enum SessionEvent {
 }
 
 /// Represents all possible outcomes for a closed Payjoin session
+///
+/// This enum is deliberately exhaustive: a terminal outcome is a closed set, and a wildcard arm
+/// has no meaningful semantics for a caller deciding what a session's conclusion was. The
+/// compile error on a new variant is the feature.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SessionOutcome {
-    /// Payjoin completed successfully
-    Success(Vec<(bitcoin::ScriptBuf, bitcoin::Witness)>),
+    /// Payjoin completed successfully: the transaction with this txid settled the session
+    Success(bitcoin::Txid),
     /// Payjoin was not successful
     Aborted,
     /// Fallback transaction was broadcasted
@@ -225,6 +230,9 @@ pub enum SessionOutcome {
     /// the sender is using non-SegWit inputs which will change the transaction ID
     /// of the proposal
     PayjoinProposalSent,
+    /// The contested outpoints were settled by an unrecognized transaction (neither the
+    /// Payjoin nor the fallback), identified by its txid.
+    Other(bitcoin::Txid),
 }
 
 #[cfg(test)]
@@ -565,6 +573,11 @@ mod tests {
             SessionEvent::GotReplyableError(mock_err()),
             SessionEvent::Cancelled,
             SessionEvent::ProtocolFailed,
+            SessionEvent::Closed(SessionOutcome::Success(bitcoin::Txid::all_zeros())),
+            SessionEvent::Closed(SessionOutcome::Aborted),
+            SessionEvent::Closed(SessionOutcome::FallbackBroadcasted),
+            SessionEvent::Closed(SessionOutcome::PayjoinProposalSent),
+            SessionEvent::Closed(SessionOutcome::Other(bitcoin::Txid::all_zeros())),
         ];
 
         for event in test_cases {
@@ -672,7 +685,7 @@ mod tests {
 
         let success = SessionHistory::new(vec![
             SessionEvent::Created(session_context.clone()),
-            SessionEvent::Closed(SessionOutcome::Success(vec![])),
+            SessionEvent::Closed(SessionOutcome::Success(bitcoin::Txid::all_zeros())),
         ]);
         assert_eq!(success.status(), SessionStatus::Completed);
 
@@ -688,9 +701,38 @@ mod tests {
         ]);
         assert_eq!(fallback.status(), SessionStatus::FallbackBroadcasted);
 
+        let other = SessionHistory::new(vec![
+            SessionEvent::Created(session_context.clone()),
+            SessionEvent::Closed(SessionOutcome::Other(bitcoin::Txid::all_zeros())),
+        ]);
+        assert_eq!(other.status(), SessionStatus::Failed);
+
         // Sessions that never reached a terminal state still report Expired.
         let still_open = SessionHistory::new(vec![SessionEvent::Created(session_context)]);
         assert_eq!(still_open.status(), SessionStatus::Expired);
+    }
+
+    // The persisted encoding of terminal outcomes freezes at 1.0: these exact strings are
+    // what a 1.0 binary must keep parsing.
+    #[test]
+    fn closed_event_serialization_shape_is_sealed() {
+        let success = serde_json::to_string(&SessionEvent::Closed(SessionOutcome::Success(
+            bitcoin::Txid::all_zeros(),
+        )))
+        .expect("Serialization should not fail");
+        assert_eq!(
+            success,
+            r#"{"Closed":{"Success":"0000000000000000000000000000000000000000000000000000000000000000"}}"#
+        );
+
+        let other = serde_json::to_string(&SessionEvent::Closed(SessionOutcome::Other(
+            bitcoin::Txid::all_zeros(),
+        )))
+        .expect("Serialization should not fail");
+        assert_eq!(
+            other,
+            r#"{"Closed":{"Other":"0000000000000000000000000000000000000000000000000000000000000000"}}"#
+        );
     }
 
     #[tokio::test]
@@ -703,7 +745,7 @@ mod tests {
             .save_event(SessionEvent::Created(session_context.clone()))
             .expect("in memory persister save should not fail");
         persister
-            .save_event(SessionEvent::Closed(SessionOutcome::Success(vec![])))
+            .save_event(SessionEvent::Closed(SessionOutcome::Success(bitcoin::Txid::all_zeros())))
             .expect("in memory persister save should not fail");
         let (state, _) =
             replay_event_log(&persister).expect("closed session should replay successfully");
@@ -715,7 +757,7 @@ mod tests {
             .await
             .expect("in memory async persister save should not fail");
         persister
-            .save_event(SessionEvent::Closed(SessionOutcome::Success(vec![])))
+            .save_event(SessionEvent::Closed(SessionOutcome::Success(bitcoin::Txid::all_zeros())))
             .await
             .expect("in memory async persister save should not fail");
         let (state, _) = replay_event_log_async(&persister)
@@ -1086,7 +1128,7 @@ mod tests {
         });
         events.push(SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()));
         events.push(SessionEvent::FinalizedProposal(payjoin_proposal.psbt().clone()));
-        events.push(SessionEvent::Closed(SessionOutcome::Success(vec![])));
+        events.push(SessionEvent::Closed(SessionOutcome::Success(bitcoin::Txid::all_zeros())));
 
         let test = SessionHistoryTest {
             events,
@@ -1094,7 +1136,9 @@ mod tests {
                 fallback_tx: Some(expected_fallback),
                 expected_status: SessionStatus::Completed,
             },
-            expected_receiver_state: ReceiveSession::Closed(SessionOutcome::Success(vec![])),
+            expected_receiver_state: ReceiveSession::Closed(SessionOutcome::Success(
+                bitcoin::Txid::all_zeros(),
+            )),
         };
         run_session_history_test(&test);
         run_session_history_test_async(&test).await;

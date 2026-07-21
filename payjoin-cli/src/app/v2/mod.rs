@@ -6,11 +6,11 @@ use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate, Transaction};
 use payjoin::persist::{OptionalTransitionOutcome, SessionPersister};
 use payjoin::receive::v2::{
-    replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
-    MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
+    replay_event_log as replay_receiver_event_log, ChainView, HasReplyableError, Initialized,
+    MaybeInputsOwned, MaybeInputsSeen, Monitor, OutpointSpend, OutputsUnknown, PayjoinProposal,
     PendingFallback as ReceiverPendingFallback, ProvisionalProposal, ReceiveSession, Receiver,
-    ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload,
-    WantsFeeRange, WantsInputs, WantsOutputs,
+    ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, SettlementOutcome, SettlementStatus,
+    Spend, UncheckedOriginalPayload, WantsFeeRange, WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, PendingFallback as SenderPendingFallback,
@@ -73,11 +73,11 @@ pub(crate) struct App {
 }
 
 trait StatusText {
-    fn status_text(&self) -> &'static str;
+    fn status_text(&self) -> String;
 }
 
 impl StatusText for SendSession {
-    fn status_text(&self) -> &'static str {
+    fn status_text(&self) -> String {
         match self {
             SendSession::WithReplyKey(_) | SendSession::PollingForProposal(_) =>
                 "Waiting for proposal",
@@ -87,13 +87,14 @@ impl StatusText for SendSession {
             },
             SendSession::PendingFallback(_) => "Session awaiting fallback",
         }
+        .to_string()
     }
 }
 
 impl StatusText for ReceiveSession {
-    fn status_text(&self) -> &'static str {
+    fn status_text(&self) -> String {
         match self {
-            ReceiveSession::Initialized(_) => "Waiting for original proposal",
+            ReceiveSession::Initialized(_) => "Waiting for original proposal".to_string(),
             ReceiveSession::UncheckedOriginalPayload(_)
             | ReceiveSession::MaybeInputsOwned(_)
             | ReceiveSession::MaybeInputsSeen(_)
@@ -101,18 +102,21 @@ impl StatusText for ReceiveSession {
             | ReceiveSession::WantsOutputs(_)
             | ReceiveSession::WantsInputs(_)
             | ReceiveSession::WantsFeeRange(_)
-            | ReceiveSession::ProvisionalProposal(_) => "Processing original proposal",
-            ReceiveSession::PayjoinProposal(_) => "Payjoin proposal sent",
+            | ReceiveSession::ProvisionalProposal(_) => "Processing original proposal".to_string(),
+            ReceiveSession::PayjoinProposal(_) => "Payjoin proposal sent".to_string(),
             ReceiveSession::HasReplyableError(_) =>
-                "Session failure, waiting to post error response",
-            ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
-            ReceiveSession::PendingFallback(_) => "Pending fallback handling",
+                "Session failure, waiting to post error response".to_string(),
+            ReceiveSession::Monitor(_) => "Monitoring payjoin proposal".to_string(),
+            ReceiveSession::PendingFallback(_) => "Pending fallback handling".to_string(),
             ReceiveSession::Closed(session_outcome) => match session_outcome {
-                ReceiverSessionOutcome::Aborted => "Session aborted",
-                ReceiverSessionOutcome::Success(_) => "Session success, Payjoin proposal was broadcasted",
-                ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
+                ReceiverSessionOutcome::Aborted => "Session aborted".to_string(),
+                ReceiverSessionOutcome::Success(txid) =>
+                    format!("Session success, Payjoin transaction {txid} was broadcasted"),
+                ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted".to_string(),
                 ReceiverSessionOutcome::PayjoinProposalSent =>
-                    "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs",
+                    "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs".to_string(),
+                ReceiverSessionOutcome::Other(txid) =>
+                    format!("Settled by an unrecognized transaction {txid}"),
             },
         }
     }
@@ -178,7 +182,7 @@ impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
             (Some(err), _) => err.to_string(),
             (None, true) =>
                 format!("{}, Fallback transaction available", self.status.status_text()),
-            (None, false) => self.status.status_text().to_string(),
+            (None, false) => self.status.status_text(),
         };
         write!(
             f,
@@ -765,6 +769,12 @@ impl App {
                 }
                 return Ok(());
             }
+            ReceiveSession::Closed(ReceiverSessionOutcome::Other(txid)) => {
+                persister.print(format_args!(
+                    "Session was already settled by an unrecognized transaction {txid}. Cannot cancel."
+                ));
+                return Ok(());
+            }
         };
 
         if no_broadcast {
@@ -1160,14 +1170,60 @@ impl App {
         }
     }
 
-    /// Watch the mempool for the payjoin transaction until it appears or a
-    /// timeout elapses. The poll/timeout loop is one logical step from the
-    /// session's perspective, so it stays local rather than in the driver.
+    /// Build a [`ChainView`] for the monitored session by querying the wallet.
+    ///
+    /// This demo wallet can only look up the two transactions whose ids the receiver predicts, so
+    /// it cannot surface [`SettlementOutcome::Other`] or a cut-through whose txid differs from
+    /// both; a wallet with a full transaction monitor would report the actual spender of each
+    /// contested outpoint.
+    fn chain_view(&self, proposal: &Receiver<Monitor>) -> Result<ChainView> {
+        let wallet = self.wallet();
+        let payjoin_txid = proposal.payjoin_txid();
+        let payjoin = wallet.get_raw_transaction_verbose(&payjoin_txid)?;
+        let fallback = match proposal.fallback_txid() {
+            Some(txid) => wallet.get_raw_transaction_verbose(&txid)?,
+            None => None,
+        };
+
+        let mut spends = Vec::new();
+        for outpoint in proposal.contested_outpoints() {
+            if let Some((tx, confirmations)) = &payjoin {
+                if tx.input.iter().any(|txin| txin.previous_output == outpoint) {
+                    spends.push(OutpointSpend {
+                        outpoint,
+                        spend: Some(Spend { tx: tx.clone(), confirmations: *confirmations }),
+                    });
+                    continue;
+                }
+            }
+            if let Some((tx, confirmations)) = &fallback {
+                if tx.input.iter().any(|txin| txin.previous_output == outpoint) {
+                    spends.push(OutpointSpend {
+                        outpoint,
+                        spend: Some(Spend { tx: tx.clone(), confirmations: *confirmations }),
+                    });
+                    continue;
+                }
+            }
+        }
+        Ok(ChainView { spends })
+    }
+
+    /// Watch the chain for a settlement of the session's contested outpoints
+    /// until one reaches the confidence bar or a timeout elapses. The
+    /// poll/timeout loop is one logical step from the session's perspective,
+    /// so it stays local rather than in the driver.
+    // With the default CONFIRMATION_BAR of 0 the `>=` comparison below is trivially true.
+    #[allow(clippy::absurd_extreme_comparisons)]
     async fn monitor_payjoin_proposal(
         &self,
-        mut proposal: Receiver<Monitor>,
+        proposal: Receiver<Monitor>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
+        // Conclude once the detected settlement has this many confirmations. 0 concludes on first
+        // sight (mempool), which a reorg or the conflicting double-spend can still flip.
+        const CONFIRMATION_BAR: u32 = 0;
+
         // On a session resumption, the receiver will resume again in this state.
         let poll_interval = tokio::time::Duration::from_millis(200);
         let timeout_duration = tokio::time::Duration::from_secs(5);
@@ -1175,44 +1231,56 @@ impl App {
         let mut interval = tokio::time::interval(poll_interval);
         interval.tick().await;
 
-        tracing::debug!("Polling for payment confirmation");
+        tracing::debug!("Polling for settlement");
 
         let result = tokio::time::timeout(timeout_duration, async {
             loop {
                 interval.tick().await;
-                let check_result = proposal
-                    .check_for_transaction(|txid| {
-                        self.wallet()
-                            .get_raw_transaction(&txid)
-                            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-                    })
-                    .save(persister);
+                let view = match self.chain_view(&proposal) {
+                    Ok(view) => view,
+                    Err(e) => {
+                        tracing::warn!("Chain query failed, retrying: {e}");
+                        continue;
+                    }
+                };
 
-                match check_result {
-                    Ok(OptionalTransitionOutcome::Progress(())) => {
-                        persister.print("Payjoin transaction detected in the mempool!");
-                        return Ok(());
+                match proposal.classify(&view) {
+                    SettlementStatus::Pending => {
+                        persister.print("Pending: no contested outpoint spent yet");
+                        continue;
                     }
-                    Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
-                        proposal = current_state;
+                    SettlementStatus::Detected { outcome, confirmations } => {
+                        match &outcome {
+                            SettlementOutcome::Cooperative(txid) => persister.print(format_args!(
+                                "Payjoin settled by transaction {txid} ({confirmations} conf)"
+                            )),
+                            SettlementOutcome::Fallback => persister.print(format_args!(
+                                "Fell back to the original transaction ({confirmations} conf)"
+                            )),
+                            SettlementOutcome::Other(txid) => persister.print(format_args!(
+                                "Spent by another transaction {txid} ({confirmations} conf)"
+                            )),
+                            // `SettlementOutcome` is #[non_exhaustive]; render any finer label this
+                            // build predates without losing the confirmation count.
+                            _ => persister.print(format_args!("Settled ({confirmations} conf)")),
+                        }
+                        if confirmations >= CONFIRMATION_BAR {
+                            return outcome;
+                        }
                     }
-                    Err(e) if e.is_transient() => {
-                        tracing::debug!(
-                            "Transient error checking for transaction, retrying: {e:?}"
-                        );
-                        proposal =
-                            e.transient_state().expect("transient error carries current state");
-                    }
-                    Err(e) => return Err(e.into()),
                 }
             }
         })
         .await;
 
         match result {
-            Ok(ok) => ok,
+            Ok(outcome) => {
+                proposal.conclude(outcome).save(persister)?;
+                persister.print("Session concluded.");
+                Ok(())
+            }
             Err(_) => Err(anyhow!(
-                "No payjoin transaction detected in mempool within {timeout_duration:?}, stopping."
+                "No settlement reached the confidence bar within {timeout_duration:?}, stopping."
             )),
         }
     }

@@ -138,15 +138,18 @@ impl BitcoindWallet {
         }
     }
 
+    /// Look up a wallet transaction and its confirmation depth.
+    ///
+    /// Uses the wallet `gettransaction` RPC so a confirmed transaction is found by txid without
+    /// `-txindex`. Returns `None` for a transaction unknown to the wallet; `confirmations == 0`
+    /// means mempool-only, and the `-1` the wallet reports for a conflicted transaction is
+    /// clamped to `0`, since a conflicted transaction has not settled.
     #[cfg(feature = "v2")]
-    pub fn get_raw_transaction(
-        &self,
-        txid: &Txid,
-    ) -> Result<Option<payjoin::bitcoin::Transaction>> {
-        let raw_tx = tokio::task::block_in_place(|| {
+    pub fn get_raw_transaction_verbose(&self, txid: &Txid) -> Result<Option<(Transaction, u32)>> {
+        let wallet_tx = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 match self.rpc.get_transaction(txid).await {
-                    Ok(rpc_res) => Ok(Some(rpc_res.tx)),
+                    Ok(res) => Ok(Some(res)),
                     Err(e) =>
                         if e.is_tx_not_found() {
                             Ok(None)
@@ -156,7 +159,7 @@ impl BitcoindWallet {
                 }
             })
         })?;
-        Ok(raw_tx)
+        Ok(wallet_tx.map(|res| (res.tx, res.confirmations.max(0) as u32)))
     }
 
     /// Get a new address from the wallet

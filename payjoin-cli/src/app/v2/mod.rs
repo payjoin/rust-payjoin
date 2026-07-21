@@ -113,6 +113,8 @@ impl StatusText for ReceiveSession {
                 ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
                 ReceiverSessionOutcome::PayjoinProposalSent =>
                     "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs",
+                ReceiverSessionOutcome::Unrecognized(_) =>
+                    "Settled by an unrecognized transaction",
             },
         }
     }
@@ -763,6 +765,12 @@ impl App {
                     None => persister
                         .print("Session is already closed. No fallback transaction available."),
                 }
+                return Ok(());
+            }
+            ReceiveSession::Closed(ReceiverSessionOutcome::Unrecognized(_)) => {
+                persister.print(format_args!(
+                    "Session was already closed by an unrecognized transaction. Cannot cancel."
+                ));
                 return Ok(());
             }
         };

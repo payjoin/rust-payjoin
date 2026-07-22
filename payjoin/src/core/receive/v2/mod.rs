@@ -469,6 +469,29 @@ impl<S: HasFallbackTx> Receiver<S> {
             },
         )
     }
+
+    /// Whether the payjoin proposal's transaction ID is knowable in advance.
+    ///
+    /// If every sender input is native SegWit, the sender's final signatures
+    /// live in the witness and each script_sig stays empty, so the
+    /// transaction ID computed from the unsigned proposal remains valid once
+    /// the sender re-signs — the receiver can record it (e.g. to reconcile an
+    /// incoming payment) and monitor the network for it.
+    ///
+    /// If any sender input finalizes with a non-empty script_sig — legacy
+    /// inputs, whose signatures live there, but also P2SH-wrapped SegWit
+    /// inputs, whose script_sig carries the redeem script push — that
+    /// script_sig is part of the txid preimage and changes the transaction
+    /// ID. Any transaction ID derived from the proposal before the sender
+    /// signs will never appear on the network, and
+    /// [`Receiver<Monitor>::check_for_transaction`] concludes the session
+    /// without monitoring. Receivers that track payments by transaction ID
+    /// can use this to choose a policy up front: decline to contribute and
+    /// let the fallback pay, or reconcile that session by script instead of
+    /// by transaction ID.
+    pub fn proposal_txid_is_stable(&self) -> bool {
+        self.state.fallback_tx().input.iter().all(|txin| txin.script_sig.is_empty())
+    }
 }
 
 impl Receiver<Initialized> {
@@ -1544,7 +1567,7 @@ impl Receiver<Monitor> {
         // If the fallback transaction included any non-SegWit inputs, then the transaction ID of
         // the Payjoin proposal is going to change when the sender signs their non-SegWit address
         // one more time. The receiver cannot monitor the transaction, and should conclude the session.
-        if fallback_tx.input.iter().any(|txin| txin.witness.is_empty()) {
+        if !self.proposal_txid_is_stable() {
             return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
                 SessionOutcome::PayjoinProposalSent,
             ));
@@ -1729,19 +1752,87 @@ pub mod test {
         encrypted
     }
 
+    /// Build a native SegWit (P2WPKH) original/payjoin PSBT pair for tests
+    /// that need a txid-stable sender input.
+    ///
+    /// The canonical BIP78 vectors cannot serve that purpose: their sender
+    /// input is P2SH-wrapped SegWit, so the finalized input carries the
+    /// redeem script push in its script_sig, which changes the transaction
+    /// ID when the sender signs.
+    fn native_segwit_psbt_context() -> PsbtContext {
+        use bitcoin::hashes::Hash;
+
+        let payment_spk = SHARED_CONTEXT.address.script_pubkey();
+        let sender_outpoint =
+            bitcoin::OutPoint { txid: bitcoin::Txid::from_byte_array([0x11; 32]), vout: 0 };
+        let receiver_outpoint =
+            bitcoin::OutPoint { txid: bitcoin::Txid::from_byte_array([0x22; 32]), vout: 1 };
+        let sender_utxo = bitcoin::TxOut {
+            value: Amount::from_sat(100_000),
+            script_pubkey: ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array(
+                [0x33; 20],
+            )),
+        };
+        let receiver_utxo = bitcoin::TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array(
+                [0x44; 20],
+            )),
+        };
+        let txin_for = |previous_output| bitcoin::TxIn {
+            previous_output,
+            script_sig: ScriptBuf::new(),
+            sequence: bitcoin::Sequence::ENABLE_RBF_NO_LOCKTIME,
+            witness: Witness::default(),
+        };
+        let mut dummy_witness = Witness::new();
+        dummy_witness.push([0x30; 71]); // dummy signature
+        dummy_witness.push([0x02; 33]); // dummy compressed pubkey
+
+        let original_unsigned_tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![txin_for(sender_outpoint)],
+            output: vec![bitcoin::TxOut {
+                value: Amount::from_sat(99_000),
+                script_pubkey: payment_spk.clone(),
+            }],
+        };
+        let mut original_psbt =
+            Psbt::from_unsigned_tx(original_unsigned_tx).expect("known tx should convert");
+        original_psbt.inputs[0].witness_utxo = Some(sender_utxo.clone());
+        original_psbt.inputs[0].final_script_witness = Some(dummy_witness);
+
+        let payjoin_unsigned_tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![txin_for(sender_outpoint), txin_for(receiver_outpoint)],
+            output: vec![bitcoin::TxOut {
+                value: Amount::from_sat(148_000),
+                script_pubkey: payment_spk,
+            }],
+        };
+        let mut payjoin_psbt =
+            Psbt::from_unsigned_tx(payjoin_unsigned_tx).expect("known tx should convert");
+        payjoin_psbt.inputs[0].witness_utxo = Some(sender_utxo);
+        payjoin_psbt.inputs[1].witness_utxo = Some(receiver_utxo);
+
+        PsbtContext { original_psbt, payjoin_psbt }
+    }
+
     #[test]
     fn test_monitor_typestate() -> Result<(), BoxError> {
-        let psbt_ctx = PsbtContext {
-            original_psbt: PARSED_ORIGINAL_PSBT.clone(),
-            payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
-        };
+        let psbt_ctx = native_segwit_psbt_context();
+        let payjoin_tx = psbt_ctx.payjoin_psbt.unsigned_tx.clone();
+        let original_tx = psbt_ctx.original_psbt.clone().extract_tx().expect("valid tx");
         let monitor = Receiver {
             state: Monitor { psbt_context: psbt_ctx },
             session_context: SHARED_CONTEXT.clone(),
         };
 
-        let payjoin_tx = PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx;
-        let original_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("valid tx");
+        // The sender's input is native SegWit — its script_sig stays empty when
+        // finalized — so the proposal's transaction ID is monitorable.
+        assert!(monitor.proposal_txid_is_stable());
 
         // Nothing was spent, should be in the same state
         let persister = InMemoryPersister::default();
@@ -1808,6 +1899,10 @@ pub mod test {
             session_context: SHARED_CONTEXT.clone(),
         };
 
+        // A non-SegWit sender input means the sender's final signature will change
+        // the proposal's transaction ID.
+        assert!(!monitor.proposal_txid_is_stable());
+
         let persister = InMemoryPersister::default();
         let res = monitor
             .check_for_transaction(|_| {
@@ -1819,6 +1914,91 @@ pub mod test {
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
         assert!(persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
         assert_eq!(persister.inner.lock().expect("Shouldn't be poisoned").events.len(), 1);
+        assert_eq!(
+            persister.inner.lock().expect("Shouldn't be poisoned").events.last(),
+            Some(&SessionEvent::Closed(SessionOutcome::PayjoinProposalSent))
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_nested_segwit_sender_input_txid_is_unstable() -> Result<(), BoxError> {
+        use bitcoin::hashes::Hash;
+
+        // P2SH-wrapped SegWit (e.g. P2SH-P2WPKH): the finalized input carries
+        // a non-empty witness AND a script_sig holding the redeem script push.
+        // The script_sig is part of the txid preimage, so the txid computed
+        // from the unsigned proposal never appears on the network even though
+        // the witness is non-empty.
+        let unsigned_original_tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![bitcoin::TxIn {
+                previous_output: bitcoin::OutPoint {
+                    txid: PARSED_ORIGINAL_PSBT.unsigned_tx.compute_txid(),
+                    vout: 0,
+                },
+                script_sig: ScriptBuf::new(),
+                sequence: bitcoin::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                witness: Witness::default(),
+            }],
+            output: vec![bitcoin::TxOut {
+                value: Amount::from_sat(50_000),
+                script_pubkey: SHARED_CONTEXT.address.script_pubkey(),
+            }],
+        };
+        let mut original_psbt = Psbt::from_unsigned_tx(unsigned_original_tx)?;
+        let redeem_script =
+            ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([0x88; 20]));
+        original_psbt.inputs[0].final_script_sig = Some(
+            bitcoin::script::Builder::new()
+                .push_slice(
+                    <&bitcoin::script::PushBytes>::try_from(redeem_script.as_bytes())
+                        .expect("redeem script fits in a push"),
+                )
+                .into_script(),
+        );
+        let mut witness = Witness::new();
+        witness.push([0x30; 71]); // dummy signature
+        witness.push([0x02; 33]); // dummy compressed pubkey
+        original_psbt.inputs[0].final_script_witness = Some(witness);
+
+        // Ground truth: finalizing the nested SegWit input rewrites the
+        // script_sig and therefore changes the transaction ID.
+        assert_ne!(
+            original_psbt.unsigned_tx.compute_txid(),
+            original_psbt.clone().extract_tx_unchecked_fee_rate().compute_txid(),
+            "nested SegWit finalization must change the txid",
+        );
+
+        let monitor = Receiver {
+            state: Monitor {
+                psbt_context: PsbtContext {
+                    original_psbt,
+                    payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+                },
+            },
+            session_context: SHARED_CONTEXT.clone(),
+        };
+
+        // A nested SegWit sender input means the sender's final script_sig
+        // (the redeem script push) will change the proposal's transaction ID,
+        // even though the input also has a witness.
+        assert!(!monitor.proposal_txid_is_stable());
+
+        // check_for_transaction must conclude the session without polling
+        // for a transaction ID that will never appear.
+        let persister = InMemoryPersister::default();
+        let res = monitor
+            .check_for_transaction(|_| {
+                panic!("check_for_transaction should return before this closure is called")
+            })
+            .save(&persister)
+            .expect("InMemoryPersister shouldn't fail");
+
+        assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
+        assert!(persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
         assert_eq!(
             persister.inner.lock().expect("Shouldn't be poisoned").events.last(),
             Some(&SessionEvent::Closed(SessionOutcome::PayjoinProposalSent))

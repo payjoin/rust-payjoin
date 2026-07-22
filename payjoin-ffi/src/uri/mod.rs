@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-pub use error::{PjNotSupported, PjParseError, UrlParseError};
+pub use error::{PjNotSupported, UriParseError, UrlParseError};
 use payjoin::bitcoin::address::NetworkChecked;
 
 use crate::error::FfiValidationError;
@@ -21,10 +21,9 @@ impl From<payjoin::Uri<NetworkChecked>> for Uri {
 #[uniffi::export]
 impl Uri {
     #[uniffi::constructor]
-    pub fn parse(uri: String) -> Result<Self, PjParseError> {
-        payjoin::Uri::from_str(uri.as_str())
-            .map(|e| e.assume_checked().into())
-            .map_err(PjParseError::from_err)
+    pub fn parse(uri: String) -> Result<Self, UriParseError> {
+        let uri = payjoin::Uri::from_str(uri.as_str())?;
+        Ok(uri.assume_checked().into())
     }
     pub fn address(&self) -> String { self.0.address().to_string() }
     /// Gets the amount in satoshis.

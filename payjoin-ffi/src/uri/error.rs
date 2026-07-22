@@ -1,13 +1,7 @@
-#[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
-#[uniffi::export(Debug, Display, Eq)]
-#[error("Error parsing the payjoin URI: {msg}")]
-pub struct PjParseError {
-    msg: String,
-}
-
-impl PjParseError {
-    pub(crate) fn from_err(err: impl std::fmt::Display) -> Self { Self { msg: err.to_string() } }
-}
+#[derive(Debug, thiserror::Error, uniffi::Object)]
+#[uniffi::export(Debug, Display)]
+#[error(transparent)]
+pub struct UriParseError(#[from] payjoin::UriParseError);
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display, Eq)]

@@ -38,6 +38,7 @@ io = ["v2", "reqwest/rustls-tls"]
 _manual-tls = ["rustls"]
 
 [dependencies]
+arbitrary = { version = "1.4.2", optional = true }
 bhttp = { version = "0.6.1", optional = true }
 bitcoin = { version = "0.32.9", features = ["base64"] }
 bitcoin-units = "0.1.3"

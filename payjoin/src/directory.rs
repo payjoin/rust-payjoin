@@ -1,5 +1,8 @@
 //! Types relevant to the Payjoin Directory as defined in BIP 77.
 
+use alloc::string::ToString;
+use core::{array, fmt};
+
 pub const ENCAPSULATED_MESSAGE_BYTES: usize = 8192;
 
 /// A 64-bit identifier used to identify Payjoin Directory entries.
@@ -28,8 +31,8 @@ impl ShortId {
     pub fn as_slice(&self) -> &[u8] { &self.0 }
 }
 
-impl std::fmt::Display for ShortId {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl fmt::Display for ShortId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let id_hrp = bitcoin::bech32::Hrp::parse("ID")
             .expect("parsing a valid HRP constant should never fail");
         f.write_str(
@@ -45,11 +48,11 @@ impl std::fmt::Display for ShortId {
 #[non_exhaustive]
 pub enum ShortIdError {
     DecodeBech32(bitcoin::bech32::primitives::decode::CheckedHrpstringError),
-    IncorrectLength(std::array::TryFromSliceError),
+    IncorrectLength(array::TryFromSliceError),
 }
 
-impl std::fmt::Display for ShortIdError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ShortIdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ShortIdError::DecodeBech32(e) => write!(f, "Failed to decode short ID: {e}"),
             ShortIdError::IncorrectLength(e) => write!(f, "Short ID has an incorrect length: {e}"),
@@ -57,16 +60,19 @@ impl std::fmt::Display for ShortIdError {
     }
 }
 
-impl std::error::Error for ShortIdError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for ShortIdError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
+            #[cfg(feature = "std")]
             ShortIdError::DecodeBech32(e) => Some(e),
+            #[cfg(not(feature = "std"))]
+            ShortIdError::DecodeBech32(_) => None,
             ShortIdError::IncorrectLength(e) => Some(e),
         }
     }
 }
 
-impl std::convert::From<bitcoin::hashes::sha256::Hash> for ShortId {
+impl From<bitcoin::hashes::sha256::Hash> for ShortId {
     fn from(h: bitcoin::hashes::sha256::Hash) -> Self {
         bitcoin::hashes::Hash::as_byte_array(&h)[..8]
             .try_into()
@@ -74,7 +80,7 @@ impl std::convert::From<bitcoin::hashes::sha256::Hash> for ShortId {
     }
 }
 
-impl std::convert::TryFrom<&[u8]> for ShortId {
+impl TryFrom<&[u8]> for ShortId {
     type Error = ShortIdError;
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         let bytes: [u8; 8] = bytes.try_into().map_err(ShortIdError::IncorrectLength)?;
@@ -82,7 +88,7 @@ impl std::convert::TryFrom<&[u8]> for ShortId {
     }
 }
 
-impl std::str::FromStr for ShortId {
+impl core::str::FromStr for ShortId {
     type Err = ShortIdError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (_, bytes) = crate::bech32::nochecksum::decode(&("ID1".to_string() + s))
@@ -93,8 +99,7 @@ impl std::str::FromStr for ShortId {
 
 #[cfg(test)]
 mod tests {
-    use super::ShortId;
-
+    use crate::uri::ShortId;
     #[test]
     fn short_id_conversion() {
         let short_id = ShortId([0; 8]);

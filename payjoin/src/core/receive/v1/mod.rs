@@ -37,16 +37,20 @@ pub(crate) use error::InternalRequestError;
 pub use error::RequestError;
 
 use super::*;
+use crate::alloc::borrow::ToOwned;
 pub use crate::receive::common::{WantsFeeRange, WantsInputs, WantsOutputs};
+#[cfg(feature = "std")]
 use crate::uri::PjParam;
-use crate::{IntoUrl, OutputSubstitution, PjParseError, Version};
-
+use crate::Version;
+#[cfg(feature = "std")]
+use crate::{IntoUrl, OutputSubstitution, PjParseError};
 const SUPPORTED_VERSIONS: &[Version] = &[Version::One];
 
 pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
 }
 
+#[cfg(feature = "std")]
 pub fn build_v1_pj_uri<'a>(
     address: &bitcoin::Address,
     endpoint: impl IntoUrl,
@@ -61,7 +65,7 @@ impl UncheckedOriginalPayload {
     pub fn from_request(body: &[u8], query: &str, headers: impl Headers) -> Result<Self, Error> {
         let validated_body = validate_body(headers, body).map_err(ProtocolError::V1)?;
 
-        let base64 = std::str::from_utf8(validated_body).map_err(InternalPayloadError::Utf8)?;
+        let base64 = core::str::from_utf8(validated_body).map_err(InternalPayloadError::Utf8)?;
 
         let (psbt, params) = crate::receive::parse_payload(base64, query, SUPPORTED_VERSIONS)
             .map_err(ProtocolError::OriginalPayload)?;

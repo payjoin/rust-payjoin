@@ -2700,6 +2700,7 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 name = "payjoin"
 version = "1.0.0-rc.5"
 dependencies = [
+ "base64 0.21.7",
  "bhttp",
  "bitcoin",
  "bitcoin-hpke",

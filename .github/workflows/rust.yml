@@ -145,3 +145,18 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: "Build fuzz targets"
         run: cd fuzz && cargo build
+
+  Embedded:
+    name: Embedded build
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v4
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - name: "Install nix"
+        uses: DeterminateSystems/determinate-nix-action@main
+      - name: "Use nix cache"
+        uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: "Build embedded target"
+        run: nix develop .#embedded -c cargo build -p payjoin --no-default-features --features "alloc,v2" --target thumbv7em-none-eabihf -Zbuild-std=core,alloc

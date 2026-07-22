@@ -452,9 +452,9 @@ dependencies = [
 
 [[package]]
 name = "base64"
-version = "0.21.3"
+version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "414dcefbc63d77c526a76b3afcf6fbb9b5e2791c19c3aa2297733208750c6e53"
+checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
 
 [[package]]
 name = "base64"
@@ -542,7 +542,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cf93e61f2dbc3e3c41234ca26a65e2c0b0975c52e0f069ab9893ebbede584d3"
 dependencies = [
  "base58ck",
- "base64 0.21.3",
+ "base64 0.21.7",
  "bech32",
  "bitcoin-internals 0.3.0",
  "bitcoin-io",
@@ -2569,6 +2569,7 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 name = "payjoin"
 version = "1.0.0-rc.5"
 dependencies = [
+ "base64 0.21.7",
  "bhttp",
  "bitcoin",
  "bitcoin-hpke",
@@ -2737,7 +2738,7 @@ version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3163d2912b7c3b52d651a055f2c7eec9ba5cd22d26ef75b8dd3a59980b185923"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.7",
  "serde",
 ]
 
@@ -3259,7 +3260,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.7",
  "bitflags 2.5.0",
  "serde",
  "serde_derive",
@@ -3356,7 +3357,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35e4980fa29e4c4b212ffb3db068a564cbf560e51d3944b7c88bd8bf5bec64f4"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.7",
  "rustls-pki-types",
 ]
 
@@ -3590,7 +3591,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f02d8aa6e3c385bf084924f660ce2a3a6bd333ba55b35e8590b321f35d88513"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.7",
  "chrono",
  "hex",
  "indexmap 1.8.0",

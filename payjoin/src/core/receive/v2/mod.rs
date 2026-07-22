@@ -24,9 +24,14 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
-use std::str::FromStr;
+use alloc::boxed::Box;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use alloc::{format, vec};
+use core::str::FromStr;
 #[cfg(not(target_arch = "wasm32"))]
-use std::time::Duration;
+use core::time::Duration;
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
@@ -35,10 +40,17 @@ pub use error::{CreateRequestError, SessionError};
 pub(crate) use error::{InternalCreateRequestError, InternalSessionError};
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
-pub use session::{
-    replay_event_log, replay_event_log_async, SessionEvent, SessionHistory, SessionOutcome,
-    SessionStatus,
-};
+#[cfg(feature = "std")]
+pub use session::replay_event_log_async;
+pub use session::{replay_event_log, SessionEvent, SessionHistory, SessionOutcome, SessionStatus};
+
+#[cfg(feature = "std")]
+pub use super::JsonReply as ErrorReply;
+use crate::ohttp::OhttpResponse;
+
+#[cfg(not(feature = "std"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErrorReply;
 #[cfg(target_arch = "wasm32")]
 use web_time::Duration;
 
@@ -51,10 +63,9 @@ use super::{
 use crate::core::Url;
 use crate::error::{InternalReplayError, ReplayError};
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
-use crate::ohttp::{
-    ohttp_encapsulate, process_get_res, process_post_res, OhttpEncapsulationError, OhttpKeys,
-    OhttpResponse,
-};
+#[cfg(all(feature = "std", feature = "v2-ohttp"))]
+use crate::ohttp::process_get_res;
+use crate::ohttp::{ohttp_encapsulate, process_post_res, OhttpEncapsulationError, OhttpKeys};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
     MaybeFatalOrSuccessTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
@@ -65,7 +76,6 @@ use crate::receive::{parse_payload, InputPair, OriginalPayload, PsbtContext};
 use crate::time::Time;
 use crate::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
-
 mod error;
 mod session;
 
@@ -144,6 +154,7 @@ pub enum ReceiveSession {
     WantsFeeRange(Receiver<WantsFeeRange>),
     ProvisionalProposal(Receiver<ProvisionalProposal>),
     PayjoinProposal(Receiver<PayjoinProposal>),
+    #[cfg(feature = "std")]
     HasReplyableError(Receiver<HasReplyableError>),
     Monitor(Receiver<Monitor>),
     PendingFallback(Receiver<PendingFallback>),
@@ -223,6 +234,7 @@ impl ReceiveSession {
             (_, SessionEvent::Closed(session_outcome)) =>
                 Ok(ReceiveSession::Closed(session_outcome)),
 
+            #[cfg(feature = "std")]
             (session, SessionEvent::GotReplyableError(error)) => {
                 let (session_context, fallback_tx) = match session {
                     ReceiveSession::Initialized(r) => (r.session_context, None),
@@ -243,8 +255,7 @@ impl ReceiveSession {
                         (r.session_context, Some(r.state.fallback_tx())),
                     ReceiveSession::PayjoinProposal(r) =>
                         (r.session_context, Some(r.state.fallback_tx())),
-                    ReceiveSession::HasReplyableError(r) =>
-                        (r.session_context, r.state.fallback_tx.clone()),
+                    ReceiveSession::HasReplyableError(r) => (r.session_context, None),
                     ReceiveSession::Monitor(r) => (r.session_context, Some(r.state.fallback_tx())),
                     ReceiveSession::PendingFallback(r) => {
                         let fallback_tx = r.fallback_tx().clone();
@@ -334,6 +345,7 @@ mod sealed {
     impl State for super::WantsFeeRange {}
     impl State for super::ProvisionalProposal {}
     impl State for super::PayjoinProposal {}
+    #[cfg(feature = "std")]
     impl State for super::HasReplyableError {}
     impl State for super::Monitor {}
     impl State for super::PendingFallback {}
@@ -648,21 +660,34 @@ impl Receiver<Initialized> {
         body: &[u8],
         context: ohttp::ClientResponse,
     ) -> Result<Option<(OriginalPayload, Option<HpkePublicKey>)>, ProtocolError> {
-        let body = match process_get_res(body, context)
-            .map_err(|e| ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()))?
+        #[cfg(all(feature = "std", feature = "v2-ohttp"))]
         {
-            Some(body) => body,
-            None => return Ok(None),
-        };
-        match std::str::from_utf8(&body) {
-            // V1 response bodies are utf8 plaintext
-            Ok(response) =>
-                Ok(Some(self.extract_proposal_from_v1(response).map(|original| (original, None))?)),
-            // V2 response bodies are encrypted binary
-            Err(_) => Ok(Some(
-                self.extract_proposal_from_v2(body)
-                    .map(|(original, reply_key)| (original, Some(reply_key)))?,
-            )),
+            let body: Vec<u8> = match process_get_res(body, context)
+                .map_err(|e| ProtocolError::V2(InternalSessionError::DirectoryResponse(e).into()))?
+            {
+                Some(body) => body,
+                None => return Ok(None),
+            };
+
+            match core::str::from_utf8(&body) {
+                // V1 response bodies are utf8 plaintext
+                Ok(response) => Ok(Some(
+                    self.extract_proposal_from_v1(response).map(|original| (original, None))?,
+                )),
+                // V2 response bodies are encrypted binary
+                Err(_) => Ok(Some(
+                    self.extract_proposal_from_v2(body)
+                        .map(|(original, reply_key)| (original, Some(reply_key)))?,
+                )),
+            }
+        }
+
+        #[cfg(not(all(feature = "std", feature = "v2-ohttp")))]
+        {
+            let _ = (body, context);
+            Err(ProtocolError::V2(
+                InternalSessionError::Implementation(ImplementationError::std_required()).into(),
+            ))
         }
     }
 
@@ -690,7 +715,7 @@ impl Receiver<Initialized> {
         let (payload_bytes, reply_key) =
             decrypt_message_a(&response, self.session_context.receiver_key.secret_key())
                 .map_err(|e| ProtocolError::V2(InternalSessionError::Hpke(e).into()))?;
-        let payload = std::str::from_utf8(&payload_bytes)
+        let payload = core::str::from_utf8(&payload_bytes)
             .map_err(|e| ProtocolError::OriginalPayload(InternalPayloadError::Utf8(e).into()))?;
         self.unchecked_from_payload(payload).map(|p| (p, reply_key))
     }
@@ -783,6 +808,7 @@ impl Receiver<UncheckedOriginalPayload> {
     /// This can be used to further prevent probing attacks since the attacker would now need to probe the receiver
     /// with transactions which are both broadcastable and pay high fee. Unrelated to the probing attack scenario,
     /// this parameter also makes operating in a high fee environment easier for the receiver.
+    #[cfg(feature = "std")]
     pub fn check_broadcast_suitability(
         self,
         min_fee_rate: Option<FeeRate>,
@@ -812,6 +838,24 @@ impl Receiver<UncheckedOriginalPayload> {
                 },
                 e,
             ),
+        }
+    }
+
+    #[cfg(not(feature = "std"))]
+    pub fn check_broadcast_suitability(
+        self,
+        min_fee_rate: Option<FeeRate>,
+        can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
+    ) -> MaybeFatalTransition<SessionEvent, Receiver<MaybeInputsOwned>, Error> {
+        match self.state.original.check_broadcast_suitability(min_fee_rate, can_broadcast) {
+            Ok(()) => MaybeFatalTransition::success(
+                SessionEvent::CheckedBroadcastSuitability(),
+                Receiver {
+                    state: MaybeInputsOwned { original: self.original.clone() },
+                    session_context: self.session_context,
+                },
+            ),
+            Err(e) => MaybeFatalTransition::transient(e),
         }
     }
 
@@ -1439,7 +1483,15 @@ impl Receiver<PayjoinProposal> {
     }
 }
 
+#[cfg(feature = "std")]
 #[derive(Debug, Clone, PartialEq)]
+pub struct HasReplyableError {
+    error_reply: super::JsonReply,
+    fallback_tx: Option<bitcoin::Transaction>,
+}
+
+#[cfg(not(feature = "std"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HasReplyableError {
     error_reply: JsonReply,
     fallback_tx: Option<bitcoin::Transaction>,
@@ -1448,14 +1500,17 @@ pub struct HasReplyableError {
 impl Receiver<HasReplyableError> {
     /// Cancel without sending the error response.
     pub fn cancel(self) -> MaybeTerminalTransition<SessionEvent, Receiver<PendingFallback>> {
-        let Receiver { state: HasReplyableError { fallback_tx, .. }, session_context } = self;
-        match fallback_tx {
-            Some(fallback_tx) => MaybeTerminalTransition::advance(
-                SessionEvent::Cancelled,
-                Receiver { state: PendingFallback { fallback_tx }, session_context },
-            ),
-            None =>
-                MaybeTerminalTransition::terminate(SessionEvent::Closed(SessionOutcome::Aborted)),
+        {
+            let Receiver { state: HasReplyableError { fallback_tx, .. }, session_context } = self;
+            match fallback_tx {
+                Some(fallback_tx) => MaybeTerminalTransition::advance(
+                    SessionEvent::Cancelled,
+                    Receiver { state: PendingFallback { fallback_tx }, session_context },
+                ),
+                None => MaybeTerminalTransition::terminate(SessionEvent::Closed(
+                    SessionOutcome::Aborted,
+                )),
+            }
         }
     }
 
@@ -1466,6 +1521,7 @@ impl Receiver<HasReplyableError> {
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, OhttpResponse), CreateRequestError> {
         let session_context = &self.session_context;
+        #[cfg(feature = "std")]
         if session_context.expiration.elapsed() {
             return Err(InternalCreateRequestError::Expired(self.session_context.expiration).into());
         }
@@ -2069,6 +2125,7 @@ pub mod test {
         Ok(())
     }
 
+    #[cfg(feature = "v1")]
     #[test]
     fn test_unchecked_proposal_fatal_error() -> Result<(), BoxError> {
         let persister = InMemoryPersister::default();
@@ -2195,6 +2252,7 @@ pub mod test {
         Ok(())
     }
 
+    #[cfg(all(feature = "v1", not(feature = "std")))]
     #[test]
     fn transient_error_can_be_retried_from_returned_state() -> Result<(), BoxError> {
         let persister = InMemoryPersister::default();
@@ -2270,6 +2328,8 @@ pub mod test {
         Ok(())
     }
 
+    #[cfg(feature = "v1")]
+    #[cfg(not(feature = "std"))]
     #[test]
     fn test_create_error_request_expiration() -> Result<(), BoxError> {
         let now = crate::time::Time::now();
@@ -2294,6 +2354,7 @@ pub mod test {
         Ok(())
     }
 
+    #[cfg(not(feature = "std"))]
     #[test]
     fn process_error_response_success_with_fallback_enters_pending_fallback() -> Result<(), BoxError>
     {
@@ -2315,7 +2376,7 @@ pub mod test {
         assert_events(&persister, &[SessionEvent::ProtocolFailed], false);
         Ok(())
     }
-
+    #[cfg(not(feature = "std"))]
     #[test]
     fn process_error_response_success_without_fallback_closes_session() -> Result<(), BoxError> {
         let receiver = receiver(HasReplyableError { error_reply: mock_err(), fallback_tx: None });
@@ -2330,6 +2391,7 @@ pub mod test {
         Ok(())
     }
 
+    #[cfg(not(feature = "std"))]
     #[test]
     fn process_error_response_fatal_with_fallback_enters_pending_fallback() -> Result<(), BoxError>
     {
@@ -2353,7 +2415,7 @@ pub mod test {
         assert_events(&persister, &[SessionEvent::ProtocolFailed], false);
         Ok(())
     }
-
+    #[cfg(not(feature = "std"))]
     #[test]
     fn process_error_response_fatal_without_fallback_closes_session() -> Result<(), BoxError> {
         let receiver = receiver(HasReplyableError { error_reply: mock_err(), fallback_tx: None });
@@ -2371,6 +2433,7 @@ pub mod test {
         Ok(())
     }
 
+    #[cfg(not(feature = "std"))]
     #[test]
     fn process_error_response_transient_leaves_session_open() -> Result<(), BoxError> {
         let receiver = receiver(HasReplyableError {
@@ -2601,6 +2664,7 @@ pub mod test {
         assert_events(&persister, &[SessionEvent::Cancelled], false);
     }
 
+    #[cfg(not(feature = "std"))]
     #[test]
     fn cancel_replyable_error_with_fallback_enters_pending_fallback() {
         let expected_tx = mock_fallback_tx();
@@ -2618,6 +2682,7 @@ pub mod test {
         assert_events(&persister, &[SessionEvent::Cancelled], false);
     }
 
+    #[cfg(not(feature = "std"))]
     #[test]
     fn cancel_replyable_error_without_fallback_closes_session() {
         let persister = InMemoryPersister::<SessionEvent>::default();
@@ -2766,6 +2831,7 @@ pub mod test {
         }
     }
 
+    #[cfg(not(feature = "std"))]
     #[test]
     fn replaying_replyable_error_from_unchecked_captures_no_fallback() {
         let state = unchecked_proposal_v2_from_test_vector();
@@ -2788,6 +2854,7 @@ pub mod test {
         }
     }
 
+    #[cfg(not(feature = "std"))]
     #[test]
     fn replaying_replyable_error_from_initialized_captures_no_fallback() {
         let error = mock_err();
@@ -2809,6 +2876,7 @@ pub mod test {
         }
     }
 
+    #[cfg(not(feature = "std"))]
     #[test]
     fn replaying_replyable_error_from_replyable_error_carries_some_fallback() {
         let expected_fallback = mock_fallback_tx();
@@ -2834,6 +2902,7 @@ pub mod test {
         }
     }
 
+    #[cfg(not(feature = "std"))]
     #[test]
     fn replaying_replyable_error_from_replyable_error_carries_no_fallback() {
         let error = mock_err();
@@ -2852,6 +2921,26 @@ pub mod test {
                 assert_eq!(receiver.state.fallback_tx, None);
             }
             other => panic!("Expected HasReplyableError, got {other:?}"),
+        }
+    }
+
+    #[cfg(not(feature = "std"))]
+    #[cfg(test)]
+    mod json_reply_placeholder_tests {
+        use super::json_reply_placeholder::JsonReply;
+        use crate::error_codes::ErrorCode;
+
+        #[test]
+        fn test_json_reply_new() {
+            let reply = JsonReply::new(ErrorCode::Unavailable, "test");
+            assert_eq!(reply.to_json(), "{}");
+        }
+
+        #[test]
+        fn test_json_reply_from() {
+            let val = 42u32;
+            let reply = JsonReply::from(&val);
+            assert_eq!(reply.to_json(), "{}");
         }
     }
 }

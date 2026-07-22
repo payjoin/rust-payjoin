@@ -1,5 +1,10 @@
-use std::borrow::Borrow;
-use std::fmt;
+use alloc::string::String;
+use core::borrow::Borrow;
+#[cfg(not(feature = "std"))]
+use core::error;
+use core::fmt;
+#[cfg(feature = "std")]
+use std::error;
 
 use bitcoin::FeeRate;
 use tracing::warn;
@@ -99,7 +104,7 @@ impl Params {
                             // TODO Parse with serde when rust-bitcoin supports it
                             let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;
                             // since it's a minimum, we want to round up
-                            FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64)
+                            FeeRate::from_sat_per_kwu((fee_rate_sat_per_kwu + 0.9999) as u64)
                         }
                         Err(_) => return Err(Error::FeeRate),
                     },
@@ -126,9 +131,9 @@ impl Params {
         query: &str,
         supported_versions: &'static [Version],
     ) -> Result<Self, Error> {
-        let url = crate::Url::parse(&format!("http://localhost/?{query}"))
-            .map_err(|_| Error::MalformedQuery)?;
-        Self::from_query_pairs(url.query_pairs().into_iter(), supported_versions)
+        let pairs =
+            query.split('&').filter(|s| !s.is_empty()).filter_map(|pair| pair.split_once('='));
+        Self::from_query_pairs(pairs, supported_versions)
     }
 }
 
@@ -149,8 +154,8 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
+impl error::Error for Error {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> { None }
 }
 
 #[cfg(test)]

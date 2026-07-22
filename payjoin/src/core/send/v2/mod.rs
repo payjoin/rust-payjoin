@@ -74,11 +74,11 @@ impl SenderBuilder {
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`Sender`]
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {
-        match uri.extras.pj_param {
+        match uri.extras().pj_param() {
             #[cfg(feature = "v1")]
             crate::uri::PjParam::V1(_) => unimplemented!("V2 SenderBuilder only supports v2 URLs"),
             crate::uri::PjParam::V2(pj_param) =>
-                Self::from_parts(psbt, &pj_param, &uri.address, uri.amount),
+                Self::from_parts(psbt, pj_param, uri.address(), uri.amount()),
         }
     }
 

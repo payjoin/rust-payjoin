@@ -47,13 +47,13 @@ impl SenderBuilder {
     /// to create a [`Sender`]
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {
         Self {
-            endpoint: uri.extras.pj_param.endpoint_url(),
+            endpoint: uri.extras().pj_param().endpoint_url(),
             // Adopt the output substitution preference from the URI
-            output_substitution: uri.extras.output_substitution,
+            output_substitution: uri.extras().output_substitution(),
             psbt_ctx_builder: PsbtContextBuilder::new(
                 psbt,
-                uri.address.script_pubkey(),
-                uri.amount,
+                uri.address().script_pubkey(),
+                uri.amount(),
             ),
         }
     }
@@ -247,12 +247,12 @@ mod test {
     use crate::error_codes::ErrorCode;
     use crate::send::error::{ResponseError, WellKnownError};
     use crate::send::test::create_psbt_context;
-    use crate::{Uri, UriExt, MAX_CONTENT_LENGTH};
+    use crate::{Uri, MAX_CONTENT_LENGTH};
 
     const PJ_URI: &str =
         "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";
 
-    fn pj_uri<'a>() -> PjUri<'a> {
+    fn pj_uri() -> PjUri {
         Uri::try_from(PJ_URI)
             .expect("uri should succeed")
             .assume_checked()
@@ -404,7 +404,7 @@ mod test {
             )
             .expect("sender should succeed");
         assert_eq!(sender.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
-        assert_eq!(&sender.psbt_ctx.payee, &pj_uri().address.script_pubkey());
+        assert_eq!(&sender.psbt_ctx.payee, &pj_uri().address().script_pubkey());
         let fee_contribution =
             sender.psbt_ctx.fee_contribution.expect("sender should contribute fees");
         assert_eq!(fee_contribution.max_amount, psbt.unsigned_tx.output[0].value);
@@ -418,7 +418,7 @@ mod test {
             .build_recommended(FeeRate::BROADCAST_MIN)
             .expect("sender should succeed");
         assert_eq!(sender.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
-        assert_eq!(&sender.psbt_ctx.payee, &pj_uri().address.script_pubkey());
+        assert_eq!(&sender.psbt_ctx.payee, &pj_uri().address().script_pubkey());
         let fee_contribution =
             sender.psbt_ctx.fee_contribution.expect("sender should contribute fees");
         assert_eq!(fee_contribution.max_amount, Amount::from_sat(91));
@@ -426,7 +426,7 @@ mod test {
         assert_eq!(sender.psbt_ctx.min_fee_rate, FeeRate::from_sat_per_kwu(250));
         // Ensure the receiver's output substitution preference is respected either way
         let mut pj_uri = pj_uri();
-        pj_uri.extras.output_substitution = OutputSubstitution::Enabled;
+        pj_uri.set_output_substitution(OutputSubstitution::Enabled);
         let sender = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
             .build_recommended(FeeRate::from_sat_per_vb_u32(1))
             .expect("sender should succeed");
@@ -436,7 +436,7 @@ mod test {
     #[test]
     fn test_always_disable_output_substitution() {
         let mut pj_uri = pj_uri();
-        pj_uri.extras.output_substitution = OutputSubstitution::Enabled;
+        pj_uri.set_output_substitution(OutputSubstitution::Enabled);
         let sender = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
             .always_disable_output_substitution()
             .build_recommended(FeeRate::BROADCAST_MIN)

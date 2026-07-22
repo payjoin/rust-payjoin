@@ -190,7 +190,7 @@ mod tests {
     use crate::send::v2::{Sender, SenderBuilder, SessionContext, WithReplyKey};
     use crate::send::PsbtContext;
     use crate::time::Time;
-    use crate::{HpkeKeyPair, Uri, UriExt};
+    use crate::{HpkeKeyPair, Uri};
 
     /// Expired V2 Payjoin URI without Amount inspired by BIP 77 test vector
     const PJ_URI: &str = "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?pjos=0&pj=HTTPS://PAYJO.IN/TXJCGKTKXLUUZ%23EX1WKV8CEC-OH1QYPM59NK2LXXS4890SUAXXYT25Z2VAPHP0X7YEYCJXGWAG6UG9ZU6NQ-RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV";

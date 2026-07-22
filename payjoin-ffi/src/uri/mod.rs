@@ -3,20 +3,19 @@ use std::sync::Arc;
 
 pub use error::{PjNotSupported, PjParseError, UrlParseError};
 use payjoin::bitcoin::address::NetworkChecked;
-use payjoin::UriExt;
 
 use crate::error::FfiValidationError;
 use crate::validation::validate_amount_sat;
 
 pub mod error;
 #[derive(Clone, uniffi::Object)]
-pub struct Uri(payjoin::Uri<'static, NetworkChecked>);
-impl From<Uri> for payjoin::Uri<'static, NetworkChecked> {
+pub struct Uri(payjoin::Uri<NetworkChecked>);
+impl From<Uri> for payjoin::Uri<NetworkChecked> {
     fn from(value: Uri) -> Self { value.0 }
 }
 
-impl From<payjoin::Uri<'static, NetworkChecked>> for Uri {
-    fn from(value: payjoin::Uri<'static, NetworkChecked>) -> Self { Uri(value) }
+impl From<payjoin::Uri<NetworkChecked>> for Uri {
+    fn from(value: payjoin::Uri<NetworkChecked>) -> Self { Uri(value) }
 }
 
 #[uniffi::export]
@@ -27,15 +26,11 @@ impl Uri {
             .map(|e| e.assume_checked().into())
             .map_err(PjParseError::from_err)
     }
-    pub fn address(&self) -> String { self.clone().0.address.to_string() }
+    pub fn address(&self) -> String { self.0.address().to_string() }
     /// Gets the amount in satoshis.
-    pub fn amount_sats(&self) -> Option<u64> { self.0.amount.map(|x| x.to_sat()) }
-    pub fn label(&self) -> Option<String> {
-        self.0.label.clone().and_then(|x| String::try_from(x).ok())
-    }
-    pub fn message(&self) -> Option<String> {
-        self.0.message.clone().and_then(|x| String::try_from(x).ok())
-    }
+    pub fn amount_sats(&self) -> Option<u64> { self.0.amount().map(|x| x.to_sat()) }
+    pub fn label(&self) -> Option<String> { self.0.label() }
+    pub fn message(&self) -> Option<String> { self.0.message() }
 
     pub fn check_pj_supported(&self) -> Result<Arc<PjUri>, PjNotSupported> {
         self.0
@@ -47,32 +42,32 @@ impl Uri {
     pub fn as_string(&self) -> String { self.0.clone().to_string() }
 }
 
-impl From<payjoin::PjUri<'static>> for PjUri {
-    fn from(value: payjoin::PjUri<'static>) -> Self { Self(value) }
+impl From<payjoin::PjUri> for PjUri {
+    fn from(value: payjoin::PjUri) -> Self { Self(value) }
 }
 
-impl From<PjUri> for payjoin::PjUri<'_> {
+impl From<PjUri> for payjoin::PjUri {
     fn from(value: PjUri) -> Self { value.0 }
 }
 
 #[derive(Clone, uniffi::Object)]
-pub struct PjUri(pub payjoin::PjUri<'static>);
+pub struct PjUri(pub payjoin::PjUri);
 
 #[uniffi::export]
 impl PjUri {
-    pub fn address(&self) -> String { self.0.clone().address.to_string() }
+    pub fn address(&self) -> String { self.0.address().to_string() }
     /// Number of sats requested as payment
-    pub fn amount_sats(&self) -> Option<u64> { self.0.clone().amount.map(|e| e.to_sat()) }
+    pub fn amount_sats(&self) -> Option<u64> { self.0.amount().map(|e| e.to_sat()) }
 
     /// Sets the amount in sats and returns a new PjUri
     pub fn set_amount_sats(&self, amount_sats: u64) -> Result<Self, FfiValidationError> {
         let mut uri = self.0.clone();
         let amount = validate_amount_sat(amount_sats)?;
-        uri.amount = Some(amount);
+        uri.set_amount(amount);
         Ok(uri.into())
     }
 
-    pub fn pj_endpoint(&self) -> String { self.0.extras.endpoint().to_string() }
+    pub fn pj_endpoint(&self) -> String { self.0.extras().endpoint().to_string() }
 
     pub fn as_string(&self) -> String { self.0.clone().to_string() }
 }

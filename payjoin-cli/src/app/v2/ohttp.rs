@@ -1,5 +1,7 @@
 //! OHTTP relay and payjoin directory selection / key bootstrapping for the payjoin-cli.
 //!
+//! See the `payjoin::io` module for relay-selection and health-check guidance.
+//!
 //! [`MailroomManager`] tracks relays and directories that have failed,
 //! excluding them from future selections for the lifetime of the [`MailroomManager`].
 //!

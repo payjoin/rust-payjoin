@@ -2,8 +2,8 @@ use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
 pub use error::{
-    AddressParseError, CoinSelectionError, InputContributionError, InputPairError, JsonReply,
-    OutputSubstitutionError, ProtocolError, PsbtInputError, ReceiverBuilderError,
+    AddressParseError, BuildReceiverError, CoinSelectionError, InputContributionError,
+    InputPairError, JsonReply, OutputSubstitutionError, ProtocolError, PsbtInputError,
     ReceiverCreateRequestError, ReceiverError, SessionError,
 };
 use payjoin::bitcoin::consensus::Decodable;
@@ -541,9 +541,9 @@ impl ReceiverBuilder {
         address: String,
         directory: String,
         ohttp_keys: Arc<OhttpKeys>,
-    ) -> Result<Self, ReceiverBuilderError> {
+    ) -> Result<Self, BuildReceiverError> {
         let parsed_address = payjoin::bitcoin::Address::from_str(address.as_str())
-            .map_err(ReceiverBuilderError::from)?
+            .map_err(BuildReceiverError::from)?
             .assume_checked();
         Ok(Self(
             payjoin::receive::v2::ReceiverBuilder::new(
@@ -551,7 +551,7 @@ impl ReceiverBuilder {
                 directory,
                 Arc::unwrap_or_clone(ohttp_keys).into(),
             )
-            .map_err(ReceiverBuilderError::from)?,
+            .map_err(BuildReceiverError::from)?,
         ))
     }
 

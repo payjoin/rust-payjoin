@@ -16,9 +16,28 @@ Most discussion about Payjoin research and development happens on [Discord](http
 
 ---
 
+## Scope
+
+Issues and pull requests are for technical substance. Foundation
+governance, personnel, and licensing or IP matters are out of scope. Take
+them to [Foundation leadership](https://payjoin.org/blog/2025/08/08/announcing-payjoin-foundation/)
+directly at [admin@payjoin.org](mailto:admin@payjoin.org). Maintainers may lock or hide
+off-topic threads by pointing to this section, and may temporarily block
+accounts for sustained off-topic participation, with notice.
+
+---
+
 ## Issues
 
 Using and testing Payjoin Dev Kit is an effective way for new contributors to both learn and provide value. If you find a bug, incorrect or unclear documentation, or have any other problem, consider [creating an issue](https://github.com/payjoin/rust-payjoin/issues). Before doing so, please search through [existing issues](https://github.com/payjoin/rust-payjoin/issues) to see if your problem has already been addressed or is actively being discussed. If you can, provide a fully reproducible example or the steps we can use to reproduce the issue to speed up the debugging process.
+
+---
+
+## Security
+
+Do not open public issues or pull requests for vulnerabilities. Report them
+privately to [security@payjoin.org](mailto:security@payjoin.org) as described
+in [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -152,3 +171,30 @@ nix fmt
 ### Linting
 
 We use [`clippy`](https://github.com/rust-lang/rust-clippy) for linting. Please run `contrib/lint.sh` using the nightly toolchain before submitting any changes.
+
+---
+
+## Review and Merging
+
+Pull requests are reviewed on technical merit by the repository
+maintainers listed in [CODEOWNERS](CODEOWNERS). Protocol wire behavior
+follows the BIP process
+([BIP 78](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki),
+[BIP 77](https://github.com/bitcoin/bips/blob/master/bip-0077.md)).
+Observable behavior not yet pinned down by a BIP may merge, but is not
+considered production ready until it is publicly specified. When
+maintainers proceed over a significant technical objection, the rationale
+is written up publicly.
+
+---
+
+## Licensing
+
+Crates in this workspace are licensed as declared in each crate's
+`Cargo.toml`: `MITNFA` for most crates, dual MIT/Apache-2.0 for
+`payjoin-ffi`. Relicensing the workspace to dual MIT/Apache-2.0 is in
+progress in [#1540](https://github.com/payjoin/rust-payjoin/issues/1540).
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in the work by you, as defined in the Apache-2.0
+license, shall be licensed under the license of the crate it modifies and
+dual MIT/Apache-2.0, without any additional terms or conditions.

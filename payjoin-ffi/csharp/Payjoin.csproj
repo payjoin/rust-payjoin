@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>true</IsPackable>
+    <PackageId>Payjoin</PackageId>
+    <Version>0.24.0-preview.1</Version>
+    <Title>Payjoin</Title>
+    <Authors>Payjoin Dev Kit Contributors</Authors>
+    <Description>C# bindings for payjoin-ffi, generated from rust-payjoin via UniFFI.</Description>
+    <PackageTags>bitcoin;payjoin;bip78;ffi;csharp;dotnet</PackageTags>
+    <PackageProjectUrl>https://github.com/payjoin/rust-payjoin</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/payjoin/rust-payjoin</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- Accepted warnings from UniFFI-generated code: CS0108 (generated exception
+         Message types hide Exception.Message) and CS0659 (generated classes override
+         Equals without GetHashCode). Regenerate rather than hand-edit src/payjoin.cs.
+         NU5131 fires because the package ships a ref/net10.0 assembly (the intentional
+         native-asset layout: compile against ref/, run from runtimes/) and csproj-based
+         pack cannot emit the nuspec references group the analysis asks for; consumption
+         is covered by the per-RID smoke tests. Keep every other package-analysis warning
+         visible. -->
+    <NoWarn>$(NoWarn);CS0108;CS0659;NU5131</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="src/**/*.cs" />
+    <Compile Include="Payjoin.Http.cs" />
+    <None Include="README.md" Pack="true" PackagePath="/" />
+    <None Include="$(TargetPath)" Pack="true" PackagePath="ref/$(TargetFramework)/" />
+    <None Include="$(TargetPath)" Pack="true" PackagePath="runtimes/any/lib/$(TargetFramework)/" />
+    <None Include="artifacts/runtimes/linux-arm64/native/*" Pack="true" PackagePath="runtimes/linux-arm64/native/" />
+    <None Include="artifacts/runtimes/linux-x64/native/*" Pack="true" PackagePath="runtimes/linux-x64/native/" />
+    <None Include="artifacts/runtimes/osx-arm64/native/*" Pack="true" PackagePath="runtimes/osx-arm64/native/" />
+    <None Include="artifacts/runtimes/osx-x64/native/*" Pack="true" PackagePath="runtimes/osx-x64/native/" />
+    <None Include="artifacts/runtimes/win-arm64/native/*" Pack="true" PackagePath="runtimes/win-arm64/native/" />
+    <None Include="artifacts/runtimes/win-x64/native/*" Pack="true" PackagePath="runtimes/win-x64/native/" />
+  </ItemGroup>
+
+  <Target Name="ValidatePayjoinNativeAssets" BeforeTargets="Pack">
+    <ItemGroup>
+      <PayjoinNativeAsset Include="artifacts/runtimes/**/native/*" />
+    </ItemGroup>
+    <Error
+      Condition="'@(PayjoinNativeAsset)' == ''"
+      Text="No RID-specific native assets found. Run scripts/build_nuget_native.sh or scripts/build_nuget_native.ps1 before packing." />
+    <!-- BitcoindEnv is exported by payjoin-ffi's test_utils module, which only
+         exists under the _test-utils feature, so its presence in the generated
+         bindings means they were not generated for production. -->
+    <Error
+      Condition="Exists('src/payjoin.cs') and $([System.IO.File]::ReadAllText('src/payjoin.cs').Contains('BitcoindEnv'))"
+      Text="Generated bindings include _test-utils. Regenerate production bindings before packing (bash: PAYJOIN_FFI_FEATURES= ./scripts/generate_bindings.sh; PowerShell: ./scripts/generate_bindings.ps1 -ProductionBindings)." />
+  </Target>
+
+</Project>

@@ -1,3 +1,14 @@
+param(
+    # Force production bindings (no extra cargo features). Windows cannot represent an empty
+    # environment variable distinctly from an unset one, so callers signal production through
+    # this switch rather than by setting PAYJOIN_FFI_FEATURES to "".
+    [switch] $ProductionBindings,
+
+    # Build the native library without regenerating the C# bindings, for callers (the per-RID
+    # packaging jobs) that consume only the native asset.
+    [switch] $NativeOnly
+)
+
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 
@@ -51,7 +62,9 @@ Copy-Item (Join-Path $repoRoot "Cargo-recent.lock") $lockFile -Force
 try {
 
 Write-Host "Generating payjoin C#..."
-if ($null -ne $env:PAYJOIN_FFI_FEATURES) {
+if ($ProductionBindings) {
+    $payjoinFfiFeatures = ""
+} elseif ($null -ne $env:PAYJOIN_FFI_FEATURES) {
     $payjoinFfiFeatures = $env:PAYJOIN_FFI_FEATURES
 } else {
     # Keep parity with other language test scripts: include _test-utils by default.
@@ -64,28 +77,42 @@ if ($payjoinFfiFeatures) {
     $generatorFeatures = "csharp"
 }
 
-Invoke-Native cargo build --features $generatorFeatures --profile dev -j2
-
-Write-Host "Cleaning csharp/src/ directory..."
-New-Item -ItemType Directory -Force -Path "csharp/src" | Out-Null
-Get-ChildItem "csharp/src" -Filter "*.cs" -ErrorAction SilentlyContinue | Remove-Item -Force
-
-$previousUniffiLanguage = $env:UNIFFI_BINDGEN_LANGUAGE
-$env:UNIFFI_BINDGEN_LANGUAGE = "csharp"
-try {
-    Invoke-Native cargo run --features $generatorFeatures --profile dev --bin uniffi-bindgen '--' --library "../target/debug/$libName" --out-dir "csharp/src/"
+if ($env:PAYJOIN_FFI_PROFILE) {
+    $payjoinFfiProfile = $env:PAYJOIN_FFI_PROFILE
+} else {
+    $payjoinFfiProfile = "dev"
 }
-finally {
-    if ($null -eq $previousUniffiLanguage) {
-        Remove-Item Env:UNIFFI_BINDGEN_LANGUAGE -ErrorAction SilentlyContinue
-    } else {
-        $env:UNIFFI_BINDGEN_LANGUAGE = $previousUniffiLanguage
+
+if ($payjoinFfiProfile -eq "dev") {
+    $targetProfileDir = "debug"
+} else {
+    $targetProfileDir = $payjoinFfiProfile
+}
+
+Invoke-Native cargo build --features $generatorFeatures --profile $payjoinFfiProfile -j2
+
+if (-not $NativeOnly) {
+    Write-Host "Cleaning csharp/src/ directory..."
+    New-Item -ItemType Directory -Force -Path "csharp/src" | Out-Null
+    Get-ChildItem "csharp/src" -Filter "*.cs" -ErrorAction SilentlyContinue | Remove-Item -Force
+
+    $previousUniffiLanguage = $env:UNIFFI_BINDGEN_LANGUAGE
+    $env:UNIFFI_BINDGEN_LANGUAGE = "csharp"
+    try {
+        Invoke-Native cargo run --features $generatorFeatures --profile dev --bin uniffi-bindgen '--' --library "../target/$targetProfileDir/$libName" --out-dir "csharp/src/"
+    }
+    finally {
+        if ($null -eq $previousUniffiLanguage) {
+            Remove-Item Env:UNIFFI_BINDGEN_LANGUAGE -ErrorAction SilentlyContinue
+        } else {
+            $env:UNIFFI_BINDGEN_LANGUAGE = $previousUniffiLanguage
+        }
     }
 }
 
 Write-Host "Copying native library..."
 New-Item -ItemType Directory -Force -Path "csharp/lib" | Out-Null
-Copy-Item "../target/debug/$libName" "csharp/lib/$libName" -Force
+Copy-Item "../target/$targetProfileDir/$libName" "csharp/lib/$libName" -Force
 
 }
 finally {

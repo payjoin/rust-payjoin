@@ -64,4 +64,184 @@ jobs:
         run: ./scripts/generate_bindings.ps1
 
       - name: Run tests
-        run: dotnet test --logger "console;verbosity=minimal"
+        run: dotnet test Payjoin.Tests.csproj --logger "console;verbosity=minimal"
+
+  build-nuget-native:
+    # Every RID cross-compiles from Linux: cargo-zigbuild links the Linux targets
+    # against a pinned glibc floor and the macOS targets against zig's bundled
+    # libSystem stubs; cargo-xwin links MSVC-ABI Windows targets against the
+    # Microsoft CRT/SDK. The per-RID smoke jobs verify each produced asset on
+    # real hardware.
+    name: "Build NuGet native asset"
+    runs-on: ubuntu-latest
+    env:
+      # Must match the dtolnay/rust-toolchain version exactly: the cross-target
+      # std components are installed for that toolchain, and a partial version
+      # here selects a different rustup toolchain entry without them (E0463).
+      RUSTUP_TOOLCHAIN: 1.85.0
+    defaults:
+      run:
+        working-directory: payjoin-ffi/csharp
+    strategy:
+      # Let every RID report its own result; a failure in one target should not
+      # cancel the signal from the others.
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-arm64
+            target: aarch64-unknown-linux-gnu
+          - rid: linux-x64
+            target: x86_64-unknown-linux-gnu
+          - rid: osx-arm64
+            target: aarch64-apple-darwin
+          - rid: osx-x64
+            target: x86_64-apple-darwin
+          - rid: win-arm64
+            target: aarch64-pc-windows-msvc
+          - rid: win-x64
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust 1.85.0
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Use cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cross toolchain
+        # Version- and hash-pinned: these tools produce the shipped binaries.
+        run: pip install --require-hashes -r scripts/cross-requirements.txt
+
+      - name: Install MSVC toolchain frontends (clang-cl, llvm-lib)
+        if: startsWith(matrix.rid, 'win-')
+        # cargo-xwin compiles C dependencies with clang-cl and archives them with
+        # llvm-lib. The runner image ships LLVM with versioned binary names only,
+        # so expose the unversioned names cc-rs looks for.
+        run: |
+          for tool in clang-cl llvm-lib; do
+            if command -v "$tool" >/dev/null; then
+              continue
+            fi
+            latest=$(ls -1 /usr/bin/"$tool"-* 2>/dev/null | sort -V | tail -n 1)
+            if [ -z "$latest" ]; then
+              sudo apt-get update -q
+              sudo apt-get install -y -q llvm clang
+              latest=$(ls -1 /usr/bin/"$tool"-* 2>/dev/null | sort -V | tail -n 1)
+            fi
+            if [ -z "$latest" ]; then
+              echo "$tool not found on the runner" >&2
+              exit 1
+            fi
+            sudo ln -s "$latest" /usr/local/bin/"$tool"
+          done
+          command -v clang-cl llvm-lib
+
+      - name: Build release native asset
+        run: |
+          PAYJOIN_FFI_CROSS=1 PAYJOIN_FFI_RID=${{ matrix.rid }} bash ./scripts/build_nuget_native.sh
+
+      - name: Upload NuGet native asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: payjoin-ffi/csharp/artifacts/runtimes/${{ matrix.rid }}/native/*
+          if-no-files-found: error
+
+  pack-nuget:
+    name: "Pack C# NuGet package"
+    runs-on: ubuntu-latest
+    needs: build-nuget-native
+    env:
+      # Exact version so the packaged bindings build with the toolchain the
+      # action installs, not an implicitly-installed latest 1.85.x.
+      RUSTUP_TOOLCHAIN: 1.85.0
+    defaults:
+      run:
+        working-directory: payjoin-ffi/csharp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust 1.85.0
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Use cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Download native assets
+        uses: actions/download-artifact@v4
+        with:
+          path: payjoin-ffi/csharp/artifacts/downloaded
+
+      - name: Assemble RID assets
+        run: |
+          for rid in linux-arm64 linux-x64 osx-arm64 osx-x64 win-arm64 win-x64; do
+            mkdir -p "artifacts/runtimes/$rid/native"
+            cp "artifacts/downloaded/$rid"/* "artifacts/runtimes/$rid/native/"
+          done
+
+      - name: Generate production bindings
+        run: |
+          PAYJOIN_FFI_FEATURES= PAYJOIN_FFI_PROFILE=release bash ./scripts/generate_bindings.sh
+
+      - name: Pack NuGet package
+        run: dotnet pack Payjoin.csproj --configuration Release --output artifacts/packages
+
+      - name: Upload NuGet package
+        uses: actions/upload-artifact@v4
+        with:
+          name: payjoin-csharp-nuget-package
+          path: payjoin-ffi/csharp/artifacts/packages/*.nupkg
+          if-no-files-found: error
+
+  smoke-nuget:
+    name: "Smoke test C# NuGet package"
+    runs-on: ${{ matrix.os }}
+    needs: pack-nuget
+    defaults:
+      run:
+        working-directory: payjoin-ffi/csharp
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: macos-15-intel
+            rid: osx-x64
+          - os: windows-11-arm
+            rid: win-arm64
+          - os: windows-latest
+            rid: win-x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Download NuGet package
+        uses: actions/download-artifact@v4
+        with:
+          name: payjoin-csharp-nuget-package
+          path: payjoin-ffi/csharp/artifacts/packages
+
+      - name: Run package smoke test
+        shell: bash
+        # 'auto' derives the version from the packed artifact, so Payjoin.csproj
+        # stays the only place the package version is maintained.
+        run: bash ./scripts/smoke_nuget_package.sh artifacts/packages auto ${{ matrix.rid }}

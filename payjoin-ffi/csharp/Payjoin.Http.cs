@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Payjoin.Http
 {
-    internal sealed class OhttpKeysClient : IDisposable
+    public sealed class OhttpKeysClient : IDisposable
     {
         private readonly HttpClient _client;
         private readonly HttpClientHandler _handler;

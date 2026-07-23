@@ -16,6 +16,12 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <ProjectReference Include="Payjoin.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Payjoin.Http.cs" />
+    <Compile Remove="src/**/*.cs" />
   </ItemGroup>
 
   <!-- Include native library - copied to output directory for testing -->

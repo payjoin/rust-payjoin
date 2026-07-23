@@ -15,3 +15,4 @@ package_name = "payjoin"
 [bindings.csharp]
 namespace = "Payjoin"
 cdylib_name = "payjoin_ffi"
+access_modifier = "public"

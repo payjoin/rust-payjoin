@@ -1,5 +1,17 @@
 # payjoin-cli Changelog
 
+## 1.0.0-rc.1
+
+Track payjoin 1.0.0-rc.6. The library insulated the `bitcoin_uri` crate from its
+public API, so the CLI now reads BIP21 URIs through payjoin's own accessor
+methods (`address()`, `amount()`, `set_amount()`) and the inherent
+`check_pj_supported` method instead of the removed `UriExt` trait. No
+user-facing behavior changes.
+
+Selected Improvements:
+
+- Insulate `bitcoin_uri` from the public API by @spacebear21 in [#1756](https://github.com/payjoin/rust-payjoin/pull/1756)
+
 ## 1.0.0-rc.0
 
 The 1.0.0-rc.0 release rewrites payjoin-cli's foundations. Session storage migrated from

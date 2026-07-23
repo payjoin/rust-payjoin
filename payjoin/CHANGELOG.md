@@ -1,5 +1,36 @@
 # Payjoin Changelog
 
+## 1.0.0-rc.6
+
+This release insulates the `bitcoin_uri` crate from payjoin's public API so
+that a breaking release of `bitcoin_uri` no longer forces a breaking release of
+payjoin. `Uri` and `PjUri` are now owned newtypes read through accessor methods
+instead of public fields, parsing returns payjoin's own `UriParseError`, and the
+`UriExt` trait is replaced by inherent methods. It also seals the persisted
+`SessionOutcome` ahead of the 1.0 database-compatibility freeze and exposes
+proposal transaction ID stability on receiver states.
+
+Selected Improvements:
+
+### API Changes
+
+- Insulate `bitcoin_uri` from the public API: `Uri` and `PjUri` become owned
+  newtypes with accessor methods (`address()`, `amount()`, `set_amount()`,
+  `label()`, `message()`, `extras()`), parsing returns the payjoin-owned
+  `UriParseError`, and the `UriExt` trait is removed in favor of inherent
+  `check_pj_supported`, `assume_checked`, and `require_network` methods (#1756)
+- `SessionOutcome` drops the unused witness payload on a `Success` outcome and
+  instead encapsulates a `bitcoin::Txid` instead. Also fully seal the enum by
+  fully handling remaining cases with a new `Unrecognized(Txid)` arm ahead of
+  the 1.0 database-compatibility freeze. (#1747)
+- Expose `proposal_txid_is_stable()` on the receiver states that hold the
+  fallback transaction, mirrored in payjoin-ffi (#1718)
+
+### Bug Fixes
+
+- Fix the proposal transaction ID stability check for nested SegWit inputs
+  (#1718)
+
 ## 1.0.0-rc.5
 
 This release renames `PersistedError::error_state` to `fatal_state`, makes

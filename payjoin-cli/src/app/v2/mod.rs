@@ -210,15 +210,14 @@ impl AppTrait for App {
     fn wallet(&self) -> BitcoindWallet { self.wallet.clone() }
 
     async fn send_payjoin(&self, bip21: &str, fee_rate: FeeRate) -> Result<()> {
-        use payjoin::UriExt;
         let uri = Uri::try_from(bip21)
             .map_err(|e| anyhow!("Failed to create URI from BIP21: {}", e))?
             .assume_checked()
             .check_pj_supported()
             .map_err(|_| anyhow!("URI does not support Payjoin"))?;
-        let address = uri.address;
-        let amount = uri.amount.ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
-        match uri.extras.pj_param() {
+        let address = uri.address().clone();
+        let amount = uri.amount().ok_or_else(|| anyhow!("please specify the amount in the Uri"))?;
+        match uri.extras().pj_param() {
             #[cfg(feature = "v1")]
             PjParam::V1(pj_param) => {
                 let psbt = self.create_original_psbt(&address, amount, fee_rate)?;

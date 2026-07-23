@@ -47,14 +47,14 @@ pub trait Headers {
     fn get_header(&self, key: &str) -> Option<&str>;
 }
 
-pub fn build_v1_pj_uri<'a>(
+pub fn build_v1_pj_uri(
     address: &bitcoin::Address,
     endpoint: impl IntoUrl,
     output_substitution: OutputSubstitution,
-) -> Result<crate::uri::PjUri<'a>, PjParseError> {
+) -> Result<crate::uri::PjUri, PjParseError> {
     let pj_param = PjParam::parse(endpoint)?;
     let extras = crate::uri::PayjoinExtras { pj_param, output_substitution };
-    Ok(bitcoin_uri::Uri::with_extras(address.clone(), extras))
+    Ok(crate::uri::PjUri::from_extras(address.clone(), extras))
 }
 
 impl UncheckedOriginalPayload {

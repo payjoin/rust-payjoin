@@ -719,7 +719,7 @@ impl Receiver<Initialized> {
     }
 
     /// Build a V2 Payjoin URI from the receiver's context
-    pub fn pj_uri<'a>(&self) -> crate::PjUri<'a> {
+    pub fn pj_uri(&self) -> crate::PjUri {
         pj_uri(&self.session_context, OutputSubstitution::Disabled)
     }
 
@@ -1629,10 +1629,10 @@ fn mailbox_endpoint(directory: &Url, id: &ShortId) -> Url {
 }
 
 /// Gets the Payjoin URI from a session context
-pub(crate) fn pj_uri<'a>(
+pub(crate) fn pj_uri(
     session_context: &SessionContext,
     output_substitution: OutputSubstitution,
-) -> crate::PjUri<'a> {
+) -> crate::PjUri {
     use crate::uri::PayjoinExtras;
     let pj_param = crate::uri::PjParam::V2(crate::uri::v2::PjParam::new(
         session_context.directory.clone(),
@@ -1642,8 +1642,10 @@ pub(crate) fn pj_uri<'a>(
         session_context.receiver_key.public_key().clone(),
     ));
     let extras = PayjoinExtras { pj_param, output_substitution };
-    let mut uri = bitcoin_uri::Uri::with_extras(session_context.address.clone(), extras);
-    uri.amount = session_context.amount;
+    let mut uri = crate::uri::PjUri::from_extras(session_context.address.clone(), extras);
+    if let Some(amount) = session_context.amount {
+        uri.set_amount(amount);
+    }
 
     uri
 }
@@ -2504,8 +2506,8 @@ pub mod test {
     fn test_v2_pj_uri() {
         let uri =
             Receiver { state: Initialized {}, session_context: SHARED_CONTEXT.clone() }.pj_uri();
-        assert_ne!(uri.extras.pj_param.endpoint().as_str(), EXAMPLE_URL);
-        assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
+        assert_ne!(uri.extras().pj_param().endpoint().as_str(), EXAMPLE_URL);
+        assert_eq!(uri.extras().output_substitution(), OutputSubstitution::Disabled);
     }
 
     #[test]

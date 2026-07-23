@@ -1,9 +1,12 @@
 //! Payjoin URI parsing and validation
 
 use std::borrow::Cow;
+use std::fmt;
+use std::str::FromStr;
 
-use bitcoin::address::NetworkChecked;
-pub use error::PjParseError;
+use bitcoin::address::{NetworkChecked, NetworkUnchecked, NetworkValidation};
+use bitcoin::{Address, Amount};
+pub use error::{PjParseError, UriParseError};
 
 #[cfg(feature = "v2")]
 pub(crate) use crate::directory::ShortId;
@@ -106,91 +109,217 @@ impl PayjoinExtras {
     pub fn output_substitution(&self) -> OutputSubstitution { self.output_substitution }
 }
 
-pub type Uri<'a, NetworkValidation> = bitcoin_uri::Uri<'a, NetworkValidation, MaybePayjoinExtras>;
-pub type PjUri<'a> = bitcoin_uri::Uri<'a, NetworkChecked, PayjoinExtras>;
+/// A BIP21 URI that may or may not request payjoin.
+///
+/// This newtype wraps [`bitcoin_uri::Uri`] so that a breaking change in that
+/// crate does not force a breaking change in this crate's public API. Parse one
+/// with [`Uri::try_from`] or [`str::parse`], validate the address network with
+/// [`assume_checked`](Self::assume_checked) or
+/// [`require_network`](Self::require_network), then check for payjoin support
+/// with [`check_pj_supported`](Self::check_pj_supported).
+///
+/// The URI is always owned, so it carries no lifetime parameter.
+#[derive(Clone, Debug)]
+pub struct Uri<NetVal: NetworkValidation>(
+    bitcoin_uri::Uri<'static, NetVal, MaybePayjoinExtrasAdapter>,
+);
 
-mod sealed {
-    use bitcoin::address::NetworkChecked;
+impl<NetVal: NetworkValidation> Uri<NetVal> {
+    /// The address the URI pays to.
+    pub fn address(&self) -> &Address<NetVal> { &self.0.address }
 
-    pub trait UriExt: Sized {}
+    /// The amount the URI requests, if any.
+    pub fn amount(&self) -> Option<Amount> { self.0.amount }
 
-    impl UriExt for super::Uri<'_, NetworkChecked> {}
-    impl UriExt for super::PjUri<'_> {}
+    /// The label describing the URI, if present and valid UTF-8.
+    pub fn label(&self) -> Option<String> {
+        self.0.label.clone().and_then(|label| String::try_from(label).ok())
+    }
+
+    /// The message describing the URI, if present and valid UTF-8.
+    pub fn message(&self) -> Option<String> {
+        self.0.message.clone().and_then(|message| String::try_from(message).ok())
+    }
+
+    /// The payjoin parameters carried by the URI.
+    pub fn extras(&self) -> &MaybePayjoinExtras { &self.0.extras.0 }
 }
 
-pub trait UriExt<'a>: sealed::UriExt {
-    // Error type is boxed to reduce the size of the Result
-    // (See https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err)
-    fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bitcoin_uri::Uri<'a>>>;
+impl Uri<NetworkUnchecked> {
+    /// Marks the URI's address as validated without checking the network.
+    pub fn assume_checked(self) -> Uri<NetworkChecked> { Uri(self.0.assume_checked()) }
+
+    /// Validates that the URI's address is valid for the given network.
+    pub fn require_network(
+        self,
+        network: bitcoin::Network,
+    ) -> Result<Uri<NetworkChecked>, UriParseError> {
+        self.0.require_network(network).map(Uri).map_err(UriParseError::from_bip21_error)
+    }
 }
 
-impl<'a> UriExt<'a> for Uri<'a, NetworkChecked> {
-    fn check_pj_supported(self) -> Result<PjUri<'a>, Box<bitcoin_uri::Uri<'a>>> {
-        match self.extras {
+impl Uri<NetworkChecked> {
+    /// Converts this URI into a [`PjUri`] if it supports payjoin.
+    ///
+    /// If payjoin is unsupported the URI is handed back unchanged in the error
+    /// variant. It is boxed to reduce the size of the `Result` (see
+    /// <https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err>).
+    pub fn check_pj_supported(self) -> Result<PjUri, Box<Self>> {
+        match self.0.extras.0 {
             MaybePayjoinExtras::Supported(payjoin) => {
-                let mut uri = bitcoin_uri::Uri::with_extras(self.address, payjoin);
-                uri.amount = self.amount;
-                uri.label = self.label;
-                uri.message = self.message;
+                let mut uri =
+                    bitcoin_uri::Uri::with_extras(self.0.address, PayjoinExtrasAdapter(payjoin));
+                uri.amount = self.0.amount;
+                uri.label = self.0.label;
+                uri.message = self.0.message;
 
-                Ok(uri)
+                Ok(PjUri(uri))
             }
             MaybePayjoinExtras::Unsupported => {
-                let mut uri = bitcoin_uri::Uri::new(self.address);
-                uri.amount = self.amount;
-                uri.label = self.label;
-                uri.message = self.message;
+                let mut uri = bitcoin_uri::Uri::with_extras(
+                    self.0.address,
+                    MaybePayjoinExtrasAdapter(MaybePayjoinExtras::Unsupported),
+                );
+                uri.amount = self.0.amount;
+                uri.label = self.0.label;
+                uri.message = self.0.message;
 
-                Err(Box::new(uri))
+                Err(Box::new(Uri(uri)))
             }
         }
     }
 }
 
-impl bitcoin_uri::de::DeserializationError for MaybePayjoinExtras {
+impl FromStr for Uri<NetworkUnchecked> {
+    type Err = UriParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let uri: bitcoin_uri::Uri<'static, NetworkUnchecked, MaybePayjoinExtrasAdapter> =
+            s.parse().map_err(UriParseError::from_bip21_error)?;
+        Ok(Uri(uri))
+    }
+}
+
+impl TryFrom<&str> for Uri<NetworkUnchecked> {
+    type Error = UriParseError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> { s.parse() }
+}
+
+impl TryFrom<String> for Uri<NetworkUnchecked> {
+    type Error = UriParseError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> { s.parse() }
+}
+
+impl fmt::Display for Uri<NetworkChecked> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { self.0.fmt(f) }
+}
+
+/// A BIP21 URI that is known to request payjoin, with validated payjoin parameters.
+///
+/// Obtained from [`Uri::check_pj_supported`]. Like [`Uri`], this newtype
+/// insulates the public API from [`bitcoin_uri`] and is always owned.
+#[derive(Clone, Debug)]
+pub struct PjUri(bitcoin_uri::Uri<'static, NetworkChecked, PayjoinExtrasAdapter>);
+
+impl PjUri {
+    /// Builds a payjoin URI from a checked address and validated payjoin parameters.
+    pub(crate) fn from_extras(address: Address<NetworkChecked>, extras: PayjoinExtras) -> Self {
+        PjUri(bitcoin_uri::Uri::with_extras(address, PayjoinExtrasAdapter(extras)))
+    }
+
+    /// The address the URI pays to.
+    pub fn address(&self) -> &Address<NetworkChecked> { &self.0.address }
+
+    /// The amount the URI requests, if any.
+    pub fn amount(&self) -> Option<Amount> { self.0.amount }
+
+    /// Sets the amount the URI requests.
+    pub fn set_amount(&mut self, amount: Amount) { self.0.amount = Some(amount); }
+
+    /// The label describing the URI, if present and valid UTF-8.
+    pub fn label(&self) -> Option<String> {
+        self.0.label.clone().and_then(|label| String::try_from(label).ok())
+    }
+
+    /// The message describing the URI, if present and valid UTF-8.
+    pub fn message(&self) -> Option<String> {
+        self.0.message.clone().and_then(|message| String::try_from(message).ok())
+    }
+
+    /// The validated payjoin parameters carried by the URI.
+    pub fn extras(&self) -> &PayjoinExtras { &self.0.extras.0 }
+
+    /// Overrides the output substitution preference carried by the URI.
+    #[cfg(test)]
+    pub(crate) fn set_output_substitution(&mut self, output_substitution: OutputSubstitution) {
+        self.0.extras.0.output_substitution = output_substitution;
+    }
+}
+
+impl fmt::Display for PjUri {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { self.0.fmt(f) }
+}
+
+/// Private adapter that carries the `bitcoin_uri` parsing and serialization
+/// trait impls, keeping them off the public [`MaybePayjoinExtras`] type so that
+/// `bitcoin_uri` stays out of this crate's semver surface.
+#[derive(Clone, Debug)]
+pub(crate) struct MaybePayjoinExtrasAdapter(pub(crate) MaybePayjoinExtras);
+
+/// Private adapter that carries the `bitcoin_uri` serialization trait impl for
+/// [`PayjoinExtras`], keeping it off the public type.
+#[derive(Clone, Debug)]
+pub(crate) struct PayjoinExtrasAdapter(pub(crate) PayjoinExtras);
+
+/// Serializes the payjoin BIP21 query parameters (`pj` and optional `pjos`).
+fn serialize_payjoin_params(extras: &PayjoinExtras) -> Vec<(&'static str, String)> {
+    let mut params = Vec::with_capacity(2);
+    if extras.output_substitution == OutputSubstitution::Disabled {
+        params.push(("pjos", String::from("0")));
+    }
+    params.push(("pj", extras.pj_param.to_string()));
+    params
+}
+
+impl bitcoin_uri::de::DeserializationError for MaybePayjoinExtrasAdapter {
     type Error = PjParseError;
 }
 
-impl bitcoin_uri::de::DeserializeParams<'_> for MaybePayjoinExtras {
+impl bitcoin_uri::de::DeserializeParams<'_> for MaybePayjoinExtrasAdapter {
     type DeserializationState = DeserializationState;
 }
 
 #[derive(Default)]
-pub struct DeserializationState {
+pub(crate) struct DeserializationState {
     pj: Option<PjParam>,
     pjos: Option<OutputSubstitution>,
 }
 
-impl bitcoin_uri::SerializeParams for &MaybePayjoinExtras {
+impl bitcoin_uri::SerializeParams for &MaybePayjoinExtrasAdapter {
     type Key = &'static str;
     type Value = String;
     type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
 
     fn serialize_params(self) -> Self::Iterator {
-        match self {
-            MaybePayjoinExtras::Supported(extras) => extras.serialize_params(),
-            MaybePayjoinExtras::Unsupported => vec![].into_iter(),
+        match &self.0 {
+            MaybePayjoinExtras::Supported(extras) => serialize_payjoin_params(extras).into_iter(),
+            MaybePayjoinExtras::Unsupported => Vec::new().into_iter(),
         }
     }
 }
 
-impl bitcoin_uri::SerializeParams for &PayjoinExtras {
+impl bitcoin_uri::SerializeParams for &PayjoinExtrasAdapter {
     type Key = &'static str;
     type Value = String;
     type Iterator = std::vec::IntoIter<(Self::Key, Self::Value)>;
 
-    fn serialize_params(self) -> Self::Iterator {
-        let mut params = Vec::with_capacity(2);
-        if self.output_substitution == OutputSubstitution::Disabled {
-            params.push(("pjos", String::from("0")));
-        }
-        params.push(("pj", self.pj_param.to_string()));
-        params.into_iter()
-    }
+    fn serialize_params(self) -> Self::Iterator { serialize_payjoin_params(&self.0).into_iter() }
 }
 
 impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
-    type Value = MaybePayjoinExtras;
+    type Value = MaybePayjoinExtrasAdapter;
 
     fn is_param_known(&self, param: &str) -> bool { matches!(param, "pj" | "pjos") }
 
@@ -228,22 +357,21 @@ impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
         self,
     ) -> std::result::Result<Self::Value, <Self::Value as bitcoin_uri::DeserializationError>::Error>
     {
-        match (self.pj, self.pjos) {
-            (None, None) => Ok(MaybePayjoinExtras::Unsupported),
-            (None, Some(_)) => Err(InternalPjParseError::MissingEndpoint.into()),
-            (Some(pj_param), pjos) => Ok(MaybePayjoinExtras::Supported(PayjoinExtras {
+        let extras = match (self.pj, self.pjos) {
+            (None, None) => MaybePayjoinExtras::Unsupported,
+            (None, Some(_)) => return Err(InternalPjParseError::MissingEndpoint.into()),
+            (Some(pj_param), pjos) => MaybePayjoinExtras::Supported(PayjoinExtras {
                 pj_param,
                 output_substitution: pjos.unwrap_or(OutputSubstitution::Enabled),
-            })),
-        }
+            }),
+        };
+        Ok(MaybePayjoinExtrasAdapter(extras))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::convert::TryFrom;
-
-    use bitcoin_uri::SerializeParams;
 
     use super::*;
 
@@ -281,7 +409,7 @@ mod tests {
         assert!(
             !Uri::try_from("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX")
                 .unwrap()
-                .extras
+                .extras()
                 .pj_is_supported(),
             "Uri expected a failure with missing pj extras, but it succeeded"
         );
@@ -292,13 +420,12 @@ mod tests {
         use bitcoin_uri::de::DeserializationState as _;
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pjos=1&pj=HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ%23EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC-RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV";
         let pjuri = Uri::try_from(uri).unwrap().assume_checked().check_pj_supported().unwrap();
-        let serialized_params = pjuri.extras.serialize_params();
-        let pjos_key = serialized_params.clone().next().expect("Missing pjos key").0;
-        let pj_key = serialized_params.clone().next().expect("Missing pj key").0;
+        let serialized_params = serialize_payjoin_params(pjuri.extras());
+        let pj_key = serialized_params.first().expect("Missing pj key").0;
 
         let state = DeserializationState::default();
 
-        assert!(state.is_param_known(pjos_key), "The pjos key should match 'pjos', but it failed");
+        assert!(state.is_param_known("pjos"), "The pjos key should match 'pjos', but it failed");
         assert!(state.is_param_known(pj_key), "The pj key should match 'pj', but it failed");
         assert!(
             !state.is_param_known("unknown_param"),

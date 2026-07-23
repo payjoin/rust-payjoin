@@ -27,6 +27,7 @@ _core = [
   "serde_json",
   "dep:percent-encoding-rfc3986",
   "bitcoin_uri",
+  "bitcoin_uri/std",
   "serde",
   "bitcoin/serde",
 ]

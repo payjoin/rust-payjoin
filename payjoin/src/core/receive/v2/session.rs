@@ -109,7 +109,7 @@ impl SessionHistory {
     }
 
     /// Receiver session Payjoin URI
-    pub fn pj_uri<'a>(&self) -> PjUri<'a> {
+    pub fn pj_uri(&self) -> PjUri {
         self.events
             .iter()
             .find_map(|event| match event {
@@ -1207,8 +1207,8 @@ mod tests {
 
         let uri = SessionHistory { events }.pj_uri();
 
-        assert_ne!(uri.extras.pj_param.endpoint().as_str(), EXAMPLE_URL);
-        assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
+        assert_ne!(uri.extras().pj_param().endpoint().as_str(), EXAMPLE_URL);
+        assert_eq!(uri.extras().output_substitution(), OutputSubstitution::Disabled);
 
         Ok(())
     }

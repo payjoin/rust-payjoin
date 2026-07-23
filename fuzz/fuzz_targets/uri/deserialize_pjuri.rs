@@ -2,9 +2,8 @@
 
 use std::any::{Any, TypeId};
 
-use bitcoin_uri::Param;
 use libfuzzer_sys::fuzz_target;
-use payjoin::{Uri, UriExt};
+use payjoin::Uri;
 
 fn do_test(data: &[u8]) {
     if let Ok(uri_str) = std::str::from_utf8(data) {
@@ -12,29 +11,29 @@ fn do_test(data: &[u8]) {
             Ok(uri) => uri.assume_checked(),
             Err(_) => return,
         };
-        let address = pj_uri.address.is_spend_standard();
-        if !address {
+        if !pj_uri.address().is_spend_standard() {
             return;
         }
 
-        if let Some(label) = pj_uri.clone().label {
-            if TypeId::of::<Param>() != label.type_id() {
+        if let Some(label) = pj_uri.label() {
+            if TypeId::of::<String>() != label.type_id() {
                 return;
             }
         };
-        if let Some(message) = pj_uri.clone().message {
-            if TypeId::of::<Param>() != message.type_id() {
+        if let Some(message) = pj_uri.message() {
+            if TypeId::of::<String>() != message.type_id() {
                 return;
             }
         };
-        let extras = match pj_uri.clone().check_pj_supported() {
-            Ok(res) => res.extras,
+        let extras = match pj_uri.check_pj_supported() {
+            Ok(res) => res,
             Err(_) => return,
         };
         assert!(
-            TypeId::of::<payjoin::OutputSubstitution>() == extras.output_substitution().type_id()
+            TypeId::of::<payjoin::OutputSubstitution>()
+                == extras.extras().output_substitution().type_id()
         );
-        assert!(TypeId::of::<String>() == extras.endpoint().type_id())
+        assert!(TypeId::of::<String>() == extras.extras().endpoint().type_id())
     }
 }
 

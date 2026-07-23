@@ -36,7 +36,6 @@ mod integration {
     #[cfg(feature = "v1")]
     mod v1 {
         use payjoin::send::v1::SenderBuilder;
-        use payjoin::UriExt;
         use tracing::debug;
 
         use super::*;
@@ -111,7 +110,7 @@ mod integration {
             let pj_receiver_address = receiver.new_address()?;
             let mut pj_uri =
                 build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
-            pj_uri.amount = Some(Amount::ONE_BTC);
+            pj_uri.set_amount(Amount::ONE_BTC);
 
             // **********************
             // Inside the Sender:
@@ -170,7 +169,7 @@ mod integration {
             let pj_receiver_address = receiver.new_address()?;
             let mut pj_uri =
                 build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
-            pj_uri.amount = Some(Amount::ONE_BTC);
+            pj_uri.set_amount(Amount::ONE_BTC);
 
             // **********************
             // Inside the Sender:
@@ -211,7 +210,7 @@ mod integration {
         };
         use payjoin::send::v2::{replay_event_log as replay_sender_event_log, SenderBuilder};
         use payjoin::send::ResponseError;
-        use payjoin::{OhttpKeys, PjUri, UriExt};
+        use payjoin::{OhttpKeys, PjUri};
         use payjoin_test_utils::{
             BoxSendSyncError, InMemoryPersister, SessionPersister, TestServices,
         };
@@ -930,7 +929,7 @@ mod integration {
             let pj_receiver_address = receiver.new_address()?;
             let mut pj_uri =
                 build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
-            pj_uri.amount = Some(Amount::ONE_BTC);
+            pj_uri.set_amount(Amount::ONE_BTC);
 
             // **********************
             // Inside the Sender:
@@ -943,7 +942,7 @@ mod integration {
             // FIXME this test no longer sends v2 to v1 because that concept is gone and should now be
             // Handled by the implementation. Therefore, the e2e test should now test v2-capable sender
             // successfully sending to v1.
-            assert!(matches!(pj_uri.extras.pj_param(), payjoin::PjParam::V1(_)));
+            assert!(matches!(pj_uri.extras().pj_param(), payjoin::PjParam::V1(_)));
             let psbt = build_original_psbt(&sender, &pj_uri)?;
             let req_ctx = payjoin::send::v1::SenderBuilder::new(psbt, pj_uri)
                 .build_recommended(FeeRate::BROADCAST_MIN)?;
@@ -1242,7 +1241,7 @@ mod integration {
             pj_uri: &PjUri,
         ) -> Result<Psbt, BoxError> {
             let mut outputs = HashMap::with_capacity(1);
-            outputs.insert(pj_uri.address.to_string(), Amount::from_btc(50.0)?.to_btc());
+            outputs.insert(pj_uri.address().to_string(), Amount::from_btc(50.0)?.to_btc());
             let options = serde_json::json!({
                 "lockUnspents": true,
                 // The minimum relay feerate ensures that tests fail if the receiver would add inputs/outputs
@@ -1271,7 +1270,6 @@ mod integration {
     #[cfg(feature = "v1")]
     mod batching {
         use payjoin::send::v1::SenderBuilder;
-        use payjoin::UriExt;
 
         use super::*;
 
@@ -1295,7 +1293,7 @@ mod integration {
             let pj_receiver_address = receiver.new_address()?;
             let mut pj_uri =
                 build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
-            pj_uri.amount = Some(Amount::ONE_BTC);
+            pj_uri.set_amount(Amount::ONE_BTC);
 
             // **********************
             // Inside the Sender:
@@ -1375,7 +1373,7 @@ mod integration {
             let pj_receiver_address = receiver.new_address()?;
             let mut pj_uri =
                 build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
-            pj_uri.amount = Some(Amount::ONE_BTC);
+            pj_uri.set_amount(Amount::ONE_BTC);
 
             // **********************
             // Inside the Sender:
@@ -1458,8 +1456,10 @@ mod integration {
 
     fn build_original_psbt(sender: &corepc_node::Client, pj_uri: &PjUri) -> Result<Psbt, BoxError> {
         let mut outputs = HashMap::with_capacity(1);
-        outputs
-            .insert(pj_uri.address.to_string(), pj_uri.amount.unwrap_or(Amount::ONE_BTC).to_btc());
+        outputs.insert(
+            pj_uri.address().to_string(),
+            pj_uri.amount().unwrap_or(Amount::ONE_BTC).to_btc(),
+        );
         let options = json!({
             "lockUnspents": true,
             // The minimum relay feerate ensures that tests fail if the receiver would add inputs/outputs

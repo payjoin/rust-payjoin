@@ -21,7 +21,7 @@ pub use url::{ParseError as UrlParseError, Url};
 #[cfg(feature = "v2")]
 pub mod time;
 pub mod uri;
-pub use uri::{PjParam, PjParseError, PjUri, Uri, UriExt};
+pub use uri::{PjParam, PjParseError, PjUri, Uri, UriParseError};
 pub(crate) mod error_codes;
 
 pub(crate) mod output_substitution;

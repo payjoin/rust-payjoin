@@ -28,7 +28,6 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
-use bitcoin::hashes::{sha256, Hash};
 use bitcoin::Address;
 pub use error::{CreateRequestError, DecapsulationError};
 use error::{InternalCreateRequestError, InternalDecapsulationError};
@@ -50,7 +49,6 @@ use crate::persist::{
     TerminalTransition,
 };
 use crate::uri::v2::PjParam;
-use crate::uri::ShortId;
 use crate::{HpkeKeyPair, IntoUrl, PjUri, Request};
 
 mod error;
@@ -489,13 +487,8 @@ impl Sender<PollingForProposal> {
             .into());
         }
 
-        // TODO unify with receiver's fn short_id_from_pubkey
-        let hash = sha256::Hash::hash(
-            &HpkeKeyPair::from_secret_key(&self.session_context.reply_key)
-                .public_key()
-                .to_compressed_bytes(),
-        );
-        let mailbox: ShortId = hash.into();
+        let mailbox =
+            HpkeKeyPair::from_secret_key(&self.session_context.reply_key).public_key().short_id();
         let url = Url::parse(self.session_context.pj_param.endpoint().as_str())
             .expect("Could not parse url")
             .join(&mailbox.to_string())

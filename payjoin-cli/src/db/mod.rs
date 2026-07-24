@@ -13,6 +13,23 @@ pub(crate) fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
 }
 
+/// Approximately three months (90 days).
+/// This would be dropped when key-rotation goes into effect.
+#[cfg(feature = "v2")]
+pub(crate) const OHTTP_KEY_CACHE_TTL_SECS: i64 = 90 * 24 * 60 * 60;
+
+#[cfg(feature = "v2")]
+#[derive(Debug, Clone)]
+pub(crate) struct CachedOhttpKeys {
+    pub(crate) keys: payjoin::OhttpKeys,
+    pub(crate) expires_at: i64,
+}
+
+#[cfg(feature = "v2")]
+impl CachedOhttpKeys {
+    pub(crate) fn is_expired(&self) -> bool { now() >= self.expires_at }
+}
+
 pub(crate) const DB_PATH: &str = "payjoin.sqlite";
 
 #[derive(Debug)]
@@ -86,6 +103,27 @@ impl Database {
             [],
         )?;
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ohttp_key_cache (
+                 directory_url TEXT PRIMARY KEY,
+                 ohttp_keys BLOB NOT NULL,
+                 expires_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+
+        let has_expires_at: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('ohttp_key_cache') WHERE name = 'expires_at'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? > 0;
+        if !has_expires_at {
+            conn.execute(
+                "ALTER TABLE ohttp_key_cache ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+
         Ok(())
     }
 
@@ -103,6 +141,60 @@ impl Database {
         )? == 0;
 
         Ok(was_seen_before)
+    }
+    #[cfg(feature = "v2")]
+    pub(crate) fn get_cached_ohttp_keys(
+        &self,
+        directory_url: &str,
+    ) -> Result<Option<CachedOhttpKeys>> {
+        let conn = self.get_connection()?;
+        let result = conn.query_row(
+            "SELECT ohttp_keys, expires_at FROM ohttp_key_cache WHERE directory_url = ?1",
+            params![directory_url],
+            |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?)),
+        );
+        match result {
+            Ok((bytes, expires_at)) => {
+                let keys = payjoin::OhttpKeys::decode(&bytes)
+                    .map_err(|e| {
+                        tracing::error!("Failed to decode ohttp keys: {}", e);
+                    })
+                    .ok();
+                Ok(keys.map(|keys| CachedOhttpKeys { keys, expires_at }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(Error::Rusqlite(e)),
+        }
+    }
+
+    #[cfg(feature = "v2")]
+    pub(crate) fn store_ohttp_keys(
+        &self,
+        directory_url: &str,
+        keys: &payjoin::OhttpKeys,
+    ) -> Result<()> {
+        let conn = self.get_connection()?;
+
+        let encoded =
+            keys.encode().map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let expires_at = now() + OHTTP_KEY_CACHE_TTL_SECS;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO ohttp_key_cache (directory_url, ohttp_keys, expires_at) VALUES (?1, ?2, ?3)",
+            params![directory_url, encoded, expires_at],
+        )?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "v2")]
+    pub(crate) fn invalidate_ohttp_key_cache(&self, directory_url: &str) -> Result<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "DELETE FROM ohttp_key_cache WHERE directory_url = ?1",
+            params![directory_url],
+        )?;
+        Ok(())
     }
 }
 

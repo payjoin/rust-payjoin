@@ -55,6 +55,18 @@ impl std::convert::From<bitcoin::hashes::sha256::Hash> for ShortId {
     }
 }
 
+/// Derives the BIP 77 mailbox [`ShortId`] for an [`HpkePublicKey`](crate::HpkePublicKey),
+/// a truncated SHA256 hash of its compressed serialization. Sender and receiver
+/// derive mailbox IDs this way so both agree on a session's mailbox.
+#[cfg(feature = "v2")]
+impl From<&crate::HpkePublicKey> for ShortId {
+    fn from(key: &crate::HpkePublicKey) -> Self {
+        use bitcoin::hashes::{sha256, Hash};
+
+        sha256::Hash::hash(&key.to_compressed_bytes()).into()
+    }
+}
+
 impl std::convert::TryFrom<&[u8]> for ShortId {
     type Error = ShortIdError;
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
@@ -81,5 +93,24 @@ mod tests {
         let short_id = ShortId([0; 8]);
         assert_eq!(short_id.as_bytes(), short_id.0);
         assert_eq!(short_id.as_slice(), short_id.0);
+    }
+
+    /// The mailbox id must be the truncated SHA256 of the key's compressed
+    /// serialization, and must be stable, so sender and receiver deriving it
+    /// independently agree on the same mailbox.
+    #[cfg(feature = "v2")]
+    #[test]
+    fn short_id_from_hpke_public_key_truncates_sha256() {
+        use bitcoin::hashes::{sha256, Hash};
+
+        use crate::HpkeKeyPair;
+
+        let public_key = HpkeKeyPair::gen_keypair().public_key().clone();
+        let expected = sha256::Hash::hash(&public_key.to_compressed_bytes());
+
+        let short_id = ShortId::from(&public_key);
+
+        assert_eq!(short_id.as_bytes(), &expected.as_byte_array()[..8]);
+        assert_eq!(short_id, ShortId::from(&public_key));
     }
 }

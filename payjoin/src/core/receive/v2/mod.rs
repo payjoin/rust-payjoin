@@ -28,7 +28,6 @@ use std::str::FromStr;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
-use bitcoin::hashes::{sha256, Hash};
 use bitcoin::psbt::Psbt;
 use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut, Txid};
 pub use error::{CreateRequestError, SessionError};
@@ -99,7 +98,7 @@ impl SessionContext {
 
     /// The mailbox ID where the receiver expects the sender's Original PSBT.
     pub(crate) fn proposal_mailbox_id(&self) -> ShortId {
-        short_id_from_pubkey(self.receiver_key.public_key())
+        self.receiver_key.public_key().short_id()
     }
 
     /// The mailbox ID where replies (the Proposal PSBT or errors) should
@@ -110,7 +109,7 @@ impl SessionContext {
     // v2 or v1 sender anyway. Ideally this should be impossible leveraging the
     // typestate machinery
     pub(crate) fn reply_mailbox_id(&self) -> ShortId {
-        short_id_from_pubkey(self.reply_key.as_ref().unwrap_or(self.receiver_key.public_key()))
+        self.reply_key.as_ref().unwrap_or(self.receiver_key.public_key()).short_id()
     }
 }
 
@@ -121,10 +120,6 @@ where
     let s = String::deserialize(deserializer)?;
     let address = Address::from_str(&s).map_err(serde::de::Error::custom)?;
     Ok(address.assume_checked())
-}
-
-fn short_id_from_pubkey(pubkey: &HpkePublicKey) -> ShortId {
-    sha256::Hash::hash(&pubkey.to_compressed_bytes()).into()
 }
 
 /// Represents the various states of a Payjoin receiver session during the protocol flow.
@@ -1363,7 +1358,7 @@ impl Receiver<PayjoinProposal> {
         if let Some(e) = &self.session_context.reply_key {
             // Prepare v2 payload
             let payjoin_bytes = self.psbt().serialize();
-            let sender_mailbox = short_id_from_pubkey(e);
+            let sender_mailbox = e.short_id();
             target_resource = mailbox_endpoint(&self.session_context.directory, &sender_mailbox);
             body = encrypt_message_b(payjoin_bytes, &self.session_context.receiver_key, e)?;
             method = "POST";

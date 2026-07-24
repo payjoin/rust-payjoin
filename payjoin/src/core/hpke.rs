@@ -1,6 +1,7 @@
 use core::fmt;
 use std::error;
 
+use bitcoin::hashes::{sha256, Hash};
 use bitcoin::key::constants::{ELLSWIFT_ENCODING_SIZE, PUBLIC_KEY_SIZE};
 use bitcoin::secp256k1;
 use bitcoin::secp256k1::ellswift::ElligatorSwift;
@@ -10,6 +11,8 @@ use hpke::kem::SecpK256HkdfSha256;
 use hpke::rand_core::OsRng;
 use hpke::{Deserializable, OpModeR, OpModeS, Serializable};
 use serde::{Deserialize, Serialize};
+
+use crate::uri::ShortId;
 
 pub const PADDED_MESSAGE_BYTES: usize = 7168;
 pub const PADDED_PLAINTEXT_A_LENGTH: usize =
@@ -114,6 +117,12 @@ impl<'de> serde::Deserialize<'de> for HpkeSecretKey {
 pub struct HpkePublicKey(PublicKey);
 
 impl HpkePublicKey {
+    /// The BIP 77 mailbox [`ShortId`] for this key, a truncated SHA256 hash
+    /// of its compressed serialization.
+    pub(crate) fn short_id(&self) -> ShortId {
+        sha256::Hash::hash(&self.to_compressed_bytes()).into()
+    }
+
     pub fn to_compressed_bytes(&self) -> [u8; 33] {
         let compressed_key = secp256k1::PublicKey::from_slice(&self.0.to_bytes())
             .expect("Invalid public key from known valid bytes");

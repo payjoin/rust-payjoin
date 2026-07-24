@@ -43,7 +43,42 @@ pub struct V1Config {
 pub struct TelemetryConfig {
     pub endpoint: String,
     pub auth_token: String,
-    pub operator_domain: String,
+    /// Foundation-issued opaque identifier for this reporting installation.
+    /// Never use a domain, hostname, or operator name here.
+    pub reporter_id: String,
+    /// Master switch for the metrics export. When `false` the mailroom keeps
+    /// the structured log format from this section but exports no metrics at
+    /// all; metrics stay local to the operator. Omitting the whole
+    /// `[telemetry]` section (the default) is also local-only.
+    #[serde(default = "default_export_enabled")]
+    pub export_enabled: bool,
+    /// Exported windows whose raw count is below this are dropped entirely.
+    /// See [`crate::metrics::ExportPolicy`].
+    #[serde(default = "default_suppression_threshold")]
+    pub suppression_threshold: u64,
+    /// Exported counts are rounded to the nearest multiple of this bin.
+    /// See [`crate::metrics::ExportPolicy`].
+    #[serde(default = "default_quantization_bin")]
+    pub quantization_bin: u64,
+}
+
+#[cfg(feature = "telemetry")]
+fn default_export_enabled() -> bool { true }
+
+#[cfg(feature = "telemetry")]
+fn default_suppression_threshold() -> u64 { crate::metrics::DEFAULT_SUPPRESSION_THRESHOLD }
+
+#[cfg(feature = "telemetry")]
+fn default_quantization_bin() -> u64 { crate::metrics::DEFAULT_QUANTIZATION_BIN }
+
+#[cfg(feature = "telemetry")]
+impl TelemetryConfig {
+    pub fn export_policy(&self) -> crate::metrics::ExportPolicy {
+        crate::metrics::ExportPolicy {
+            suppression_threshold: self.suppression_threshold,
+            quantization_bin: self.quantization_bin,
+        }
+    }
 }
 
 #[cfg(feature = "acme")]

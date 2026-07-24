@@ -284,8 +284,16 @@ impl<D: Db> Service<D> {
 
     async fn get_mailbox(&self, id: &str) -> Result<Response<Body>, HandlerError> {
         let id = ShortId::from_str(id)?;
-        let timeout_response = Response::builder().status(StatusCode::ACCEPTED).body(empty())?;
-        handle_peek(self.db.wait_for_v2_payload(&id).await, timeout_response)
+        let empty_response = Response::builder().status(StatusCode::ACCEPTED).body(empty())?;
+        match self.db.peek_v2_payload(&id).await {
+            Ok(Some(payload)) => Ok(Response::new(full((*payload).clone()))),
+            Ok(None) => Ok(empty_response),
+            Err(DbError::Operational(err)) => {
+                error!("Storage error: {err}");
+                Err(HandlerError::InternalServerError(anyhow::Error::msg("Internal server error")))
+            }
+            Err(_) => Ok(empty_response),
+        }
     }
 
     /// Screen a V1 PSBT body against the address blocklist.
@@ -870,6 +878,25 @@ mod tests {
             }
             other => panic!("expected U64 Sum, got {other:?}"),
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn get_mailbox_returns_immediately_when_empty() {
+        let svc = test_service(None).await;
+        let id = valid_short_id_path();
+        let start = tokio::time::Instant::now();
+        let res = svc.get_mailbox(&id).await.expect("get_mailbox");
+        assert_eq!(res.status(), StatusCode::ACCEPTED);
+        assert_eq!(start.elapsed(), Duration::ZERO, "GET must not block");
+    }
+
+    #[tokio::test]
+    async fn get_mailbox_returns_payload_when_present() {
+        let svc = test_service(None).await;
+        let id = valid_short_id_path();
+        svc.post_mailbox(&id, Body::from(b"hi".to_vec())).await.expect("post");
+        let res = svc.get_mailbox(&id).await.expect("get_mailbox");
+        assert_eq!(res.status(), StatusCode::OK);
     }
 
     #[tokio::test]

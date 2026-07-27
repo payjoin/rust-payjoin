@@ -6,7 +6,7 @@ on:
       - payjoin-mailroom/**
   push:
     tags:
-      - payjoin-mailroom-**
+      - payjoin-mailroom-[0-9]*
   workflow_dispatch:
 
 jobs:

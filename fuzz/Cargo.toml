@@ -11,9 +11,11 @@ cargo-fuzz = true
 default = []
 
 [dependencies]
+arbitrary = { version = "1.0.1" }
 home = "=0.5.11"
 libfuzzer-sys = { version = "0.4.10" }
 payjoin = { path = "../payjoin", default-features = false, features = [
+  "arbitrary",
   "_core",
   "v1",
   "v2",

@@ -1,0 +1,207 @@
+name: Release
+
+# A pull request that bumps a release crate's version is checked for
+# consistency and publishability. Pushing a `<crate>-<version>` tag verifies
+# the tag, waits for CI at that commit, then publishes to crates.io through
+# the `crates-release` environment (required reviewer) with keyless OIDC,
+# cuts the GitHub release, and confirms the upload.
+
+on:
+  pull_request:
+    paths:
+      - payjoin/Cargo.toml
+      - payjoin-cli/Cargo.toml
+      - payjoin-mailroom/Cargo.toml
+  push:
+    tags:
+      - payjoin-[0-9]*
+      - payjoin-cli-[0-9]*
+      - payjoin-mailroom-[0-9]*
+
+permissions:
+  contents: read
+
+jobs:
+  check-bump:
+    name: Check release version bump
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install nix
+        uses: DeterminateSystems/determinate-nix-action@main
+      - name: Use nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Check the bump is consistent and publishable
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: nix --quiet develop .#release -c ./contrib/release/check-bump.sh "$BASE_SHA"
+
+  verify-tag:
+    name: Verify release tag
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      crate: ${{ steps.meta.outputs.crate }}
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Fetch master
+        run: git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
+      - name: Install nix
+        uses: DeterminateSystems/determinate-nix-action@main
+      - name: Use nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Compute tag metadata
+        id: meta
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          source contrib/release/crates.sh
+          version="$(version_from_tag "$TAG")"
+          {
+            echo "crate=$(crate_from_tag "$TAG")"
+            echo "version=$version"
+            is_prerelease "$version" && echo "prerelease=true" || echo "prerelease=false"
+          } >>"$GITHUB_OUTPUT"
+      - name: Verify tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: nix --quiet develop .#release -c ./contrib/release/verify-tag.sh "$TAG"
+
+  wait-for-ci:
+    name: Wait for CI
+    if: github.event_name == 'push'
+    needs: verify-tag
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+    steps:
+      # Wait only for the correctness checks (rust.yml, format.yml) at the
+      # tagged commit. Scoping by regexp avoids waiting on this workflow's
+      # own downstream publish jobs, which would deadlock.
+      - name: Wait for test, lint, and format checks
+        uses: lewagon/wait-on-check-action@v1.9.0
+        with:
+          ref: ${{ github.sha }}
+          check-regexp: ^(Test|Lint|Format)
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 30
+
+  publish:
+    name: Publish to crates.io
+    if: github.event_name == 'push'
+    needs: [verify-tag, wait-for-ci]
+    runs-on: ubuntu-latest
+    environment: crates-release
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      CRATE: ${{ needs.verify-tag.outputs.crate }}
+      VERSION: ${{ needs.verify-tag.outputs.version }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Use cache
+        uses: Swatinem/rust-cache@v2
+      - name: Prepare lockfile
+        run: cp Cargo-recent.lock Cargo.lock
+      - name: Package the crate
+        run: cargo package --locked -p "$CRATE"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: target/package/${{ needs.verify-tag.outputs.crate }}-${{ needs.verify-tag.outputs.version }}.crate
+      - name: Authenticate to crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --locked -p "$CRATE"
+      - name: Upload packaged crate
+        uses: actions/upload-artifact@v4
+        with:
+          name: crate
+          path: target/package/${{ needs.verify-tag.outputs.crate }}-${{ needs.verify-tag.outputs.version }}.crate
+
+  github-release:
+    name: Create GitHub release
+    if: github.event_name == 'push'
+    needs: [verify-tag, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      CRATE: ${{ needs.verify-tag.outputs.crate }}
+      VERSION: ${{ needs.verify-tag.outputs.version }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      - name: Install nix
+        uses: DeterminateSystems/determinate-nix-action@main
+      - name: Use nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Download packaged crate
+        uses: actions/download-artifact@v4
+        with:
+          name: crate
+          path: dist
+      - name: Generate SHA256SUMS
+        run: (cd dist && sha256sum ./*.crate >SHA256SUMS)
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          echo "Extracting the ## $VERSION section of $CRATE/CHANGELOG.md"
+          {
+            echo "body<<CHANGELOG_EOF"
+            nix --quiet develop .#release -c ./contrib/release/extract-changelog.sh "$CRATE" "$VERSION"
+            echo "CHANGELOG_EOF"
+          } >>"$GITHUB_OUTPUT"
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: ${{ steps.changelog.outputs.body }}
+          generate_release_notes: true
+          prerelease: ${{ needs.verify-tag.outputs.prerelease }}
+          files: |
+            dist/*.crate
+            dist/SHA256SUMS
+
+  verify-published:
+    name: Verify publication
+    if: github.event_name == 'push'
+    needs: [verify-tag, publish]
+    runs-on: ubuntu-latest
+    env:
+      CRATE: ${{ needs.verify-tag.outputs.crate }}
+      VERSION: ${{ needs.verify-tag.outputs.version }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      - name: Install nix
+        uses: DeterminateSystems/determinate-nix-action@main
+      - name: Use nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Download packaged crate
+        uses: actions/download-artifact@v4
+        with:
+          name: crate
+          path: dist
+      - name: Verify crates.io and docs.rs
+        run: nix --quiet develop .#release -c ./contrib/release/verify-published.sh "$CRATE" "$VERSION" "dist/$CRATE-$VERSION.crate"

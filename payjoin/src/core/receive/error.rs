@@ -195,6 +195,8 @@ pub(crate) enum InternalPayloadError {
     SenderParams(super::optional_parameters::Error),
     /// The raw PSBT fails bip78-specific validation.
     InconsistentPsbt(crate::psbt::InconsistentPsbt),
+    /// An original PSBT input carries missing or unauthenticated UTXO data.
+    InvalidInputUtxo(crate::psbt::PsbtInputsError),
     /// The Original PSBT has no output for the receiver.
     MissingPayment,
     /// The original PSBT transaction fails the broadcast check
@@ -224,6 +226,7 @@ impl From<&PayloadError> for JsonReply {
             Utf8(_)
             | ParsePsbt(_)
             | InconsistentPsbt(_)
+            | InvalidInputUtxo(_)
             | MissingPayment
             | OriginalPsbtNotBroadcastable
             | InputOwned(_)
@@ -261,6 +264,7 @@ impl fmt::Display for InternalPayloadError {
             ParsePsbt(e) => write!(f, "{e}"),
             SenderParams(e) => write!(f, "{e}"),
             InconsistentPsbt(e) => write!(f, "{e}"),
+            InvalidInputUtxo(e) => write!(f, "Invalid original PSBT input UTXO: {e}"),
             MissingPayment => write!(f, "Missing payment."),
             OriginalPsbtNotBroadcastable => write!(f, "Can't broadcast. PSBT rejected by mempool."),
             InputOwned(_) => write!(f, "The receiver rejected the original PSBT."),
@@ -285,6 +289,7 @@ impl std::error::Error for PayloadError {
             ParsePsbt(e) => Some(e),
             SenderParams(e) => Some(e),
             InconsistentPsbt(e) => Some(e),
+            InvalidInputUtxo(e) => Some(e),
             PsbtBelowFeeRate(_, _) => None,
             FeeTooHigh(_, _) => None,
             MissingPayment => None,

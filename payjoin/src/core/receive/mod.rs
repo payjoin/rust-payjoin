@@ -240,6 +240,7 @@ pub(crate) fn parse_payload(
     let unchecked_psbt = Psbt::from_str(base64).map_err(InternalPayloadError::ParsePsbt)?;
 
     let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
+    psbt.validate_input_utxos().map_err(InternalPayloadError::InvalidInputUtxo)?;
     tracing::trace!("Received original psbt: {psbt:?}");
 
     let params = Params::from_query_str(query, supported_versions)
@@ -968,6 +969,38 @@ pub(crate) mod tests {
                 ))) if op == real_outpoint
             ),
             "expected InputOwned(real_outpoint), got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_payload_rejects_inconsistent_input_utxo() {
+        // An input whose witness_utxo contradicts its non_witness_utxo must be rejected
+        // at ingestion.
+        let prev_tx = Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: LockTime::Seconds(Time::MIN),
+            input: vec![],
+            output: vec![TxOut {
+                value: Amount::from_sat(50_000),
+                script_pubkey: ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array(DUMMY20)),
+            }],
+        };
+
+        let mut psbt = PARSED_ORIGINAL_PSBT.clone();
+        psbt.unsigned_tx.input[0].previous_output =
+            OutPoint { txid: prev_tx.compute_txid(), vout: 0 };
+        psbt.inputs[0].non_witness_utxo = Some(prev_tx);
+        // A witness_utxo whose value disagrees with the non_witness_utxo output.
+        psbt.inputs[0].witness_utxo = Some(TxOut {
+            value: Amount::from_sat(40_000),
+            script_pubkey: ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array(DUMMY20)),
+        });
+
+        let err = parse_payload(&psbt.to_string(), QUERY_PARAMS, &[Version::One])
+            .expect_err("inconsistent input UTXO must be rejected at ingestion");
+        assert!(
+            matches!(err.0, InternalPayloadError::InvalidInputUtxo(_)),
+            "expected InvalidInputUtxo, got: {err:?}"
         );
     }
 

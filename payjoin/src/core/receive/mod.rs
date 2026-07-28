@@ -256,6 +256,15 @@ pub struct PsbtContext {
     payjoin_psbt: Psbt,
 }
 
+/// Whether a PSBT input carries any signature material.
+fn psbt_input_is_signed(input: &bitcoin::psbt::Input) -> bool {
+    input.final_script_sig.is_some()
+        || input.final_script_witness.is_some()
+        || !input.partial_sigs.is_empty()
+        || input.tap_key_sig.is_some()
+        || !input.tap_script_sigs.is_empty()
+}
+
 impl PsbtContext {
     /// Prepare the PSBT by creating a new PSBT and copying only the fields allowed by the [spec](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#senders-payjoin-proposal-checklist)
     fn prepare_psbt(self, processed_psbt: Psbt) -> Psbt {
@@ -323,7 +332,9 @@ impl PsbtContext {
             tracing::trace!("Clearing sender input {i}");
             psbt.inputs[i].final_script_sig = None;
             psbt.inputs[i].final_script_witness = None;
+            psbt.inputs[i].partial_sigs.clear();
             psbt.inputs[i].tap_key_sig = None;
+            psbt.inputs[i].tap_script_sigs.clear();
         }
 
         psbt
@@ -343,8 +354,20 @@ impl PsbtContext {
         let actual_ntxid = signed_psbt.unsigned_tx.compute_ntxid();
         if expected_ntxid != actual_ntxid {
             return Err(ImplementationError::from(
-                format!("Ntxid mismatch: expected {expected_ntxid}, got {actual_ntxid}").as_str(),
+                format!("ntxid mismatch: expected {expected_ntxid}, got {actual_ntxid}").as_str(),
             ));
+        }
+        // The wallet may only sign the receiver's own contributed inputs; every input
+        // from the sender's original PSBT must come back unsigned.
+        for i in self.sender_input_indexes() {
+            if let Some(input) = signed_psbt.inputs.get(i) {
+                if psbt_input_is_signed(input) {
+                    return Err(ImplementationError::from(
+                        format!("unexpected signature on input {i} from the original PSBT")
+                            .as_str(),
+                    ));
+                }
+            }
         }
         let payjoin_proposal = self.prepare_psbt(signed_psbt);
         Ok(payjoin_proposal)
@@ -1095,11 +1118,31 @@ pub(crate) mod tests {
                 Ok(PARSED_ORIGINAL_PSBT.clone())
             })
             .expect_err("Should fail when ntxid mismatches");
-        assert!(err.to_string().contains("Ntxid mismatch"));
+        assert!(err.to_string().contains("ntxid mismatch"));
 
         // Outcome 3: wallet_process_psbt succeeds → Ok(Psbt)
         let _psbt = psbt_context
             .finalize_proposal(|_| Ok(PARSED_PAYJOIN_PROPOSAL.clone()))
             .expect("Should succeed when wallet_process_psbt returns a valid signed psbt");
+    }
+
+    #[test]
+    fn finalize_rejects_signing_a_sender_input() {
+        let psbt_context = psbt_context_from_test_vector();
+        let sender_i = *psbt_context
+            .sender_input_indexes()
+            .first()
+            .expect("test vector has at least one sender input");
+
+        let err = psbt_context
+            .finalize_proposal(|to_sign| {
+                // Sign a sender-side input.
+                let mut signed = to_sign.clone();
+                signed.inputs[sender_i].final_script_witness =
+                    Some(bitcoin::Witness::from_slice(&[vec![0x01u8]]));
+                Ok(signed)
+            })
+            .expect_err("finalize must reject a signed sender input");
+        assert!(err.to_string().contains("unexpected signature"), "unexpected error: {err}");
     }
 }

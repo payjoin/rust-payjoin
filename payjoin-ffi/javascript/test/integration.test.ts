@@ -132,6 +132,34 @@ class IsScriptOwnedCallback {
     }
 }
 
+class IsInputOwnedCallback {
+    private connection: testUtils.RpcClient;
+
+    constructor(connection: testUtils.RpcClient) {
+        this.connection = connection;
+    }
+
+    callback(outpoint: nodejsPayjoin.OutPoint): boolean {
+        try {
+            const txOut = JSON.parse(
+                this.connection.call("gettxout", [
+                    JSON.stringify(outpoint.txid),
+                    JSON.stringify(outpoint.vout),
+                    JSON.stringify(true),
+                ]),
+            );
+            if (!txOut) {
+                return false;
+            }
+            const scriptHex: string = txOut.scriptPubKey.hex;
+            const script = new Uint8Array(Buffer.from(scriptHex, "hex")).buffer;
+            return new IsScriptOwnedCallback(this.connection).callback(script);
+        } catch {
+            return false;
+        }
+    }
+}
+
 class CheckInputsNotSeenCallback {
     private connection: testUtils.RpcClient;
 
@@ -287,7 +315,7 @@ class ReceiverProcessor {
         proposal: nodejsPayjoin.MaybeInputsOwned,
     ): Promise<PJ<"PayjoinProposal">> {
         const maybeInputsSeen = proposal
-            .checkInputsNotOwned(new IsScriptOwnedCallback(this.receiver))
+            .checkInputsNotOwned(new IsInputOwnedCallback(this.receiver))
             .save(this.recvPersister) as PJ<"MaybeInputsSeen">;
         return this.processMaybeInputsSeen(maybeInputsSeen);
     }

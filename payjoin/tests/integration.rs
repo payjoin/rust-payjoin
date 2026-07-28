@@ -1159,9 +1159,17 @@ mod integration {
 
             // Receive Check 2: receiver can't sign for proposal inputs
             let proposal = proposal
-                .check_inputs_not_owned(&mut |input| {
-                    let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
+                .check_inputs_not_owned(&mut |outpoint| {
+                    let tx_out = receiver
+                        .get_tx_out(outpoint.txid, u64::from(outpoint.vout))
+                        .map_err(ImplementationError::new)?
+                        .into_model()
                         .map_err(ImplementationError::new)?;
+                    let address = bitcoin::Address::from_script(
+                        &tx_out.tx_out.script_pubkey,
+                        bitcoin::Network::Regtest,
+                    )
+                    .map_err(ImplementationError::new)?;
                     receiver
                         .get_address_info(&address)
                         .map(|info| info.is_mine)
@@ -1529,9 +1537,17 @@ mod integration {
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // Receive Check 2: receiver can't sign for proposal inputs
-        let proposal = proposal.check_inputs_not_owned(&mut |input| {
-            let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)
+        let proposal = proposal.check_inputs_not_owned(&mut |outpoint| {
+            let tx_out = receiver
+                .get_tx_out(outpoint.txid, u64::from(outpoint.vout))
+                .map_err(ImplementationError::new)?
+                .into_model()
                 .map_err(ImplementationError::new)?;
+            let address = bitcoin::Address::from_script(
+                &tx_out.tx_out.script_pubkey,
+                bitcoin::Network::Regtest,
+            )
+            .map_err(ImplementationError::new)?;
             receiver
                 .get_address_info(&address)
                 .map(|info| info.is_mine)

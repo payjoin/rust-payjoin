@@ -392,30 +392,22 @@ impl OriginalPayload {
     /// Check that the original PSBT has no receiver-owned inputs.
     ///
     /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    ///
+    /// `is_owned` must answer whether the receiver's wallet can sign the coin at the
+    /// given outpoint, resolved from its own authoritative wallet state. It must cover
+    /// every outpoint the wallet can sign, including locked and unconfirmed coins that
+    /// `listunspent` omits. Resolving the outpoint to its scriptPubKey and testing key
+    /// ownership covers all of these.
     pub fn check_inputs_not_owned(
         &self,
-        is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
+        is_owned: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
-        let mut err: Result<(), Error> = Ok(());
-        if let Some(e) = self
-            .psbt
-            .input_pairs()
-            .scan(&mut err, |err, input| match input.previous_txout() {
-                Ok(txout) => Some(txout.script_pubkey.to_owned()),
-                Err(e) => {
-                    **err = Err(InternalPayloadError::PrevTxOut(e).into());
-                    None
-                }
-            })
-            .find_map(|script| match is_owned(&script) {
-                Ok(false) => None,
-                Ok(true) => Some(InternalPayloadError::InputOwned(script).into()),
-                Err(e) => Some(Error::Implementation(e)),
-            })
-        {
-            return Err(e);
+        for input in self.psbt.input_pairs() {
+            let outpoint = input.txin.previous_output;
+            if is_owned(&outpoint).map_err(Error::Implementation)? {
+                return Err(InternalPayloadError::InputOwned(outpoint).into());
+            }
         }
-        err?;
         Ok(())
     }
 
@@ -908,16 +900,11 @@ pub(crate) mod tests {
         let original = original_from_test_vector();
         let original_missing_prevtxout = original_missing_prevtxout_from_test_vector();
 
-        // Outcome 1: input_scripts returns a PrevTxOut error → Protocol error
-        let err = original_missing_prevtxout
+        // Outcome 1: ownership is keyed on the outpoint, which is always present, so
+        // the check succeeds even when the previous txout is missing
+        original_missing_prevtxout
             .check_inputs_not_owned(&mut |_| Ok(false))
-            .expect_err("Should fail when previous txout is missing");
-        match err {
-            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
-                InternalPayloadError::PrevTxOut(_),
-            ))) => {}
-            _ => panic!("Expected PrevTxOut error, got: {err:?}"),
-        }
+            .expect("Ownership check is independent of previous-txout availability");
 
         // Outcome 2: is_owned returns true → InputOwned error
         let err = original
@@ -949,6 +936,39 @@ pub(crate) mod tests {
         original
             .check_inputs_not_owned(&mut |_| Ok(false))
             .expect("Should succeed when no inputs are owned");
+    }
+
+    #[test]
+    fn check_inputs_not_owned_keys_on_outpoint_not_script() {
+        // An owned input must be rejected even when its witness_utxo advertises a
+        // scriptPubKey the wallet does not recognize.
+        let mut original = original_from_test_vector();
+        let real_outpoint = original.psbt.unsigned_tx.input[0].previous_output;
+
+        original.psbt.inputs[0].witness_utxo = Some(TxOut {
+            value: Amount::from_sat(1_000),
+            script_pubkey: ScriptBuf::from_hex("00140000000000000000000000000000000000000000")
+                .unwrap(),
+        });
+
+        let mut queried = Vec::new();
+        let err = original
+            .check_inputs_not_owned(&mut |outpoint: &OutPoint| {
+                queried.push(*outpoint);
+                Ok(*outpoint == real_outpoint)
+            })
+            .expect_err("an owned input must be rejected regardless of its witness_utxo script");
+
+        assert!(queried.contains(&real_outpoint), "guard did not query the real outpoint");
+        assert!(
+            matches!(
+                err,
+                Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                    InternalPayloadError::InputOwned(op),
+                ))) if op == real_outpoint
+            ),
+            "expected InputOwned(real_outpoint), got: {err:?}"
+        );
     }
 
     #[test]

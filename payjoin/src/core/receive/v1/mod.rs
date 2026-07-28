@@ -149,7 +149,7 @@ impl MaybeInputsOwned {
     /// An attacker can try to spend the receiver's own inputs. This check prevents that.
     pub fn check_inputs_not_owned(
         self,
-        is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
+        is_owned: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsSeen, Error> {
         self.original.check_inputs_not_owned(is_owned)?;
         Ok(MaybeInputsSeen { original: self.original })

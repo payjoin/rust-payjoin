@@ -1043,9 +1043,9 @@ impl App {
     ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
         let proposal = proposal
-            .check_inputs_not_owned(&mut |input| {
+            .check_inputs_not_owned(&mut |outpoint| {
                 wallet
-                    .is_mine(input)
+                    .is_my_outpoint(outpoint)
                     .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
             })
             .save(persister)?;

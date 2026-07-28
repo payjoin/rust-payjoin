@@ -844,6 +844,14 @@ pub trait IsScriptOwned: Send + Sync {
     fn callback(&self, script: Vec<u8>) -> Result<bool, ForeignError>;
 }
 
+/// Answers whether the receiver's wallet can sign the coin at a given outpoint.
+/// Implement this against the wallet's own authoritative state, covering every
+/// outpoint the wallet can sign, including locked and unconfirmed coins.
+#[uniffi::export(with_foreign)]
+pub trait IsInputOwned: Send + Sync {
+    fn callback(&self, outpoint: OutPoint) -> Result<bool, ForeignError>;
+}
+
 #[uniffi::export]
 impl MaybeInputsOwned {
     /// The Sender’s Original PSBT
@@ -854,11 +862,13 @@ impl MaybeInputsOwned {
     }
     pub fn check_inputs_not_owned(
         &self,
-        is_owned: Arc<dyn IsScriptOwned>,
+        is_owned: Arc<dyn IsInputOwned>,
     ) -> MaybeInputsOwnedTransition {
         MaybeInputsOwnedTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().check_inputs_not_owned(&mut |input| {
-                is_owned.callback(input.to_bytes()).map_err(|e| ImplementationError::new(e).into())
+            self.0.clone().check_inputs_not_owned(&mut |outpoint| {
+                is_owned
+                    .callback(OutPoint::from(*outpoint))
+                    .map_err(|e| ImplementationError::new(e).into())
             }),
         ))))
     }

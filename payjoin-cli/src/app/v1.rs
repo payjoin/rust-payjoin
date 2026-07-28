@@ -359,8 +359,10 @@ impl App {
         let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // Receive Check 2: receiver can't sign for proposal inputs
-        let proposal = proposal.check_inputs_not_owned(&mut |input| {
-            wallet.is_mine(input).map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+        let proposal = proposal.check_inputs_not_owned(&mut |outpoint| {
+            wallet
+                .is_my_outpoint(outpoint)
+                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
         })?;
         tracing::trace!("check2");
 

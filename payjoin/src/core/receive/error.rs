@@ -195,15 +195,13 @@ pub(crate) enum InternalPayloadError {
     SenderParams(super::optional_parameters::Error),
     /// The raw PSBT fails bip78-specific validation.
     InconsistentPsbt(crate::psbt::InconsistentPsbt),
-    /// The prevtxout is missing
-    PrevTxOut(crate::psbt::PrevTxOutError),
     /// The Original PSBT has no output for the receiver.
     MissingPayment,
     /// The original PSBT transaction fails the broadcast check
     OriginalPsbtNotBroadcastable,
     #[allow(dead_code)]
     /// The sender is trying to spend the receiver input
-    InputOwned(bitcoin::ScriptBuf),
+    InputOwned(bitcoin::OutPoint),
     #[allow(dead_code)]
     /// Original PSBT input has been seen before. Only automatic receivers, aka "non-interactive" in the spec
     /// look out for these to prevent probing attacks.
@@ -226,7 +224,6 @@ impl From<&PayloadError> for JsonReply {
             Utf8(_)
             | ParsePsbt(_)
             | InconsistentPsbt(_)
-            | PrevTxOut(_)
             | MissingPayment
             | OriginalPsbtNotBroadcastable
             | InputOwned(_)
@@ -264,7 +261,6 @@ impl fmt::Display for InternalPayloadError {
             ParsePsbt(e) => write!(f, "{e}"),
             SenderParams(e) => write!(f, "{e}"),
             InconsistentPsbt(e) => write!(f, "{e}"),
-            PrevTxOut(e) => write!(f, "PrevTxOut Error: {e}"),
             MissingPayment => write!(f, "Missing payment."),
             OriginalPsbtNotBroadcastable => write!(f, "Can't broadcast. PSBT rejected by mempool."),
             InputOwned(_) => write!(f, "The receiver rejected the original PSBT."),
@@ -289,7 +285,6 @@ impl std::error::Error for PayloadError {
             ParsePsbt(e) => Some(e),
             SenderParams(e) => Some(e),
             InconsistentPsbt(e) => Some(e),
-            PrevTxOut(e) => Some(e),
             PsbtBelowFeeRate(_, _) => None,
             FeeTooHigh(_, _) => None,
             MissingPayment => None,

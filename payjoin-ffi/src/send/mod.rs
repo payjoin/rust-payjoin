@@ -252,6 +252,18 @@ impl From<PjParam> for payjoin::uri::v2::PjParam {
     fn from(value: PjParam) -> Self { value.0 }
 }
 
+#[uniffi::export]
+impl PjParam {
+    /// The receiver's ephemeral HPKE public key, as 33 compressed bytes.
+    ///
+    /// Stable for the lifetime of a receive session. Consumers use it to
+    /// deduplicate and resume sender sessions and to ensure a receiver key
+    /// is not reused across sessions, without parsing the endpoint fragment.
+    pub fn receiver_pubkey(&self) -> Vec<u8> {
+        self.0.receiver_pubkey().to_compressed_bytes().to_vec()
+    }
+}
+
 #[derive(uniffi::Object, Clone)]
 pub struct SenderSessionHistory(pub payjoin::send::v2::SessionHistory);
 

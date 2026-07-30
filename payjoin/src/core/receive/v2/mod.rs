@@ -728,18 +728,6 @@ impl Receiver<Initialized> {
     }
 }
 
-/// This is the first typestate after retrieving the sender's proposal. Here the
-/// receiver verifies the Original PSBT is broadcastable so it can serve as a
-/// fallback if the payjoin fails.
-///
-/// Non-interactive receivers (e.g. a donation page that generates a fresh QR code
-/// per visit) should call
-/// [`Receiver<UncheckedOriginalPayload>::check_broadcast_suitability`] to confirm
-/// the proposal is broadcastable (and optionally above a minimum fee rate),
-/// guarding against probing attacks that trick the receiver into revealing its
-/// UTXOs. Interactive receivers can skip that check and call
-/// [`Receiver<UncheckedOriginalPayload>::assume_interactive_receiver`] instead.
-/// Either path advances to [`Receiver<MaybeInputsOwned>`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct UncheckedOriginalPayload {
     pub(crate) original: OriginalPayload,
@@ -755,6 +743,18 @@ impl Receiver<UncheckedOriginalPayload> {
     }
 }
 
+/// This is the first typestate after retrieving the sender's proposal. Here the
+/// receiver verifies the Original PSBT is broadcastable so it can serve as a
+/// fallback if the payjoin fails.
+///
+/// Non-interactive receivers (e.g. a donation page that generates a fresh QR code
+/// per visit) should call
+/// [`Receiver<UncheckedOriginalPayload>::check_broadcast_suitability`] to confirm
+/// the proposal is broadcastable (and optionally above a minimum fee rate),
+/// guarding against probing attacks that trick the receiver into revealing its
+/// UTXOs. Interactive receivers can skip that check and call
+/// [`Receiver<UncheckedOriginalPayload>::assume_interactive_receiver`] instead.
+/// Either path advances to [`Receiver<MaybeInputsOwned>`].
 impl Receiver<UncheckedOriginalPayload> {
     /// Check that the sender's Original PSBT is suitable for broadcast, ensuring
     /// it can be used as a fallback if the payjoin does not complete.

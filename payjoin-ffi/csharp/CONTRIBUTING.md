@@ -1,4 +1,4 @@
-# Developing the Payjoin C# Bindings
+# Contributing to the Payjoin C# Bindings
 
 C# bindings for the [Payjoin Dev Kit](https://payjoindevkit.org/), generated from
 `payjoin-ffi` with UniFFI. This document covers building the bindings from

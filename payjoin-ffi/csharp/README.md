@@ -43,4 +43,4 @@ The package is in preview while the C# API stabilizes alongside the Rust core's 
 - [Payjoin Dev Kit](https://payjoindevkit.org/) for protocol background and guides
 - [rust-payjoin](https://github.com/payjoin/rust-payjoin) is the Rust core these bindings are generated from, with the [issue tracker](https://github.com/payjoin/rust-payjoin/issues) for bugs and feature requests
 
-To build the bindings from source, run the tests, or produce the NuGet package locally, see [`DEVELOPMENT.md`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/DEVELOPMENT.md).
+To build the bindings from source, run the tests, or produce the NuGet package locally, see [`CONTRIBUTING.md`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/CONTRIBUTING.md).

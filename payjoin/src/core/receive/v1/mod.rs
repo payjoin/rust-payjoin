@@ -139,7 +139,7 @@ impl MaybeInputsOwned {
     /// Returns a [`MaybeInputsSeen`] to continue validation.
     pub fn check_inputs_not_owned(
         self,
-        is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
+        is_owned: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsSeen, Error> {
         self.original.check_inputs_not_owned(is_owned)?;
         Ok(MaybeInputsSeen { original: self.original })
@@ -318,13 +318,19 @@ mod tests {
     use std::str::FromStr;
 
     use bitcoin::absolute::{LockTime, Time};
-    use bitcoin::{Address, Network, Transaction};
+    use bitcoin::hashes::Hash;
+    use bitcoin::secp256k1::{Keypair, Message, SecretKey, SECP256K1};
+    use bitcoin::taproot::TapLeafHash;
+    use bitcoin::{
+        Address, Network, ScriptBuf, TapSighashType, Transaction, Witness, XOnlyPublicKey,
+    };
     use payjoin_test_utils::{
-        MAX_ADDITIONAL_FEE_CONTRIBUTION, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT,
+        DUMMY32, MAX_ADDITIONAL_FEE_CONTRIBUTION, ORIGINAL_PSBT, PARSED_ORIGINAL_PSBT,
         PARSED_PAYJOIN_PROPOSAL, QUERY_PARAMS,
     };
 
     use super::*;
+    use crate::receive::psbt_input_is_signed;
     use crate::Version;
 
     #[derive(Debug, Clone)]
@@ -521,7 +527,7 @@ mod tests {
         assert_eq!(
             err.to_string(),
             format!(
-                "Implementation error: Ntxid mismatch: expected {}, got {}",
+                "Implementation error: ntxid mismatch: expected {}, got {}",
                 provisional.psbt_context.payjoin_psbt.unsigned_tx.compute_txid(),
                 other_psbt.unsigned_tx.compute_txid()
             )
@@ -538,5 +544,41 @@ mod tests {
         };
         let psbt = provisional_proposal.psbt_to_sign();
         assert_eq!(psbt, PARSED_PAYJOIN_PROPOSAL.clone());
+
+        // Every field psbt_input_is_signed inspects must be cleared on sender inputs.
+        let mut psbt_context = PsbtContext {
+            payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+            original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+        };
+        let sender_i = *psbt_context
+            .sender_input_indexes()
+            .first()
+            .expect("test vector has at least one sender input");
+        let sk = SecretKey::from_slice(&DUMMY32).expect("DUMMY32 is a valid secret key");
+        let keypair = Keypair::from_secret_key(SECP256K1, &sk);
+        let msg = Message::from_digest(DUMMY32);
+        let taproot_sig = bitcoin::taproot::Signature {
+            signature: SECP256K1.sign_schnorr_no_aux_rand(&msg, &keypair),
+            sighash_type: TapSighashType::All,
+        };
+        let input = &mut psbt_context.payjoin_psbt.inputs[sender_i];
+        input.final_script_sig = Some(ScriptBuf::new());
+        input.final_script_witness = Some(Witness::new());
+        input.partial_sigs.insert(
+            bitcoin::PublicKey::new(keypair.public_key()),
+            bitcoin::ecdsa::Signature::sighash_all(SECP256K1.sign_ecdsa(&msg, &sk)),
+        );
+        input.tap_key_sig = Some(taproot_sig);
+        input.tap_script_sigs.insert(
+            (XOnlyPublicKey::from_keypair(&keypair).0, TapLeafHash::from_byte_array(DUMMY32)),
+            taproot_sig,
+        );
+        assert!(psbt_input_is_signed(&psbt_context.payjoin_psbt.inputs[sender_i]));
+
+        let psbt = ProvisionalProposal { psbt_context }.psbt_to_sign();
+        assert!(
+            !psbt_input_is_signed(&psbt.inputs[sender_i]),
+            "sender input must carry no signature material"
+        );
     }
 }

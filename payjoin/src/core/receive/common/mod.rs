@@ -962,7 +962,7 @@ mod tests {
             .commit_inputs()
             .calculate_psbt_context_with_fee_range(None, None)
             .expect("Contributed inputs should allow for valid fee contributions");
-        psbt_context.finalize_proposal(|_| Ok(processed_psbt.clone())).expect("Valid psbt")
+        psbt_context.prepare_psbt(processed_psbt)
     }
 
     #[test]

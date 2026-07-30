@@ -194,7 +194,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         recv_persister: InMemoryReceiverPersister,
     ):
         maybe_inputs_owned = proposal.check_inputs_not_owned(
-            IsScriptOwnedCallback(self.receiver)
+            IsInputOwnedCallback(self.receiver)
         ).save(recv_persister)
         return await self.process_maybe_inputs_seen(maybe_inputs_owned, recv_persister)
 
@@ -493,6 +493,33 @@ class IsScriptOwnedCallback(IsScriptOwned):
                 if info.get("ismine") is True:
                     return True
             return False
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return False
+
+
+class IsInputOwnedCallback(IsInputOwned):
+    def __init__(self, connection: RpcClient):
+        self.connection = connection
+
+    def callback(self, outpoint):
+        try:
+            tx_out = json.loads(
+                self.connection.call(
+                    "gettxout",
+                    [
+                        json.dumps(outpoint.txid),
+                        json.dumps(outpoint.vout),
+                        json.dumps(True),
+                    ],
+                )
+            )
+            if not tx_out:
+                return False
+            script_hex = tx_out["scriptPubKey"]["hex"]
+            return IsScriptOwnedCallback(self.connection).callback(
+                bytes.fromhex(script_hex)
+            )
         except Exception as e:
             print(f"An error occurred: {e}")
             return False

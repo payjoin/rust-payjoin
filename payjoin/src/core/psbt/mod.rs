@@ -111,19 +111,22 @@ impl InternalInputPair<'_> {
     pub fn previous_txout(&self) -> Result<&TxOut, PrevTxOutError> {
         match (&self.psbtin.non_witness_utxo, &self.psbtin.witness_utxo) {
             (None, None) => Err(PrevTxOutError::MissingUtxoInformation),
-            (_, Some(txout)) => Ok(txout),
-            (Some(tx), None) => tx
-                .output
-                .get::<usize>(self.txin.previous_output.vout.try_into().map_err(|_| {
+            // Prefer the `non_witness_utxo`: its txid is committed to by
+            // `previous_output`, so it authenticates the spent `TxOut`, unlike a bare
+            // `witness_utxo`.
+            (Some(tx), _) => {
+                let vout: usize = self.txin.previous_output.vout.try_into().map_err(|_| {
                     PrevTxOutError::IndexOutOfBounds {
                         output_count: tx.output.len(),
                         index: self.txin.previous_output.vout,
                     }
-                })?)
-                .ok_or(PrevTxOutError::IndexOutOfBounds {
+                })?;
+                tx.output.get(vout).ok_or(PrevTxOutError::IndexOutOfBounds {
                     output_count: tx.output.len(),
                     index: self.txin.previous_output.vout,
-                }),
+                })
+            }
+            (None, Some(txout)) => Ok(txout),
         }
     }
 
@@ -427,7 +430,7 @@ impl From<AddressTypeError> for InputWeightError {
 
 #[cfg(test)]
 mod test {
-    use bitcoin::{Psbt, ScriptBuf, Transaction};
+    use bitcoin::{Psbt, ScriptBuf, Transaction, TxOut};
     use payjoin_test_utils::PARSED_ORIGINAL_PSBT;
 
     use crate::psbt::{InputWeightError, InternalInputPair, InternalPsbtInputError, PsbtExt};
@@ -512,6 +515,37 @@ mod test {
         let pair: InternalInputPair = InternalInputPair { txin: &txin, psbtin: &psbtin };
         let validated_utxo = pair.validate_utxo();
         assert_eq!(validated_utxo.unwrap_err(), InternalPsbtInputError::SegWitTxOutMismatch);
+    }
+
+    #[test]
+    fn previous_txout_prefers_authenticated_non_witness_utxo() {
+        // When both UTXO fields are present, `previous_txout` must return the `TxOut`
+        // derived from the txid-authenticated `non_witness_utxo`, not the
+        // `witness_utxo`.
+        let psbt: Psbt = PARSED_ORIGINAL_PSBT.clone();
+        let raw_tx = "010000000001015721029046ec1840d5bc8f4e59ae8ac4b576191d5e7994c8d1c44ddeaffc176c0300000000fdffffff018e8d00000000000017a9144a87748bc7bcfee8290e36700eeca3112f53ecbe870140239d1975e0fc9b8345bce9a170a0224cf8eb327bfcaccf0f8b9434d17345579e4dcbb68f7be39eac7987dfaa08293b11fdc76ac28e26bd85e99a46b69675418100000000";
+        let transaction: Transaction = bitcoin::consensus::encode::deserialize_hex(raw_tx).unwrap();
+
+        let mut txin = psbt.unsigned_tx.input[0].clone();
+        let mut psbtin = psbt.inputs[0].clone();
+
+        psbtin.non_witness_utxo = Some(transaction.clone());
+        txin.previous_output.txid = transaction.compute_txid();
+        txin.previous_output.vout = 0;
+        let authenticated_spk = transaction.output[0].script_pubkey.clone();
+
+        let mismatched_spk =
+            ScriptBuf::from_hex("00140000000000000000000000000000000000000000").unwrap();
+        assert_ne!(authenticated_spk, mismatched_spk);
+        psbtin.witness_utxo = Some(TxOut {
+            value: transaction.output[0].value,
+            script_pubkey: mismatched_spk.clone(),
+        });
+
+        let pair: InternalInputPair = InternalInputPair { txin: &txin, psbtin: &psbtin };
+
+        assert_eq!(pair.validate_utxo().unwrap_err(), InternalPsbtInputError::SegWitTxOutMismatch);
+        assert_eq!(pair.previous_txout().unwrap().script_pubkey, authenticated_spk);
     }
 
     #[test]

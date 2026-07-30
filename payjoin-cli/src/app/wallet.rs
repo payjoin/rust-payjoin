@@ -124,7 +124,29 @@ impl BitcoindWallet {
         .context("Failed to broadcast transaction")
     }
 
-    /// Check if a script belongs to this wallet
+    /// Check if an outpoint belongs to this wallet.
+    ///
+    /// The scriptPubKey is resolved from the wallet's own record of the funding
+    /// transaction and then checked for key ownership. This covers coins that
+    /// `listunspent` omits, such as locked and unconfirmed coins.
+    pub fn is_my_outpoint(&self, outpoint: &OutPoint) -> Result<bool> {
+        let funding_tx = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                match self.rpc.get_transaction(&outpoint.txid).await {
+                    Ok(res) => Ok(Some(res.tx)),
+                    Err(e) if e.is_tx_not_found() => Ok(None),
+                    Err(e) => Err(e),
+                }
+            })
+        })
+        .context("Failed to look up outpoint funding transaction")?;
+        match funding_tx.as_ref().and_then(|tx| tx.output.get(outpoint.vout as usize)) {
+            Some(txout) => self.is_mine(&txout.script_pubkey),
+            None => Ok(false),
+        }
+    }
+
+    /// Check if a script belongs to this wallet.
     pub fn is_mine(&self, script: &Script) -> Result<bool> {
         if let Ok(address) = Address::from_script(script, self.network()?) {
             let info = tokio::task::block_in_place(|| {

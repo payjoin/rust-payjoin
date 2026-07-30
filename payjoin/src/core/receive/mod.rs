@@ -240,6 +240,7 @@ pub(crate) fn parse_payload(
     let unchecked_psbt = Psbt::from_str(base64).map_err(InternalPayloadError::ParsePsbt)?;
 
     let psbt = unchecked_psbt.validate().map_err(InternalPayloadError::InconsistentPsbt)?;
+    psbt.validate_input_utxos().map_err(InternalPayloadError::InvalidInputUtxo)?;
     tracing::trace!("Received original psbt: {psbt:?}");
 
     let params = Params::from_query_str(query, supported_versions)
@@ -253,6 +254,15 @@ pub(crate) fn parse_payload(
 pub struct PsbtContext {
     original_psbt: Psbt,
     payjoin_psbt: Psbt,
+}
+
+/// Whether a PSBT input carries any signature material.
+fn psbt_input_is_signed(input: &bitcoin::psbt::Input) -> bool {
+    input.final_script_sig.is_some()
+        || input.final_script_witness.is_some()
+        || !input.partial_sigs.is_empty()
+        || input.tap_key_sig.is_some()
+        || !input.tap_script_sigs.is_empty()
 }
 
 impl PsbtContext {
@@ -322,7 +332,9 @@ impl PsbtContext {
             tracing::trace!("Clearing sender input {i}");
             psbt.inputs[i].final_script_sig = None;
             psbt.inputs[i].final_script_witness = None;
+            psbt.inputs[i].partial_sigs.clear();
             psbt.inputs[i].tap_key_sig = None;
+            psbt.inputs[i].tap_script_sigs.clear();
         }
 
         psbt
@@ -342,8 +354,20 @@ impl PsbtContext {
         let actual_ntxid = signed_psbt.unsigned_tx.compute_ntxid();
         if expected_ntxid != actual_ntxid {
             return Err(ImplementationError::from(
-                format!("Ntxid mismatch: expected {expected_ntxid}, got {actual_ntxid}").as_str(),
+                format!("ntxid mismatch: expected {expected_ntxid}, got {actual_ntxid}").as_str(),
             ));
+        }
+        // The wallet may only sign the receiver's own contributed inputs; every input
+        // from the sender's original PSBT must come back unsigned.
+        for i in self.sender_input_indexes() {
+            if let Some(input) = signed_psbt.inputs.get(i) {
+                if psbt_input_is_signed(input) {
+                    return Err(ImplementationError::from(
+                        format!("unexpected signature on input {i} from the original PSBT")
+                            .as_str(),
+                    ));
+                }
+            }
         }
         let payjoin_proposal = self.prepare_psbt(signed_psbt);
         Ok(payjoin_proposal)
@@ -392,30 +416,22 @@ impl OriginalPayload {
     /// Check that the original PSBT has no receiver-owned inputs.
     ///
     /// An attacker can try to spend the receiver's own inputs. This check prevents that.
+    ///
+    /// `is_owned` must answer whether the receiver's wallet can sign the coin at the
+    /// given outpoint, resolved from its own authoritative wallet state. It must cover
+    /// every outpoint the wallet can sign, including locked and unconfirmed coins that
+    /// `listunspent` omits. Resolving the outpoint to its scriptPubKey and testing key
+    /// ownership covers all of these.
     pub fn check_inputs_not_owned(
         &self,
-        is_owned: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
+        is_owned: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
-        let mut err: Result<(), Error> = Ok(());
-        if let Some(e) = self
-            .psbt
-            .input_pairs()
-            .scan(&mut err, |err, input| match input.previous_txout() {
-                Ok(txout) => Some(txout.script_pubkey.to_owned()),
-                Err(e) => {
-                    **err = Err(InternalPayloadError::PrevTxOut(e).into());
-                    None
-                }
-            })
-            .find_map(|script| match is_owned(&script) {
-                Ok(false) => None,
-                Ok(true) => Some(InternalPayloadError::InputOwned(script).into()),
-                Err(e) => Some(Error::Implementation(e)),
-            })
-        {
-            return Err(e);
+        for input in self.psbt.input_pairs() {
+            let outpoint = input.txin.previous_output;
+            if is_owned(&outpoint).map_err(Error::Implementation)? {
+                return Err(InternalPayloadError::InputOwned(outpoint).into());
+            }
         }
-        err?;
         Ok(())
     }
 
@@ -908,16 +924,11 @@ pub(crate) mod tests {
         let original = original_from_test_vector();
         let original_missing_prevtxout = original_missing_prevtxout_from_test_vector();
 
-        // Outcome 1: input_scripts returns a PrevTxOut error → Protocol error
-        let err = original_missing_prevtxout
+        // Outcome 1: ownership is keyed on the outpoint, which is always present, so
+        // the check succeeds even when the previous txout is missing
+        original_missing_prevtxout
             .check_inputs_not_owned(&mut |_| Ok(false))
-            .expect_err("Should fail when previous txout is missing");
-        match err {
-            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
-                InternalPayloadError::PrevTxOut(_),
-            ))) => {}
-            _ => panic!("Expected PrevTxOut error, got: {err:?}"),
-        }
+            .expect("Ownership check is independent of previous-txout availability");
 
         // Outcome 2: is_owned returns true → InputOwned error
         let err = original
@@ -949,6 +960,71 @@ pub(crate) mod tests {
         original
             .check_inputs_not_owned(&mut |_| Ok(false))
             .expect("Should succeed when no inputs are owned");
+    }
+
+    #[test]
+    fn check_inputs_not_owned_keys_on_outpoint_not_script() {
+        // An owned input must be rejected even when its witness_utxo advertises a
+        // scriptPubKey the wallet does not recognize.
+        let mut original = original_from_test_vector();
+        let real_outpoint = original.psbt.unsigned_tx.input[0].previous_output;
+
+        original.psbt.inputs[0].witness_utxo = Some(TxOut {
+            value: Amount::from_sat(1_000),
+            script_pubkey: ScriptBuf::from_hex("00140000000000000000000000000000000000000000")
+                .unwrap(),
+        });
+
+        let mut queried = Vec::new();
+        let err = original
+            .check_inputs_not_owned(&mut |outpoint: &OutPoint| {
+                queried.push(*outpoint);
+                Ok(*outpoint == real_outpoint)
+            })
+            .expect_err("an owned input must be rejected regardless of its witness_utxo script");
+
+        assert!(queried.contains(&real_outpoint), "guard did not query the real outpoint");
+        assert!(
+            matches!(
+                err,
+                Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                    InternalPayloadError::InputOwned(op),
+                ))) if op == real_outpoint
+            ),
+            "expected InputOwned(real_outpoint), got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_payload_rejects_inconsistent_input_utxo() {
+        // An input whose witness_utxo contradicts its non_witness_utxo must be rejected
+        // at ingestion.
+        let prev_tx = Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: LockTime::Seconds(Time::MIN),
+            input: vec![],
+            output: vec![TxOut {
+                value: Amount::from_sat(50_000),
+                script_pubkey: ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array(DUMMY20)),
+            }],
+        };
+
+        let mut psbt = PARSED_ORIGINAL_PSBT.clone();
+        psbt.unsigned_tx.input[0].previous_output =
+            OutPoint { txid: prev_tx.compute_txid(), vout: 0 };
+        psbt.inputs[0].non_witness_utxo = Some(prev_tx);
+        // A witness_utxo whose value disagrees with the non_witness_utxo output.
+        psbt.inputs[0].witness_utxo = Some(TxOut {
+            value: Amount::from_sat(40_000),
+            script_pubkey: ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array(DUMMY20)),
+        });
+
+        let err = parse_payload(&psbt.to_string(), QUERY_PARAMS, &[Version::One])
+            .expect_err("inconsistent input UTXO must be rejected at ingestion");
+        assert!(
+            matches!(err.0, InternalPayloadError::InvalidInputUtxo(_)),
+            "expected InvalidInputUtxo, got: {err:?}"
+        );
     }
 
     #[test]
@@ -1042,11 +1118,31 @@ pub(crate) mod tests {
                 Ok(PARSED_ORIGINAL_PSBT.clone())
             })
             .expect_err("Should fail when ntxid mismatches");
-        assert!(err.to_string().contains("Ntxid mismatch"));
+        assert!(err.to_string().contains("ntxid mismatch"));
 
         // Outcome 3: wallet_process_psbt succeeds → Ok(Psbt)
         let _psbt = psbt_context
             .finalize_proposal(|_| Ok(PARSED_PAYJOIN_PROPOSAL.clone()))
             .expect("Should succeed when wallet_process_psbt returns a valid signed psbt");
+    }
+
+    #[test]
+    fn finalize_rejects_signing_a_sender_input() {
+        let psbt_context = psbt_context_from_test_vector();
+        let sender_i = *psbt_context
+            .sender_input_indexes()
+            .first()
+            .expect("test vector has at least one sender input");
+
+        let err = psbt_context
+            .finalize_proposal(|to_sign| {
+                // Sign a sender-side input.
+                let mut signed = to_sign.clone();
+                signed.inputs[sender_i].final_script_witness =
+                    Some(bitcoin::Witness::from_slice(&[vec![0x01u8]]));
+                Ok(signed)
+            })
+            .expect_err("finalize must reject a signed sender input");
+        assert!(err.to_string().contains("unexpected signature"), "unexpected error: {err}");
     }
 }

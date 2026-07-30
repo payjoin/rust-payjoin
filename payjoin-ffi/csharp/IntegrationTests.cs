@@ -111,6 +111,45 @@ namespace Payjoin.Tests
             }
         }
 
+        private sealed class IsInputOwnedCallback : IsInputOwned
+        {
+            private readonly RpcClient _connection;
+
+            public IsInputOwnedCallback(RpcClient connection)
+            {
+                _connection = connection;
+            }
+
+            public bool Callback(OutPoint outpoint)
+            {
+                try
+                {
+                    var txOutJson = RpcCall(
+                        _connection,
+                        "gettxout",
+                        JsonSerializer.Serialize(outpoint.Txid),
+                        JsonSerializer.Serialize(outpoint.Vout),
+                        JsonSerializer.Serialize(true));
+                    using var txOutDoc = JsonDocument.Parse(txOutJson);
+                    if (txOutDoc.RootElement.ValueKind == JsonValueKind.Null)
+                    {
+                        return false;
+                    }
+
+                    var scriptHex = txOutDoc.RootElement
+                        .GetProperty("scriptPubKey")
+                        .GetProperty("hex")
+                        .GetString()!;
+                    return new IsScriptOwnedCallback(_connection)
+                        .Callback(Convert.FromHexString(scriptHex));
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        }
+
         private sealed class CheckInputsNotSeenCallback : IsOutputKnown
         {
             public bool Callback(OutPoint _outpoint) => false;
@@ -214,7 +253,7 @@ namespace Payjoin.Tests
             RpcClient receiverRpc,
             InMemoryReceiverPersister recvPersister)
         {
-            using var transition = proposal.CheckInputsNotOwned(new IsScriptOwnedCallback(receiverRpc));
+            using var transition = proposal.CheckInputsNotOwned(new IsInputOwnedCallback(receiverRpc));
             using var maybeInputsSeen = transition.Save(recvPersister);
 
             return ProcessMaybeInputsSeen(maybeInputsSeen, receiverRpc, recvPersister);

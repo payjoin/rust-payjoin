@@ -97,6 +97,37 @@ class IsScriptOwnedCallback implements payjoin.IsScriptOwned {
   }
 }
 
+class IsInputOwnedCallback implements payjoin.IsInputOwned {
+  final payjoin.RpcClient connection;
+
+  IsInputOwnedCallback(this.connection);
+
+  @override
+  bool callback(outpoint) {
+    try {
+      final txOut = jsonDecode(
+        connection.call(
+          method: "gettxout",
+          params: [
+            jsonEncode(outpoint.txid),
+            jsonEncode(outpoint.vout),
+            jsonEncode(true),
+          ],
+        ),
+      );
+      if (txOut == null) {
+        return false;
+      }
+      final scriptHex = txOut["scriptPubKey"]["hex"] as String;
+      return IsScriptOwnedCallback(
+        connection,
+      ).callback(Uint8List.fromList(hex.decode(scriptHex)));
+    } catch (e) {
+      return false;
+    }
+  }
+}
+
 class CheckInputsNotSeenCallback implements payjoin.IsOutputKnown {
   final payjoin.RpcClient connection;
 
@@ -265,7 +296,7 @@ Future<payjoin.PayjoinProposalReceiveSession> process_maybe_inputs_owned(
   InMemoryReceiverPersister recv_persister,
 ) async {
   final maybe_inputs_owned = proposal
-      .checkInputsNotOwned(isOwned: IsScriptOwnedCallback(receiver))
+      .checkInputsNotOwned(isOwned: IsInputOwnedCallback(receiver))
       .save(persister: recv_persister);
   return await process_maybe_inputs_seen(maybe_inputs_owned, recv_persister);
 }

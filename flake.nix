@@ -452,6 +452,23 @@
             inherit buildInputs;
             src = dummySrc;
           };
+
+        # Pinned tooling for the contrib/release scripts, so they run
+        # identically under `nix develop .#release -c` locally and in CI.
+        releaseDevShell = pkgs.mkShell {
+          name = "release";
+          packages = with pkgs; [
+            rustToolchains.stable
+            jq
+            gnupg
+            curl
+            git
+            gnugrep
+            gnused
+            gawk
+            coreutils
+          ];
+        };
       in
       {
         packages =
@@ -462,6 +479,7 @@
           };
         devShells = devShells // {
           default = devShells.nightly;
+          release = releaseDevShell;
           python = pythonDevShell;
           javascript = javascriptDevShell;
           csharp = csharpDevShell;

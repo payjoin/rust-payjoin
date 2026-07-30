@@ -444,6 +444,9 @@ impl<State> core::ops::DerefMut for Receiver<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
+/// The fallback transaction for cancelled or failed receiver session.
+///
+/// See [`Receiver<PendingFallback>`] for further documentation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingFallback {
     fallback_tx: bitcoin::Transaction,
@@ -554,6 +557,9 @@ impl ReceiverBuilder {
     }
 }
 
+/// Empty initial state awaiting the sender's Original PSBT.
+///
+/// See [`Receiver<Initialized>`] for further documentation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Initialized {}
 
@@ -728,6 +734,9 @@ impl Receiver<Initialized> {
     }
 }
 
+/// The sender's Original PSBT, received but not yet validated.
+///
+/// See [`Receiver<UncheckedOriginalPayload>`] for further documentation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UncheckedOriginalPayload {
     pub(crate) original: OriginalPayload,
@@ -821,6 +830,9 @@ impl Receiver<UncheckedOriginalPayload> {
     }
 }
 
+/// The Original PSBT with inputs not yet checked for receiver ownership.
+///
+/// See [`Receiver<MaybeInputsOwned>`] for further documentation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsOwned {
     original: OriginalPayload,
@@ -892,6 +904,9 @@ impl Receiver<MaybeInputsOwned> {
     }
 }
 
+/// The Original PSBT with inputs not yet checked against previously seen inputs.
+///
+/// See [`Receiver<MaybeInputsSeen>`] for further documentation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaybeInputsSeen {
     original: OriginalPayload,
@@ -959,6 +974,9 @@ impl Receiver<MaybeInputsSeen> {
     }
 }
 
+/// The Original PSBT with receiver outputs not yet identified.
+///
+/// See [`Receiver<OutputsUnknown>`] for further documentation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutputsUnknown {
     original: OriginalPayload,
@@ -1028,6 +1046,9 @@ impl Receiver<OutputsUnknown> {
     }
 }
 
+/// The checked Original PSBT awaiting receiver output substitution and commitment.
+///
+/// See [`Receiver<WantsOutputs>`] for further documentation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WantsOutputs {
     inner: common::WantsOutputs,
@@ -1114,6 +1135,9 @@ impl Receiver<WantsOutputs> {
     }
 }
 
+/// The checked proposal awaiting receiver input contributions and commitment.
+///
+/// See [`Receiver<WantsInputs>`] for further documentation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WantsInputs {
     inner: common::WantsInputs,
@@ -1192,6 +1216,9 @@ impl Receiver<WantsInputs> {
     }
 }
 
+/// The checked proposal awaiting the receiver's fee contribution.
+///
+/// See [`Receiver<WantsFeeRange>`] for further documentation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WantsFeeRange {
     inner: common::WantsFeeRange,
@@ -1261,6 +1288,9 @@ impl Receiver<WantsFeeRange> {
     }
 }
 
+/// The modified proposal ready to be signed and finalized.
+///
+/// See [`Receiver<ProvisionalProposal>`] for further documentation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProvisionalProposal {
     psbt_context: PsbtContext,
@@ -1321,6 +1351,9 @@ impl Receiver<ProvisionalProposal> {
     }
 }
 
+/// The signed and finalized Payjoin proposal to send to the sender.
+///
+/// See [`Receiver<PayjoinProposal>`] for further documentation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PayjoinProposal {
     psbt_context: PsbtContext,
@@ -1439,6 +1472,9 @@ impl Receiver<PayjoinProposal> {
     }
 }
 
+/// Replyable error hit during validation.
+///
+/// See [`Receiver<HasReplyableError>`] for further documentation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HasReplyableError {
     error_reply: JsonReply,
@@ -1545,6 +1581,9 @@ impl Receiver<HasReplyableError> {
     }
 }
 
+/// Completed payjoin proposal monitoring for the payjoin or fallback transaction.
+///
+/// See [`Receiver<Monitor>`] for further documentation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Monitor {
     psbt_context: PsbtContext,

@@ -24,15 +24,15 @@ A receiver session produces a BIP 21 URI to show the sender. It works with every
 
 A session starts with the directory's OHTTP keys, fetched through an OHTTP relay so the directory never learns your IP address, then builds a receiver for your address and persists every step to an event log so your app can crash or restart and resume where it left off. From there the session advances through a typestate flow: each state hands you a request to relay with your own HTTP client, and the response moves you to the next state, through checking the sender's original transaction, contributing inputs, and posting the proposal.
 
-The code for this flow lives in [`samples/`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-ffi/csharp/samples), compiled on every change so it cannot go stale. Start with [`ReceiveSample.cs`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/samples/ReceiveSample.cs), which also shows a minimal session persister. The [integration tests](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/IntegrationTests.cs) walk the complete loop.
+The usage reference is the commented walkthrough in [`IntegrationTests.cs`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/IntegrationTests.cs): `TestIntegrationV2ToV2` drives a complete payjoin from both sides, executed by CI on every change so it cannot go stale, and narrates each protocol step, from opening and persisting the session through the receiver checklist to signing the proposal.
 
 ## Send a payjoin
 
-A sender session starts from a BIP 21 URI scanned from the receiver and the wallet's signed PSBT, posts the original PSBT, and polls for the receiver's proposal through the same request/response flow. See [`SendSample.cs`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/samples/SendSample.cs).
+A sender session starts from a BIP 21 URI scanned from the receiver (`Payjoin.Uri.Parse(...).CheckPjSupported()`) and the wallet's signed PSBT, posts that original PSBT, and polls for the receiver's proposal through the same request/response flow. The sender half of the same walkthrough shows every step.
 
 ## Resume after a restart
 
-Replay a persisted event log to recover the current state of a session: [`ResumeSample.cs`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/samples/ResumeSample.cs). Every `Save` has a `SaveAsync` counterpart, with async persister interfaces for database-backed storage.
+Sessions persist each step to an event log through a persister you implement over your own storage; replaying the log with `PayjoinMethods.ReplayReceiverEventLog` recovers the current state after a crash or restart. Every `Save` has a `SaveAsync` counterpart, with async persister interfaces for database-backed storage.
 
 ## Preview status
 

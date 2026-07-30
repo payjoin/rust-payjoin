@@ -247,18 +247,13 @@ mod test {
     use crate::error_codes::ErrorCode;
     use crate::send::error::{ResponseError, WellKnownError};
     use crate::send::test::create_psbt_context;
+    use crate::uri::pj_uri;
     use crate::{Uri, MAX_CONTENT_LENGTH};
 
     const PJ_URI: &str =
         "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";
-
-    fn pj_uri() -> PjUri {
-        Uri::try_from(PJ_URI)
-            .expect("uri should succeed")
-            .assume_checked()
-            .check_pj_supported()
-            .expect("uri should support payjoin")
-    }
+    const PJ_URI_OUTPUT_SUBSTITUTION_ENABLED: &str =
+        "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pj=HTTPS://EXAMPLE.COM/";
 
     fn create_v1_context() -> super::V1Context {
         let psbt_context = create_psbt_context().expect("failed to create context");
@@ -398,13 +393,13 @@ mod test {
     #[test]
     fn test_build_recommended_max_fee_contribution() {
         let psbt = PARSED_ORIGINAL_PSBT.clone();
-        let sender = SenderBuilder::new(psbt.clone(), pj_uri())
+        let sender = SenderBuilder::new(psbt.clone(), pj_uri(PJ_URI))
             .build_recommended(
                 FeeRate::from_sat_per_vb(2000000).expect("Could not determine feerate"),
             )
             .expect("sender should succeed");
         assert_eq!(sender.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
-        assert_eq!(&sender.psbt_ctx.payee, &pj_uri().address().script_pubkey());
+        assert_eq!(&sender.psbt_ctx.payee, &pj_uri(PJ_URI).address().script_pubkey());
         let fee_contribution =
             sender.psbt_ctx.fee_contribution.expect("sender should contribute fees");
         assert_eq!(fee_contribution.max_amount, psbt.unsigned_tx.output[0].value);
@@ -414,33 +409,35 @@ mod test {
 
     #[test]
     fn test_build_recommended() {
-        let sender = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri())
+        let sender = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri(PJ_URI))
             .build_recommended(FeeRate::BROADCAST_MIN)
             .expect("sender should succeed");
         assert_eq!(sender.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
-        assert_eq!(&sender.psbt_ctx.payee, &pj_uri().address().script_pubkey());
+        assert_eq!(&sender.psbt_ctx.payee, &pj_uri(PJ_URI).address().script_pubkey());
         let fee_contribution =
             sender.psbt_ctx.fee_contribution.expect("sender should contribute fees");
         assert_eq!(fee_contribution.max_amount, Amount::from_sat(91));
         assert_eq!(fee_contribution.vout, 0);
         assert_eq!(sender.psbt_ctx.min_fee_rate, FeeRate::from_sat_per_kwu(250));
         // Ensure the receiver's output substitution preference is respected either way
-        let mut pj_uri = pj_uri();
-        pj_uri.set_output_substitution(OutputSubstitution::Enabled);
-        let sender = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
-            .build_recommended(FeeRate::from_sat_per_vb_u32(1))
-            .expect("sender should succeed");
+        let sender = SenderBuilder::new(
+            PARSED_ORIGINAL_PSBT.clone(),
+            pj_uri(PJ_URI_OUTPUT_SUBSTITUTION_ENABLED),
+        )
+        .build_recommended(FeeRate::from_sat_per_vb_u32(1))
+        .expect("sender should succeed");
         assert_eq!(sender.psbt_ctx.output_substitution, OutputSubstitution::Enabled);
     }
 
     #[test]
     fn test_always_disable_output_substitution() {
-        let mut pj_uri = pj_uri();
-        pj_uri.set_output_substitution(OutputSubstitution::Enabled);
-        let sender = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
-            .always_disable_output_substitution()
-            .build_recommended(FeeRate::BROADCAST_MIN)
-            .expect("sender should succeed");
+        let sender = SenderBuilder::new(
+            PARSED_ORIGINAL_PSBT.clone(),
+            pj_uri(PJ_URI_OUTPUT_SUBSTITUTION_ENABLED),
+        )
+        .always_disable_output_substitution()
+        .build_recommended(FeeRate::BROADCAST_MIN)
+        .expect("sender should succeed");
         assert_eq!(sender.psbt_ctx.output_substitution, OutputSubstitution::Disabled);
     }
 

@@ -38,7 +38,7 @@ mod tests {
     use payjoin_test_utils::BoxError;
 
     use super::*;
-    use crate::uri::MaybePayjoinExtras;
+    use crate::uri::{pj_uri, MaybePayjoinExtras};
     use crate::{OutputSubstitution, PjParam, Uri};
 
     #[test]
@@ -123,25 +123,22 @@ mod tests {
 
     #[test]
     fn test_serialize_pjos() {
-        let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=HTTPS://EXAMPLE.COM/%23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
-        let expected_is_disabled = "pjos=0";
-        let expected_is_enabled = "pjos=1";
-        let mut pjuri = Uri::try_from(uri)
-            .expect("Invalid uri")
-            .assume_checked()
-            .check_pj_supported()
-            .expect("Could not parse pj extras");
-
-        pjuri.set_output_substitution(OutputSubstitution::Disabled);
+        let disabled_uri = pj_uri(
+            "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pjos=0&pj=HTTPS://EXAMPLE.COM/\
+             %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC",
+        );
         assert!(
-            pjuri.to_string().contains(expected_is_disabled),
-            "Pj uri should contain param: {expected_is_disabled}, but it did not"
+            disabled_uri.to_string().contains("pjos=0"),
+            "Pj uri should preserve disabled output substitution"
         );
 
-        pjuri.set_output_substitution(OutputSubstitution::Enabled);
+        let enabled_uri = pj_uri(
+            "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pjos=1&pj=HTTPS://EXAMPLE.COM/\
+             %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC",
+        );
         assert!(
-            !pjuri.to_string().contains(expected_is_enabled),
-            "Pj uri should elide param: {expected_is_enabled}, but it did not"
+            !enabled_uri.to_string().contains("pjos=1"),
+            "Pj uri should elide enabled output substitution"
         );
     }
 

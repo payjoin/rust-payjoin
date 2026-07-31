@@ -1,24 +1,30 @@
 //! Payjoin URI parsing and validation
+#[cfg(feature = "std")]
 use alloc::borrow::Cow;
+#[cfg(feature = "std")]
 use alloc::boxed::Box;
 #[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 use alloc::fmt;
 #[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 use alloc::string::{String, ToString};
-#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
+#[cfg(feature = "std")]
 use alloc::vec;
-#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 use alloc::vec::Vec;
+#[cfg(feature = "std")]
 use core::str::FromStr;
 
+#[cfg(feature = "std")]
 use bitcoin::address::{NetworkChecked, NetworkUnchecked, NetworkValidation};
+#[cfg(feature = "std")]
 use bitcoin::{Address, Amount};
-pub use error::{PjParseError, UriParseError};
+pub use error::PjParseError;
+#[cfg(feature = "std")]
+pub use error::UriParseError;
 
 #[cfg(feature = "v2-ohttp")]
 pub(crate) use crate::directory::ShortId;
 use crate::output_substitution::OutputSubstitution;
-#[cfg(feature = "std")]
 #[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 use crate::uri::error::InternalPjParseError;
 
@@ -148,10 +154,12 @@ impl PayjoinExtras {
 ///
 /// The URI is always owned, so it carries no lifetime parameter.
 #[derive(Clone, Debug)]
+#[cfg(feature = "std")]
 pub struct Uri<NetVal: NetworkValidation>(
     bitcoin_uri::Uri<'static, NetVal, MaybePayjoinExtrasAdapter>,
 );
 
+#[cfg(feature = "std")]
 impl<NetVal: NetworkValidation> Uri<NetVal> {
     /// The address the URI pays to.
     pub fn address(&self) -> &Address<NetVal> { &self.0.address }
@@ -173,6 +181,7 @@ impl<NetVal: NetworkValidation> Uri<NetVal> {
     pub fn extras(&self) -> &MaybePayjoinExtras { &self.0.extras.0 }
 }
 
+#[cfg(feature = "std")]
 impl Uri<NetworkUnchecked> {
     /// Marks the URI's address as validated without checking the network.
     pub fn assume_checked(self) -> Uri<NetworkChecked> { Uri(self.0.assume_checked()) }
@@ -186,6 +195,7 @@ impl Uri<NetworkUnchecked> {
     }
 }
 
+#[cfg(feature = "std")]
 impl Uri<NetworkChecked> {
     /// Converts this URI into a [`PjUri`] if it supports payjoin.
     ///
@@ -217,6 +227,7 @@ impl Uri<NetworkChecked> {
     }
 }
 
+#[cfg(feature = "std")]
 impl FromStr for Uri<NetworkUnchecked> {
     type Err = UriParseError;
 
@@ -227,18 +238,21 @@ impl FromStr for Uri<NetworkUnchecked> {
     }
 }
 
+#[cfg(feature = "std")]
 impl TryFrom<&str> for Uri<NetworkUnchecked> {
     type Error = UriParseError;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> { s.parse() }
 }
 
+#[cfg(feature = "std")]
 impl TryFrom<String> for Uri<NetworkUnchecked> {
     type Error = UriParseError;
 
     fn try_from(s: String) -> Result<Self, Self::Error> { s.parse() }
 }
 
+#[cfg(feature = "std")]
 impl fmt::Display for Uri<NetworkChecked> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { self.0.fmt(f) }
 }
@@ -248,8 +262,10 @@ impl fmt::Display for Uri<NetworkChecked> {
 /// Obtained from [`Uri::check_pj_supported`]. Like [`Uri`], this newtype
 /// insulates the public API from [`bitcoin_uri`] and is always owned.
 #[derive(Clone, Debug)]
+#[cfg(feature = "std")]
 pub struct PjUri(bitcoin_uri::Uri<'static, NetworkChecked, PayjoinExtrasAdapter>);
 
+#[cfg(feature = "std")]
 impl PjUri {
     /// Builds a payjoin URI from a checked address and validated payjoin parameters.
     pub(crate) fn from_extras(address: Address<NetworkChecked>, extras: PayjoinExtras) -> Self {
@@ -277,8 +293,15 @@ impl PjUri {
 
     /// The validated payjoin parameters carried by the URI.
     pub fn extras(&self) -> &PayjoinExtras { &self.0.extras.0 }
+
+    /// Overrides the output substitution preference carried by the URI.
+    #[cfg(test)]
+    pub(crate) fn set_output_substitution(&mut self, output_substitution: OutputSubstitution) {
+        self.0.extras.0.output_substitution = output_substitution;
+    }
 }
 
+#[cfg(feature = "std")]
 impl fmt::Display for PjUri {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { self.0.fmt(f) }
 }
@@ -287,14 +310,17 @@ impl fmt::Display for PjUri {
 /// trait impls, keeping them off the public [`MaybePayjoinExtras`] type so that
 /// `bitcoin_uri` stays out of this crate's semver surface.
 #[derive(Clone, Debug)]
+#[cfg(feature = "std")]
 pub(crate) struct MaybePayjoinExtrasAdapter(pub(crate) MaybePayjoinExtras);
 
 /// Private adapter that carries the `bitcoin_uri` serialization trait impl for
 /// [`PayjoinExtras`], keeping it off the public type.
 #[derive(Clone, Debug)]
+#[cfg(feature = "std")]
 pub(crate) struct PayjoinExtrasAdapter(pub(crate) PayjoinExtras);
 
 /// Serializes the payjoin BIP21 query parameters (`pj` and optional `pjos`).
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 fn serialize_payjoin_params(extras: &PayjoinExtras) -> Vec<(&'static str, String)> {
     let mut params = Vec::with_capacity(2);
     if extras.output_substitution == OutputSubstitution::Disabled {
@@ -304,12 +330,12 @@ fn serialize_payjoin_params(extras: &PayjoinExtras) -> Vec<(&'static str, String
     params
 }
 
-#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
 impl bitcoin_uri::de::DeserializationError for MaybePayjoinExtrasAdapter {
     type Error = PjParseError;
 }
 
-#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
 impl bitcoin_uri::de::DeserializeParams<'_> for MaybePayjoinExtrasAdapter {
     type DeserializationState = DeserializationState;
 }
@@ -321,7 +347,7 @@ pub(crate) struct DeserializationState {
     pjos: Option<OutputSubstitution>,
 }
 
-#[cfg(feature = "v2-ohttp")]
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
 impl bitcoin_uri::SerializeParams for &MaybePayjoinExtrasAdapter {
     type Key = &'static str;
     type Value = String;
@@ -335,7 +361,7 @@ impl bitcoin_uri::SerializeParams for &MaybePayjoinExtrasAdapter {
     }
 }
 
-#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+#[cfg(all(feature = "std", any(feature = "v1", feature = "v2-ohttp")))]
 impl bitcoin_uri::SerializeParams for &PayjoinExtrasAdapter {
     type Key = &'static str;
     type Value = String;
@@ -407,10 +433,8 @@ pub(crate) fn pj_uri(uri: &str) -> PjUri {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryFrom;
-
     #[cfg(all(feature = "std", feature = "v1"))]
-    use bitcoin_uri::SerializeParams;
+    use std::convert::TryFrom;
 
     use super::*;
 
@@ -495,7 +519,7 @@ mod tests {
                    %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"
             )
             .unwrap()
-            .extras
+            .extras()
             .pj_is_supported(),
             "Uri expected a success with a well formatted pj extras, but it failed"
         );
@@ -526,23 +550,19 @@ mod tests {
         let uri =
             "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pjos=1&pjos=1&pj=HTTPS://EXAMPLE.COM/\
                    %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
-        let pjuri = Uri::try_from(uri);
+        let err = Uri::try_from(uri).unwrap_err();
         assert!(matches!(
-            pjuri,
-            Err(bitcoin_uri::de::Error::Extras(PjParseError(
-                InternalPjParseError::DuplicateParams("pjos")
-            )))
+            err.payjoin_params().map(|e| &e.0),
+            Some(InternalPjParseError::DuplicateParams("pjos"))
         ));
         let uri =
             "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pjos=1&pj=HTTPS://EXAMPLE.COM/\
                    %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC&pj=HTTPS://EXAMPLE.COM/\
                    %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC";
-        let pjuri = Uri::try_from(uri);
+        let err = Uri::try_from(uri).unwrap_err();
         assert!(matches!(
-            pjuri,
-            Err(bitcoin_uri::de::Error::Extras(PjParseError(
-                InternalPjParseError::DuplicateParams("pj")
-            )))
+            err.payjoin_params().map(|e| &e.0),
+            Some(InternalPjParseError::DuplicateParams("pj"))
         ));
     }
 
@@ -558,13 +578,13 @@ mod tests {
             .check_pj_supported()
             .expect("Could not parse pj extras");
 
-        pjuri.extras.output_substitution = OutputSubstitution::Disabled;
+        pjuri.set_output_substitution(OutputSubstitution::Disabled);
         assert!(
             pjuri.to_string().contains(expected_is_disabled),
             "Pj uri should contain param: {expected_is_disabled}, but it did not"
         );
 
-        pjuri.extras.output_substitution = OutputSubstitution::Enabled;
+        pjuri.set_output_substitution(OutputSubstitution::Enabled);
         assert!(
             !pjuri.to_string().contains(expected_is_enabled),
             "Pj uri should elide param: {expected_is_enabled}, but it did not"
@@ -577,7 +597,7 @@ mod tests {
         // pjos=0 should disable output substitution
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://example.com&pjos=0";
         let parsed = Uri::try_from(uri).unwrap();
-        match parsed.extras {
+        match parsed.extras() {
             MaybePayjoinExtras::Supported(extras) =>
                 assert_eq!(extras.output_substitution, OutputSubstitution::Disabled),
             _ => panic!("Expected Supported PayjoinExtras"),
@@ -586,7 +606,7 @@ mod tests {
         // pjos=1 should allow output substitution
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://example.com&pjos=1";
         let parsed = Uri::try_from(uri).unwrap();
-        match parsed.extras {
+        match parsed.extras() {
             MaybePayjoinExtras::Supported(extras) =>
                 assert_eq!(extras.output_substitution, OutputSubstitution::Enabled),
             _ => panic!("Expected Supported PayjoinExtras"),
@@ -595,7 +615,7 @@ mod tests {
         // Elided pjos=1 should allow output substitution
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://example.com";
         let parsed = Uri::try_from(uri).unwrap();
-        match parsed.extras {
+        match parsed.extras() {
             MaybePayjoinExtras::Supported(extras) =>
                 assert_eq!(extras.output_substitution, OutputSubstitution::Enabled),
             _ => panic!("Expected Supported PayjoinExtras"),

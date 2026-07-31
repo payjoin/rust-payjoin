@@ -29,10 +29,6 @@
 //! but request reuse makes correlation trivial for the relay.
 
 #[cfg(feature = "v2-ohttp")]
-use bitcoin::hashes::sha256;
-#[cfg(feature = "v2-ohttp")]
-use bitcoin::hashes::Hash;
-#[cfg(feature = "v2-ohttp")]
 use bitcoin::Address;
 pub use error::{CreateRequestError, DecapsulationError};
 #[cfg(feature = "v2-ohttp")]
@@ -566,10 +562,8 @@ impl Sender<PollingForProposal> {
 
         // TODO unify with receiver's fn short_id_from_pubkey
         use crate::ohttp::ohttp_encapsulate;
-        let hash = sha256::Hash::hash(
-            &HpkeKeyPair::from_secret_key(&self.session_context.reply_key)
-                .public_key()
-                .to_compressed_bytes(),
+        let mailbox: ShortId = ShortId::from(
+            HpkeKeyPair::from_secret_key(&self.session_context.reply_key).public_key(),
         );
         let url = Url::parse(self.session_context.pj_param.endpoint().as_str())
             .expect("Could not parse url")

@@ -51,7 +51,7 @@ pub trait Headers {
 }
 
 #[cfg(feature = "std")]
-pub fn build_v1_pj_uri<'a>(
+pub fn build_v1_pj_uri(
     address: &bitcoin::Address,
     endpoint: impl IntoUrl,
     output_substitution: OutputSubstitution,

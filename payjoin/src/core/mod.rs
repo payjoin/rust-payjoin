@@ -31,6 +31,8 @@ pub mod uri;
 pub use uri::PjUri;
 #[cfg(feature = "std")]
 pub use uri::Uri;
+#[cfg(feature = "std")]
+pub use uri::UriParseError;
 pub use uri::{PjParam, PjParseError};
 pub(crate) mod error_codes;
 

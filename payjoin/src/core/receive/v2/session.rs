@@ -1219,9 +1219,9 @@ mod tests {
         let binding = SessionHistory { events };
         let uri = binding.pj_uri();
 
-        assert_ne!(uri.extras.pj_param.endpoint().as_str(), EXAMPLE_URL);
+        assert_ne!(uri.extras().pj_param.endpoint().as_str(), EXAMPLE_URL);
         #[cfg(feature = "v1")]
-        assert_eq!(uri.extras.output_substitution, OutputSubstitution::Disabled);
+        assert_eq!(uri.extras().output_substitution, OutputSubstitution::Disabled);
 
         Ok(())
     }

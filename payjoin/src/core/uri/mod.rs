@@ -250,12 +250,6 @@ impl PjUri {
 
     /// The validated payjoin parameters carried by the URI.
     pub fn extras(&self) -> &PayjoinExtras { &self.0.extras.0 }
-
-    /// Overrides the output substitution preference carried by the URI.
-    #[cfg(test)]
-    pub(crate) fn set_output_substitution(&mut self, output_substitution: OutputSubstitution) {
-        self.0.extras.0.output_substitution = output_substitution;
-    }
 }
 
 impl fmt::Display for PjUri {
@@ -367,6 +361,15 @@ impl bitcoin_uri::de::DeserializationState<'_> for DeserializationState {
         };
         Ok(MaybePayjoinExtrasAdapter(extras))
     }
+}
+
+#[cfg(all(test, feature = "v1"))]
+pub(crate) fn pj_uri(uri: &str) -> PjUri {
+    Uri::try_from(uri)
+        .expect("uri should parse")
+        .assume_checked()
+        .check_pj_supported()
+        .expect("uri should support payjoin")
 }
 
 #[cfg(test)]

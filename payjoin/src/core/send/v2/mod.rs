@@ -577,8 +577,9 @@ impl Sender<PollingForProposal> {
 
         // TODO unify with receiver's fn short_id_from_pubkey
         use crate::ohttp::ohttp_encapsulate;
-        let mailbox: ShortId =
-            ShortId::from(HpkeKeyPair::from_secret_key(&self.session_context.reply_key).public_key());
+        let mailbox: ShortId = ShortId::from(
+            HpkeKeyPair::from_secret_key(&self.session_context.reply_key).public_key(),
+        );
         let url = Url::parse(self.session_context.pj_param.endpoint().as_str())
             .expect("Could not parse url")
             .join(&mailbox.to_string())

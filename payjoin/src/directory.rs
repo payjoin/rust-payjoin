@@ -83,7 +83,7 @@ impl From<bitcoin::hashes::sha256::Hash> for ShortId {
 /// Derives the BIP 77 mailbox [`ShortId`] for an [`HpkePublicKey`](crate::HpkePublicKey),
 /// a truncated SHA256 hash of its compressed serialization. Sender and receiver
 /// derive mailbox IDs this way so both agree on a session's mailbox.
-#[cfg(feature = "v2")]
+#[cfg(feature = "v2-ohttp")]
 impl From<&crate::HpkePublicKey> for ShortId {
     fn from(key: &crate::HpkePublicKey) -> Self {
         use bitcoin::hashes::{sha256, Hash};

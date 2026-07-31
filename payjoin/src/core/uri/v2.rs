@@ -430,7 +430,7 @@ mod tests {
 
     use super::*;
     #[cfg(all(feature = "v1", feature = "v2"))]
-    use crate::{Uri, UriExt};
+    use crate::Uri;
 
     #[test]
     fn test_ohttp_get_set() {
@@ -608,7 +608,8 @@ mod tests {
         let uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=0.01\
                    &pjos=0&pj=HTTPS://EXAMPLE.COM/missing_short_id\
                    %23oh1qypm5jxyns754y4r45qwe336qfx6zr8dqgvqculvztv20tfveydmfqc";
-        let extras = Uri::try_from(uri).unwrap().extras;
+        let uri = Uri::try_from(uri).unwrap();
+        let extras = uri.extras();
         match extras {
             crate::uri::MaybePayjoinExtras::Supported(extras) => {
                 assert!(matches!(extras.pj_param, crate::uri::PjParam::V1(_)));

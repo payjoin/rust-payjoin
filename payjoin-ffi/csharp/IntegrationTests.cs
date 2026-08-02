@@ -10,11 +10,12 @@ namespace Payjoin.Tests
     /// usage reference the package README points at. <see cref="TestIntegrationV2ToV2"/>
     /// drives a complete payjoin between two regtest wallets: the receiver opens a
     /// session and produces a BIP 21 URI, the sender posts its original PSBT to an
-    /// untrusted directory, the receiver checks that original, contributes an input,
-    /// and posts a proposal back, and the sender signs and broadcasts the final
+    /// untrusted directory, the receiver fetches that original PSBT, contributes an input,
+    /// and posts a payjoin proposal back, and the sender signs and broadcasts the final
     /// transaction. Neither side talks to the other directly; every message travels
-    /// through the directory, encapsulated in OHTTP so the directory cannot link
-    /// client identity to session content.
+    /// through the directory, encapsulated in OHTTP so the directory cannot observe
+    /// session content. Additionally all requests to the directory are routed through an
+    /// OHTTP relay to prevent the directory from learning the receiver and sender identities.
     ///
     /// The callback classes at the top are the seams where the library asks the
     /// wallet questions it cannot answer itself (is this outpoint mine, is this
@@ -311,8 +312,7 @@ namespace Payjoin.Tests
 
         // The methods below are the receiver checklist from BIP 78, one typestate
         // per check. The compiler enforces the order: each state exposes only its
-        // own check, and Save yields the next state. A receiver that skips a check
-        // does not typecheck.
+        // own check, and Save yields the next state.
 
         /// <summary>
         /// Check 1: the sender's original transaction must be broadcastable. It is
@@ -365,7 +365,8 @@ namespace Payjoin.Tests
         /// <summary>
         /// Check 4: find which outputs of the original pay the receiver. These are
         /// the outputs the payjoin is allowed to substitute or amend; everything
-        /// else belongs to the sender and stays untouched.
+        /// else belongs to the sender and stays untouched. This check also ensures
+        /// that at least one output actually pays the receiver.
         /// </summary>
         private Task<PayjoinProposal> ProcessOutputsUnknown(
             OutputsUnknown proposal,

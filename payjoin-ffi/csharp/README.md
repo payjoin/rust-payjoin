@@ -18,17 +18,19 @@ Requires .NET 10.0 or later, on one of:
 | macOS   | `osx-arm64`, `osx-x64`     |
 | Windows | `win-x64`, `win-arm64`     |
 
+## End to end example
+
+The usage reference is the commented walkthrough in [`IntegrationTests.cs`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/IntegrationTests.cs): `TestIntegrationV2ToV2` drives a complete payjoin from both sides, executed by CI on every change so it cannot go stale, and narrates each protocol step, from opening and persisting the session through the receiver checklist to signing the proposal.
+
 ## Receive a payjoin
 
 A receiver session produces a BIP 21 URI to show the sender. It works with every wallet: a payjoin-aware sender upgrades to a payjoin, any other wallet simply sends to the address as usual.
 
 A session starts with the directory's OHTTP keys, fetched through an OHTTP relay so the directory never learns your IP address, then builds a receiver for your address and persists every step to an event log so your app can crash or restart and resume where it left off. From there the session advances through a typestate flow: each state hands you a request to relay with your own HTTP client, and the response moves you to the next state, through checking the sender's original transaction, contributing inputs, and posting the proposal.
 
-The usage reference is the commented walkthrough in [`IntegrationTests.cs`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/IntegrationTests.cs): `TestIntegrationV2ToV2` drives a complete payjoin from both sides, executed by CI on every change so it cannot go stale, and narrates each protocol step, from opening and persisting the session through the receiver checklist to signing the proposal.
-
 ## Send a payjoin
 
-A sender session starts from a BIP 21 URI scanned from the receiver (`Payjoin.Uri.Parse(...).CheckPjSupported()`) and the wallet's signed PSBT, posts that original PSBT, and polls for the receiver's proposal through the same request/response flow. The sender half of the same walkthrough shows every step.
+A sender session starts from a BIP 21 URI scanned from the receiver (`Payjoin.Uri.Parse(...).CheckPjSupported()`), which is used to create and sign the original PSBT, posted to the receiver's mailbox on the directory. The sender then polls for the receiver's payjoin proposal through the same request/response flow, and once it arrives, signs it and broadcasts it to the network. The sender half of the same walkthrough shows every step.
 
 ## Resume after a restart
 

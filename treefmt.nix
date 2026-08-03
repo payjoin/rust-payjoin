@@ -11,7 +11,10 @@
       package = pkgs.rustToolchains.nightly;
       edition = "2021";
     };
-    shellcheck.enable = true;
+    shellcheck = {
+      enable = true;
+      external-sources = true;
+    };
     shfmt = {
       enable = true;
       indent_size = 4;

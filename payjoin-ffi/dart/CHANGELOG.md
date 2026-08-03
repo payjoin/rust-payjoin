@@ -1,3 +1,9 @@
+## [0.2.0]
+
+- Bindings for payjoin-1.0.0-rc.7
+- **Breaking:** `checkInputsNotOwned` takes an `IsInputOwned` callback keyed on
+  an `OutPoint` in place of `IsScriptOwned`
+
 ## [0.1.2]
 
 - Bindings for payjoin-1.0.0-rc.4

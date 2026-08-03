@@ -1,5 +1,34 @@
 # Payjoin Changelog
 
+## 1.0.0-rc.7
+
+This release changes how the receiver's ownership guard identifies a coin, so
+`check_inputs_not_owned` now takes a closure over `&OutPoint` rather than
+`&Script`. This is a breaking change for receiver implementations. It also
+hardens Original PSBT validation, unifies the BIP 77 mailbox derivation, and
+expands the receiver interface documentation.
+
+Selected Improvements:
+
+### API Changes
+
+- **Breaking:** `check_inputs_not_owned` takes
+  `&mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>` in place of
+  a closure over `&Script`. The closure must answer for every outpoint the
+  wallet can sign
+- `ShortId` implements `From<&HpkePublicKey>`, giving sender and receiver a
+  single BIP 77 mailbox derivation instead of two copies of the same hash
+  (#1763)
+
+### Bug Fixes
+
+- Harden Original PSBT input validation and the proposal finalization checks
+
+### Documentation
+
+- Revise and expand the receiver interface documentation across the v1 and v2
+  state machines (#1710)
+
 ## 1.0.0-rc.6
 
 This release insulates the `bitcoin_uri` crate from payjoin's public API so

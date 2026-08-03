@@ -1099,8 +1099,9 @@ impl App {
         let candidate_inputs = wallet.list_unspent()?;
 
         if candidate_inputs.is_empty() {
+            let id = persister.session_id();
             return Err(anyhow::anyhow!(
-                "No spendable UTXOs available in wallet. Cannot contribute inputs to payjoin."
+                "No spendable UTXOs available in wallet. Please fund your wallet before resuming this session, or run `payjoin-cli cancel {id}` to cancel and broadcast the original transaction."
             ));
         }
 

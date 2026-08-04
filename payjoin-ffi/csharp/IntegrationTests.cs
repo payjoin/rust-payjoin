@@ -5,12 +5,36 @@ using Xunit;
 
 namespace Payjoin.Tests
 {
+    /// <summary>
+    /// End-to-end walkthrough of the BIP 77 (asynchronous payjoin) flow, and the
+    /// usage reference the package README points at. <see cref="TestIntegrationV2ToV2"/>
+    /// drives a complete payjoin between two regtest wallets: the receiver opens a
+    /// session and produces a BIP 21 URI, the sender posts its original PSBT to an
+    /// untrusted directory, the receiver fetches that original PSBT, contributes an input,
+    /// and posts a payjoin proposal back, and the sender signs and broadcasts the final
+    /// transaction. Neither side talks to the other directly; every message travels
+    /// through the directory, encapsulated in OHTTP so the directory cannot observe
+    /// session content. Additionally all requests to the directory are routed through an
+    /// OHTTP relay to prevent the directory from learning the receiver and sender identities.
+    ///
+    /// The callback classes at the top are the seams where the library asks the
+    /// wallet questions it cannot answer itself (is this outpoint mine, is this
+    /// transaction broadcastable, sign these inputs). A production integration
+    /// implements the same interfaces against its own wallet backend.
+    /// </summary>
     public class IntegrationTests : IAsyncLifetime
     {
         private static string RpcCall(RpcClient rpc, string method, params string?[] args) => rpc.Call(method, args);
         private TestServices? _services;
         private HttpClient? _httpClient;
 
+        /// <summary>
+        /// Answers whether a transaction would be accepted by the mempool, via
+        /// Bitcoin Core's testmempoolaccept. The receiver runs this against the
+        /// sender's original transaction before doing anything else: that original
+        /// is the fallback that pays the receiver if the payjoin never completes,
+        /// so a receiver must not build on an original that could never confirm.
+        /// </summary>
         private sealed class MempoolAcceptanceCallback : CanBroadcast
         {
             private readonly RpcClient _connection;
@@ -37,6 +61,14 @@ namespace Payjoin.Tests
             }
         }
 
+        /// <summary>
+        /// Answers "does this script belong to my wallet?" by decoding the script
+        /// to an address and asking Bitcoin Core getaddressinfo. The receiver uses
+        /// this to identify which outputs of the original pay the receiver, since
+        /// those are the outputs the payjoin may modify. Outputs are script-keyed
+        /// because an output's script in the transaction is the real payment
+        /// destination; input ownership uses the outpoint-keyed callback below.
+        /// </summary>
         private sealed class IsScriptOwnedCallback : IsScriptOwned
         {
             private readonly RpcClient _connection;
@@ -111,6 +143,13 @@ namespace Payjoin.Tests
             }
         }
 
+        /// <summary>
+        /// Answers "does my wallet own the UTXO at this outpoint?". Input ownership
+        /// is decided by outpoint, never by the PSBT's script data: a counterparty
+        /// can forge a script through a bare witness_utxo, but the outpoint is the
+        /// spend claim itself. This keeps the check aligned with how the wallet
+        /// recognizes and signs its own inputs.
+        /// </summary>
         private sealed class IsInputOwnedCallback : IsInputOwned
         {
             private readonly RpcClient _connection;
@@ -150,11 +189,24 @@ namespace Payjoin.Tests
             }
         }
 
+        /// <summary>
+        /// Answers "have I seen this input in an earlier session?". Automated
+        /// receivers track this to stop probing attacks, where a sender retries the
+        /// same input across sessions to map the receiver's UTXO set. The test
+        /// always answers no; a production receiver persists every outpoint it has
+        /// seen and answers from that store.
+        /// </summary>
         private sealed class CheckInputsNotSeenCallback : IsOutputKnown
         {
             public bool Callback(OutPoint _outpoint) => false;
         }
 
+        /// <summary>
+        /// Signs the receiver's contributed inputs in the finished proposal, via
+        /// Bitcoin Core's walletprocesspsbt. This is the last receiver-side step:
+        /// after it, the proposal goes back to the sender, who re-signs their own
+        /// inputs and broadcasts.
+        /// </summary>
         private sealed class ProcessPsbtCallback : ProcessPsbt
         {
             private readonly RpcClient _connection;
@@ -173,6 +225,12 @@ namespace Payjoin.Tests
             }
         }
 
+        /// <summary>
+        /// Collects the receiver wallet's spendable UTXOs as InputPair candidates
+        /// for contribution. An InputPair carries the transaction input plus the
+        /// PSBT metadata (here a witness_utxo) the sender needs to see the coin
+        /// being spent.
+        /// </summary>
         private static InputPair[] GetInputs(RpcClient rpc)
         {
             var utxosJson = RpcCall(rpc, "listunspent");
@@ -202,6 +260,21 @@ namespace Payjoin.Tests
             return inputs.ToArray();
         }
 
+        /// <summary>
+        /// One receiver poll of the directory mailbox, through the OHTTP relay.
+        /// The relay sees an encrypted blob and the client address; the directory
+        /// sees the blob only. Save persists the step to the session's event log,
+        /// and the outcome is either Stasis (nothing arrived yet, poll again
+        /// later) or Progress (the sender's original PSBT arrived), in which case
+        /// the receiver checklist below runs to completion.
+        ///
+        /// Each state transition here follows the same shape the whole API uses:
+        /// the state object creates a request, the application relays it with its
+        /// own HTTP client, the response feeds ProcessResponse, and Save moves the
+        /// session to the next persisted state. A crashed application replays the
+        /// event log with PayjoinMethods.ReplayReceiverEventLog and resumes from
+        /// the same state.
+        /// </summary>
         private async Task<PayjoinProposal?> RetrieveReceiverProposal(
             Initialized receiver,
             RpcClient receiverRpc,
@@ -237,6 +310,15 @@ namespace Payjoin.Tests
             throw new InvalidOperationException("Unknown initialized transition outcome");
         }
 
+        // The methods below are the receiver checklist from BIP 78, one typestate
+        // per check. The compiler enforces the order: each state exposes only its
+        // own check, and Save yields the next state.
+
+        /// <summary>
+        /// Check 1: the sender's original transaction must be broadcastable. It is
+        /// the fallback payment if the payjoin does not complete, and its fee rate
+        /// also bounds what the merged transaction can look like.
+        /// </summary>
         private Task<PayjoinProposal> ProcessUncheckedProposal(
             UncheckedOriginalPayload proposal,
             RpcClient receiverRpc,
@@ -248,6 +330,12 @@ namespace Payjoin.Tests
             return ProcessMaybeInputsOwned(maybeInputsOwned, receiverRpc, recvPersister);
         }
 
+        /// <summary>
+        /// Check 2: none of the original's inputs may belong to the receiver,
+        /// decided by outpoint against the wallet's own records.
+        /// Otherwise a malicious sender could get the receiver to sign away a coin
+        /// the receiver already owns.
+        /// </summary>
         private Task<PayjoinProposal> ProcessMaybeInputsOwned(
             MaybeInputsOwned proposal,
             RpcClient receiverRpc,
@@ -259,6 +347,10 @@ namespace Payjoin.Tests
             return ProcessMaybeInputsSeen(maybeInputsSeen, receiverRpc, recvPersister);
         }
 
+        /// <summary>
+        /// Check 3: none of the original's inputs may have appeared in an earlier
+        /// session. Retried inputs are how a prober maps the receiver's wallet.
+        /// </summary>
         private Task<PayjoinProposal> ProcessMaybeInputsSeen(
             MaybeInputsSeen proposal,
             RpcClient receiverRpc,
@@ -270,6 +362,12 @@ namespace Payjoin.Tests
             return ProcessOutputsUnknown(outputsUnknown, receiverRpc, recvPersister);
         }
 
+        /// <summary>
+        /// Check 4: find which outputs of the original pay the receiver. These are
+        /// the outputs the payjoin is allowed to substitute or amend; everything
+        /// else belongs to the sender and stays untouched. This check also ensures
+        /// that at least one output actually pays the receiver.
+        /// </summary>
         private Task<PayjoinProposal> ProcessOutputsUnknown(
             OutputsUnknown proposal,
             RpcClient receiverRpc,
@@ -281,6 +379,11 @@ namespace Payjoin.Tests
             return ProcessWantsOutputs(wantsOutputs, receiverRpc, recvPersister);
         }
 
+        /// <summary>
+        /// The receiver may replace its output set here, for example to substitute
+        /// a fresh address or split the payment. This walkthrough keeps the
+        /// original outputs and just commits them.
+        /// </summary>
         private Task<PayjoinProposal> ProcessWantsOutputs(
             WantsOutputs proposal,
             RpcClient receiverRpc,
@@ -292,6 +395,12 @@ namespace Payjoin.Tests
             return ProcessWantsInputs(wantsInputs, receiverRpc, recvPersister);
         }
 
+        /// <summary>
+        /// The heart of the payjoin: the receiver contributes its own input. The
+        /// merged transaction now spends coins from both parties, which is what
+        /// breaks the common-input-ownership heuristic. The library selects from
+        /// the candidates to avoid unnecessary-input heuristics where it can.
+        /// </summary>
         private Task<PayjoinProposal> ProcessWantsInputs(
             WantsInputs proposal,
             RpcClient receiverRpc,
@@ -304,6 +413,13 @@ namespace Payjoin.Tests
             return ProcessWantsFeeRange(wantsFeeRange, receiverRpc, recvPersister);
         }
 
+        /// <summary>
+        /// The receiver's added input makes the transaction larger, and someone
+        /// must pay for those bytes. ApplyFeeRange(min, max) bounds the fee rate
+        /// the receiver will accept; the library deducts the receiver's share from
+        /// the receiver's own output so the sender never pays for the receiver's
+        /// contribution.
+        /// </summary>
         private Task<PayjoinProposal> ProcessWantsFeeRange(
             WantsFeeRange proposal,
             RpcClient receiverRpc,
@@ -315,6 +431,11 @@ namespace Payjoin.Tests
             return ProcessProvisionalProposal(provisional, receiverRpc, recvPersister);
         }
 
+        /// <summary>
+        /// Finalization: the wallet signs the receiver's contributed inputs (see
+        /// ProcessPsbtCallback), and the result is the proposal to post back to
+        /// the directory for the sender to pick up.
+        /// </summary>
         private Task<PayjoinProposal> ProcessProvisionalProposal(
             ProvisionalProposal proposal,
             RpcClient receiverRpc,
@@ -342,6 +463,12 @@ namespace Payjoin.Tests
             return ValueTask.CompletedTask;
         }
 
+        /// <summary>
+        /// Session bootstrap: fetch the directory's OHTTP keys through an OHTTP
+        /// relay, so the directory never learns the client's IP address. This is
+        /// the first network step of every session; on mainnet the cert parameter
+        /// is null and the relay's real TLS certificate is used.
+        /// </summary>
         [Fact]
         public async Task FetchAndDecodeOhttpKeysViaRelayProxy()
         {
@@ -477,6 +604,12 @@ namespace Payjoin.Tests
             });
         }
 
+        /// <summary>
+        /// The complete BIP 77 payjoin, receiver and sender in one place. In a real
+        /// deployment these are two applications that never talk directly; the
+        /// directory carries every message between them, and both sides survive a
+        /// restart because every state transition is saved to a persister first.
+        /// </summary>
         [Fact]
         public async Task TestIntegrationV2ToV2()
         {
@@ -497,30 +630,54 @@ namespace Payjoin.Tests
 
             var ohttpKeys = _services.FetchOhttpKeys();
 
+            // The persisters are the session event logs. Implement
+            // JsonReceiverSessionPersister and JsonSenderSessionPersister over your
+            // own storage (these in-memory versions append each event to a list);
+            // async variants exist for database-backed stores.
             var recvPersister = new InMemoryReceiverPersister();
             var senderPersister = new InMemorySenderPersister();
 
+            // *****************************
+            // RECEIVER SIDE
+            // Open a session for the receiving address. Save persists the opening
+            // event and yields the Initialized state, whose PjUri() is the BIP 21
+            // URI to show the sender. Any wallet can pay this URI: a payjoin-aware
+            // sender upgrades to a payjoin, any other wallet just sends to the
+            // address.
             using var receiverBuilder = new ReceiverBuilder(receiverAddress, directory, ohttpKeys);
             using var receiveTransition = receiverBuilder.Build();
             using var session = receiveTransition.Save(recvPersister);
 
+            // First poll: the sender has not posted anything yet, so the outcome
+            // is Stasis and the helper returns null. A production receiver polls
+            // on a timer.
             var initial = await RetrieveReceiverProposal(session, receiver, recvPersister, ohttpRelay, cancellationToken);
             Assert.Null(initial);
 
             // *****************************
             // SENDER SIDE
-            // Get PayJoin URI from receiver
+            // The sender starts from the receiver's BIP 21 URI. In production this
+            // arrives as a scanned QR code or a pasted string, and
+            // Payjoin.Uri.Parse(...).CheckPjSupported() turns it into the PjUri
+            // used below.
             using var pjUri = session.PjUri();
 
-            // Create a funded PSBT that sweeps all funds to receiver
+            // The original PSBT is a normal transaction paying the URI's address,
+            // built and signed by the sender's wallet. It doubles as the fallback:
+            // if the payjoin never completes, this is the transaction that pays
+            // the receiver.
             var psbt = BuildSweepPsbt(sender, pjUri);
 
-            // Build sender request context
+            // BuildRecommended validates the original against the URI and sets the
+            // minimum fee rate (sat/kWU) the sender will accept for the merged
+            // transaction. Save persists the sender session the same way the
+            // receiver side persists its own.
             using var senderBuilder = new SenderBuilder(psbt, pjUri);
             using var senderTransition = senderBuilder.BuildRecommended(1000);
             using var reqCtx = senderTransition.Save(senderPersister);
 
-            // Create V2 POST request with OHTTP
+            // Post the original PSBT to the receiver's directory mailbox, OHTTP
+            // encapsulated like every other hop.
             using var request = reqCtx.CreateV2PostRequest(ohttpRelay);
             var response = await _httpClient!.PostAsync(
                 request.Request.Url,
@@ -538,12 +695,16 @@ namespace Payjoin.Tests
 
             // *********************
             // RECEIVER SIDE
-            // Poll for the proposal
+            // This poll finds the sender's original in the mailbox and runs the
+            // whole receiver pipeline (checks 1 through 4, output commit, input
+            // contribution, fee range, signing; see the Process* methods above).
+            // The result is the receiver-signed payjoin proposal.
             using var payjoinProposal = await RetrieveReceiverProposal(session, receiver, recvPersister, ohttpRelay, cancellationToken);
             Assert.NotNull(payjoinProposal);
             Assert.IsType<PayjoinProposal>(payjoinProposal);
 
-            // Post the payjoin proposal back to the directory
+            // Post the proposal to the sender's mailbox and confirm the directory
+            // accepted it.
             using var proposalRequest = payjoinProposal!.CreatePostRequest(ohttpRelay);
             using var proposalResponse = await _httpClient.PostAsync(
                 proposalRequest.Request.Url,
@@ -558,7 +719,11 @@ namespace Payjoin.Tests
 
             // *******************************
             // SENDER SIDE (FINALIZATION)
-            // Poll for the final payjoin PSBT
+            // Poll the sender mailbox until the receiver's proposal arrives
+            // (Stasis until then, like the receiver's poll). The library has
+            // already validated the proposal against the original during
+            // ProcessResponse; what comes out is the payjoin PSBT waiting for the
+            // sender's signatures.
             PollingForProposalTransitionOutcome? pollOutcome = null;
             var attempts = 0;
             while (true)
@@ -591,7 +756,8 @@ namespace Payjoin.Tests
 
             var progressOutcome = (PollingForProposalTransitionOutcome.Progress)pollOutcome!;
 
-            // Sign the payjoin PSBT
+            // The sender re-signs its own inputs. The receiver's contributed input
+            // changed the transaction, so the original signatures no longer apply.
             var payjoinPsbt = progressOutcome.PsbtBase64;
             var processedPsbtJson = RpcCall(sender, "walletprocesspsbt", JsonSerializer.Serialize(payjoinPsbt));
             using var processedDoc = JsonDocument.Parse(processedPsbtJson);
@@ -610,6 +776,9 @@ namespace Payjoin.Tests
 
             // *******************************
             // VERIFY RESULTS
+            // The broadcast transaction spends one input from each party into the
+            // receiver's output: on chain it is indistinguishable from an ordinary
+            // transaction, which is the point.
             // Decode PSBT to get network fees
             var decodedPsbtJson = RpcCall(sender, "decodepsbt", JsonSerializer.Serialize(finalPsbt));
             using var decodedPsbtDoc = JsonDocument.Parse(decodedPsbtJson);

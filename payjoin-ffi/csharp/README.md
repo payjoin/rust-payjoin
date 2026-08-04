@@ -1,11 +1,8 @@
 # Payjoin C# Bindings
 
-C# bindings for the [Payjoin Dev Kit](https://payjoindevkit.org/), generated from
-`payjoin-ffi` with UniFFI.
+Welcome to the C# language bindings for the [Payjoin Dev Kit](https://payjoindevkit.org/)!
 
-The NuGet package is still prepared as a preview while the C# API stabilizes. The
-first release-ready package layout targets .NET 10 and ships a managed
-`Payjoin.dll` plus RID-specific native `payjoin_ffi` libraries.
+Payjoin lets the receiver of a Bitcoin transfer contribute inputs to the sender's transaction. The result looks like any other transaction, which preserves privacy by poisoning the common-input-ownership heuristic that chain surveillance depends on, and it lets the receiver batch its own operations into the same transaction. These bindings implement both [BIP 78](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) (synchronous payjoin) and [BIP 77](https://github.com/bitcoin/bips/blob/master/bip-0077.md) (asynchronous payjoin, where sender and receiver exchange the transaction through an untrusted directory and never need to be online at the same time), and ship with native libraries for every supported platform, so no Rust toolchain is required.
 
 ## Install
 
@@ -13,123 +10,39 @@ first release-ready package layout targets .NET 10 and ships a managed
 dotnet add package Payjoin --prerelease
 ```
 
-## Requirements
+Requires .NET 10.0 or later, on one of:
 
-- .NET 10.0 or higher
-- A supported RID native asset in the package
+| OS      | RIDs                       |
+| ------- | -------------------------- |
+| Linux   | `linux-x64`, `linux-arm64` |
+| macOS   | `osx-arm64`, `osx-x64`     |
+| Windows | `win-x64`, `win-arm64`     |
 
-The first preview release matrix is:
+## End to end example
 
-| OS                  | RID           | Native library         |
-| ------------------- | ------------- | ---------------------- |
-| Linux arm64         | `linux-arm64` | `libpayjoin_ffi.so`    |
-| Linux x64           | `linux-x64`   | `libpayjoin_ffi.so`    |
-| macOS Apple Silicon | `osx-arm64`   | `libpayjoin_ffi.dylib` |
-| macOS x64           | `osx-x64`     | `libpayjoin_ffi.dylib` |
-| Windows arm64       | `win-arm64`   | `payjoin_ffi.dll`      |
-| Windows x64         | `win-x64`     | `payjoin_ffi.dll`      |
+The usage reference is the commented walkthrough in [`IntegrationTests.cs`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/IntegrationTests.cs): `TestIntegrationV2ToV2` drives a complete payjoin from both sides, executed by CI on every change so it cannot go stale, and narrates each protocol step, from opening and persisting the session through the receiver checklist to signing the proposal.
 
-The package follows the .NET native asset layout:
+## Receive a payjoin
 
-- `ref/net10.0/Payjoin.dll`
-- `runtimes/any/lib/net10.0/Payjoin.dll`
-- `runtimes/{rid}/native/{native-library}`
+A receiver session produces a BIP 21 URI to show the sender. It works with every wallet: a payjoin-aware sender upgrades to a payjoin, any other wallet simply sends to the address as usual.
 
-## Minimal Usage
+A session starts with the directory's OHTTP keys, fetched through an OHTTP relay so the directory never learns your IP address, then builds a receiver for your address and persists every step to an event log so your app can crash or restart and resume where it left off. From there the session advances through a typestate flow: each state hands you a request to relay with your own HTTP client, and the response moves you to the next state, through checking the sender's original transaction, contributing inputs, and posting the proposal.
 
-```csharp
-var uri = Payjoin.Url.Parse(
-    "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao");
+## Send a payjoin
 
-Console.WriteLine(uri.AsString());
-```
+A sender session starts from a BIP 21 URI scanned from the receiver (`Payjoin.Uri.Parse(...).CheckPjSupported()`), which is used to create and sign the original PSBT, posted to the receiver's mailbox on the directory. The sender then polls for the receiver's payjoin proposal through the same request/response flow, and once it arrives, signs it and broadcasts it to the network. The sender half of the same walkthrough shows every step.
 
-## Development
+## Resume after a restart
 
-With nix, the C# development shell provides the Rust toolchain and .NET 10 SDK:
+Sessions persist each step to an event log through a persister you implement over your own storage; replaying the log with `PayjoinMethods.ReplayReceiverEventLog` recovers the current state after a crash or restart. Every `Save` has a `SaveAsync` counterpart, with async persister interfaces for database-backed storage.
 
-```shell
-nix develop .#csharp -c bash payjoin-ffi/csharp/contrib/test.sh
-```
+## Preview status
 
-Without nix, a Rust toolchain (MSRV: 1.85.0 for this repository) and the .NET 10
-SDK are required:
+The package is in preview while the C# API stabilizes alongside the Rust core's 1.0 release candidates. Expect breaking changes between previews; the package version tracks the underlying `payjoin-ffi` crate.
 
-```shell
-git clone https://github.com/payjoin/rust-payjoin.git
-cd rust-payjoin/payjoin-ffi/csharp
+## Documentation and help
 
-bash ./scripts/generate_bindings.sh
-dotnet build Payjoin.Tests.csproj
-dotnet test Payjoin.Tests.csproj
-```
+- [Payjoin Dev Kit](https://payjoindevkit.org/) for protocol background and guides
+- [rust-payjoin](https://github.com/payjoin/rust-payjoin) is the Rust core these bindings are generated from, with the [issue tracker](https://github.com/payjoin/rust-payjoin/issues) for bugs and feature requests
 
-### Windows
-
-```powershell
-git clone https://github.com/payjoin/rust-payjoin.git
-cd rust-payjoin/payjoin-ffi/csharp
-
-powershell -ExecutionPolicy Bypass -File .\scripts\generate_bindings.ps1
-dotnet build Payjoin.Tests.csproj
-dotnet test Payjoin.Tests.csproj
-```
-
-Generation uses the Cargo-managed C# generator pinned in `payjoin-ffi/Cargo.toml`.
-By default, development generation enables `_test-utils` to keep parity with the
-test suite. For production bindings, set `PAYJOIN_FFI_FEATURES` to an empty value
-(bash) or pass `-ProductionBindings` (PowerShell — Windows cannot represent an
-empty environment variable, so the switch is the only reliable signal there).
-
-## Packaging
-
-Build the release native asset for the current host RID (production features are
-the default when `PAYJOIN_FFI_FEATURES` is not set; this step does not regenerate
-the C# bindings):
-
-```shell
-bash ./scripts/build_nuget_native.sh
-```
-
-Any supported RID can also be cross-compiled from a Linux host, which is how CI
-builds every native asset (`pip install -r scripts/cross-requirements.txt` for
-the version- and hash-pinned toolchain CI uses, and `rustup target add` the
-matching triple first):
-
-```shell
-PAYJOIN_FFI_CROSS=1 PAYJOIN_FFI_RID=osx-arm64 bash ./scripts/build_nuget_native.sh
-```
-
-On Windows:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_nuget_native.ps1
-```
-
-To pack, gather every supported RID under `artifacts/runtimes/{rid}/native/`,
-generate production bindings, and run:
-
-```shell
-PAYJOIN_FFI_FEATURES= PAYJOIN_FFI_PROFILE=release bash ./scripts/generate_bindings.sh
-dotnet pack Payjoin.csproj --configuration Release --output artifacts/packages
-```
-
-On Windows:
-
-```powershell
-$env:PAYJOIN_FFI_PROFILE = "release"
-powershell -ExecutionPolicy Bypass -File .\scripts\generate_bindings.ps1 -ProductionBindings
-dotnet pack Payjoin.csproj --configuration Release --output artifacts/packages
-```
-
-Validate the package in a clean sample app (`auto` derives the version from the
-packed artifact; an explicit version is also accepted):
-
-```shell
-bash ./scripts/smoke_nuget_package.sh artifacts/packages auto linux-x64
-```
-
-CI performs the package build from release native assets and runs the smoke test
-on each supported RID before publishing should be considered. The maintainer
-release and publish workflow is documented in
-[`RELEASING.md`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/RELEASING.md).
+To build the bindings from source, run the tests, or produce the NuGet package locally, see [`CONTRIBUTING.md`](https://github.com/payjoin/rust-payjoin/blob/master/payjoin-ffi/csharp/CONTRIBUTING.md).

@@ -16,7 +16,8 @@
 //! Note: Even fresh requests may be linkable via metadata (e.g. client IP, request timing),
 //! but request reuse makes correlation trivial for the relay.
 
-use bitcoin::psbt::Psbt;
+use bitcoin::psbt::{Psbt, PsbtSighashType};
+use bitcoin::sighash::TapSighashType;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
 pub use error::{BuildSenderError, ResponseError, ValidationError, WellKnownError};
 pub(crate) use error::{InternalBuildSenderError, InternalProposalError, InternalValidationError};
@@ -253,6 +254,19 @@ fn ensure<T>(condition: bool, error: T) -> Result<(), T> {
     Ok(())
 }
 
+/// Whether a PSBT input's declared sighash type commits to every input and
+/// output of the transaction.
+///
+/// Only `SIGHASH_ALL` (ECDSA) and `SIGHASHDEFAULT`/`SIGHASH_ALL` (Taproot)
+/// commit to all inputs and outputs. Any other type (`NONE`, `SINGLE`, or an
+/// `ANYONECANPAY` variant) leaves the signed transaction malleable, so the
+/// sender must never sign one of its own inputs with such a type.
+fn commits_to_all_inputs_and_outputs(sighash_type: PsbtSighashType) -> bool {
+    // Taproot reuses the ECDSA sighash encodings and adds SIGHASHDEFAULT at
+    // 0x00, so parsing as taproot recognizes both signature types.
+    matches!(sighash_type.taproot_hash_ty(), Ok(TapSighashType::Default | TapSighashType::All))
+}
+
 impl PsbtContext {
     fn process_proposal(self, mut proposal: Psbt) -> InternalResult<Psbt> {
         self.basic_checks(&proposal)?;
@@ -364,6 +378,14 @@ impl PsbtContext {
                         proposed.psbtin.final_script_witness.is_none(),
                         InternalProposalError::SenderTxinContainsFinalScriptWitness,
                     )?;
+                    // Refuse to sign our own inputs with any sighash type that
+                    // does not commit to every input and output.
+                    if let Some(sighash_type) = proposed.psbtin.sighash_type {
+                        ensure(
+                            commits_to_all_inputs_and_outputs(sighash_type),
+                            InternalProposalError::SenderTxinNonAllSighashType,
+                        )?;
+                    }
                     original_inputs.next();
                 }
                 // theirs (receiver)
@@ -1225,6 +1247,63 @@ mod test {
                 InternalProposalError::SenderTxinContainsFinalScriptWitness.to_string()
             );
 
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_non_all_sighash_type_is_rejected() -> Result<(), BoxError> {
+            use bitcoin::psbt::PsbtSighashType;
+            use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
+
+            // Any sighash type that does not commit to all inputs and outputs
+            // must be rejected on the sender's own inputs.
+            let invalid_sighash_types = [
+                PsbtSighashType::from(EcdsaSighashType::None),
+                PsbtSighashType::from(EcdsaSighashType::Single),
+                PsbtSighashType::from(EcdsaSighashType::AllPlusAnyoneCanPay),
+                PsbtSighashType::from(EcdsaSighashType::NonePlusAnyoneCanPay),
+                PsbtSighashType::from(TapSighashType::None),
+                PsbtSighashType::from(TapSighashType::Single),
+                PsbtSighashType::from(TapSighashType::AllPlusAnyoneCanPay),
+            ];
+
+            for sighash_type in invalid_sighash_types {
+                let ctx = create_psbt_context()?;
+                let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+                proposal.inputs.get_mut(0).unwrap().sighash_type = Some(sighash_type);
+
+                assert_eq!(
+                    ctx.process_proposal(proposal).unwrap_err().to_string(),
+                    InternalProposalError::SenderTxinNonAllSighashType.to_string(),
+                    "sighash type {sighash_type:?} should be rejected",
+                );
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_all_sighash_type_is_accepted() -> Result<(), BoxError> {
+            use bitcoin::psbt::PsbtSighashType;
+            use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
+
+            // SIGHASH_ALL and taproot SIGHASHDEFAULT/SIGHASH_ALL commit to all
+            // inputs and outputs, as does an unset type, so all must be accepted.
+            let acceptable = [
+                None,
+                Some(PsbtSighashType::from(EcdsaSighashType::All)),
+                Some(PsbtSighashType::from(TapSighashType::Default)),
+                Some(PsbtSighashType::from(TapSighashType::All)),
+            ];
+
+            for sighash_type in acceptable {
+                let ctx = create_psbt_context()?;
+                let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+                proposal.inputs.get_mut(0).unwrap().sighash_type = sighash_type;
+
+                ctx.process_proposal(proposal).unwrap_or_else(|e| {
+                    panic!("sighash type {sighash_type:?} should be accepted: {e}")
+                });
+            }
             Ok(())
         }
 

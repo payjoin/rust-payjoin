@@ -1,5 +1,21 @@
 # payjoin-cli Changelog
 
+## 1.0.0-rc.2
+
+Track payjoin 1.0.0-rc.8, whose `check_inputs_not_owned` callback now
+identifies inputs by outpoint instead of script. The CLI resolves each
+outpoint's scriptPubKey from the receiver node's own record of the funding
+transaction before checking ownership. A receiver session with no spendable
+inputs to contribute now remains recoverable instead of being cancelled
+automatically: the receiver can fund the wallet and resume the session, or run
+`payjoin-cli cancel <id>` to fall back to the original transaction.
+
+Selected Improvements:
+
+- Bump payjoin to version 1.0.0-rc.8 by @spacebear21 in [#1795](https://github.com/payjoin/rust-payjoin/pull/1795)
+- Bump payjoin to version 1.0.0-rc.7 by @spacebear21 in [#1782](https://github.com/payjoin/rust-payjoin/pull/1782)
+- Keep receiver input failures recoverable by @Jolah1 in [#1769](https://github.com/payjoin/rust-payjoin/pull/1769)
+
 ## 1.0.0-rc.1
 
 Track payjoin 1.0.0-rc.6. The library insulated the `bitcoin_uri` crate from its

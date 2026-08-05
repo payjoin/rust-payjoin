@@ -17,6 +17,7 @@ pub struct BuildSenderError(InternalBuildSenderError);
 pub(crate) enum InternalBuildSenderError {
     InvalidOriginalInput(crate::psbt::PsbtInputsError),
     InconsistentOriginalPsbt(crate::psbt::InconsistentPsbt),
+    OriginalTxinNonAllSighashType,
     NoInputs,
     PayeeValueNotEqual,
     NoOutputs,
@@ -47,6 +48,7 @@ impl fmt::Display for BuildSenderError {
         match &self.0 {
             InvalidOriginalInput(e) => write!(f, "an input in the original transaction is invalid: {e:#?}"),
             InconsistentOriginalPsbt(e) => write!(f, "the original transaction is inconsistent: {e:#?}"),
+            OriginalTxinNonAllSighashType => write!(f, "an input in the original transaction requests a sighash type other than SIGHASH_ALL"),
             NoInputs => write!(f, "the original transaction has no inputs"),
             PayeeValueNotEqual => write!(f, "the value in original transaction doesn't equal value requested in the payment link"),
             NoOutputs => write!(f, "the original transaction has no outputs"),
@@ -69,6 +71,7 @@ impl std::error::Error for BuildSenderError {
         match &self.0 {
             InvalidOriginalInput(error) => Some(error),
             InconsistentOriginalPsbt(error) => Some(error),
+            OriginalTxinNonAllSighashType => None,
             NoInputs => None,
             PayeeValueNotEqual => None,
             NoOutputs => None,

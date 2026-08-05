@@ -201,6 +201,19 @@ impl PsbtContextBuilder {
             self.psbt.validate().map_err(InternalBuildSenderError::InconsistentOriginalPsbt)?;
         psbt.validate_input_utxos().map_err(InternalBuildSenderError::InvalidOriginalInput)?;
 
+        // The Original PSBT reaches the receiver already signed, to be held as
+        // a broadcastable fallback. A signature that does not commit to every
+        // input and output leaves that transaction malleable by whoever holds
+        // it, so refuse to build a context around one.
+        for input in &psbt.inputs {
+            if let Some(sighash_type) = input.sighash_type {
+                ensure(
+                    commits_to_all_inputs_and_outputs(sighash_type),
+                    InternalBuildSenderError::OriginalTxinNonAllSighashType,
+                )?;
+            }
+        }
+
         check_single_payee(&psbt, &self.payee, self.amount)?;
         let fee_contribution = determine_fee_contribution(
             &psbt,
@@ -796,6 +809,66 @@ mod test {
         assert!(payjoin_proposal.outputs[0].tap_key_origins.contains_key(&x_only));
         assert_eq!(payjoin_proposal.outputs[0].tap_internal_key, Some(x_only));
         assert_eq!(payjoin_proposal.outputs[0].tap_tree, Some(taptree));
+        Ok(())
+    }
+
+    #[test]
+    fn test_original_psbt_non_all_sighash_type_is_rejected() -> Result<(), BoxError> {
+        use bitcoin::psbt::PsbtSighashType;
+        use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
+
+        let rejected = [
+            PsbtSighashType::from(EcdsaSighashType::None),
+            PsbtSighashType::from(EcdsaSighashType::Single),
+            PsbtSighashType::from(EcdsaSighashType::AllPlusAnyoneCanPay),
+            PsbtSighashType::from(EcdsaSighashType::NonePlusAnyoneCanPay),
+            PsbtSighashType::from(EcdsaSighashType::SinglePlusAnyoneCanPay),
+            PsbtSighashType::from(TapSighashType::None),
+            PsbtSighashType::from(TapSighashType::Single),
+            PsbtSighashType::from(TapSighashType::AllPlusAnyoneCanPay),
+            PsbtSighashType::from_u32(u32::MAX),
+        ];
+
+        for sighash_type in rejected {
+            let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();
+            let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
+            original_psbt.inputs[0].sighash_type = Some(sighash_type);
+
+            let error = PsbtContextBuilder::new(original_psbt, payee, None)
+                .build(OutputSubstitution::Disabled)
+                .unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                BuildSenderError::from(InternalBuildSenderError::OriginalTxinNonAllSighashType)
+                    .to_string(),
+                "sighash type {sighash_type:?} rejected for the wrong reason",
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_original_psbt_all_sighash_type_is_accepted() -> Result<(), BoxError> {
+        use bitcoin::psbt::PsbtSighashType;
+        use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
+
+        let accepted = [
+            None,
+            Some(PsbtSighashType::from(EcdsaSighashType::All)),
+            Some(PsbtSighashType::from(TapSighashType::Default)),
+            Some(PsbtSighashType::from(TapSighashType::All)),
+        ];
+
+        for sighash_type in accepted {
+            let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();
+            let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
+            original_psbt.inputs[0].sighash_type = sighash_type;
+
+            PsbtContextBuilder::new(original_psbt, payee, None)
+                .build(OutputSubstitution::Disabled)
+                .unwrap_or_else(|e| panic!("sighash type {sighash_type:?} should build: {e}"));
+        }
         Ok(())
     }
 

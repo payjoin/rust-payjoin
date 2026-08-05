@@ -14,10 +14,12 @@ if [[ $OS == "Darwin" && -z ${IN_NIX_SHELL:-} ]]; then
     echo "LLVM flags set: AR=$AR, CC=$CC"
 fi
 
-# Heinous hack to pin a transitive dependency to be MSRV compatible on 1.85
-cd node_modules/uniffi-bindgen-react-native
-cargo add home@=0.5.11 --package uniffi-bindgen-react-native
-cd ../..
+# The ubrn command is compiled from source during the build below, from a
+# workspace that ships no lock file, so cargo resolves it fresh every run and
+# picks up crates whose MSRV has moved past this shell's toolchain. Ask cargo
+# to prefer versions compatible with the rustc in use instead of pinning each
+# drifting crate by hand.
+export CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback
 
 # rustup target add is a no-op against a nix-provided toolchain
 # (no rustup home, targets baked into the nix derivation instead).

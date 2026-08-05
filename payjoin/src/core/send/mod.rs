@@ -201,6 +201,24 @@ impl PsbtContextBuilder {
             self.psbt.validate().map_err(InternalBuildSenderError::InconsistentOriginalPsbt)?;
         psbt.validate_input_utxos().map_err(InternalBuildSenderError::InvalidOriginalInput)?;
 
+        // The Original PSBT reaches the receiver already signed, to be held as
+        // a broadcastable fallback. A signature that does not commit to every
+        // input and output leaves that transaction malleable by whoever holds
+        // it, so refuse to build a context around one.
+        //
+        // TODO: BIP-78 does not mention sighash types at all, neither for the
+        // Original PSBT nor in the sender's payjoin proposal checklist. The
+        // spec needs an update stating that a sender signs with SIGHASH_ALL
+        // and rejects anything else on its own inputs.
+        for input in &psbt.inputs {
+            if let Some(sighash_type) = input.sighash_type {
+                ensure(
+                    commits_to_all_inputs_and_outputs(sighash_type),
+                    InternalBuildSenderError::OriginalTxinNonAllSighashType,
+                )?;
+            }
+        }
+
         check_single_payee(&psbt, &self.payee, self.amount)?;
         let fee_contribution = determine_fee_contribution(
             &psbt,
@@ -1116,6 +1134,7 @@ mod test {
 
     /// Test the sender's payjoin proposal checklist
     /// See: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#user-content-Senders_payjoin_proposal_checklist
+    /// TODO: update the BIP78 spec, see the sighash check in [`PsbtContextBuilder::build`].
     mod bip78_checklist {
         use super::*;
 
@@ -1256,7 +1275,8 @@ mod test {
             use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 
             // Any sighash type that does not commit to all inputs and outputs
-            // must be rejected on the sender's own inputs.
+            // must be rejected on the sender's own inputs, both in the Original
+            // PSBT the sender hands over and in the proposal it gets back.
             let invalid_sighash_types = [
                 PsbtSighashType::from(EcdsaSighashType::None),
                 PsbtSighashType::from(EcdsaSighashType::Single),
@@ -1271,6 +1291,20 @@ mod test {
             ];
 
             for sighash_type in invalid_sighash_types {
+                let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();
+                let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
+                original_psbt.inputs[0].sighash_type = Some(sighash_type);
+
+                assert_eq!(
+                    PsbtContextBuilder::new(original_psbt, payee, None)
+                        .build(OutputSubstitution::Disabled)
+                        .unwrap_err()
+                        .to_string(),
+                    BuildSenderError::from(InternalBuildSenderError::OriginalTxinNonAllSighashType)
+                        .to_string(),
+                    "sighash type {sighash_type:?} should be rejected in the Original PSBT",
+                );
+
                 let ctx = create_psbt_context()?;
                 let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
                 proposal.inputs.get_mut(0).unwrap().sighash_type = Some(sighash_type);
@@ -1278,7 +1312,7 @@ mod test {
                 assert_eq!(
                     ctx.process_proposal(proposal).unwrap_err().to_string(),
                     InternalProposalError::SenderTxinNonAllSighashType.to_string(),
-                    "sighash type {sighash_type:?} should be rejected",
+                    "sighash type {sighash_type:?} should be rejected in the proposal",
                 );
             }
             Ok(())
@@ -1295,6 +1329,20 @@ mod test {
             let nonstandard = [0x04, 0x80, 0xff, 0x100, u32::MAX];
 
             for raw in nonstandard {
+                let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();
+                let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
+                original_psbt.inputs[0].sighash_type = Some(PsbtSighashType::from_u32(raw));
+
+                assert_eq!(
+                    PsbtContextBuilder::new(original_psbt, payee, None)
+                        .build(OutputSubstitution::Disabled)
+                        .unwrap_err()
+                        .to_string(),
+                    BuildSenderError::from(InternalBuildSenderError::OriginalTxinNonAllSighashType)
+                        .to_string(),
+                    "sighash type {raw:#x} should be rejected in the Original PSBT",
+                );
+
                 let ctx = create_psbt_context()?;
                 let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
                 proposal.inputs.get_mut(0).unwrap().sighash_type =
@@ -1303,7 +1351,7 @@ mod test {
                 assert_eq!(
                     ctx.process_proposal(proposal).unwrap_err().to_string(),
                     InternalProposalError::SenderTxinNonAllSighashType.to_string(),
-                    "sighash type {raw:#x} should be rejected",
+                    "sighash type {raw:#x} should be rejected in the proposal",
                 );
             }
             Ok(())
@@ -1315,7 +1363,8 @@ mod test {
             use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 
             // SIGHASH_ALL and taproot SIGHASHDEFAULT/SIGHASH_ALL commit to all
-            // inputs and outputs, as does an unset type, so all must be accepted.
+            // inputs and outputs, as does an unset type, so all must be accepted
+            // in the Original PSBT and in the proposal alike.
             let acceptable = [
                 None,
                 Some(PsbtSighashType::from(EcdsaSighashType::All)),
@@ -1324,6 +1373,14 @@ mod test {
             ];
 
             for sighash_type in acceptable {
+                let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();
+                let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
+                original_psbt.inputs[0].sighash_type = sighash_type;
+
+                PsbtContextBuilder::new(original_psbt, payee, None)
+                    .build(OutputSubstitution::Disabled)
+                    .unwrap_or_else(|e| panic!("sighash type {sighash_type:?} should build: {e}"));
+
                 let ctx = create_psbt_context()?;
                 let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
                 proposal.inputs.get_mut(0).unwrap().sighash_type = sighash_type;

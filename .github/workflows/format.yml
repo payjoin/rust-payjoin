@@ -4,7 +4,7 @@ on: [push, pull_request]
 
 jobs:
   Format:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: "Checkout repo"
         uses: actions/checkout@v6

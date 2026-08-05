@@ -13,7 +13,7 @@ on:
 
 jobs:
   create-discussion:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v5

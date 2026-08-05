@@ -4,7 +4,7 @@ on: [push, pull_request]
 
 jobs:
   Test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +41,7 @@ jobs:
         run: RUST_LOG=debug bash contrib/test.sh
 
   Lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: "Checkout repo"
         uses: actions/checkout@v6
@@ -58,7 +58,7 @@ jobs:
 
   Coverage:
     name: Code coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
     env:
@@ -94,14 +94,14 @@ jobs:
 
   CodeSpell:
     name: Code spell check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
       - uses: codespell-project/actions-codespell@v2
 
   DiffMutants:
     name: Diff cargo-mutants
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       RUSTUP_TOOLCHAIN: stable
     steps:
@@ -135,7 +135,7 @@ jobs:
 
   Fuzz:
     name: Fuzz build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: "Checkout repo"
         uses: actions/checkout@v6

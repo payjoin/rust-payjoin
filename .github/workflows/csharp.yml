@@ -19,7 +19,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-26.04, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -73,7 +73,7 @@ jobs:
     # Microsoft CRT/SDK. The per-RID smoke jobs verify each produced asset on
     # real hardware.
     name: "Build NuGet native asset"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       # Must match the dtolnay/rust-toolchain version exactly: the cross-target
       # std components are installed for that toolchain, and a partial version
@@ -153,7 +153,7 @@ jobs:
 
   pack-nuget:
     name: "Pack C# NuGet package"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: build-nuget-native
     env:
       # Exact version so the packaged bindings build with the toolchain the
@@ -213,9 +213,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04-arm
             rid: linux-arm64
-          - os: ubuntu-latest
+          - os: ubuntu-26.04
             rid: linux-x64
           - os: macos-latest
             rid: osx-arm64

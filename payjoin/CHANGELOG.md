@@ -1,5 +1,20 @@
 # Payjoin Changelog
 
+## 1.0.0-rc.8
+
+This release tightens the sender's validation of the sighash types declared on
+its own inputs.
+
+Selected Improvements:
+
+### Bug Fixes
+
+- Require sender inputs to declare a sighash type that commits to all inputs
+  and outputs. Only ECDSA `SIGHASH_ALL`, taproot
+  `SIGHASHDEFAULT`/`SIGHASH_ALL`, and an unset type are accepted, both when
+  building the sender context and when validating the receiver's proposal
+  (#1790, #1793)
+
 ## 1.0.0-rc.7
 
 This release changes how the receiver's ownership guard identifies a coin, so

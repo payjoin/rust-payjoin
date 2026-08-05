@@ -67,7 +67,7 @@ opentelemetry-otlp = { version = "0.32", optional = true, default-features = fal
   "http-proto",
 ] }
 opentelemetry_sdk = "0.32"
-payjoin = { version = "1.0.0-rc.7", features = [
+payjoin = { version = "1.0.0-rc.8", features = [
   "directory",
 ], default-features = false }
 rand = "0.8"

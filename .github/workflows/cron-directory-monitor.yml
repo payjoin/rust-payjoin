@@ -4,7 +4,7 @@ on:
     - cron: "9,23,38,53 * * * *" # Runs 4 times per hour offset from the high traffic quarters that may delay or cancel a run from occuring
 jobs:
   health-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
       - name: Check /health endpoint

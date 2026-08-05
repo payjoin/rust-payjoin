@@ -25,7 +25,7 @@ jobs:
   check-bump:
     name: Check release version bump
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
@@ -43,7 +43,7 @@ jobs:
   verify-tag:
     name: Verify release tag
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       crate: ${{ steps.meta.outputs.crate }}
       version: ${{ steps.meta.outputs.version }}
@@ -80,7 +80,7 @@ jobs:
     name: Wait for CI
     if: github.event_name == 'push'
     needs: verify-tag
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       checks: read
       contents: read
@@ -100,7 +100,7 @@ jobs:
     name: Publish to crates.io
     if: github.event_name == 'push'
     needs: [verify-tag, wait-for-ci]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: crates-release
     permissions:
       id-token: write
@@ -142,7 +142,7 @@ jobs:
     name: Create GitHub release
     if: github.event_name == 'push'
     needs: [verify-tag, publish]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     env:
@@ -187,7 +187,7 @@ jobs:
     name: Verify publication
     if: github.event_name == 'push'
     needs: [verify-tag, publish]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       CRATE: ${{ needs.verify-tag.outputs.crate }}
       VERSION: ${{ needs.verify-tag.outputs.version }}

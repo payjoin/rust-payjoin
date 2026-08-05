@@ -12,7 +12,7 @@ jobs:
       github.event.comment.parent_id == null &&
       github.event.comment.user.login != 'payjoin-bot' &&
       contains(github.event.comment.body, '/check-in')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v5

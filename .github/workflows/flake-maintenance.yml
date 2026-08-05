@@ -7,7 +7,7 @@ on:
 
 jobs:
   validate-lock-file:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         checks:
@@ -26,7 +26,7 @@ jobs:
 
   update-lock-file:
     needs: validate-lock-file
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
       pull-requests: write

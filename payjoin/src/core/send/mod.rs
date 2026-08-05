@@ -1265,9 +1265,12 @@ mod test {
                 PsbtSighashType::from(EcdsaSighashType::Single),
                 PsbtSighashType::from(EcdsaSighashType::AllPlusAnyoneCanPay),
                 PsbtSighashType::from(EcdsaSighashType::NonePlusAnyoneCanPay),
+                PsbtSighashType::from(EcdsaSighashType::SinglePlusAnyoneCanPay),
                 PsbtSighashType::from(TapSighashType::None),
                 PsbtSighashType::from(TapSighashType::Single),
                 PsbtSighashType::from(TapSighashType::AllPlusAnyoneCanPay),
+                PsbtSighashType::from(TapSighashType::NonePlusAnyoneCanPay),
+                PsbtSighashType::from(TapSighashType::SinglePlusAnyoneCanPay),
             ];
 
             for sighash_type in invalid_sighash_types {
@@ -1279,6 +1282,31 @@ mod test {
                     ctx.process_proposal(proposal).unwrap_err().to_string(),
                     InternalProposalError::SenderTxinNonAllSighashType.to_string(),
                     "sighash type {sighash_type:?} should be rejected",
+                );
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_nonstandard_sighash_type_is_rejected() -> Result<(), BoxError> {
+            use bitcoin::psbt::PsbtSighashType;
+
+            // PSBT_IN_SIGHASH_TYPE is a raw u32, so it can hold values that
+            // parse as neither an ECDSA nor a taproot sighash type. An
+            // unparsable type commits to nothing knowable, so it must be
+            // rejected rather than waved through as "not a known bad type".
+            let nonstandard = [0x04, 0x80, 0xff, 0x100, u32::MAX];
+
+            for raw in nonstandard {
+                let ctx = create_psbt_context()?;
+                let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+                proposal.inputs.get_mut(0).unwrap().sighash_type =
+                    Some(PsbtSighashType::from_u32(raw));
+
+                assert_eq!(
+                    ctx.process_proposal(proposal).unwrap_err().to_string(),
+                    InternalProposalError::SenderTxinNonAllSighashType.to_string(),
+                    "sighash type {raw:#x} should be rejected",
                 );
             }
             Ok(())

@@ -1,3 +1,11 @@
+## [0.2.1+payjoin-1.0.0-rc.8]
+
+- Sender inputs must declare a sighash type that commits to all inputs and
+  outputs. Only ECDSA `SIGHASH_ALL`, taproot `SIGHASHDEFAULT`/`SIGHASH_ALL`,
+  and an unset type are accepted, both when building the sender context and
+  when validating the receiver's proposal
+- Versions now carry the wrapped payjoin release as build metadata
+
 ## [0.2.0]
 
 - Bindings for payjoin-1.0.0-rc.7

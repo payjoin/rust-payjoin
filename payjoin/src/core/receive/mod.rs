@@ -483,11 +483,12 @@ pub(crate) mod tests {
     use bitcoin::absolute::{LockTime, Time};
     use bitcoin::hashes::Hash;
     use bitcoin::key::{PublicKey, WPubkeyHash};
-    use bitcoin::secp256k1::SECP256K1;
+    use bitcoin::secp256k1::{Keypair, Message, SecretKey, SECP256K1};
+    use bitcoin::taproot::TapLeafHash;
     use bitcoin::transaction::InputWeightPrediction;
     use bitcoin::{
-        witness, Amount, PubkeyHash, ScriptBuf, ScriptHash, Sequence, Txid, WScriptHash,
-        XOnlyPublicKey,
+        witness, Amount, PubkeyHash, ScriptBuf, ScriptHash, Sequence, TapSighashType, Txid,
+        WScriptHash, XOnlyPublicKey,
     };
     use payjoin_test_utils::{
         DUMMY20, DUMMY32, MAX_ADDITIONAL_FEE_CONTRIBUTION, PARSED_ORIGINAL_PSBT,
@@ -1144,5 +1145,59 @@ pub(crate) mod tests {
             })
             .expect_err("finalize must reject a signed sender input");
         assert!(err.to_string().contains("unexpected signature"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_psbt_input_is_signed_paths() {
+        let sk = SecretKey::from_slice(&DUMMY32).expect("DUMMY32 is a valid secret key");
+        let keypair = Keypair::from_secret_key(SECP256K1, &sk);
+        let msg = Message::from_digest(DUMMY32);
+        let taproot_sig = bitcoin::taproot::Signature {
+            signature: SECP256K1.sign_schnorr_no_aux_rand(&msg, &keypair),
+            sighash_type: TapSighashType::All,
+        };
+
+        // empty input is not signed
+        let input = bitcoin::psbt::Input::default();
+        assert!(!psbt_input_is_signed(&input));
+
+        // final_script_sig present
+        let input = bitcoin::psbt::Input {
+            final_script_sig: Some(ScriptBuf::from_hex("0014").unwrap()),
+            ..Default::default()
+        };
+        assert!(psbt_input_is_signed(&input));
+
+        // final_script_witness present
+        let input = bitcoin::psbt::Input {
+            final_script_witness: Some(witness::Witness::from_slice(&[vec![0x01u8]])),
+            ..Default::default()
+        };
+        assert!(psbt_input_is_signed(&input));
+
+        // partial_sigs non-empty
+        let pubkey = PublicKey::new(keypair.public_key());
+        let ecdsa_sig = bitcoin::ecdsa::Signature::sighash_all(SECP256K1.sign_ecdsa(&msg, &sk));
+        let input = bitcoin::psbt::Input {
+            partial_sigs: [(pubkey, ecdsa_sig)].into_iter().collect(),
+            ..Default::default()
+        };
+        assert!(psbt_input_is_signed(&input));
+
+        // tap_key_sig present
+        let input = bitcoin::psbt::Input { tap_key_sig: Some(taproot_sig), ..Default::default() };
+        assert!(psbt_input_is_signed(&input));
+
+        // tap_script_sigs non-empty
+        let input = bitcoin::psbt::Input {
+            tap_script_sigs: [(
+                (XOnlyPublicKey::from_keypair(&keypair).0, TapLeafHash::from_byte_array(DUMMY32)),
+                taproot_sig,
+            )]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        assert!(psbt_input_is_signed(&input));
     }
 }

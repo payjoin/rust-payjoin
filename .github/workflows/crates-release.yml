@@ -199,7 +199,7 @@ jobs:
       - name: Use nix cache
         uses: DeterminateSystems/magic-nix-cache-action@main
       - name: Download packaged crate
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: crate
           path: dist

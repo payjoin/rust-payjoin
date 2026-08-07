@@ -7,7 +7,10 @@ echo "Running on $OS"
 npm --version
 
 if [[ $OS == "Darwin" && -z ${IN_NIX_SHELL:-} ]]; then
-    # TODO: check if brew & llvm are installed
+    if ! command -v brew >/dev/null 2>&1 || [[ ! -d "$(brew --prefix llvm 2>/dev/null)" ]]; then
+        echo "Error: both brew and llvm must be installed." >&2
+        exit 1
+    fi
     LLVM_PREFIX=$(brew --prefix llvm)
     export AR="$LLVM_PREFIX/bin/llvm-ar"
     export CC="$LLVM_PREFIX/bin/clang"

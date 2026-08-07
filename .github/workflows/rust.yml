@@ -148,15 +148,17 @@ jobs:
 
   Embedded:
     name: Embedded build
-    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    runs-on: ubuntu-26.04
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
       - name: "Install nix"
         uses: DeterminateSystems/determinate-nix-action@main
-      - name: "Use nix cache"
-        uses: DeterminateSystems/magic-nix-cache-action@main
-      - name: "Build embedded target"
+      - name: "Build embedded target v2"
+        run: nix develop .#embedded -c cargo build -p payjoin --no-default-features --features "alloc,v2" --target thumbv7em-none-eabihf -Zbuild-std=core,alloc
+      - name: "Build embedded target v1"
         run: nix develop .#embedded -c cargo build -p payjoin --no-default-features --features "alloc,v2" --target thumbv7em-none-eabihf -Zbuild-std=core,alloc

@@ -182,7 +182,9 @@ jobs:
 
   Embedded:
     name: Embedded build
-    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    runs-on: ubuntu-26.04
     steps:
       - name: "Checkout repo"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -194,3 +196,5 @@ jobs:
         uses: DeterminateSystems/determinate-nix-action@e847f25223456b3058e12f7fc9d777b6a6f25060 # v3.23.2
       - name: "Build embedded target v2"
         run: nix develop .#embedded -c cargo build -p payjoin --no-default-features --features "alloc,v2" --target thumbv7em-none-eabihf -Zbuild-std=core,alloc
+      - name: "Build embedded target v1"
+        run: nix develop .#embedded -c cargo build -p payjoin --no-default-features --features "alloc,v1" --target thumbv7em-none-eabihf -Zbuild-std=core,alloc

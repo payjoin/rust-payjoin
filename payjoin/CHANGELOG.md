@@ -1,5 +1,16 @@
 # Payjoin Changelog
 
+## 1.0.0
+
+The first stable release of the payjoin library supports both synchronous
+BIP 78 payjoins and asynchronous BIP 77 payjoins. The BIP 77 sender and
+receiver APIs use typestate-driven session workflows, event-log persistence,
+and explicit monitoring, cancellation, and fallback paths so interrupted
+sessions can be safely resumed.
+
+This release stabilizes the public API and persisted session format developed
+through the 0.24, 0.25, and 1.0 release candidates.
+
 ## 1.0.0-rc.8
 
 This release tightens the sender's validation of the sighash types declared on

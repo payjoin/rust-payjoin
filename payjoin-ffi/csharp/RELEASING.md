@@ -96,8 +96,53 @@ Review before every publish to nuget.org. Grounded in the NuGet
 
 ## Publishing
 
+CI is the publish path. A tag push builds, packs, smoke-tests, and pushes the
+package to nuget.org via [trusted publishing] (OIDC) — no long-lived API key
+is ever stored. The workflow is
+[`.github/workflows/csharp.yml`](../../.github/workflows/csharp.yml) (jobs
+`publish-nuget` and `github-release`).
+
+1. Work through the release readiness checklist above on the release commit in
+   `master`; confirm every `Build and Test CSharp` job is green.
+2. Tag that commit `payjoin-csharp-<version>`, where `<version>` is the
+   `Payjoin.csproj` `<Version>` exactly, and push the tag:
+
+   ```shell
+   git tag payjoin-csharp-0.24.0-preview.1
+   git push upstream payjoin-csharp-0.24.0-preview.1
+   ```
+
+   The tag reruns the full build/pack/smoke graph at the tagged commit, then
+   `publish-nuget` verifies the tag matches the packed
+   `Payjoin.<version>.nupkg`, attests build provenance, exchanges the GitHub
+   OIDC token for a short-lived nuget.org key via [`NuGet/login`], and pushes.
+   The job runs in the `nuget-release` environment: if it has required
+   reviewers, approve the paused run before anything reaches nuget.org.
+
+3. `github-release` attaches the `.nupkg` and a generated `SHA256SUMS` to the
+   tag's GitHub release. Optionally sign `SHA256SUMS` locally and upload
+   `SHA256SUMS.asc` — never place a GPG key on a runner.
+4. Complete the post-publish verification section of the checklist, and verify
+   the attestation:
+   `gh attestation verify Payjoin.<version>.nupkg -R payjoin/rust-payjoin`.
+
+One-time setup — the nuget.org Trusted Publishing policy (bound to
+`payjoin/rust-payjoin`, workflow file `csharp.yml`, environment
+`nuget-release`), the `nuget-release` GitHub Actions environment with required
+reviewers, and the `NUGET_USER` secret (the publishing member's nuget.org
+profile name) — is a one-time account and repository configuration, not part
+of the per-release flow.
+
+## Manual fallback
+
+Use only if the CI publish path is unavailable. Requires a maintainer with
+nuget.org ownership of the `Payjoin` package ID.
+
 1. Work through the release readiness checklist above.
-2. Push the CI-built package:
+2. Download the CI-built `payjoin-csharp-nuget-package` artifact from the
+   workflow run on the release commit (do not pack from a development machine —
+   a local pack only contains the native assets present on that host), then
+   push it:
 
    ```shell
    dotnet nuget push Payjoin.<version>.nupkg \
@@ -105,12 +150,11 @@ Review before every publish to nuget.org. Grounded in the NuGet
        --api-key <nuget.org API key>
    ```
 
-3. Complete the post-publish verification section of the checklist.
+   Prefer a scoped, push-only, short-expiry key per [scoped API keys], or the
+   `NUGET_API_KEY` environment variable (.NET SDK 10.0.300+) so the key never
+   appears in shell history.
 
-Publishing is intentionally manual while the package is in preview. Only
-maintainers with nuget.org ownership of the `Payjoin` package ID can push.
-If publishing later moves into CI, prefer nuget.org trusted publishing over
-long-lived API keys.
+3. Complete the post-publish verification section of the checklist.
 
 [SemVer]: https://semver.org/
 [package versioning]: https://learn.microsoft.com/en-us/nuget/concepts/package-versioning
@@ -119,3 +163,5 @@ long-lived API keys.
 [native library packaging]: https://learn.microsoft.com/en-us/nuget/create-packages/native-files-in-net-packages
 [readme preview]: https://learn.microsoft.com/en-us/nuget/nuget-org/package-readme-on-nuget-org
 [scoped API keys]: https://learn.microsoft.com/en-us/nuget/nuget-org/scoped-api-keys
+[trusted publishing]: https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing
+[`NuGet/login`]: https://github.com/NuGet/login

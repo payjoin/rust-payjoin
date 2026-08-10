@@ -459,6 +459,7 @@
           name = "release";
           packages = with pkgs; [
             rustToolchains.stable
+            cargo-semver-checks
             jq
             gnupg
             curl

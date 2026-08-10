@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
 # Pull request check. For each release crate whose version changed relative
-# to the base commit, confirm the bump is consistent (check-invariants) and
-# the crate still publishes (cargo publish --dry-run). No-ops when no release
-# version changed. A sibling release crate not yet on crates.io is skipped,
-# not failed, since a PR may bump two crates at once.
+# to the base commit, confirm the bump is consistent (check-invariants), the
+# crate still publishes (cargo publish --dry-run), and the bump is large
+# enough for the API changes since the base version (cargo semver-checks).
+# No-ops when no release version changed. A sibling release crate not yet on
+# crates.io is skipped, not failed, since a PR may bump two crates at once.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=contrib/release/crates.sh
@@ -55,4 +56,24 @@ for crate in "${changed[@]}"; do
     echo "Dry-run publishing $crate"
     cargo publish --dry-run --locked -q -p "$crate"
     echo "$crate packages and publishes cleanly"
+done
+
+# Semver only binds between stable releases: any comparison involving a
+# pre-release is classified as a major bump, which permits everything, so
+# running the tool there proves nothing. Only payjoin is checked for now;
+# payjoin-cli has no library API and payjoin-mailroom's is not yet stable.
+for crate in "${changed[@]}"; do
+    [ "$crate" = "payjoin" ] || continue
+    new_version="$(manifest_version "$crate")"
+    baseline="$(version_at "$base" "$crate")"
+    if is_prerelease "$new_version" || is_prerelease "$baseline"; then
+        echo "Skipping $crate semver check for pre-release ($baseline -> $new_version)"
+        continue
+    fi
+    if ! crate_published "$crate" "$baseline"; then
+        echo "Skipping $crate semver check; baseline $baseline not on crates.io"
+        continue
+    fi
+    echo "Checking $crate $new_version API against $baseline"
+    cargo semver-checks --package "$crate" --baseline-version "$baseline"
 done

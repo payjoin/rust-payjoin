@@ -347,44 +347,15 @@ jobs:
 
   github-release:
     name: "Attach nupkg + SHA256SUMS to the GitHub release"
-    runs-on: ubuntu-latest
     needs: [publish-nuget]
     if: startsWith(github.ref, 'refs/tags/payjoin-csharp-')
     permissions:
       contents: write # create/update the Release for this tag and upload assets
-    steps:
-      - name: Download packed NuGet package
-        uses: actions/download-artifact@v4
-        with:
-          name: payjoin-csharp-nuget-package
-          path: dist
-
-      - name: Generate SHA256SUMS (nupkg + each native lib)
-        working-directory: dist
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Hash the package itself.
-          sha256sum *.nupkg > SHA256SUMS
-          # Also hash each shipped native library extracted from inside the
-          # package, so a consumer can verify an individual .so/.dylib/.dll
-          # (paths are runtimes/<rid>/native/<lib>). Matches the tor/hwi pattern.
-          tmp="$(mktemp -d)"
-          unzip -q *.nupkg -d "$tmp" 'runtimes/*/native/*'
-          ( cd "$tmp" && find runtimes -type f -print0 | sort -z | xargs -0 sha256sum ) >> SHA256SUMS
-          echo "----- SHA256SUMS -----"
-          cat SHA256SUMS
-
-      - name: Create / update GitHub release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: |
-            dist/*.nupkg
-            dist/SHA256SUMS
-          fail_on_unmatched_files: true
-          draft: false
-          # Mark preview / rc tags as pre-releases on the Releases page.
-          prerelease: ${{ contains(github.ref_name, '-preview') || contains(github.ref_name, '-rc') }}
-          # Dan's GPG detached signature over SHA256SUMS is added out-of-band
-          # (locally, then uploaded as SHA256SUMS.asc) — his private key must not
-          # live on a runner. See README "GPG signature".
+    uses: ./.github/workflows/release-assets.yml
+    with:
+      artifact-pattern: payjoin-csharp-nuget-package
+      tag-prefix: payjoin-csharp-
+      # Also hash each shipped native library from inside the package, so a
+      # consumer can verify an individual .so/.dylib/.dll (paths are
+      # runtimes/<rid>/native/<lib>). Matches the tor/hwi pattern.
+      unzip-globs: runtimes/*/native/*

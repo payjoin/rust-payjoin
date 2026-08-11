@@ -45,8 +45,17 @@ published_sha="$(poll "${CRATES_IO_ATTEMPTS:-30}" \
     die "checksum mismatch: crates.io $published_sha vs local $local_sha"
 echo "crates.io checksum matches the attested .crate ($local_sha)"
 
-echo "Waiting for docs.rs to build $crate $version (${DOCS_RS_ATTEMPTS:-60} checks, ${interval}s apart)"
-poll "${DOCS_RS_ATTEMPTS:-60}" \
-    "https://docs.rs/crate/$crate/$version/status.json" 'select(.doc_status == true) | "built"' >/dev/null ||
-    die "docs.rs did not build $crate $version"
-echo "docs.rs built $crate $version"
+# docs.rs builds documentation only for crates with a library target;
+# binary-only crates (e.g. payjoin-cli) never reach doc_status == true.
+if cargo metadata --format-version 1 --no-deps 2>/dev/null |
+    jq -e --arg c "$crate" \
+        'any(.packages[] | select(.name == $c) | .targets[].kind[]; . | test("^(lib|rlib|dylib|cdylib|staticlib|proc-macro)$"))' \
+        >/dev/null; then
+    echo "Waiting for docs.rs to build $crate $version (${DOCS_RS_ATTEMPTS:-60} checks, ${interval}s apart)"
+    poll "${DOCS_RS_ATTEMPTS:-60}" \
+        "https://docs.rs/crate/$crate/$version/status.json" 'select(.doc_status == true) | "built"' >/dev/null ||
+        die "docs.rs did not build $crate $version"
+    echo "docs.rs built $crate $version"
+else
+    echo "Skipping docs.rs check for $crate (no library target)"
+fi

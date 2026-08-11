@@ -37,10 +37,17 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
+      - name: Mint bot token
+        id: bot-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+
       - name: Update flake.lock
         uses: DeterminateSystems/update-flake-lock@main
         with:
           pr-title: "chore: update flake.lock"
           commit-msg: "chore: update flake.lock"
-          token: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
+          token: ${{ steps.bot-token.outputs.token }}
           nix-options: --offline

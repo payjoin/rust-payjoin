@@ -397,14 +397,16 @@
             "rustfmt"
             "llvm-tools-preview"
           ];
-          targets =
-            pkgs.lib.optionals pkgs.stdenv.isDarwin [
-              "aarch64-apple-darwin"
-              "x86_64-apple-darwin"
-            ]
-            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-              "x86_64-unknown-linux-gnu"
-            ];
+          targets = [
+            # On Darwin the native test builds lipo both arches; on Linux
+            # cargo-zigbuild cross-links the release wheel's universal2
+            # dylib from these same targets.
+            "aarch64-apple-darwin"
+            "x86_64-apple-darwin"
+          ]
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            "x86_64-unknown-linux-gnu"
+          ];
         };
 
         pythonDevShell = pkgs.mkShell {
@@ -416,11 +418,20 @@
               uv
               pythonRustToolchain
               bzip2 # needed for some machines to have access to libzip at runtime
+              # Provides the wheel CLI; the uv2nix venv omits build backends.
+              python3Packages.wheel
             ]
             ++ lib.optionals pkgs.stdenv.isLinux [
               pkg-config
               openssl
               clang
+              # Applies the manylinux platform tag the release wheel satisfies;
+              # PyPI rejects raw linux_x86_64 wheels.
+              auditwheel
+              # Cross-links the macOS release wheel against zig's bundled
+              # Apple SDK stubs, so the dylib records system install names
+              # instead of nix store paths.
+              cargo-zigbuild
             ];
 
           env = {

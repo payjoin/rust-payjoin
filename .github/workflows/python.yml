@@ -29,5 +29,7 @@ jobs:
         uses: DeterminateSystems/determinate-nix-action@main
       - name: "Use nix cache"
         uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          use-flakehub: false
       - name: "Build and test"
         run: nix develop .#python --command bash ./payjoin-ffi/python/contrib/test.sh

@@ -36,8 +36,14 @@ if [[ $OS == "Darwin" ]]; then
     ensure_target aarch64-apple-darwin x86_64-apple-darwin
     # This is a test script the actual release should not include the test utils feature
     cargo build --profile dev --target aarch64-apple-darwin --features _test-utils &
+    aarch64_pid=$!
     cargo build --profile dev --target x86_64-apple-darwin --features _test-utils &
-    wait
+    x86_64_pid=$!
+    # A bare `wait` always returns 0; wait on each build so a failure
+    # cannot slip through to lipo, which would happily reuse a stale
+    # library from an earlier build.
+    wait "$aarch64_pid"
+    wait "$x86_64_pid"
 
     echo "Building macos fat library"
     lipo -create -output python/src/payjoin/$LIBNAME \

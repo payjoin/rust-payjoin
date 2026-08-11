@@ -60,6 +60,10 @@
             rust-overlay.overlays.default
             (final: prev: {
               dart = nixpkgs-unstable.legacyPackages.${system}.dart;
+              # From unstable so it keeps pace with the rustdoc JSON format
+              # emitted by rust-overlay's latest stable toolchain; the
+              # release-branch nixpkgs version lags too far behind.
+              cargo-semver-checks = nixpkgs-unstable.legacyPackages.${system}.cargo-semver-checks;
               rustToolchains = {
                 msrv = prev.rust-bin.stable.${msrv-version}.default;
                 stable = prev.rust-bin.stable.latest.default;
@@ -459,6 +463,7 @@
           name = "release";
           packages = with pkgs; [
             rustToolchains.stable
+            cargo-semver-checks
             jq
             gnupg
             curl

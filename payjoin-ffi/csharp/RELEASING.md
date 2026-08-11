@@ -116,7 +116,7 @@ is ever stored. The workflow is
    `publish-nuget` verifies the tag matches the packed
    `Payjoin.<version>.nupkg`, attests build provenance, exchanges the GitHub
    OIDC token for a short-lived nuget.org key via [`NuGet/login`], and pushes.
-   The job runs in the `nuget-release` environment: if it has required
+   The job runs in the `release` environment: if it has required
    reviewers, approve the paused run before anything reaches nuget.org.
 
 3. `github-release` attaches the `.nupkg` and a generated `SHA256SUMS` to the
@@ -128,7 +128,7 @@ is ever stored. The workflow is
 
 One-time setup — the nuget.org Trusted Publishing policy (bound to
 `payjoin/rust-payjoin`, workflow file `csharp.yml`, environment
-`nuget-release`), the `nuget-release` GitHub Actions environment with required
+`release`), the `release` GitHub Actions environment with required
 reviewers, and the `NUGET_USER` secret (the publishing member's nuget.org
 profile name) — is a one-time account and repository configuration, not part
 of the per-release flow.

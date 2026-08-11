@@ -26,18 +26,29 @@ ensure_target() {
     fi
 }
 
+# Keep parity with other language test scripts: include _test-utils by default.
+PAYJOIN_FFI_FEATURES=${PAYJOIN_FFI_FEATURES-_test-utils}
+PAYJOIN_FFI_PROFILE=${PAYJOIN_FFI_PROFILE:-dev}
+if [[ $PAYJOIN_FFI_PROFILE == "dev" ]]; then
+    TARGET_PROFILE_DIR=debug
+else
+    TARGET_PROFILE_DIR=$PAYJOIN_FFI_PROFILE
+fi
+FEATURE_ARGS=()
+if [[ -n $PAYJOIN_FFI_FEATURES ]]; then
+    FEATURE_ARGS=(--features "$PAYJOIN_FFI_FEATURES")
+fi
+
 cd ../
-# This is a test script the actual release should not include the test utils feature
-cargo build --features _test-utils --profile dev
-cargo run --features _test-utils --profile dev --bin uniffi-bindgen generate --library ../target/debug/$LIBNAME --language python --out-dir python/src/payjoin/
+cargo build "${FEATURE_ARGS[@]}" --profile "$PAYJOIN_FFI_PROFILE"
+cargo run "${FEATURE_ARGS[@]}" --profile dev --bin uniffi-bindgen generate --library "../target/$TARGET_PROFILE_DIR/$LIBNAME" --language python --out-dir python/src/payjoin/
 
 if [[ $OS == "Darwin" ]]; then
     echo "Generating native binaries..."
     ensure_target aarch64-apple-darwin x86_64-apple-darwin
-    # This is a test script the actual release should not include the test utils feature
-    cargo build --profile dev --target aarch64-apple-darwin --features _test-utils &
+    cargo build --profile "$PAYJOIN_FFI_PROFILE" --target aarch64-apple-darwin "${FEATURE_ARGS[@]}" &
     aarch64_pid=$!
-    cargo build --profile dev --target x86_64-apple-darwin --features _test-utils &
+    cargo build --profile "$PAYJOIN_FFI_PROFILE" --target x86_64-apple-darwin "${FEATURE_ARGS[@]}" &
     x86_64_pid=$!
     # A bare `wait` always returns 0; wait on each build so a failure
     # cannot slip through to lipo, which would happily reuse a stale
@@ -47,17 +58,16 @@ if [[ $OS == "Darwin" ]]; then
 
     echo "Building macos fat library"
     lipo -create -output python/src/payjoin/$LIBNAME \
-        ../target/aarch64-apple-darwin/debug/$LIBNAME \
-        ../target/x86_64-apple-darwin/debug/$LIBNAME
+        "../target/aarch64-apple-darwin/$TARGET_PROFILE_DIR/$LIBNAME" \
+        "../target/x86_64-apple-darwin/$TARGET_PROFILE_DIR/$LIBNAME"
 
 else
     echo "Generating native binaries..."
     ensure_target x86_64-unknown-linux-gnu
-    # This is a test script the actual release should not include the test utils feature
-    cargo build --profile dev --target x86_64-unknown-linux-gnu --features _test-utils
+    cargo build --profile "$PAYJOIN_FFI_PROFILE" --target x86_64-unknown-linux-gnu "${FEATURE_ARGS[@]}"
 
     echo "Copying payjoin_ffi binary"
-    cp ../target/x86_64-unknown-linux-gnu/debug/$LIBNAME python/src/payjoin/$LIBNAME
+    cp "../target/x86_64-unknown-linux-gnu/$TARGET_PROFILE_DIR/$LIBNAME" python/src/payjoin/$LIBNAME
 fi
 
 echo "All done!"

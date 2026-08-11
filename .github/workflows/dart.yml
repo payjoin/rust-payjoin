@@ -12,6 +12,14 @@ on:
       # change this workflow's environment.
       - flake.nix
       - flake.lock
+  # Publishing path. A tag push runs the build/test and archive-verification
+  # jobs at the tagged commit (no path filter applies to tags), then the
+  # tag-gated publish job below. Tag scheme: payjoin-dart-<pubspec version>,
+  # e.g. payjoin-dart-0.2.1+payjoin-1.0.0-rc.8 (the full version, including
+  # build metadata), matching the version-first payjoin-csharp-* convention.
+  push:
+    tags:
+      - "payjoin-dart-[0-9]*"
 
 jobs:
   build-dart-and-test:
@@ -29,3 +37,71 @@ jobs:
         uses: ./.github/actions/setup-nix
       - name: "Build and test"
         run: nix develop .#dart -c bash ./payjoin-ffi/dart/contrib/test.sh
+
+  verify-pub-package:
+    # pub.dev ships source that consumers compile through hook/build.dart,
+    # so there is no artifact to pack or smoke test.
+    name: "Verify pub.dev package"
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
+      - name: Generate production bindings and dry-run publish
+        run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh
+
+  # ---------------------------------------------------------------------------
+  # PUBLISH PATH (tag-gated). Runs only for a payjoin-dart-* tag push, after
+  # build/test and the archive verification are green. The published unit is
+  # the pub.dev source archive, so there is no artifact to attach to a GitHub
+  # release afterwards.
+  # ---------------------------------------------------------------------------
+  publish-pub:
+    name: "Publish to pub.dev (automated publishing / OIDC)"
+    runs-on: ubuntu-26.04
+    needs: [build-dart-and-test, verify-pub-package]
+    if: startsWith(github.ref, 'refs/tags/payjoin-dart-')
+    # Pauses for a required reviewer before anything reaches the registry;
+    # the pub.dev automated-publishing config requires this environment.
+    environment: release
+    permissions:
+      id-token: write # OIDC: pub.dev automated publishing
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
+
+      - name: Read pubspec version
+        id: pubspec
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version: *//p' payjoin-ffi/dart/pubspec.yaml)"
+          if [ -z "$version" ]; then
+            echo "::error::could not read version from pubspec.yaml"
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Verify tag matches pubspec version
+        uses: ./.github/actions/verify-tag-version
+        with:
+          tag-prefix: payjoin-dart-
+          version: ${{ steps.pubspec.outputs.version }}
+
+      - name: Prepare the package
+        run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh
+
+      - name: Publish to pub.dev
+        # dart pub exchanges the job's OIDC token for short-lived pub.dev
+        # credentials; there is no long-lived token anywhere in this
+        # workflow. --force skips the interactive confirmation.
+        run: nix develop .#dart -c bash -c 'cd payjoin-ffi/dart && dart pub publish --force'

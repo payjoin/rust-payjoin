@@ -17,17 +17,17 @@ from standup_lib import (
     gather_activity,
     gather_potential_bottlenecks,
     graphql,
+    is_bot_login,
     parse_github_datetime,
 )
 
-BOT_LOGIN = "payjoin-bot"
 TRIGGER_RE = re.compile(r"(?im)(^|\s)/check-in\b")
 SUCCESS_MARKER = "### Shipped"
 ERROR_BODY = "_Bot couldn't gather activity right now. Try again in a few minutes._"
 
 
 def has_prior_success(discussion_id, author):
-    """Return True if payjoin-bot has already posted a successful summary
+    """Return True if the bot has already posted a successful summary
     in reply to a comment authored by ``author`` in this Discussion."""
     data = graphql(
         """
@@ -57,7 +57,7 @@ def has_prior_success(discussion_id, author):
             continue
         for reply in top["replies"]["nodes"]:
             reply_author = (reply.get("author") or {}).get("login")
-            if reply_author != BOT_LOGIN:
+            if not is_bot_login(reply_author):
                 continue
             if (reply.get("body") or "").startswith(SUCCESS_MARKER):
                 return True
@@ -99,7 +99,7 @@ def main():
         print("No /check-in token matched; nothing to do.")
         return
 
-    if comment_author == BOT_LOGIN:
+    if is_bot_login(comment_author):
         print("Loop guard: comment author is the bot; exiting.")
         return
 

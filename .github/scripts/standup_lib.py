@@ -15,6 +15,18 @@ HEADERS = {
     "Accept": "application/vnd.github+json",
 }
 
+# The bot's login, i.e. the GitHub App slug. GraphQL reports app
+# actors without the "[bot]" suffix while webhooks and REST include
+# it, so comparisons go through is_bot_login() which accepts both
+# forms.
+BOT_LOGIN = os.environ["BOT_LOGIN"].removesuffix("[bot]")
+
+
+def is_bot_login(login):
+    """Return True if ``login`` belongs to the standup bot."""
+    return (login or "").removesuffix("[bot]") == BOT_LOGIN
+
+
 # Public repos to search — explicit list avoids leaking private repo
 # data when the bot token has org membership.
 REPOS = [

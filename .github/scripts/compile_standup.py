@@ -8,6 +8,8 @@ from pathlib import Path
 import requests
 import yaml
 
+from standup_lib import is_bot_login
+
 REPO = os.environ["GITHUB_REPOSITORY"]
 TOKEN = os.environ["STANDUP_TOKEN"]
 GRAPHQL = "https://api.github.com/graphql"
@@ -29,7 +31,6 @@ def load_contributors():
 
 
 CONTRIBUTORS = load_contributors()
-BOT_LOGIN = "payjoin-bot"
 SUCCESS_MARKER = "### Shipped"
 TRIGGER_RE = re.compile(r"(?im)(^|\s)/check-in\b")
 
@@ -123,7 +124,7 @@ def check_participation(comments):
         for reply in comment["replies"]["nodes"]:
             reply_author = (reply.get("author") or {}).get("login")
             reply_body = reply.get("body") or ""
-            if reply_author == BOT_LOGIN and reply_body.startswith(SUCCESS_MARKER):
+            if is_bot_login(reply_author) and reply_body.startswith(SUCCESS_MARKER):
                 participated.append(author)
                 seen.add(author)
                 break

@@ -1,0 +1,37 @@
+name: Verify tag version
+description: >
+  Check that the pushed tag is the expected prefix followed by exactly the
+  version about to be published, refusing to publish on any mismatch.
+inputs:
+  tag-prefix:
+    description: Expected tag prefix, e.g. payjoin-csharp-
+    required: true
+  version:
+    description: Version of the artifact or package about to be published
+    required: true
+outputs:
+  version:
+    description: The version the tag calls for
+    value: ${{ steps.check.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - name: Compare tag against version
+      id: check
+      shell: bash
+      env:
+        TAG: ${{ github.ref_name }}
+        PREFIX: ${{ inputs.tag-prefix }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        if [[ $TAG != "$PREFIX"* ]]; then
+          echo "::error::tag $TAG does not start with $PREFIX; refusing to publish"
+          exit 1
+        fi
+        tag_version="${TAG#"$PREFIX"}"
+        if [[ $tag_version != "$VERSION" ]]; then
+          echo "::error::tag $TAG implies version $tag_version but the packed version is $VERSION; refusing to publish"
+          exit 1
+        fi
+        echo "version=$tag_version" >>"$GITHUB_OUTPUT"

@@ -272,8 +272,11 @@ jobs:
     permissions:
       id-token: write # OIDC: used by BOTH NuGet/login and attest-build-provenance
       attestations: write # actions/attest-build-provenance writes the attestation
-      contents: read # checkout of the (already-packed) repo is not needed; read is the floor
+      contents: read # needed only to check out the in-repo verify-tag-version action
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
       - name: Download packed NuGet package
         uses: actions/download-artifact@v4
         with:
@@ -285,27 +288,28 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Verify tag matches packed artifact version
-        id: verify
+      - name: Locate packed artifact
+        id: locate
         shell: bash
         run: |
           set -euo pipefail
-          # payjoin-csharp-0.24.0-preview.1 -> 0.24.0-preview.1
-          version="${GITHUB_REF_NAME#payjoin-csharp-}"
           shopt -s nullglob
           pkgs=(dist/*.nupkg)
           if [ "${#pkgs[@]}" -ne 1 ]; then
             echo "::error::expected exactly one .nupkg in dist/, found ${#pkgs[@]}: ${pkgs[*]:-none}"
             exit 1
           fi
-          expected="Payjoin.${version}.nupkg"
-          actual="$(basename "${pkgs[0]}")"
-          if [ "${actual}" != "${expected}" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} implies ${expected} but packed artifact is ${actual}; refusing to publish"
-            exit 1
-          fi
+          # Payjoin.0.24.0-preview.1.nupkg -> 0.24.0-preview.1
+          name="$(basename "${pkgs[0]}" .nupkg)"
           echo "nupkg=${pkgs[0]}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "version=${name#Payjoin.}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches packed artifact version
+        id: verify
+        uses: ./.github/actions/verify-tag-version
+        with:
+          tag-prefix: payjoin-csharp-
+          version: ${{ steps.locate.outputs.version }}
 
       - name: Attest build provenance (nupkg)
         # Attesting the .nupkg covers every RID native lib inside it; a consumer
@@ -316,7 +320,7 @@ jobs:
         #  published unit.)
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: ${{ steps.verify.outputs.nupkg }}
+          subject-path: ${{ steps.locate.outputs.nupkg }}
 
       - name: NuGet login (OIDC -> short-lived API key)
         id: login
@@ -335,7 +339,7 @@ jobs:
           # the tag would otherwise 409 on the already-published version and
           # redden the whole run. With it, an already-present version is a
           # no-op success and the run converges.
-          dotnet nuget push "${{ steps.verify.outputs.nupkg }}" \
+          dotnet nuget push "${{ steps.locate.outputs.nupkg }}" \
             --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
             --source https://api.nuget.org/v3/index.json \
             --no-symbols \

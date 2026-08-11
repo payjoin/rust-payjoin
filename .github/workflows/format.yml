@@ -8,12 +8,8 @@ jobs:
     steps:
       - name: "Checkout repo"
         uses: actions/checkout@v6
-      - name: "Install nix"
-        uses: DeterminateSystems/determinate-nix-action@main
-      - name: "Use nix cache"
-        uses: DeterminateSystems/magic-nix-cache-action@main
-        with:
-          use-flakehub: false
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
       - name: Run treefmt
         run: |
           set -eo pipefail

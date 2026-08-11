@@ -31,12 +31,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Install nix
-        uses: DeterminateSystems/determinate-nix-action@main
-      - name: Use nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
-        with:
-          use-flakehub: false
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
       - name: Check the bump is consistent and publishable
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -57,12 +53,8 @@ jobs:
           fetch-depth: 0
       - name: Fetch master
         run: git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
-      - name: Install nix
-        uses: DeterminateSystems/determinate-nix-action@main
-      - name: Use nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
-        with:
-          use-flakehub: false
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
       - name: Compute tag metadata
         id: meta
         env:
@@ -155,12 +147,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
-      - name: Install nix
-        uses: DeterminateSystems/determinate-nix-action@main
-      - name: Use nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
-        with:
-          use-flakehub: false
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
       - name: Download packaged crate
         uses: actions/download-artifact@v4
         with:
@@ -200,12 +188,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
-      - name: Install nix
-        uses: DeterminateSystems/determinate-nix-action@main
-      - name: Use nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
-        with:
-          use-flakehub: false
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
       - name: Download packaged crate
         uses: actions/download-artifact@v8
         with:

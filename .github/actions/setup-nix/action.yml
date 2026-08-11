@@ -1,0 +1,14 @@
+name: Set up nix
+description: >
+  Install nix with the magic cache, keeping its FlakeHub lookup disabled.
+  Must run after actions/checkout so the cache can key off the repository
+  contents.
+runs:
+  using: composite
+  steps:
+    - name: Install nix
+      uses: DeterminateSystems/determinate-nix-action@main
+    - name: Use nix cache
+      uses: DeterminateSystems/magic-nix-cache-action@main
+      with:
+        use-flakehub: false

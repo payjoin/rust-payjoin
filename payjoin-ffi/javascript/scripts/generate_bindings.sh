@@ -32,6 +32,10 @@ if command -v rustup >/dev/null 2>&1 &&
 fi
 
 npm run build
-npm run build:test-utils
+
+# The test-utils addon is a dev-only native helper for the integration tests.
+if [[ ${PAYJOIN_JS_BUILD_TEST_UTILS:-1} == 1 ]]; then
+    npm run build:test-utils
+fi
 
 echo "All done!"

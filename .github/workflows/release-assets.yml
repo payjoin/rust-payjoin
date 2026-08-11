@@ -1,0 +1,91 @@
+name: Attach release assets
+
+# Reusable tail of every binding publish workflow: download the packed
+# artifact(s), generate SHA256SUMS, and attach everything to the GitHub
+# release for the pushed tag. A maintainer's GPG detached signature over
+# SHA256SUMS is added out-of-band (locally, then uploaded as
+# SHA256SUMS.asc), so no signing key ever reaches a runner.
+
+on:
+  workflow_call:
+    inputs:
+      artifact-pattern:
+        description: Name (or glob) of the artifact(s) holding the files to attach
+        required: true
+        type: string
+      tag-prefix:
+        description: >
+          Tag prefix before the version, e.g. payjoin-csharp-. Used to
+          derive the version for pre-release detection.
+        required: true
+        type: string
+      archive-globs:
+        description: >
+          Optional whitespace-separated globs naming which downloaded
+          assets are archives to open for member hashing. Required with
+          archive-member-globs.
+        required: false
+        type: string
+        default: ""
+      archive-member-globs:
+        description: >
+          Optional whitespace-separated globs of files inside each
+          matched archive to hash into SHA256SUMS, so files nested
+          inside a package (e.g. native libraries) can be verified
+          individually. Required with archive-globs.
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  github-release:
+    name: Create GitHub release
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write # create/update the Release for this tag and upload assets
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ inputs.artifact-pattern }}
+          merge-multiple: true
+          path: dist
+
+      - name: Generate SHA256SUMS
+        shell: bash
+        env:
+          ARCHIVE_GLOBS: ${{ inputs.archive-globs }}
+          MEMBER_GLOBS: ${{ inputs.archive-member-globs }}
+        run: |
+          ./contrib/release/generate-sha256sums.sh dist
+          echo "----- SHA256SUMS -----"
+          cat dist/SHA256SUMS
+
+      - name: Derive pre-release status from the tag
+        id: meta
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          set -euo pipefail
+          version="${TAG#"$PREFIX"}"
+          # SemVer: a hyphen in the version proper marks a pre-release;
+          # build metadata after a + never does.
+          version="${version%%+*}"
+          if [[ $version == *-* ]]; then
+            echo "prerelease=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Create / update GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: ${{ steps.meta.outputs.prerelease }}

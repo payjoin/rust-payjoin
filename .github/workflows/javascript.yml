@@ -12,6 +12,9 @@ on:
       # change this workflow's environment.
       - flake.nix
       - flake.lock
+  push:
+    tags:
+      - "payjoin-javascript-[0-9]*"
 
 jobs:
   build-js-and-test:
@@ -29,3 +32,135 @@ jobs:
         uses: ./.github/actions/setup-nix
       - name: "Build and test"
         run: nix develop .#javascript -c ./payjoin-ffi/javascript/contrib/test.sh
+
+  pack-npm:
+    # The package ships only dist/ (wasm + compiled TypeScript), which is
+    # platform-independent, so one pack on Linux is the entire release build.
+    name: "Pack npm package"
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
+      - name: Build and pack
+        run: nix develop .#javascript -c ./payjoin-ffi/javascript/contrib/pack.sh
+      - name: Upload npm package
+        uses: actions/upload-artifact@v4
+        with:
+          name: payjoin-javascript-npm-package
+          path: payjoin-ffi/javascript/artifacts/*.tgz
+          if-no-files-found: error
+
+  smoke-npm:
+    name: "Smoke test npm package"
+    runs-on: ${{ matrix.os }}
+    needs: pack-npm
+    strategy:
+      matrix:
+        os: [ubuntu-26.04, macos-latest]
+    steps:
+      - name: Download npm package
+        uses: actions/download-artifact@v4
+        with:
+          name: payjoin-javascript-npm-package
+          path: pkg
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install and exercise the packed package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir smoke && cd smoke
+          npm init -y >/dev/null
+          npm install ../pkg/payjoin-*.tgz
+          node --input-type=module -e '
+            import { payjoin, uniffiInitAsync } from "payjoin";
+            await uniffiInitAsync();
+            payjoin.Url.parse("https://example.com");
+            console.log("smoke ok");
+          '
+
+  verify-tag:
+    name: "Verify release tag"
+    if: startsWith(github.ref, 'refs/tags/payjoin-javascript-')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify-tag-hygiene.yml
+
+  publish-npm:
+    name: "Publish to npmjs.com (trusted publishing / OIDC)"
+    runs-on: ubuntu-26.04
+    needs: [build-js-and-test, pack-npm, smoke-npm, verify-tag]
+    if: startsWith(github.ref, 'refs/tags/payjoin-javascript-')
+    environment: release
+    permissions:
+      id-token: write # OIDC: npm trusted publishing and its provenance statement
+      attestations: write # actions/attest-build-provenance writes the attestation
+      contents: read # needed only to check out the in-repo verify-tag-version action
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download npm package
+        uses: actions/download-artifact@v4
+        with:
+          name: payjoin-javascript-npm-package
+          path: dist
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Update npm
+        run: |
+          npm install -g npm@11
+          npm --version
+
+      - name: Locate packed artifact
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(dist/payjoin-*.tgz)
+          if [ "${#pkgs[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one .tgz in dist/, found ${#pkgs[@]}: ${pkgs[*]:-none}"
+            exit 1
+          fi
+          # payjoin-0.1.1.tgz -> 0.1.1
+          name="$(basename "${pkgs[0]}" .tgz)"
+          echo "tarball=${pkgs[0]}" >> "$GITHUB_OUTPUT"
+          echo "version=${name#payjoin-}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches packed artifact version
+        uses: ./.github/actions/verify-tag-version
+        with:
+          tag-prefix: payjoin-javascript-
+          version: ${{ steps.locate.outputs.version }}
+
+      - name: Attest build provenance (tarball)
+        # A consumer runs: gh attestation verify <file>.tgz -R payjoin/rust-payjoin
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: ${{ steps.locate.outputs.tarball }}
+
+      - name: Publish to npmjs.com
+        run: npm publish "${{ steps.locate.outputs.tarball }}"
+
+  github-release:
+    name: "Attach tarball + SHA256SUMS to the GitHub release"
+    needs: [publish-npm]
+    if: startsWith(github.ref, 'refs/tags/payjoin-javascript-')
+    permissions:
+      contents: write # create/update the Release for this tag and upload assets
+    uses: ./.github/workflows/release-assets.yml
+    with:
+      artifact-pattern: payjoin-javascript-npm-package
+      tag-prefix: payjoin-javascript-

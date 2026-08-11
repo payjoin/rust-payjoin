@@ -19,7 +19,20 @@ fi
 
 cd ../
 echo "Generating payjoin dart..."
-cargo build --features dart,_test-utils --profile dev
-cargo run --features dart,_test-utils --profile dev --bin uniffi-bindgen -- --library ../target/debug/$LIBNAME --language dart --out-dir dart/lib/
+# Keep parity with other language test scripts: include _test-utils by default.
+PAYJOIN_FFI_FEATURES=${PAYJOIN_FFI_FEATURES-_test-utils}
+PAYJOIN_FFI_PROFILE=${PAYJOIN_FFI_PROFILE:-dev}
+if [[ $PAYJOIN_FFI_PROFILE == "dev" ]]; then
+    TARGET_PROFILE_DIR=debug
+else
+    TARGET_PROFILE_DIR=$PAYJOIN_FFI_PROFILE
+fi
+GENERATOR_FEATURES="dart"
+if [[ -n $PAYJOIN_FFI_FEATURES ]]; then
+    GENERATOR_FEATURES="$GENERATOR_FEATURES,$PAYJOIN_FFI_FEATURES"
+fi
+
+cargo build --features "$GENERATOR_FEATURES" --profile "$PAYJOIN_FFI_PROFILE"
+cargo run --features "$GENERATOR_FEATURES" --profile dev --bin uniffi-bindgen -- --library "../target/$TARGET_PROFILE_DIR/$LIBNAME" --language dart --out-dir dart/lib/
 
 echo "All done!"

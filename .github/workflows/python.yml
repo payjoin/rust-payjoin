@@ -12,6 +12,15 @@ on:
       # change this workflow's environment.
       - flake.nix
       - flake.lock
+  # Publishing path. A tag push runs the full build/wheel/smoke graph at the
+  # tagged commit (no path filter applies to tags), then the tag-gated
+  # publish/release jobs below. Tag scheme: payjoin-python-<version>, e.g.
+  # payjoin-python-0.24.0, matching the version-first payjoin-csharp-*
+  # convention. The version is the payjoin-ffi crate version: setup.py
+  # derives the wheel version from payjoin-ffi/Cargo.toml.
+  push:
+    tags:
+      - "payjoin-python-[0-9]*"
 
 jobs:
   build-python-and-test:
@@ -29,3 +38,159 @@ jobs:
         uses: ./.github/actions/setup-nix
       - name: "Build and test"
         run: nix develop .#python --command bash ./payjoin-ffi/python/contrib/test.sh
+
+  build-wheel:
+    # The wheel bundles a prebuilt native library, so each supported
+    # platform packs its own wheel: x86_64 on Linux (retagged manylinux by
+    # auditwheel) and a fat universal2 dylib for macOS. Both wheels build
+    # on a Linux host, like the C# native assets: a dylib linked inside
+    # the nix dev shell on a mac records nix store install names that
+    # exist on no user machine, while cargo-zigbuild links against zig's
+    # bundled Apple SDK stubs and records the system ones. The smoke jobs
+    # below verify each wheel on real hardware.
+    name: "Build wheel"
+    runs-on: ubuntu-26.04
+    strategy:
+      # Let every platform report its own result; a failure in one target
+      # should not cancel the signal from the others.
+      fail-fast: false
+      matrix:
+        platform: [linux-x64, macos-universal2]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
+      - name: Build the wheel
+        run: nix develop .#python --command bash ./payjoin-ffi/python/contrib/build-wheel.sh
+        env:
+          PAYJOIN_WHEEL_PLATFORM: ${{ matrix.platform }}
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: payjoin-python-wheel-${{ matrix.platform }}
+          path: payjoin-ffi/python/dist/*.whl
+          if-no-files-found: error
+
+  smoke-wheel:
+    name: "Smoke test wheel"
+    runs-on: ${{ matrix.os }}
+    needs: build-wheel
+    strategy:
+      matrix:
+        os: [ubuntu-26.04, macos-latest, macos-15-intel]
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: payjoin-python-wheel-*
+          merge-multiple: true
+          path: dist
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          # Deliberately not the version the wheel was built with: the
+          # wheels are tagged py3-none (the bindings load the library
+          # through ctypes), and installing on a different CPython proves
+          # the retag.
+          python-version: "3.12"
+      - name: Install and exercise the wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(dist/payjoin-*.whl)
+          # download-artifact succeeds even when the pattern matches nothing.
+          if [ "${#pkgs[@]}" -eq 0 ]; then
+            echo "::error::no payjoin wheels found in dist/"
+            exit 1
+          fi
+          version="$(basename "${pkgs[0]}" | cut -d- -f2)"
+          # pip picks whichever wheel matches this runner's platform;
+          # dependencies come from PyPI.
+          python -m pip install --only-binary payjoin --find-links dist "payjoin==$version"
+          python -c '
+          import payjoin
+          payjoin.Url.parse("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com")
+          print("smoke ok")
+          '
+
+  # ---------------------------------------------------------------------------
+  # PUBLISH PATH (tag-gated). Runs only for a payjoin-python-* tag push, after
+  # build/test, both wheel builds, and every smoke job are green. Consumes the
+  # already-built, already-smoke-tested wheels and never rebuilds.
+  # ---------------------------------------------------------------------------
+  publish-pypi:
+    name: "Publish to PyPI (trusted publishing / OIDC)"
+    runs-on: ubuntu-26.04
+    needs: [build-python-and-test, build-wheel, smoke-wheel]
+    if: startsWith(github.ref, 'refs/tags/payjoin-python-')
+    # Pauses for a required reviewer before anything reaches the registry;
+    # the PyPI trusted-publishing policy is bound to this environment.
+    environment: release
+    permissions:
+      id-token: write # OIDC: PyPI trusted publishing and its PEP 740 attestations
+      attestations: write # actions/attest-build-provenance writes the attestation
+      contents: read # needed only to check out the in-repo verify-tag-version action
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: payjoin-python-wheel-*
+          merge-multiple: true
+          path: dist
+
+      - name: Locate packed artifacts
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(dist/payjoin-*.whl)
+          if [ "${#pkgs[@]}" -ne 2 ]; then
+            echo "::error::expected exactly two wheels in dist/, found ${#pkgs[@]}: ${pkgs[*]:-none}"
+            exit 1
+          fi
+          # payjoin-0.24.0-py3-none-<platform>.whl -> 0.24.0
+          versions="$(for pkg in "${pkgs[@]}"; do basename "$pkg" | cut -d- -f2; done | sort -u)"
+          if [ "$(echo "$versions" | wc -l)" -ne 1 ]; then
+            echo "::error::wheels disagree on version: $versions; refusing to publish"
+            exit 1
+          fi
+          echo "version=$versions" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches packed artifact version
+        uses: ./.github/actions/verify-tag-version
+        with:
+          tag-prefix: payjoin-python-
+          version: ${{ steps.locate.outputs.version }}
+
+      - name: Attest build provenance (wheels)
+        # A consumer runs: gh attestation verify <file>.whl -R payjoin/rust-payjoin
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*.whl
+
+      - name: Publish to PyPI
+        # Exchanges the job's OIDC token for short-lived registry
+        # credentials and uploads PEP 740 attestations alongside the
+        # wheels; there is no long-lived token anywhere in this workflow.
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  github-release:
+    name: "Attach wheels + SHA256SUMS to the GitHub release"
+    needs: [publish-pypi]
+    if: startsWith(github.ref, 'refs/tags/payjoin-python-')
+    permissions:
+      contents: write # create/update the Release for this tag and upload assets
+    uses: ./.github/workflows/release-assets.yml
+    with:
+      artifact-pattern: payjoin-python-wheel-*
+      tag-prefix: payjoin-python-

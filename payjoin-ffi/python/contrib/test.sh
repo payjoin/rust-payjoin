@@ -18,6 +18,7 @@ echo "==> Generating FFI bindings..."
 bash ./scripts/generate_bindings.sh
 
 echo "==> Building wheel..."
+rm -rf dist
 uv build --wheel
 
 echo "==> Installing wheel..."

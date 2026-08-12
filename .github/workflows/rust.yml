@@ -31,6 +31,8 @@ jobs:
         uses: DeterminateSystems/determinate-nix-action@main
       - name: "Use nix cache"
         uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          use-flakehub: false
       - name: "Add nginxWithStream to PATH"
         run: |
           # This is necessary for payjoin-mailroom integration tests
@@ -51,6 +53,8 @@ jobs:
         uses: DeterminateSystems/determinate-nix-action@main
       - name: "Use nix cache"
         uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          use-flakehub: false
       - name: "Run code linting"
         run: nix develop -c ./contrib/lint.sh
       - name: "Run documentation linting"
@@ -77,6 +81,8 @@ jobs:
         uses: DeterminateSystems/determinate-nix-action@main
       - name: "Use nix cache"
         uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          use-flakehub: false
       - name: "Add nginxWithStream to PATH"
         run: |
           # This is necessary for payjoin-mailroom integration tests

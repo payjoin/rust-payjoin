@@ -15,7 +15,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install requests pyyaml
+      - name: Mint bot token
+        id: bot-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
       - run: python .github/scripts/compile_standup.py
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
-          STANDUP_TOKEN: ${{ secrets.STANDUP_BOT_TOKEN || secrets.STANDUP_TOKEN }}
+          STANDUP_TOKEN: ${{ steps.bot-token.outputs.token }}
+          BOT_LOGIN: ${{ steps.bot-token.outputs.app-slug }}

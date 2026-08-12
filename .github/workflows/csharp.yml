@@ -269,10 +269,10 @@ jobs:
     needs: [pack-nuget, smoke-nuget]
     if: startsWith(github.ref, 'refs/tags/payjoin-csharp-')
     # Optional but recommended: a GitHub Actions environment lets you bind the
-    # nuget.org policy to `nuget-release` AND add required reviewers, turning
+    # nuget.org policy to `release` AND add required reviewers, turning
     # publish into a manual-approval gate. Create the environment first, or
     # remove this line to publish without an approval gate. See README.
-    environment: nuget-release
+    environment: release
     permissions:
       id-token: write # OIDC: used by BOTH NuGet/login and attest-build-provenance
       attestations: write # actions/attest-build-provenance writes the attestation

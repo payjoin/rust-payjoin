@@ -57,7 +57,7 @@ If any issues need to be fixed before the _MAJOR.MINOR+1.0_ version is released:
   - In the body of the tag message put a copy of the **Summary** and **Changelog** for the release.
   - Sign with a key committed under `contrib/release/keys/`, using the explicit `--sign` flag.
 - [ ] Push the new tag to the `payjoin/rust-payjoin` repo.
-- [ ] Approve the `crates-release` environment when it requests a reviewer.
+- [ ] Approve the `release` environment when it requests a reviewer.
 - [ ] Announce the release, using the **Summary**, on Discord, Twitter, Nostr, and stacker.news.
 - [ ] Celebrate 🎉
 

@@ -3,7 +3,7 @@ name: Release
 # A pull request that bumps a release crate's version is checked for
 # consistency and publishability. Pushing a `<crate>-<version>` tag verifies
 # the tag, waits for CI at that commit, then publishes to crates.io through
-# the `crates-release` environment (required reviewer) with keyless OIDC,
+# the `release` environment (required reviewer) with keyless OIDC,
 # cuts the GitHub release, and confirms the upload.
 
 on:
@@ -105,7 +105,7 @@ jobs:
     if: github.event_name == 'push'
     needs: [verify-tag, wait-for-ci]
     runs-on: ubuntu-26.04
-    environment: crates-release
+    environment: release
     permissions:
       id-token: write
       attestations: write

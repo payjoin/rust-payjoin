@@ -8,6 +8,7 @@ import "package:convert/convert.dart";
 import "package:payjoin/http.dart" as payjoin_http;
 import "package:payjoin/payjoin.dart" as payjoin;
 import "package:payjoin/test_utils.dart" as test_utils;
+
 import "utils.dart";
 
 late test_utils.BitcoindEnv env;
@@ -119,9 +120,8 @@ class IsInputOwnedCallback implements payjoin.IsInputOwned {
         return false;
       }
       final scriptHex = txOut["scriptPubKey"]["hex"] as String;
-      return IsScriptOwnedCallback(
-        connection,
-      ).callback(Uint8List.fromList(hex.decode(scriptHex)));
+      return IsScriptOwnedCallback(connection)
+          .callback(Uint8List.fromList(hex.decode(scriptHex)));
     } catch (e) {
       return false;
     }
@@ -387,36 +387,28 @@ Future<payjoin.ReceiveSession?> process_receiver_proposal(
 
 void main() {
   group('fetchOhttpKeys', () {
-    test(
-      'fetches and decodes keys via relay proxy',
-      () async {
-        final services = test_utils.TestServices.initialize();
-        services.waitForServicesReady();
-        final keys = await payjoin_http.fetchOhttpKeys(
+    test('fetches and decodes keys via relay proxy', () async {
+      final services = test_utils.TestServices.initialize();
+      services.waitForServicesReady();
+      final keys = await payjoin_http.fetchOhttpKeys(
+        ohttpRelayUrl: services.ohttpRelayUrl(),
+        directoryUrl: services.directoryUrl(),
+        certificate: services.cert(),
+      );
+      expect(keys, isA<payjoin.OhttpKeys>());
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('without trusted certificate throws', () async {
+      final services = test_utils.TestServices.initialize();
+      services.waitForServicesReady();
+      await expectLater(
+        payjoin_http.fetchOhttpKeys(
           ohttpRelayUrl: services.ohttpRelayUrl(),
           directoryUrl: services.directoryUrl(),
-          certificate: services.cert(),
-        );
-        expect(keys, isA<payjoin.OhttpKeys>());
-      },
-      timeout: const Timeout(Duration(minutes: 2)),
-    );
-
-    test(
-      'without trusted certificate throws',
-      () async {
-        final services = test_utils.TestServices.initialize();
-        services.waitForServicesReady();
-        await expectLater(
-          payjoin_http.fetchOhttpKeys(
-            ohttpRelayUrl: services.ohttpRelayUrl(),
-            directoryUrl: services.directoryUrl(),
-          ),
-          throwsA(isA<Exception>()),
-        );
-      },
-      timeout: const Timeout(Duration(minutes: 2)),
-    );
+        ),
+        throwsA(isA<Exception>()),
+      );
+    }, timeout: const Timeout(Duration(minutes: 2)));
   });
 
   group('Test integration', () {
@@ -471,9 +463,9 @@ void main() {
       // Use a real v2 payjoin URI from the test harness to avoid v1 panics.
       final envLocal = test_utils.initBitcoindSenderReceiver();
       final receiverRpc = envLocal.getReceiver();
-      final receiverAddress =
-          jsonDecode(receiverRpc.call(method: "getnewaddress", params: []))
-              as String;
+      final receiverAddress = jsonDecode(
+        receiverRpc.call(method: "getnewaddress", params: []),
+      ) as String;
       final services = test_utils.TestServices.initialize();
       services.waitForServicesReady();
       final directory = services.directoryUrl();
@@ -507,9 +499,9 @@ void main() {
       bitcoind = env.getBitcoind();
       receiver = env.getReceiver();
       sender = env.getSender();
-      var receiver_address =
-          jsonDecode(receiver.call(method: "getnewaddress", params: []))
-              as String;
+      var receiver_address = jsonDecode(
+        receiver.call(method: "getnewaddress", params: []),
+      ) as String;
       var services = test_utils.TestServices.initialize();
 
       services.waitForServicesReady();

@@ -131,9 +131,8 @@ void _handleConnectProxyClient(Socket client) {
     final headerEnd = _headerEnd(buffer);
     if (headerEnd == -1) return;
     final request = latin1.decode(buffer.sublist(0, headerEnd));
-    final match = RegExp(
-      r'^CONNECT ([^:]+):(\d+) HTTP/1\.1',
-    ).firstMatch(request);
+    final match = RegExp(r'^CONNECT ([^:]+):(\d+) HTTP/1\.1')
+        .firstMatch(request);
     if (match == null) {
       client.destroy();
       return;

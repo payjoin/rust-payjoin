@@ -21,9 +21,6 @@ pub(crate) mod v1;
 pub(crate) mod v2;
 
 #[async_trait::async_trait]
-// [TODO] remove this clippy ignore once https://github.com/dtolnay/async-trait/pull/303 is included
-// in a new release
-#[allow(clippy::double_must_use)]
 pub trait App: Send + Sync {
     async fn new(config: Config) -> Result<Self>
     where

@@ -771,9 +771,6 @@ impl payjoin::persist::SessionPersister for CallbackPersisterAdapter {
 /// Async session persister that should save and load events as JSON strings.
 #[uniffi::export(with_foreign)]
 #[async_trait::async_trait]
-// [TODO] remove this clippy ignore once https://github.com/dtolnay/async-trait/pull/303 is included
-// in a new release
-#[allow(clippy::double_must_use)]
 pub trait JsonSenderSessionPersisterAsync: Send + Sync {
     async fn save(&self, event: String) -> Result<(), ForeignError>;
     async fn load(&self) -> Result<Vec<String>, ForeignError>;

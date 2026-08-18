@@ -25,6 +25,8 @@ jobs:
         uses: actions/checkout@v6
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Set up nix
         uses: ./.github/actions/setup-nix
       - name: "Build and test"

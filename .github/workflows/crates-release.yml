@@ -113,6 +113,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Use cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Prepare lockfile
         run: cp Cargo-recent.lock Cargo.lock
       - name: Package the crate

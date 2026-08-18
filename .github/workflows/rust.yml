@@ -39,6 +39,8 @@ jobs:
           echo "$(nix build .#nginx-with-stream --print-out-paths --no-link)/bin" >> $GITHUB_PATH
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run tests
         run: RUST_LOG=debug bash contrib/test.sh
 
@@ -49,6 +51,8 @@ jobs:
         uses: actions/checkout@v6
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: "Install nix"
         uses: DeterminateSystems/determinate-nix-action@main
       - name: "Use nix cache"
@@ -89,6 +93,8 @@ jobs:
           echo "$(nix build .#nginx-with-stream --print-out-paths --no-link)/bin" >> $GITHUB_PATH
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: "Install cargo-llvm-cov"
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: "Generate code coverage for tests"
@@ -128,6 +134,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Run cargo-mutants on diff
         run: >
           cargo mutants --no-shuffle --in-diff git.diff
@@ -149,5 +157,7 @@ jobs:
         uses: dtolnay/rust-toolchain@nightly
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: "Build fuzz targets"
         run: cd fuzz && cargo build

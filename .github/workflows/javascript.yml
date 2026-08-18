@@ -12,6 +12,15 @@ on:
       # change this workflow's environment.
       - flake.nix
       - flake.lock
+      # This is the only workflow that compiles for wasm32-unknown-unknown,
+      # and the wasm build pulls in the core crates via payjoin-ffi's
+      # `wasm_js` feature (-> `getrandom/js`), which is what supplies
+      # browser entropy for the input/output shuffle in
+      # payjoin/src/core/receive/common/mod.rs. A dependency bump can drop
+      # that backend without touching payjoin-ffi/, so gate on the
+      # manifests and the lockfile as well.
+      - "**/Cargo.toml"
+      - Cargo.lock
 
 jobs:
   build-js-and-test:

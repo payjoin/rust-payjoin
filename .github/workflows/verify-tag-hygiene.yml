@@ -1,0 +1,31 @@
+name: Verify tag hygiene
+
+# Reusable head of every binding publish workflow: verify the pushed tag is
+# annotated, signed by a maintainer key in contrib/release/keys/, and an
+# ancestor of master, so only a maintainer can cut a release. Call it as a
+# job the publish job `needs`, so a bad tag fails before the `release`
+# environment asks for approval. The tag comes from the triggering ref; the
+# checks are prefix-agnostic, so there are no inputs.
+
+on:
+  workflow_call:
+
+jobs:
+  verify-tag-hygiene:
+    name: Verify tag hygiene
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Fetch master
+        run: git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
+      - name: Verify tag hygiene
+        env:
+          TAG: ${{ github.ref_name }}
+        run: nix --quiet develop .#release -c ./contrib/release/verify-tag-hygiene.sh "$TAG"

@@ -35,12 +35,8 @@ jobs:
         uses: actions/checkout@v6
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
-      - name: "Install nix"
-        uses: DeterminateSystems/determinate-nix-action@main
-      - name: "Use nix cache"
-        uses: DeterminateSystems/magic-nix-cache-action@main
-        with:
-          use-flakehub: false
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
       - name: "Build and test"
         run: nix develop .#csharp -c ./payjoin-ffi/csharp/contrib/test.sh
 
@@ -260,13 +256,21 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # PUBLISH PATH (tag-gated). Runs only for a payjoin-csharp-* tag push, after
-  # pack + every per-RID smoke job are green. Consumes the already-built,
-  # already-smoke-tested `payjoin-csharp-nuget-package` artifact — never repacks.
+  # the tag passes the hygiene checks and pack + every per-RID smoke job are
+  # green. Consumes the already-built, already-smoke-tested
+  # `payjoin-csharp-nuget-package` artifact — never repacks.
   # ---------------------------------------------------------------------------
+  verify-tag:
+    name: "Verify release tag"
+    if: startsWith(github.ref, 'refs/tags/payjoin-csharp-')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify-tag-hygiene.yml
+
   publish-nuget:
     name: "Publish to nuget.org (trusted publishing / OIDC)"
     runs-on: ubuntu-latest
-    needs: [pack-nuget, smoke-nuget]
+    needs: [pack-nuget, smoke-nuget, verify-tag]
     if: startsWith(github.ref, 'refs/tags/payjoin-csharp-')
     # Optional but recommended: a GitHub Actions environment lets you bind the
     # nuget.org policy to `release` AND add required reviewers, turning
@@ -276,8 +280,11 @@ jobs:
     permissions:
       id-token: write # OIDC: used by BOTH NuGet/login and attest-build-provenance
       attestations: write # actions/attest-build-provenance writes the attestation
-      contents: read # checkout of the (already-packed) repo is not needed; read is the floor
+      contents: read # needed only to check out the in-repo verify-tag-version action
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
       - name: Download packed NuGet package
         uses: actions/download-artifact@v4
         with:
@@ -289,27 +296,28 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Verify tag matches packed artifact version
-        id: verify
+      - name: Locate packed artifact
+        id: locate
         shell: bash
         run: |
           set -euo pipefail
-          # payjoin-csharp-0.24.0-preview.1 -> 0.24.0-preview.1
-          version="${GITHUB_REF_NAME#payjoin-csharp-}"
           shopt -s nullglob
           pkgs=(dist/*.nupkg)
           if [ "${#pkgs[@]}" -ne 1 ]; then
             echo "::error::expected exactly one .nupkg in dist/, found ${#pkgs[@]}: ${pkgs[*]:-none}"
             exit 1
           fi
-          expected="Payjoin.${version}.nupkg"
-          actual="$(basename "${pkgs[0]}")"
-          if [ "${actual}" != "${expected}" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} implies ${expected} but packed artifact is ${actual}; refusing to publish"
-            exit 1
-          fi
+          # Payjoin.0.24.0-preview.1.nupkg -> 0.24.0-preview.1
+          name="$(basename "${pkgs[0]}" .nupkg)"
           echo "nupkg=${pkgs[0]}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "version=${name#Payjoin.}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches packed artifact version
+        id: verify
+        uses: ./.github/actions/verify-tag-version
+        with:
+          tag-prefix: payjoin-csharp-
+          version: ${{ steps.locate.outputs.version }}
 
       - name: Attest build provenance (nupkg)
         # Attesting the .nupkg covers every RID native lib inside it; a consumer
@@ -320,7 +328,7 @@ jobs:
         #  published unit.)
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: ${{ steps.verify.outputs.nupkg }}
+          subject-path: ${{ steps.locate.outputs.nupkg }}
 
       - name: NuGet login (OIDC -> short-lived API key)
         id: login
@@ -339,7 +347,7 @@ jobs:
           # the tag would otherwise 409 on the already-published version and
           # redden the whole run. With it, an already-present version is a
           # no-op success and the run converges.
-          dotnet nuget push "${{ steps.verify.outputs.nupkg }}" \
+          dotnet nuget push "${{ steps.locate.outputs.nupkg }}" \
             --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
             --source https://api.nuget.org/v3/index.json \
             --no-symbols \
@@ -347,44 +355,13 @@ jobs:
 
   github-release:
     name: "Attach nupkg + SHA256SUMS to the GitHub release"
-    runs-on: ubuntu-latest
     needs: [publish-nuget]
     if: startsWith(github.ref, 'refs/tags/payjoin-csharp-')
     permissions:
       contents: write # create/update the Release for this tag and upload assets
-    steps:
-      - name: Download packed NuGet package
-        uses: actions/download-artifact@v4
-        with:
-          name: payjoin-csharp-nuget-package
-          path: dist
-
-      - name: Generate SHA256SUMS (nupkg + each native lib)
-        working-directory: dist
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Hash the package itself.
-          sha256sum *.nupkg > SHA256SUMS
-          # Also hash each shipped native library extracted from inside the
-          # package, so a consumer can verify an individual .so/.dylib/.dll
-          # (paths are runtimes/<rid>/native/<lib>). Matches the tor/hwi pattern.
-          tmp="$(mktemp -d)"
-          unzip -q *.nupkg -d "$tmp" 'runtimes/*/native/*'
-          ( cd "$tmp" && find runtimes -type f -print0 | sort -z | xargs -0 sha256sum ) >> SHA256SUMS
-          echo "----- SHA256SUMS -----"
-          cat SHA256SUMS
-
-      - name: Create / update GitHub release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: |
-            dist/*.nupkg
-            dist/SHA256SUMS
-          fail_on_unmatched_files: true
-          draft: false
-          # Mark preview / rc tags as pre-releases on the Releases page.
-          prerelease: ${{ contains(github.ref_name, '-preview') || contains(github.ref_name, '-rc') }}
-          # Dan's GPG detached signature over SHA256SUMS is added out-of-band
-          # (locally, then uploaded as SHA256SUMS.asc) — his private key must not
-          # live on a runner. See README "GPG signature".
+    uses: ./.github/workflows/release-assets.yml
+    with:
+      artifact-pattern: payjoin-csharp-nuget-package
+      tag-prefix: payjoin-csharp-
+      archive-globs: "*.nupkg"
+      archive-member-globs: runtimes/*/native/*

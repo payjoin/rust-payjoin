@@ -12,13 +12,6 @@ on:
       # the flake change this workflow's environment.
       - flake.nix
       - flake.lock
-  # Publishing path. A tag push runs the full build/pack/smoke graph at the
-  # tagged commit (no path filter applies to tags), then the tag-gated
-  # publish/release jobs below. Tag scheme: payjoin-csharp-<csproj Version>,
-  # e.g. payjoin-csharp-0.24.0-preview.1. The [0-9] anchor keeps this glob
-  # collision-free against the repo's existing payjoin-* and payjoin-cli-*
-  # tags (which a payjoin-csharp-* prefix cannot match anyway) while dropping
-  # the `v` so the scheme matches the version-first convention already in use.
   push:
     tags:
       - "payjoin-csharp-[0-9]*"
@@ -254,12 +247,6 @@ jobs:
         # stays the only place the package version is maintained.
         run: bash ./scripts/smoke_nuget_package.sh artifacts/packages auto ${{ matrix.rid }}
 
-  # ---------------------------------------------------------------------------
-  # PUBLISH PATH (tag-gated). Runs only for a payjoin-csharp-* tag push, after
-  # the tag passes the hygiene checks and pack + every per-RID smoke job are
-  # green. Consumes the already-built, already-smoke-tested
-  # `payjoin-csharp-nuget-package` artifact — never repacks.
-  # ---------------------------------------------------------------------------
   verify-tag:
     name: "Verify release tag"
     if: startsWith(github.ref, 'refs/tags/payjoin-csharp-')
@@ -272,10 +259,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [pack-nuget, smoke-nuget, verify-tag]
     if: startsWith(github.ref, 'refs/tags/payjoin-csharp-')
-    # Optional but recommended: a GitHub Actions environment lets you bind the
-    # nuget.org policy to `release` AND add required reviewers, turning
-    # publish into a manual-approval gate. Create the environment first, or
-    # remove this line to publish without an approval gate. See README.
     environment: release
     permissions:
       id-token: write # OIDC: used by BOTH NuGet/login and attest-build-provenance
@@ -322,10 +305,6 @@ jobs:
       - name: Attest build provenance (nupkg)
         # Attesting the .nupkg covers every RID native lib inside it; a consumer
         # runs: gh attestation verify <file>.nupkg -R payjoin/rust-payjoin
-        # (To attest each native .so/.dylib/.dll as an independent subject as
-        #  well, add a second attest step with subject-checksums pointing at the
-        #  SHA256SUMS produced in github-release. Not required — the nupkg is the
-        #  published unit.)
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: ${{ steps.locate.outputs.nupkg }}
@@ -334,19 +313,10 @@ jobs:
         id: login
         uses: NuGet/login@v1
         with:
-          # nuget.org username (profile name), NOT an email. Individual member of
-          # the org that owns the Trusted Publishing policy. Kept in a secret only
-          # to avoid leaking the account name in logs — it is NOT a credential;
-          # there is no long-lived API key anywhere in this workflow.
           user: ${{ secrets.NUGET_USER }}
 
       - name: Push to nuget.org
         run: |
-          # --skip-duplicate keeps re-runs idempotent: if a prior run published
-          # this version but a later job (github-release) failed, re-triggering
-          # the tag would otherwise 409 on the already-published version and
-          # redden the whole run. With it, an already-present version is a
-          # no-op success and the run converges.
           dotnet nuget push "${{ steps.locate.outputs.nupkg }}" \
             --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
             --source https://api.nuget.org/v3/index.json \

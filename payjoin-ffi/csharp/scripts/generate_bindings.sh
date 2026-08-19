@@ -29,7 +29,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/../.."
 
 echo "Generating payjoin C#..."
-# Keep parity with other language test scripts: include _test-utils by default.
 PAYJOIN_FFI_FEATURES=${PAYJOIN_FFI_FEATURES-_test-utils}
 PAYJOIN_FFI_PROFILE=${PAYJOIN_FFI_PROFILE:-dev}
 if [[ $PAYJOIN_FFI_PROFILE == "dev" ]]; then

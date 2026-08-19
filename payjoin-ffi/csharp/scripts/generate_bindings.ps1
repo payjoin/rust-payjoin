@@ -67,7 +67,6 @@ if ($ProductionBindings) {
 } elseif ($null -ne $env:PAYJOIN_FFI_FEATURES) {
     $payjoinFfiFeatures = $env:PAYJOIN_FFI_FEATURES
 } else {
-    # Keep parity with other language test scripts: include _test-utils by default.
     $payjoinFfiFeatures = "_test-utils"
 }
 

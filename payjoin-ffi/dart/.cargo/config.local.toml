@@ -1,5 +1,5 @@
-# Local Cargo.toml overlay for development in monorepo
-# These patches are intentionally ignored in .pubignore for publishing to pub.dev
+# Local Cargo.toml overlay for development in monorepo.
+# The Dart hook passes this file only for explicit test-utils opt-in.
 [patch."https://github.com/payjoin/rust-payjoin.git"]
 payjoin-ffi = { path = ".." }
 payjoin = { path = "../../payjoin" }

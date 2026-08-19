@@ -14,4 +14,6 @@ doc/api/
 lib/payjoin.dart
 
 # Local Cargo overlay for monorepo dev
-!.cargo/config.toml
+!.cargo/config.local.toml
+
+# The production native lockfile is part of the published package.

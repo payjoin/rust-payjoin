@@ -45,39 +45,38 @@ patch bump at minimum, since the same Dart API gets new behavior.
 
 ### Publishing
 
+CI is the publish path. On every pull request touching `payjoin-ffi/**`,
+the `Build and Test Dart` workflow regenerates the production bindings and
+validates the archive with a publish dry run
+([`contrib/prepare-publish.sh`](contrib/prepare-publish.sh)).
+
 1. Point the `payjoin-ffi` dependency in `native/Cargo.toml` at the commit
    tagged for the `payjoin` release being wrapped. Consumers build from that
    revision. `.cargo/config.toml` redirects it to the local workspace for
    development only, and `.pubignore` withholds that file from the archive.
 2. Set the version in `pubspec.yaml` and describe the consumer-visible
    changes under a matching heading in `CHANGELOG.md`.
-3. Run the tests: `bash ./contrib/test.sh`.
-4. Generate the bindings to be shipped and inspect the archive.
+3. Confirm every `Build and Test Dart` job is green on the release commit
+   in `master`.
+4. Tag that commit `payjoin-dart-<version>`, where `<version>` is the
+   `pubspec.yaml` version exactly (including the `+` build metadata). The
+   tag must be annotated and signed by a maintainer key in
+   `contrib/release/keys/`, and the tagged commit must be on `master`;
+   `verify-tag` refuses to publish otherwise.
 
    ```shell
-   bash ./scripts/generate_bindings.sh
-   dart pub publish --dry-run
+   git tag -s 'payjoin-dart-0.2.1+payjoin-1.0.0-rc.8' -m 'payjoin-dart-0.2.1+payjoin-1.0.0-rc.8'
+   git push upstream 'payjoin-dart-0.2.1+payjoin-1.0.0-rc.8'
    ```
 
-   `.pubignore` replaces `.gitignore` for publishing, so a gitignored file is
-   only kept out of the archive if `.pubignore` also lists it. Two build
-   artifacts decide the contents here: `lib/payjoin.dart` has to be present
-   and current, since it is the binding surface consumers import, and
-   `native/Cargo.lock` has to be absent, since publishing one resolved
-   against the `.cargo/config.toml` path overlay would hand consumers a
-   lockfile pinned to a dependency graph they cannot reproduce. Delete it
-   before publishing if a local build left one behind.
+   The tag reruns the tests and the archive verification at the tagged
+   commit, then `publish-pub` verifies the tag matches `pubspec.yaml`,
+   regenerates the production bindings, and publishes through pub.dev
+   [automated publishing] (OIDC), so no long-lived credential is stored
+   anywhere. The job runs in the `release` environment: approve the paused
+   run before anything reaches the registry.
 
-5. Publish.
+5. Verify the [pub.dev listing](https://pub.dev/packages/payjoin) shows the
+   new version and its changelog.
 
-   ```shell
-   dart pub publish
-   ```
-
-Known limitation: `scripts/generate_bindings.sh` always builds with
-`_test-utils`, so the bindings it emits declare test-only APIs such as
-`TestServices` and `BitcoindEnv`. Consumers build the native library without
-that feature, which leaves those declarations backed by symbols that are
-absent at runtime. Every release so far ships them. Giving the script a
-production mode, as `payjoin-ffi/csharp` does with `PAYJOIN_FFI_FEATURES`,
-remains to be done.
+[automated publishing]: https://dart.dev/tools/pub/automated-publishing

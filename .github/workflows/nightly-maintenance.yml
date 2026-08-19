@@ -1,0 +1,46 @@
+name: Nightly toolchain maintenance
+
+on:
+  schedule:
+    - cron: "0 11 * * 2" # weekly Tuesday, after Monday's flake maintenance
+  workflow_dispatch:
+
+jobs:
+  validate-toolchain:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
+      - name: Update nightly toolchain pin
+        run: ./contrib/bump-nightly.sh
+      - name: Validate pinned toolchain
+        run: nix build .#checks.x86_64-linux.nightly -L --recreate-lock-file --no-write-lock-file
+
+  update-toolchain:
+    needs: validate-toolchain
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Update nightly toolchain pin
+        run: ./contrib/bump-nightly.sh
+      - name: Mint bot token
+        id: bot-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          title: "chore: update nightly toolchain pin"
+          commit-message: "chore: update nightly toolchain pin"
+          token: ${{ steps.bot-token.outputs.token }}
+          branch: chore/nightly-pin-update
+          add-paths: |
+            rust-toolchain.toml

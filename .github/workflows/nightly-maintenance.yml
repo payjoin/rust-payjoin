@@ -44,3 +44,4 @@ jobs:
           branch: chore/nightly-pin-update
           add-paths: |
             rust-toolchain.toml
+            .github/workflows/rust.yml

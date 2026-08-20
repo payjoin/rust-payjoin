@@ -2699,6 +2699,7 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 name = "payjoin"
 version = "1.0.0"
 dependencies = [
+ "arbitrary",
  "bhttp",
  "bitcoin",
  "bitcoin-hpke",
@@ -2778,6 +2779,7 @@ dependencies = [
 name = "payjoin-fuzz"
 version = "0.0.1"
 dependencies = [
+ "arbitrary",
  "home",
  "libfuzzer-sys",
  "payjoin",

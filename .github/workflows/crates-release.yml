@@ -118,7 +118,7 @@ jobs:
       - name: Package the crate
         run: cargo package --locked -p "$CRATE"
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest@v4
         with:
           subject-path: target/package/${{ needs.verify-tag.outputs.crate }}-${{ needs.verify-tag.outputs.version }}.crate
       - name: Authenticate to crates.io

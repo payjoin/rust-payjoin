@@ -100,7 +100,7 @@ jobs:
     environment: release
     permissions:
       id-token: write # OIDC: npm trusted publishing and its provenance statement
-      attestations: write # actions/attest-build-provenance writes the attestation
+      attestations: write # actions/attest writes the attestation
       contents: read # needed only to check out the in-repo verify-tag-version action
     steps:
       - name: Checkout
@@ -147,7 +147,7 @@ jobs:
 
       - name: Attest build provenance (tarball)
         # A consumer runs: gh attestation verify <file>.tgz -R payjoin/rust-payjoin
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest@v4
         with:
           subject-path: ${{ steps.locate.outputs.tarball }}
 

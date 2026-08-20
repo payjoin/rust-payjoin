@@ -367,6 +367,27 @@
           BITCOIND_SKIP_DOWNLOAD = 1;
         };
 
+        cppDevShell = pkgs.mkShell {
+          name = "cpp-dev";
+          packages =
+            with pkgs;
+            [
+              rustVersions.msrv
+              cmake
+              ninja
+              curl
+              nlohmann_json
+              bzip2
+            ]
+            ++ lib.optionals pkgs.stdenv.isLinux [
+              pkg-config
+              openssl
+              clang
+            ];
+          BITCOIND_EXE = pkgs.lib.getExe' pkgs.bitcoind "bitcoind";
+          BITCOIND_SKIP_DOWNLOAD = 1;
+        };
+
         csharpDevShell = pkgs.mkShell {
           name = "csharp-dev";
           packages =
@@ -487,6 +508,7 @@
           release = releaseDevShell;
           python = pythonDevShell;
           javascript = javascriptDevShell;
+          cpp = cppDevShell;
           csharp = csharpDevShell;
           dart = dartDevShell;
         };

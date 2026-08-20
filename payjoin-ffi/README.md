@@ -16,6 +16,7 @@ The directories below include instructions for using, building, and publishing t
 | Dart       | linux, macOS          | [payjoin-ffi/dart](dart)             | [pub.dev](https://pub.dev/packages/payjoin)     |
 | JavaScript | linux, macOS          | [payjoin-ffi/javascript](javascript) | [npm](https://www.npmjs.com/package/payjoin)    |
 | C#         | linux, macOS, windows | [payjoin-ffi/csharp](csharp)         | [nuget](https://www.nuget.org/packages/Payjoin) |
+| C++        | linux, macOS          | [payjoin-ffi/cpp](cpp)               | draft, not yet published                        |
 
 ## Minimum Supported Rust Version (MSRV)
 

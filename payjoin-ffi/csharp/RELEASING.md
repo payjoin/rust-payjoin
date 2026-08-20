@@ -126,42 +126,4 @@ is ever stored. The workflow is
    the attestation:
    `gh attestation verify Payjoin.<version>.nupkg -R payjoin/rust-payjoin`.
 
-One-time setup — the nuget.org Trusted Publishing policy (bound to
-`payjoin/rust-payjoin`, workflow file `csharp.yml`, environment
-`release`), the `release` GitHub Actions environment with required
-reviewers, and the `NUGET_USER` secret (the publishing member's nuget.org
-profile name) — is a one-time account and repository configuration, not part
-of the per-release flow.
-
-## Manual fallback
-
-Use only if the CI publish path is unavailable. Requires a maintainer with
-nuget.org ownership of the `Payjoin` package ID.
-
-1. Work through the release readiness checklist above.
-2. Download the CI-built `payjoin-csharp-nuget-package` artifact from the
-   workflow run on the release commit (do not pack from a development machine —
-   a local pack only contains the native assets present on that host), then
-   push it:
-
-   ```shell
-   dotnet nuget push Payjoin.<version>.nupkg \
-       --source https://api.nuget.org/v3/index.json \
-       --api-key <nuget.org API key>
-   ```
-
-   Prefer a scoped, push-only, short-expiry key per [scoped API keys], or the
-   `NUGET_API_KEY` environment variable (.NET SDK 10.0.300+) so the key never
-   appears in shell history.
-
-3. Complete the post-publish verification section of the checklist.
-
-[SemVer]: https://semver.org/
-[package versioning]: https://learn.microsoft.com/en-us/nuget/concepts/package-versioning
-[publish guide]: https://learn.microsoft.com/en-us/nuget/nuget-org/publish-a-package
-[package authoring best practices]: https://learn.microsoft.com/en-us/nuget/create-packages/package-authoring-best-practices
-[native library packaging]: https://learn.microsoft.com/en-us/nuget/create-packages/native-files-in-net-packages
-[readme preview]: https://learn.microsoft.com/en-us/nuget/nuget-org/package-readme-on-nuget-org
-[scoped API keys]: https://learn.microsoft.com/en-us/nuget/nuget-org/scoped-api-keys
 [trusted publishing]: https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing
-[`NuGet/login`]: https://github.com/NuGet/login

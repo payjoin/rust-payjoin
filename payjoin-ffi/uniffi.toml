@@ -12,6 +12,9 @@ cdylib_name = "payjoin_ffi"
 cdylib_name = "payjoin_ffi"
 package_name = "payjoin"
 
+[bindings.cpp]
+cdylib_name = "payjoin_ffi"
+
 [bindings.csharp]
 namespace = "Payjoin"
 cdylib_name = "payjoin_ffi"

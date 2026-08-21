@@ -1,3 +1,9 @@
+## [0.2.2+payjoin-1.0.0]
+
+- Bindings for payjoin-1.0.0, the first stable payjoin release. No Dart
+  API changes since 0.2.1+payjoin-1.0.0-rc.8
+- The package description no longer carries the EXPERIMENTAL disclaimer
+
 ## [0.2.1+payjoin-1.0.0-rc.8]
 
 - Sender inputs must declare a sighash type that commits to all inputs and

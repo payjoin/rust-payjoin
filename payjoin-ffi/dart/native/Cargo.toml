@@ -16,6 +16,6 @@ name = "payjoin_ffi_wrapper"
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-payjoin-ffi = { git = "https://github.com/payjoin/rust-payjoin.git", rev = "e4f5a0b384462458b3d68aeec042c20ceffb8d80", features = [
+payjoin-ffi = { git = "https://github.com/payjoin/rust-payjoin.git", rev = "60d0adbf4ee8e60090209d55e9864893a4acc30e", features = [
   "dart",
 ] }

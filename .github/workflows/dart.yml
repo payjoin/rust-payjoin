@@ -93,4 +93,4 @@ jobs:
         run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh
 
       - name: Publish to pub.dev
-        run: nix develop .#dart -c bash -c 'cd payjoin-ffi/dart && dart pub publish --force'
+        run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/publish.sh

@@ -10,6 +10,7 @@
 //! version 1, refer to the `receive::v1` module documentation after enabling the `v1` feature.
 
 use std::collections::BTreeMap;
+use std::marker::PhantomData;
 use std::str::FromStr;
 
 use bitcoin::transaction::InputWeightPrediction;
@@ -231,6 +232,124 @@ impl<'a> From<&'a InputPair> for InternalInputPair<'a> {
     fn from(pair: &'a InputPair) -> Self { Self { psbtin: &pair.psbtin, txin: &pair.txin } }
 }
 
+mod sealed {
+    pub trait ChecklistKind {}
+    impl ChecklistKind for super::InputOwnership {}
+    impl ChecklistKind for super::InputSeenBefore {}
+    impl ChecklistKind for super::OutputOwnership {}
+}
+
+/// Trait that associates a checklist kind with its value type.
+///
+/// This trait is sealed and cannot be implemented outside of this crate.
+pub trait ChecklistKind: sealed::ChecklistKind {
+    type Value: Clone + std::fmt::Debug;
+}
+
+/// Checklist kind for checking that the original PSBT inputs are not owned by the receiver.
+#[derive(Debug)]
+pub struct InputOwnership;
+
+impl ChecklistKind for InputOwnership {
+    type Value = OutPoint;
+}
+
+/// Checklist kind for checking that the original PSBT inputs have not been seen before.
+#[derive(Debug)]
+pub struct InputSeenBefore;
+
+impl ChecklistKind for InputSeenBefore {
+    type Value = OutPoint;
+}
+
+/// Checklist kind for checking that the original PSBT outputs are owned by the receiver.
+#[derive(Debug)]
+pub struct OutputOwnership;
+
+impl ChecklistKind for OutputOwnership {
+    type Value = ScriptBuf;
+}
+
+/// Holds a checklist value that requires some form of boolean check.
+#[derive(Debug)]
+pub struct ChecklistItem<K: ChecklistKind> {
+    value: K::Value,
+    index: usize,
+    final_index: usize,
+    _kind: PhantomData<K>,
+}
+
+impl<K: ChecklistKind> ChecklistItem<K> {
+    fn new(value: K::Value, index: usize, final_index: usize) -> Self {
+        ChecklistItem { value, index, final_index, _kind: PhantomData }
+    }
+
+    /// Returns a [`MarkedChecklistItem`] that has been marked with the result of the boolean
+    /// check.
+    pub fn mark(self, result: bool) -> MarkedChecklistItem<K> {
+        MarkedChecklistItem { item: self, result }
+    }
+    pub fn value(&self) -> &K::Value { &self.value }
+    pub fn index(&self) -> usize { self.index }
+}
+
+/// Holds the result of a [`ChecklistItem`]. Can only be constructed with [`ChecklistItem::mark`].
+#[derive(Debug)]
+pub struct MarkedChecklistItem<K: ChecklistKind> {
+    item: ChecklistItem<K>,
+    result: bool,
+}
+
+impl<K: ChecklistKind> MarkedChecklistItem<K> {
+    pub fn result(&self) -> bool { self.result }
+    pub fn value(&self) -> &K::Value { self.item.value() }
+    pub fn index(&self) -> usize { self.item.index() }
+    fn final_index(&self) -> usize { self.item.final_index }
+}
+
+/// Helper function to run validation callback over a list of [`ChecklistItem`]s
+pub fn mark_checklist<K: ChecklistKind>(
+    checklist: impl IntoIterator<Item = ChecklistItem<K>>,
+    check: &mut impl FnMut(&K::Value) -> Result<bool, ImplementationError>,
+) -> Result<impl Iterator<Item = MarkedChecklistItem<K>>, ImplementationError> {
+    let mut marked_checklist: Vec<MarkedChecklistItem<K>> = vec![];
+    for item in checklist {
+        let result = check(item.value())?;
+        marked_checklist.push(item.mark(result));
+    }
+    Ok(marked_checklist.into_iter())
+}
+
+/// Validate that the [`MarkedChecklistItem`]s are in the correct order and are a complete set.
+fn validate_checklist<K: ChecklistKind>(
+    marked_checklist: impl IntoIterator<Item = MarkedChecklistItem<K>>,
+) -> Result<impl Iterator<Item = MarkedChecklistItem<K>>, ImplementationError> {
+    let items: Vec<MarkedChecklistItem<K>> = marked_checklist.into_iter().collect();
+    let final_index = items
+        .first()
+        .ok_or_else(|| ImplementationError::from("Validation error: empty checklist"))?
+        .final_index();
+
+    if items.len() != final_index + 1 {
+        return Err(ImplementationError::from(
+            "Validation error: checklist length does not match expected length",
+        ));
+    }
+    for (current_index, item) in items.iter().enumerate() {
+        if item.index() != current_index {
+            let msg =
+                format!("Validation error: unexpected checklist item at index {current_index}");
+            return Err(ImplementationError::from(msg.as_str()));
+        }
+        if item.final_index() != final_index {
+            return Err(ImplementationError::from(
+                "Validation error: checklist has inconsistent expected length",
+            ));
+        }
+    }
+    Ok(items.into_iter())
+}
+
 /// Validate the payload of a Payjoin request for PSBT and Params sanity
 pub(crate) fn parse_payload(
     base64: &str,
@@ -267,7 +386,7 @@ fn psbt_input_is_signed(input: &bitcoin::psbt::Input) -> bool {
 
 impl PsbtContext {
     /// Prepare the PSBT by creating a new PSBT and copying only the fields allowed by the [spec](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#senders-payjoin-proposal-checklist)
-    fn prepare_psbt(self, processed_psbt: Psbt) -> Psbt {
+    fn prepare_psbt(&self, processed_psbt: Psbt) -> Psbt {
         tracing::trace!("Original PSBT from callback: {processed_psbt:#?}");
 
         // Create a new PSBT and copy only the allowed fields
@@ -340,16 +459,12 @@ impl PsbtContext {
         psbt
     }
 
-    /// Finalizes the Payjoin proposal into a PSBT which the sender will find acceptable before
+    /// Finalizes the signed payjoin proposal PSBT which the sender will find acceptable before
     /// they sign the transaction and broadcast it to the network.
     ///
-    /// Finalization consists of signing and finalizing the PSBT using the passed `wallet_process_psbt` signing function.
-    fn finalize_proposal(
-        self,
-        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
-    ) -> Result<Psbt, ImplementationError> {
-        let psbt = self.psbt_to_sign();
-        let signed_psbt = wallet_process_psbt(&psbt)?;
+    /// Returns a final payjoin proposal PSBT after verifying the signed PSBT matches the payjoin
+    /// proposal PSBT and sanitizing it.
+    fn finalize_signed_proposal(&self, signed_psbt: Psbt) -> Result<Psbt, ImplementationError> {
         let expected_ntxid = self.payjoin_psbt.unsigned_tx.compute_ntxid();
         let actual_ntxid = signed_psbt.unsigned_tx.compute_ntxid();
         if expected_ntxid != actual_ntxid {
@@ -394,6 +509,17 @@ impl OriginalPayload {
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
+        self.apply_broadcast_suitability(
+            min_fee_rate,
+            can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())?,
+        )
+    }
+
+    pub fn apply_broadcast_suitability(
+        &self,
+        min_fee_rate: Option<FeeRate>,
+        is_broadcast_suitable: bool,
+    ) -> Result<(), Error> {
         let original_psbt_fee_rate = self.psbt_fee_rate()?;
         if let Some(min_fee_rate) = min_fee_rate {
             if original_psbt_fee_rate < min_fee_rate {
@@ -404,9 +530,7 @@ impl OriginalPayload {
                 .into());
             }
         }
-        if can_broadcast(&self.psbt.clone().extract_tx_unchecked_fee_rate())
-            .map_err(Error::Implementation)?
-        {
+        if is_broadcast_suitable {
             Ok(())
         } else {
             Err(InternalPayloadError::OriginalPsbtNotBroadcastable.into())
@@ -426,55 +550,117 @@ impl OriginalPayload {
         &self,
         is_owned: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
-        for input in self.psbt.input_pairs() {
-            let outpoint = input.txin.previous_output;
-            if is_owned(&outpoint).map_err(Error::Implementation)? {
-                return Err(InternalPayloadError::InputOwned(outpoint).into());
-            }
+        let marked_checklist = mark_checklist(self.inputs_owned_checklist(), is_owned)?;
+        self.apply_inputs_owned_checklist(marked_checklist)
+    }
+
+    pub fn inputs_owned_checklist(&self) -> impl Iterator<Item = ChecklistItem<InputOwnership>> {
+        let final_index = self.psbt.input_pairs().count() - 1;
+        let checklist = self
+            .psbt
+            .input_pairs()
+            .enumerate()
+            .map(|(index, input)| {
+                ChecklistItem::<InputOwnership>::new(input.txin.previous_output, index, final_index)
+            })
+            .collect::<Vec<_>>();
+        checklist.into_iter()
+    }
+
+    pub fn apply_inputs_owned_checklist(
+        &self,
+        marked_checklist: impl IntoIterator<Item = MarkedChecklistItem<InputOwnership>>,
+    ) -> Result<(), Error> {
+        let validated_checklist = validate_checklist(marked_checklist)?;
+        match validated_checklist.into_iter().find(|item| item.result()) {
+            Some(item) => Err(InternalPayloadError::InputOwned(*item.value()).into()),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     pub fn check_no_inputs_seen_before(
         &self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<(), Error> {
-        self.psbt.input_pairs().try_for_each(|input| {
-            match is_known(&input.txin.previous_output) {
-                Ok(false) => Ok::<(), Error>(()),
-                Ok(true) =>  {
-                    tracing::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", input.txin.previous_output);
-                    Err(InternalPayloadError::InputSeen(input.txin.previous_output))?
-                },
-                Err(e) => Err(Error::Implementation(e))?,
+        let marked_checklist = mark_checklist(self.inputs_seen_checklist(), is_known)?;
+        self.apply_inputs_seen_checklist(marked_checklist)
+    }
+
+    pub fn inputs_seen_checklist(&self) -> impl Iterator<Item = ChecklistItem<InputSeenBefore>> {
+        let final_index = self.psbt.input_pairs().count() - 1;
+        let checklist = self
+            .psbt
+            .input_pairs()
+            .enumerate()
+            .map(|(index, input)| {
+                ChecklistItem::<InputSeenBefore>::new(
+                    input.txin.previous_output,
+                    index,
+                    final_index,
+                )
+            })
+            .collect::<Vec<_>>();
+        checklist.into_iter()
+    }
+
+    pub fn apply_inputs_seen_checklist(
+        &self,
+        marked_checklist: impl IntoIterator<Item = MarkedChecklistItem<InputSeenBefore>>,
+    ) -> Result<(), Error> {
+        let validated_checklist = validate_checklist(marked_checklist)?;
+        match validated_checklist.into_iter().find(|item| item.result()) {
+            Some(item) => {
+                tracing::warn!("Request contains an input we've seen before: {}. Preventing possible probing attack.", item.value());
+                Err(InternalPayloadError::InputSeen(*item.value()))?
             }
-        })?;
-        Ok(())
+            None => Ok(()),
+        }
     }
 
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<common::WantsOutputs, Error> {
-        let owned_vouts: Vec<usize> = self
+        let marked_checklist =
+            mark_checklist(self.outputs_owned_checklist(), &mut |script: &ScriptBuf| {
+                is_receiver_output(script.as_script())
+            })?;
+        self.apply_outputs_owned_checklist(marked_checklist)
+    }
+
+    pub fn outputs_owned_checklist(&self) -> impl Iterator<Item = ChecklistItem<OutputOwnership>> {
+        let final_index = self.psbt.unsigned_tx.output.len() - 1;
+        let checklist = self
             .psbt
             .unsigned_tx
             .output
             .iter()
             .enumerate()
-            .filter_map(|(vout, txo)| match is_receiver_output(&txo.script_pubkey) {
-                Ok(true) => Some(Ok(vout)),
-                Ok(false) => None,
-                Err(e) => Some(Err(e)),
+            .map(|(index, output)| {
+                ChecklistItem::<OutputOwnership>::new(
+                    output.script_pubkey.clone(),
+                    index,
+                    final_index,
+                )
             })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::Implementation)?;
+            .collect::<Vec<_>>();
+        checklist.into_iter()
+    }
 
+    pub fn apply_outputs_owned_checklist(
+        &self,
+        marked_checklist: impl IntoIterator<Item = MarkedChecklistItem<OutputOwnership>>,
+    ) -> Result<common::WantsOutputs, Error> {
+        let validated_checklist = validate_checklist(marked_checklist)?;
+        let owned_vouts = validated_checklist
+            .filter(|item| item.result())
+            .map(|item| item.index())
+            .collect::<Vec<_>>();
         if owned_vouts.is_empty() {
             return Err(InternalPayloadError::MissingPayment.into());
         }
 
-        Ok(common::WantsOutputs::new(self, owned_vouts))
+        Ok(common::WantsOutputs::new(self.clone(), owned_vouts))
     }
 }
 
@@ -521,6 +707,73 @@ pub(crate) mod tests {
             payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
             original_psbt: PARSED_ORIGINAL_PSBT.clone(),
         }
+    }
+
+    #[test]
+    fn checklist_item_mark_preserves_value_and_index() {
+        let outpoint = OutPoint::null();
+        let item = ChecklistItem::<InputOwnership>::new(outpoint, 2, 4);
+
+        // The unmarked item exposes its value.
+        assert_eq!(item.value(), &outpoint);
+
+        // Marking consumes the item and carries value and index through, alongside the result.
+        let marked = item.mark(true);
+        assert_eq!(marked.value(), &outpoint);
+        assert_eq!(marked.index(), 2);
+        assert!(marked.result());
+
+        // A false result is recorded faithfully.
+        let item = ChecklistItem::<InputOwnership>::new(outpoint, 0, 0);
+        let marked = item.mark(false);
+        assert!(!marked.result());
+        assert_eq!(marked.value(), &outpoint);
+        assert_eq!(marked.index(), 0);
+    }
+
+    #[test]
+    fn validate_checklist_covers_all_outcomes() {
+        fn item(index: usize, final_index: usize) -> MarkedChecklistItem<InputOwnership> {
+            ChecklistItem::<InputOwnership>::new(OutPoint::null(), index, final_index).mark(true)
+        }
+
+        // A complete, correctly ordered checklist validates and yields every item back in order.
+        let validated: Vec<_> = validate_checklist(vec![item(0, 2), item(1, 2), item(2, 2)])
+            .expect("complete checklist should validate")
+            .collect();
+        assert_eq!(validated.len(), 3);
+        for (i, marked) in validated.iter().enumerate() {
+            assert_eq!(marked.index(), i);
+        }
+
+        // An empty checklist has no first item to derive the expected length from.
+        let empty: Vec<MarkedChecklistItem<InputOwnership>> = vec![];
+        let err = validate_checklist(empty).err().expect("empty checklist should fail");
+        assert!(err.to_string().contains("empty checklist"));
+
+        // A checklist shorter than final_index + 1 is rejected.
+        let err = validate_checklist(vec![item(0, 2), item(1, 2)])
+            .err()
+            .expect("short checklist should fail");
+        assert!(err.to_string().contains("does not match expected length"));
+
+        // A checklist longer than final_index + 1 is rejected.
+        let err = validate_checklist(vec![item(0, 2), item(1, 2), item(2, 2), item(3, 2)])
+            .err()
+            .expect("long checklist should fail");
+        assert!(err.to_string().contains("does not match expected length"));
+
+        // Items out of order are rejected at the first offending index.
+        let err = validate_checklist(vec![item(0, 2), item(2, 2), item(1, 2)])
+            .err()
+            .expect("out-of-order checklist should fail");
+        assert!(err.to_string().contains("unexpected checklist item at index 1"));
+
+        // Items disagreeing on the expected length are rejected.
+        let err = validate_checklist(vec![item(0, 2), item(1, 3), item(2, 2)])
+            .err()
+            .expect("inconsistent checklist should fail");
+        assert!(err.to_string().contains("inconsistent expected length"));
     }
 
     #[test]
@@ -1101,29 +1354,20 @@ pub(crate) mod tests {
 
     #[test]
     fn test_finalize_proposal() {
-        let psbt_context = psbt_context_from_test_vector();
-
-        // Outcome 1: wallet_process_psbt returns an implementation error → ImplementationError
-        let err = psbt_context
-            .clone()
-            .finalize_proposal(|_| Err(ImplementationError::from("wallet signing failed")))
-            .expect_err("Should fail when wallet_process_psbt returns an error");
-        assert_eq!(err.to_string(), "wallet signing failed");
-
-        // Outcome 2: wallet_process_psbt returns a psbt with mismatched ntxid → ImplementationError
+        // Outcome 1: wallet_process_psbt returns a psbt with mismatched ntxid → ImplementationError
         let psbt_context = psbt_context_from_test_vector();
         let err = psbt_context
             .clone()
-            .finalize_proposal(|_| {
+            .finalize_signed_proposal(
                 // return a totally different psbt to trigger ntxid mismatch
-                Ok(PARSED_ORIGINAL_PSBT.clone())
-            })
+                PARSED_ORIGINAL_PSBT.clone(),
+            )
             .expect_err("Should fail when ntxid mismatches");
         assert!(err.to_string().contains("ntxid mismatch"));
 
-        // Outcome 3: wallet_process_psbt succeeds → Ok(Psbt)
+        // Outcome 2: wallet_process_psbt succeeds → Ok(Psbt)
         let _psbt = psbt_context
-            .finalize_proposal(|_| Ok(PARSED_PAYJOIN_PROPOSAL.clone()))
+            .finalize_signed_proposal(PARSED_PAYJOIN_PROPOSAL.clone())
             .expect("Should succeed when wallet_process_psbt returns a valid signed psbt");
     }
 
@@ -1135,14 +1379,12 @@ pub(crate) mod tests {
             .first()
             .expect("test vector has at least one sender input");
 
+        // Sign a sender-side input.
+        let mut signed = psbt_context.psbt_to_sign();
+        signed.inputs[sender_i].final_script_witness =
+            Some(bitcoin::Witness::from_slice(&[vec![0x01u8]]));
         let err = psbt_context
-            .finalize_proposal(|to_sign| {
-                // Sign a sender-side input.
-                let mut signed = to_sign.clone();
-                signed.inputs[sender_i].final_script_witness =
-                    Some(bitcoin::Witness::from_slice(&[vec![0x01u8]]));
-                Ok(signed)
-            })
+            .finalize_signed_proposal(signed)
             .expect_err("finalize must reject a signed sender input");
         assert!(err.to_string().contains("unexpected signature"), "unexpected error: {err}");
     }

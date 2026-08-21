@@ -421,9 +421,6 @@ impl InitialReceiveTransition {
     }
 }
 
-#[derive(Clone, Debug, uniffi::Object)]
-pub struct ReceiverBuilder(payjoin::receive::v2::ReceiverBuilder);
-
 /// Primitive representation of a transaction output for the FFI boundary.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Record)]
 pub struct TxOut {
@@ -471,7 +468,7 @@ impl TxIn {
 }
 
 /// Primitive representation of an outpoint for the FFI boundary.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, uniffi::Record)]
 pub struct OutPoint {
     /// Hex-encoded txid (big-endian).
     pub txid: String,
@@ -534,6 +531,9 @@ impl Weight {
 impl From<payjoin::bitcoin::Weight> for Weight {
     fn from(value: payjoin::bitcoin::Weight) -> Self { Weight { weight_units: value.to_wu() } }
 }
+
+#[derive(Clone, Debug, uniffi::Object)]
+pub struct ReceiverBuilder(payjoin::receive::v2::ReceiverBuilder);
 
 #[uniffi::export]
 impl ReceiverBuilder {
@@ -815,6 +815,37 @@ impl UncheckedOriginalPayload {
         )))))
     }
 
+    /// Extract the transaction from the Original PSBT for external broadcast suitability checks.
+    ///
+    /// Submit the result of the check to [`UncheckedOriginalPayload::apply_broadcast_suitability`].
+    ///
+    /// Returns the consensus-encoded raw transaction bytes.
+    pub fn extract_tx_to_check_broadcast_suitability(&self) -> Vec<u8> {
+        payjoin::bitcoin::consensus::encode::serialize(
+            &self.0.clone().extract_tx_to_check_broadcast_suitability(),
+        )
+    }
+
+    /// Apply the result of an external broadcast suitability check, ensuring
+    /// the Original PSBT can be used as a fallback if the payjoin does
+    /// not complete.
+    ///
+    /// Use [`UncheckedOriginalPayload::extract_tx_to_check_broadcast_suitability`] to obtain
+    /// the transaction that needs to be checked.
+    ///
+    /// Returns an [`UncheckedOriginalPayloadTransition`] that, once persisted,
+    /// yields a [`MaybeInputsOwned`] to continue validation.
+    pub fn apply_broadcast_suitability(
+        &self,
+        min_fee_rate_sat_per_kwu: Option<u64>,
+        is_broadcast_suitable: bool,
+    ) -> Result<UncheckedOriginalPayloadTransition, FfiValidationError> {
+        let min_fee_rate = validate_fee_rate_sat_per_kwu_opt(min_fee_rate_sat_per_kwu)?;
+        Ok(UncheckedOriginalPayloadTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().apply_broadcast_suitability(min_fee_rate, is_broadcast_suitable),
+        )))))
+    }
+
     /// Call this method if the only way to initiate a Payjoin with this receiver
     /// requires manual intervention, as in most consumer wallets.
     ///
@@ -825,6 +856,65 @@ impl UncheckedOriginalPayload {
             self.0.clone().assume_interactive_receiver(),
         ))))
     }
+}
+
+trait FfiMarkedChecklistItem<V> {
+    fn result(&self) -> bool;
+    fn value(&self) -> V;
+}
+
+fn to_marked_checklist<K, R, Vffi>(
+    checklist: impl Iterator<Item = payjoin::receive::ChecklistItem<K>>,
+    ffi_marked_checklist: Vec<Arc<R>>,
+) -> Result<
+    impl Iterator<Item = payjoin::receive::MarkedChecklistItem<K>>,
+    payjoin::error::ImplementationError,
+>
+where
+    K: payjoin::receive::ChecklistKind,
+    R: FfiMarkedChecklistItem<Vffi>,
+    Vffi: From<K::Value> + PartialEq,
+{
+    payjoin::receive::mark_checklist(checklist, &mut move |item: &K::Value| {
+        let found_result = ffi_marked_checklist.iter().find_map(|marked_item| {
+            if Vffi::from(item.clone()) == marked_item.value() {
+                Some(marked_item.result())
+            } else {
+                None
+            }
+        });
+        match found_result {
+            Some(result) => Ok(result),
+            None => {
+                let msg = format!("Checklist item {item:?} has not been marked with a result");
+                Err(payjoin::ImplementationError::from(msg.as_str()))
+            }
+        }
+    })
+}
+
+#[derive(Debug, uniffi::Object)]
+pub struct InputOwnedChecklistItem(
+    payjoin::receive::ChecklistItem<payjoin::receive::InputOwnership>,
+);
+
+#[uniffi::export]
+impl InputOwnedChecklistItem {
+    pub fn value(&self) -> OutPoint { (*self.0.value()).into() }
+    pub fn mark(&self, result: bool) -> Arc<MarkedInputOwnedChecklistItem> {
+        Arc::new(MarkedInputOwnedChecklistItem { value: self.value(), result })
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Object)]
+pub struct MarkedInputOwnedChecklistItem {
+    value: OutPoint,
+    result: bool,
+}
+
+impl FfiMarkedChecklistItem<OutPoint> for MarkedInputOwnedChecklistItem {
+    fn result(&self) -> bool { self.result }
+    fn value(&self) -> OutPoint { self.value.clone() }
 }
 
 #[derive(Clone, uniffi::Object)]
@@ -900,6 +990,62 @@ impl MaybeInputsOwned {
             }),
         ))))
     }
+
+    /// Get the inputs owned checklist for external ownership verification.
+    ///
+    /// Each item can be marked with the result via [`InputOwnedChecklistItem::mark`]
+    /// and passed to [`MaybeInputsOwned::apply_inputs_owned_checklist`].
+    pub fn inputs_owned_checklist(&self) -> Vec<Arc<InputOwnedChecklistItem>> {
+        self.0
+            .clone()
+            .inputs_owned_checklist()
+            .map(|item| Arc::new(InputOwnedChecklistItem(item)))
+            .collect()
+    }
+
+    /// Apply the results of the input ownership checklist, ensuring none of the
+    /// inputs are owned by the receiver. This prevents an attacker from spending
+    /// the receiver's own inputs.
+    ///
+    /// Use [`MaybeInputsOwned::inputs_owned_checklist`] to obtain the items that need to be checked.
+    ///
+    /// Returns a [`MaybeInputsOwnedTransition`] that, once persisted,
+    /// yields a [`MaybeInputsSeen`] to continue validation.
+    pub fn apply_inputs_owned_checklist(
+        &self,
+        marked_checklist: Vec<Arc<MarkedInputOwnedChecklistItem>>,
+    ) -> Result<MaybeInputsOwnedTransition, ReceiverError> {
+        let checklist = self.0.clone().inputs_owned_checklist();
+        let marked_checklist = to_marked_checklist(checklist, marked_checklist)
+            .map_err(|e| ReceiverError::Implementation(Arc::new(ImplementationError::from(e))))?;
+        Ok(MaybeInputsOwnedTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().apply_inputs_owned_checklist(marked_checklist),
+        )))))
+    }
+}
+
+#[derive(Debug, uniffi::Object)]
+pub struct InputSeenChecklistItem(
+    payjoin::receive::ChecklistItem<payjoin::receive::InputSeenBefore>,
+);
+
+#[uniffi::export]
+impl InputSeenChecklistItem {
+    pub fn value(&self) -> OutPoint { (*self.0.value()).into() }
+    pub fn mark(&self, result: bool) -> Arc<MarkedInputSeenChecklistItem> {
+        Arc::new(MarkedInputSeenChecklistItem { value: self.value(), result })
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Object)]
+pub struct MarkedInputSeenChecklistItem {
+    value: OutPoint,
+    result: bool,
+}
+
+impl FfiMarkedChecklistItem<OutPoint> for MarkedInputSeenChecklistItem {
+    fn result(&self) -> bool { self.result }
+    fn value(&self) -> OutPoint { self.value.clone() }
 }
 
 #[derive(Clone, uniffi::Object)]
@@ -958,6 +1104,62 @@ impl MaybeInputsSeen {
             }),
         ))))
     }
+
+    /// Get the inputs seen checklist for external outpoint seen verification.
+    ///
+    /// Each item can be marked with the result via [`InputSeenChecklistItem::mark`]
+    /// and passed to [`MaybeInputsSeen::apply_inputs_seen_checklist`].
+    pub fn inputs_seen_checklist(&self) -> Vec<Arc<InputSeenChecklistItem>> {
+        self.0
+            .clone()
+            .inputs_seen_checklist()
+            .map(|item| Arc::new(InputSeenChecklistItem(item)))
+            .collect::<Vec<_>>()
+    }
+
+    /// Apply the results of the outpoint seen checklist, ensuring none of
+    /// the inputs have been seen before. This prevents input probing and replay
+    /// attacks (where inputs have been used in a previous payjoin attempt).
+    ///
+    /// Use [`MaybeInputsSeen::inputs_seen_checklist`] to obtain the items that need to be checked.
+    ///
+    /// Returns a [`MaybeInputsSeenTransition`] that, once persisted,
+    /// yields an [`OutputsUnknown`] to continue validation.
+    pub fn apply_inputs_seen_checklist(
+        &self,
+        marked_checklist: Vec<Arc<MarkedInputSeenChecklistItem>>,
+    ) -> Result<MaybeInputsSeenTransition, ReceiverError> {
+        let checklist = self.0.clone().inputs_seen_checklist();
+        let marked_checklist = to_marked_checklist(checklist, marked_checklist)
+            .map_err(|e| ReceiverError::Implementation(Arc::new(ImplementationError::from(e))))?;
+        Ok(MaybeInputsSeenTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().apply_inputs_seen_checklist(marked_checklist),
+        )))))
+    }
+}
+
+#[derive(Debug, uniffi::Object)]
+pub struct OutputOwnedChecklistItem(
+    payjoin::receive::ChecklistItem<payjoin::receive::OutputOwnership>,
+);
+
+#[uniffi::export]
+impl OutputOwnedChecklistItem {
+    pub fn value(&self) -> Vec<u8> { self.0.value().to_bytes() }
+    pub fn mark(&self, result: bool) -> Arc<MarkedOutputOwnedChecklistItem> {
+        Arc::new(MarkedOutputOwnedChecklistItem { value: self.value(), result })
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Object)]
+pub struct MarkedOutputOwnedChecklistItem {
+    value: Vec<u8>,
+    result: bool,
+}
+
+impl FfiMarkedChecklistItem<Vec<u8>> for MarkedOutputOwnedChecklistItem {
+    fn result(&self) -> bool { self.result }
+    fn value(&self) -> Vec<u8> { self.value.clone() }
 }
 
 /// The receiver has not yet identified which outputs belong to the receiver.
@@ -1011,6 +1213,38 @@ impl OutputsUnknown {
                     .map_err(|e| ImplementationError::new(e).into())
             }),
         ))))
+    }
+
+    /// Get the outputs owned checklist for external ownership verification.
+    ///
+    /// Each item can be marked with the result via [`OutputOwnedChecklistItem::mark`]
+    /// and passed to [`OutputsUnknown::apply_outputs_owned_checklist`].
+    pub fn outputs_owned_checklist(&self) -> Vec<Arc<OutputOwnedChecklistItem>> {
+        self.0
+            .clone()
+            .outputs_owned_checklist()
+            .map(|item| Arc::new(OutputOwnedChecklistItem(item)))
+            .collect::<Vec<_>>()
+    }
+
+    /// Apply the results of the output ownership checklist, identifying which
+    /// outputs in the original transaction belong to the receiver and ensuring
+    /// at least one output pays the receiver.
+    ///
+    /// Use [`OutputsUnknown::outputs_owned_checklist`] to obtain the items that need to be checked.
+    ///
+    /// Returns an [`OutputsUnknownTransition`] that, once persisted,
+    /// yields a [`WantsOutputs`] to continue the proposal.
+    pub fn apply_outputs_owned_checklist(
+        &self,
+        marked_checklist: Vec<Arc<MarkedOutputOwnedChecklistItem>>,
+    ) -> Result<OutputsUnknownTransition, ReceiverError> {
+        let checklist = self.0.clone().outputs_owned_checklist();
+        let marked_checklist = to_marked_checklist(checklist, marked_checklist)
+            .map_err(|e| ReceiverError::Implementation(Arc::new(ImplementationError::from(e))))?;
+        Ok(OutputsUnknownTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().apply_outputs_owned_checklist(marked_checklist),
+        )))))
     }
 }
 
@@ -1326,7 +1560,26 @@ impl ProvisionalProposal {
     }
 
     /// Extract the PSBT that needs to be signed by the receiver's wallet.
+    ///
+    /// Submit the signed PSBT to [`ProvisionalProposal::finalize_signed_proposal`].
     pub fn psbt_to_sign(&self) -> String { self.0.clone().psbt_to_sign().to_string() }
+
+    /// Finalize the proposal with a signed PSBT.
+    ///
+    /// Use [`ProvisionalProposal::psbt_to_sign`] to obtain the unsigned PSBT for the receiver
+    /// to sign and return here.
+    ///
+    /// Returns a [`ProvisionalProposalTransition`] that, once persisted,
+    /// yields the final [`PayjoinProposal`].
+    pub fn finalize_signed_proposal(
+        &self,
+        signed_psbt: String,
+    ) -> Result<ProvisionalProposalTransition, ImplementationError> {
+        let signed_psbt = Psbt::from_str(&signed_psbt).map_err(ImplementationError::new)?;
+        Ok(ProvisionalProposalTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().finalize_signed_proposal(&signed_psbt),
+        )))))
+    }
 }
 
 #[derive(Clone, uniffi::Object)]
@@ -1588,11 +1841,12 @@ fn try_deserialize_tx(
 
 #[uniffi::export]
 impl Monitor {
-    /// Check the network for the payjoin or fallback transaction via the
-    /// `find_transaction` callback.
+    /// Check the network for the payjoin or fallback transaction via the `find_transaction`
+    /// callback.
     ///
-    /// Returns a [`MonitorTransition`] that, once persisted, completes
-    /// the session if a transaction is found.
+    /// Returns a [`MonitorTransition`] that, once successfully persisted, either
+    /// concludes the session if a transaction is found, or yields a [`Monitor`] to
+    /// remain in stasis if no transaction is found yet.
     pub fn check_for_transaction(
         &self,
         find_transaction: Arc<dyn TransactionFinder>,
@@ -1605,6 +1859,65 @@ impl Monitor {
                     .map_err(|e| ImplementationError::new(e).into())
             },
         )))))
+    }
+
+    /// Extract the txid of the fallback transaction to look it up on the network.
+    ///
+    /// Call [`Monitor::fallback_tx_exists`] to conclude the session if the
+    /// fallback has been found on the network.
+    ///
+    /// Returns the fallback transaction's txid.
+    pub fn extract_fallback_txid(&self) -> String {
+        self.0.clone().extract_fallback_txid().to_string()
+    }
+
+    /// Extract the txid of the Payjoin proposal transaction to look it up on the network.
+    ///
+    /// Pass the Payjoin proposal transaction to [`Monitor::payjoin_tx_exists`] to
+    /// conclude the session.
+    ///
+    /// Returns the Payjoin proposal transaction's txid.
+    pub fn extract_payjoin_proposal_txid(&self) -> String {
+        self.0.clone().extract_payjoin_proposal_txid().to_string()
+    }
+
+    /// Conclude the session when the Payjoin proposal's txid cannot be tracked.
+    ///
+    /// When the sender spends non-SegWit inputs the proposal txid changes once they sign,
+    /// so its broadcast cannot be monitored; see
+    /// [`Monitor::proposal_txid_is_stable`].
+    ///
+    /// Returns a [`MonitorTransition`] that, once successfully persisted, closes
+    /// the session with `SessionOutcome::PayjoinProposalSent`.
+    pub fn payjoin_sent(&self) -> MonitorTransition {
+        MonitorTransition(Arc::new(RwLock::new(Some(self.0.clone().payjoin_sent()))))
+    }
+
+    /// Conclude the session when the fallback transaction has been found on the network.
+    ///
+    /// Use [`Monitor::extract_fallback_txid`] to obtain the txid to look up.
+    ///
+    /// Returns a [`MonitorTransition`] that, once successfully persisted, closes
+    /// the session with `SessionOutcome::FallbackBroadcasted`.
+    pub fn fallback_tx_exists(&self) -> MonitorTransition {
+        MonitorTransition(Arc::new(RwLock::new(Some(self.0.clone().fallback_tx_exists()))))
+    }
+
+    /// Conclude the session when the Payjoin proposal transaction has been found on the
+    /// network.
+    ///
+    /// Use [`Monitor::extract_payjoin_proposal_txid`] to obtain the txid to look
+    /// up, then pass the found transaction here. If its txid does not match the proposal, a
+    /// transient error is returned so the caller can retry.
+    ///
+    /// Returns a [`MonitorTransition`] that, once successfully persisted, closes
+    /// the session with `SessionOutcome::Success`.
+    pub fn payjoin_tx_exists(
+        &self,
+        payjoin_tx: Vec<u8>,
+    ) -> Result<MonitorTransition, ForeignError> {
+        let tx = try_deserialize_tx(payjoin_tx)?;
+        Ok(MonitorTransition(Arc::new(RwLock::new(Some(self.0.clone().payjoin_tx_exists(tx))))))
     }
 }
 

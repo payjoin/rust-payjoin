@@ -3,6 +3,7 @@ use std::{error, fmt};
 use crate::error_codes::ErrorCode::{
     self, NotEnoughMoney, OriginalPsbtRejected, Unavailable, VersionUnsupported,
 };
+use crate::ImplementationError;
 
 /// The top-level error type for the payjoin receiver
 #[derive(Debug)]
@@ -27,6 +28,10 @@ impl From<&Error> for JsonReply {
 
 impl From<ProtocolError> for Error {
     fn from(e: ProtocolError) -> Self { Error::Protocol(e) }
+}
+
+impl From<ImplementationError> for Error {
+    fn from(e: ImplementationError) -> Self { Error::Implementation(e) }
 }
 
 impl fmt::Display for Error {

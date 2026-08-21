@@ -24,8 +24,8 @@ impl PjParam {
     pub(crate) fn endpoint(&self) -> Url { self.0.clone() }
 }
 
-impl std::fmt::Display for PjParam {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for PjParam {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // Use the same display logic as the encapsulated child Url
         self.0.fmt(f)
     }

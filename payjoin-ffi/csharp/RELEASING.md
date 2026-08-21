@@ -7,12 +7,19 @@ package readme.
 ## Versioning
 
 - The package version is set in `Payjoin.csproj` (`<Version>`).
-- It tracks the `payjoin-ffi` crate version from `payjoin-ffi/Cargo.toml`,
-  with a `-preview.N` suffix while the C# API stabilizes. For example,
-  `0.24.0-preview.1` packages `payjoin-ffi 0.24.0`. Pre-release suffixes
-  follow [SemVer], per NuGet's [package versioning] guidance.
-- Bump only the `-preview.N` suffix for packaging-only fixes. Bump
-  `MAJOR.MINOR.PATCH` together with a `payjoin-ffi` version bump.
+- It is the package's own semantic version, independent of the
+  `payjoin-ffi` crate version. The language bindings follow a
+  `{version}+payjoin-{version}` convention: the [SemVer] build metadata
+  names the wrapped payjoin core release, so `0.1.0+payjoin-1.0.0`
+  packages payjoin 1.0.0. NuGet accepts build metadata per its
+  [package versioning] guidance but ignores it for version comparison
+  and strips it from the `.nupkg` filename, so the package identity is
+  the bare version.
+- Bump `MAJOR.MINOR.PATCH` for C# API changes, and update the build
+  metadata whenever the wrapped payjoin core version changes.
+- Versions up to `0.24.0-preview.1` tracked the `payjoin-ffi` crate
+  version instead. They predate this scheme and are unlisted on
+  nuget.org so they do not resolve as the latest version.
 - `Payjoin.csproj` is the only place the version is maintained: the CI smoke
   test derives the version from the packed artifact.
 
@@ -57,8 +64,9 @@ Review before every publish to nuget.org. Grounded in the NuGet
 - [ ] Native assets are release-profile builds without `_test-utils` (the
       pack step's validation target enforces both; confirm it ran in CI).
 - [ ] The package is under nuget.org's 250 MB size limit.
-- [ ] Package version in `Payjoin.csproj` matches `payjoin-ffi`'s crate
-      version plus the intended pre-release suffix.
+- [ ] Package version in `Payjoin.csproj` carries the intended C# version
+      and its `+payjoin-{version}` build metadata matches the wrapped
+      payjoin core release.
 
 ### Metadata and trust
 
@@ -105,11 +113,14 @@ is ever stored. The workflow is
 1. Work through the release readiness checklist above on the release commit in
    `master`; confirm every `Build and Test CSharp` job is green.
 2. Tag that commit `payjoin-csharp-<version>`, where `<version>` is the
-   `Payjoin.csproj` `<Version>` exactly, and push the tag:
+   `Payjoin.csproj` `<Version>` without its build metadata — the
+   normalized version NuGet uses in the `Payjoin.<version>.nupkg`
+   filename, which the publish job verifies the tag against — and push
+   the tag:
 
    ```shell
-   git tag payjoin-csharp-0.24.0-preview.1
-   git push upstream payjoin-csharp-0.24.0-preview.1
+   git tag payjoin-csharp-0.1.0
+   git push upstream payjoin-csharp-0.1.0
    ```
 
    The tag reruns the full build/pack/smoke graph at the tagged commit, then

@@ -36,9 +36,9 @@ A sender session starts from a BIP 21 URI scanned from the receiver (`Payjoin.Ur
 
 Sessions persist each step to an event log through a persister you implement over your own storage; replaying the log with `PayjoinMethods.ReplayReceiverEventLog` recovers the current state after a crash or restart. Every `Save` has a `SaveAsync` counterpart, with async persister interfaces for database-backed storage.
 
-## Preview status
+## Stability
 
-The package is in preview while the C# API stabilizes alongside the Rust core's 1.0 release candidates. Expect breaking changes between previews; the package version tracks the underlying `payjoin-ffi` crate.
+The package is pre-1.0 while the C# API stabilizes; expect breaking changes between 0.x releases. The version's build metadata names the wrapped payjoin core release, so `0.1.0+payjoin-1.0.0` packages payjoin 1.0.0, the first stable payjoin release.
 
 ## Documentation and help
 

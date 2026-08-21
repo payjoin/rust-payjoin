@@ -8,7 +8,12 @@ lives in [`README.md`](README.md).
 
 - The package version is set in `package.json`.
 - It is the package's own semantic version, independent of the
-  `payjoin-ffi` crate version while the JavaScript API stabilizes.
+  `payjoin-ffi` crate version. The language bindings follow a
+  `{version}+payjoin-{version}` convention where the build metadata
+  names the wrapped payjoin core release, but npm strips build metadata
+  from published versions, so `package.json` carries the bare version
+  and records the full one in a `releaseTag` field for traceability.
+  Keep `releaseTag` in sync when bumping the version.
 - `package.json` is the only place the version is maintained: the publish
   job derives the version from the packed tarball and refuses to publish
   if it does not match the pushed tag.
@@ -29,8 +34,8 @@ TypeScript), which is platform-independent.
    be on `master`; `verify-tag` refuses to publish otherwise.
 
     ```shell
-    git tag -s payjoin-javascript-0.1.1 -m payjoin-javascript-0.1.1
-    git push upstream payjoin-javascript-0.1.1
+    git tag -s payjoin-javascript-0.2.0 -m payjoin-javascript-0.2.0
+    git push upstream payjoin-javascript-0.2.0
     ```
 
     The tag reruns the full build/pack/smoke graph at the tagged commit,

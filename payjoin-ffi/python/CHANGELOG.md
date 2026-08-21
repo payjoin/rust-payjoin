@@ -1,3 +1,13 @@
+## [0.2.0]
+
+- Bindings for payjoin-1.0.0, the first stable payjoin release
+- The package now carries its own version, independent of the
+  payjoin-ffi crate version: 0.2.0 succeeds 0.1.0.dev0, the only version
+  previously published to PyPI. Earlier entries in this changelog used
+  the crate version
+- See the [payjoin-ffi changelog](../CHANGELOG.md) for the shared API
+  changes since 0.20.0
+
 ## [0.20.0]
 
 #### APIs added

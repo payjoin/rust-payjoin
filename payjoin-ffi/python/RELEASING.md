@@ -6,12 +6,17 @@ Maintainer documentation for publishing the `payjoin` package to
 
 ## Versioning
 
-- The package version is the `payjoin-ffi` crate version: `setup.py` reads
-  it from `payjoin-ffi/Cargo.toml` at build time, so a release always
-  requires the crate version to be correct first.
-- There is no separate Python version to maintain: the publish job derives
-  the version from the built wheels and refuses to publish if it does not
-  match the pushed tag.
+- The package version is set in `pyproject.toml` (`project.version`).
+- It is the package's own semantic version, independent of the
+  `payjoin-ffi` crate version. The language bindings follow a
+  `{version}+payjoin-{version}` convention where the build metadata
+  names the wrapped payjoin core release, but PyPI rejects PEP 440
+  local version labels (the `+` part), so the package publishes the
+  bare version and the wrapped payjoin core version is recorded in
+  [`CHANGELOG.md`](CHANGELOG.md) instead.
+- `pyproject.toml` is the only place the version is maintained: the
+  publish job derives the version from the built wheels and refuses to
+  publish if it does not match the pushed tag.
 
 ## Producing the wheels
 
@@ -35,13 +40,13 @@ CPython satisfying `requires-python` can install them.
 1. Confirm every `Build and Test Python` job is green on the release
    commit in `master`, including the per-platform smoke tests.
 2. Tag that commit `payjoin-python-<version>`, where `<version>` is the
-   `payjoin-ffi` crate version exactly. The tag must be annotated and
+   `pyproject.toml` version exactly. The tag must be annotated and
    signed by a maintainer key in `contrib/release/keys/`, and the tagged
    commit must be on `master`; `verify-tag` refuses to publish otherwise.
 
    ```shell
-   git tag -s payjoin-python-0.24.0 -m payjoin-python-0.24.0
-   git push upstream payjoin-python-0.24.0
+   git tag -s payjoin-python-0.2.0 -m payjoin-python-0.2.0
+   git push upstream payjoin-python-0.2.0
    ```
 
    The tag reruns the full build/wheel/smoke graph at the tagged commit,

@@ -283,7 +283,7 @@ public class ValidationTests
     {
         var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
         
-        Assert.Throws<ReceiverBuilderException.InvalidAddress>(() =>
+        Assert.Throws<BuildReceiverException.InvalidAddress>(() =>
         {
             new ReceiverBuilder("not-an-address", "https://example.com", ohttpKeys);
         });

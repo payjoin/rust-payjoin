@@ -122,7 +122,7 @@ impl_persisted_error_from!(payjoin::IntoUrlError, |api_err: payjoin::IntoUrlErro
 /// Error that may occur when building a receiver session.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[non_exhaustive]
-pub enum ReceiverBuilderError {
+pub enum BuildReceiverError {
     /// The provided Bitcoin address is invalid.
     #[error("Invalid Bitcoin address: {0}")]
     InvalidAddress(Arc<AddressParseError>),
@@ -131,15 +131,15 @@ pub enum ReceiverBuilderError {
     IntoUrl(Arc<IntoUrlError>),
 }
 
-impl From<payjoin::IntoUrlError> for ReceiverBuilderError {
+impl From<payjoin::IntoUrlError> for BuildReceiverError {
     fn from(value: payjoin::IntoUrlError) -> Self {
-        ReceiverBuilderError::IntoUrl(Arc::new(value.into()))
+        BuildReceiverError::IntoUrl(Arc::new(value.into()))
     }
 }
 
-impl From<payjoin::bitcoin::address::ParseError> for ReceiverBuilderError {
+impl From<payjoin::bitcoin::address::ParseError> for BuildReceiverError {
     fn from(value: payjoin::bitcoin::address::ParseError) -> Self {
-        ReceiverBuilderError::InvalidAddress(Arc::new(value.into()))
+        BuildReceiverError::InvalidAddress(Arc::new(value.into()))
     }
 }
 

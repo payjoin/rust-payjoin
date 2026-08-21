@@ -357,6 +357,8 @@
               rustVersions.msrv
               dart
               bzip2
+              curl
+              jq
             ]
             ++ lib.optionals pkgs.stdenv.isLinux [
               pkg-config

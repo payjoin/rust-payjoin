@@ -34,3 +34,9 @@ name = "url_decode_url"
 path = "fuzz_targets/url/decode_url.rs"
 doc = false
 bench = false
+
+[[bin]]
+name = "directory_short_id"
+path = "fuzz_targets/directory/short_id.rs"
+doc = false
+bench = false

@@ -261,8 +261,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/payjoin-csharp-')
     environment: release
     permissions:
-      id-token: write # OIDC: used by BOTH NuGet/login and attest-build-provenance
-      attestations: write # actions/attest-build-provenance writes the attestation
+      id-token: write # OIDC: used by BOTH NuGet/login and actions/attest
+      attestations: write # actions/attest writes the attestation
       contents: read # needed only to check out the in-repo verify-tag-version action
     steps:
       - name: Checkout
@@ -305,7 +305,7 @@ jobs:
       - name: Attest build provenance (nupkg)
         # Attesting the .nupkg covers every RID native lib inside it; a consumer
         # runs: gh attestation verify <file>.nupkg -R payjoin/rust-payjoin
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest@v4
         with:
           subject-path: ${{ steps.locate.outputs.nupkg }}
 

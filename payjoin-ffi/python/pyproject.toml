@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=83", "wheel", "toml"]
+requires = ["setuptools>=83", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,7 @@ description = "The Python language bindings for the Payjoin Dev Kit"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-dynamic = ["version"]
+version = "0.2.0"
 dependencies = ["httpx>=0.28.1,<1.0"]
 
 [tool.setuptools]
@@ -20,4 +20,4 @@ include-package-data = true
 pythonpath = ["."]
 
 [dependency-groups]
-dev = ["toml==0.10.2", "yapf==0.43.0"]
+dev = ["yapf==0.43.0"]

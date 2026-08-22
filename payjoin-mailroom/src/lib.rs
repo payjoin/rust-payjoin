@@ -29,7 +29,7 @@ pub mod ohttp_relay;
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
 
-use crate::metrics::MetricsService;
+use crate::metrics::{ExportPolicy, MetricsService};
 use crate::middleware::{track_connections, track_metrics};
 
 type DirectoryService =
@@ -46,7 +46,7 @@ struct Services {
 
 pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> anyhow::Result<()> {
     let sentinel_tag = generate_sentinel_tag();
-    let metrics = MetricsService::new(meter_provider);
+    let metrics = build_metrics(&config, meter_provider);
 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
@@ -169,7 +169,7 @@ pub async fn serve_acme(
         .ok_or_else(|| anyhow::anyhow!("ACME configuration is required for serve_acme"))?;
 
     let sentinel_tag = generate_sentinel_tag();
-    let metrics = MetricsService::new(meter_provider);
+    let metrics = build_metrics(&config, meter_provider);
 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
@@ -228,6 +228,29 @@ pub async fn serve_acme(
 /// The relay and directory share this tag in a best-effort attempt
 /// at detecting self loops.
 fn generate_sentinel_tag() -> SentinelTag { SentinelTag::new(rand::thread_rng().gen()) }
+
+/// Builds the metrics service for a server process.
+///
+/// Precise instruments always stay in-process. When an export provider is
+/// present, the only instruments registered on it are the coarse
+/// settled-window gauges filtered through the operator's export policy:
+/// nothing precise, live, or below-threshold leaves the operator boundary.
+fn build_metrics(config: &Config, export_provider: Option<SdkMeterProvider>) -> MetricsService {
+    match export_provider {
+        Some(provider) => MetricsService::with_export(&provider, export_policy(config)),
+        None => MetricsService::new(None),
+    }
+}
+
+fn export_policy(config: &Config) -> ExportPolicy {
+    #[cfg(feature = "telemetry")]
+    if let Some(telemetry) = &config.telemetry {
+        return telemetry.export_policy();
+    }
+    #[cfg(not(feature = "telemetry"))]
+    let _ = config;
+    ExportPolicy::default()
+}
 
 #[cfg(feature = "access-control")]
 impl Connected<IncomingStream<'_, Listener>> for middleware::MaybePeerIp {

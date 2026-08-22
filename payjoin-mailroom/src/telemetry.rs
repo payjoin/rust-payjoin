@@ -10,8 +10,31 @@ use opentelemetry::KeyValue;
 use opentelemetry_http::hyper::HyperClient;
 use opentelemetry_http::{Bytes, HttpClient, HttpError, Request, Response};
 use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
-use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::Resource;
+
+/// How often the exporter pushes to the collection endpoint.
+///
+/// Exported values cover one completed UTC reporting week. Daily delivery
+/// retries the same frozen value, avoiding a single weekly delivery attempt
+/// without exposing daily traffic volume.
+const EXPORT_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Resource attributes attached to every exported metric.
+///
+/// Built from an empty resource rather than the SDK default so nothing about
+/// the host environment leaks into the export: the default builder includes
+/// an environment detector (`OTEL_RESOURCE_ATTRIBUTES`) through which
+/// hostnames or other identifying attributes could silently join the stream.
+/// The export carries exactly the service name and a Foundation-issued opaque
+/// reporter ID. The ID is necessary only until a collector aggregates reports;
+/// its mapping to an operator belongs outside Grafana.
+pub(crate) fn export_resource(reporter_id: &str) -> Resource {
+    Resource::builder_empty()
+        .with_service_name("payjoin-mailroom")
+        .with_attribute(KeyValue::new("reporter.id", reporter_id.to_string()))
+        .build()
+}
 
 /// Build an OTLP/HTTP `SdkMeterProvider` pinned to the mailroom's `ring`
 /// crypto provider.
@@ -35,12 +58,9 @@ use opentelemetry_sdk::Resource;
 pub fn build_otlp_meter_provider(
     endpoint: &str,
     auth_token: &str,
-    operator_domain: &str,
+    reporter_id: &str,
 ) -> SdkMeterProvider {
-    let resource = Resource::builder()
-        .with_service_name("payjoin-mailroom")
-        .with_attribute(KeyValue::new("operator.domain", operator_domain.to_string()))
-        .build();
+    let resource = export_resource(reporter_id);
 
     let headers: std::collections::HashMap<String, String> =
         [("Authorization".to_string(), format!("Basic {auth_token}"))].into();
@@ -71,10 +91,9 @@ pub fn build_otlp_meter_provider(
         .build()
         .expect("Failed to build OTLP metric exporter");
 
-    SdkMeterProvider::builder()
-        .with_periodic_exporter(metric_exporter)
-        .with_resource(resource)
-        .build()
+    let reader = PeriodicReader::builder(metric_exporter).with_interval(EXPORT_INTERVAL).build();
+
+    SdkMeterProvider::builder().with_reader(reader).with_resource(resource).build()
 }
 
 /// `HttpClient` adapter that runs the inner client on a captured Tokio handle.
@@ -118,6 +137,23 @@ where
 mod tests {
     use super::*;
     use crate::metrics::MetricsService;
+
+    #[test]
+    fn exporter_retries_frozen_weekly_values_daily() {
+        assert_eq!(EXPORT_INTERVAL, Duration::from_secs(24 * 60 * 60));
+    }
+
+    /// The exported resource must carry exactly the service name and the
+    /// Foundation-issued opaque reporting identifier. Anything else (hostname,
+    /// IP, instance id, domain, env-injected attributes) could identify the operator's
+    /// infrastructure, so this pins the exact key set rather than a subset.
+    #[test]
+    fn export_resource_carries_only_allowlisted_attributes() {
+        let resource = export_resource("reporter-opaque-test-id");
+        let mut keys: Vec<&str> = resource.iter().map(|(key, _)| key.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["reporter.id", "service.name"]);
+    }
 
     /// Regression test for the OTLP transport swap (opentelemetry 0.32).
     ///

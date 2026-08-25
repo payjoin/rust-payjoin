@@ -27,6 +27,10 @@ void main(List<String> args) async {
         // resolves a relative --config path against its own working
         // directory, so pass the absolute one.
         if (isWorkspaceBuild) ...['--config', localCargoConfig.path],
+        // The overlay redirects `payjoin-ffi` to workspace paths, which
+        // changes resolution: --locked would refuse the resulting update.
+        // Consumers get the tracked production graph instead.
+        if (!isWorkspaceBuild) '--locked',
       ],
       extraCargoEnvironmentVariables: {
         'CARGO_ENCODED_RUSTFLAGS': composeEncodedRustFlags(

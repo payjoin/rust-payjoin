@@ -11,11 +11,25 @@ use_lockfile Cargo-recent.lock
 
 cd "$REPO_ROOT/payjoin-ffi/dart"
 
-echo "==> Cleaning nested Cargo.lock..."
-rm -f native/Cargo.lock
+echo "==> Testing the production lockfile checker..."
+bash ./contrib/check_production_lock_test.sh
+
+echo "==> Checking the production native Cargo.lock..."
+bash ./contrib/check_production_lock.sh native/Cargo.toml native/Cargo.lock
 
 echo "==> Generating FFI bindings..."
 bash ./scripts/generate_bindings.sh
 
+# The hook builds through .cargo/config.local.toml here, which redirects
+# payjoin-ffi to the workspace. That graph is not the one the production
+# lockfile pins, so Cargo has to resolve its own and would overwrite the
+# tracked file. Keep it aside for the run instead of losing it.
 echo "==> Running dart tests..."
-dart test
+production_lock=$(mktemp "${TMPDIR:-/tmp}/payjoin-native-lock.XXXXXX")
+cp native/Cargo.lock "$production_lock"
+rm -f native/Cargo.lock
+status=0
+dart test || status=$?
+cat "$production_lock" >native/Cargo.lock
+rm -f "$production_lock"
+exit "$status"

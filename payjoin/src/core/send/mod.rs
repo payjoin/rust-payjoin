@@ -427,6 +427,26 @@ impl PsbtContext {
                             InternalProposalError::SenderTxinNonAllSighashType,
                         )?;
                     }
+                    // BIP 78 says nothing about the receiver altering UTXO data on the
+                    // sender's inputs. Its reference implementation overwrites these
+                    // fields with the sender's own values without ever reading them,
+                    // and its proposal vectors return them unchanged. Rejecting a
+                    // mismatch is our policy, not a spec requirement; `is_none_or`
+                    // stays lenient toward receivers that strip what they do not need.
+                    ensure(
+                        proposed
+                            .psbtin
+                            .witness_utxo
+                            .as_ref()
+                            .is_none_or(|utxo| Some(utxo) == original.psbtin.witness_utxo.as_ref()),
+                        InternalProposalError::SenderTxinUtxoInfoChanged,
+                    )?;
+                    ensure(
+                        proposed.psbtin.non_witness_utxo.as_ref().is_none_or(|utxo| {
+                            Some(utxo) == original.psbtin.non_witness_utxo.as_ref()
+                        }),
+                        InternalProposalError::SenderTxinUtxoInfoChanged,
+                    )?;
                     original_inputs.next();
                 }
                 // theirs (receiver)
@@ -780,8 +800,16 @@ mod test {
         let originals = vec![txin(0), txin(1)];
 
         assert!(is_ordered_subsequence(&originals, &vec![txin(0), txin(1)]));
-        // A receiver input inserted between the sender's is allowed.
+        // Receiver inputs may be inserted before, between, and after the sender's.
         assert!(is_ordered_subsequence(&originals, &vec![txin(0), txin(9), txin(1)]));
+        assert!(is_ordered_subsequence(
+            &originals,
+            &vec![txin(3), txin(0), txin(9), txin(1), txin(3)]
+        ));
+        assert!(!is_ordered_subsequence(
+            &originals,
+            &vec![txin(3), txin(1), txin(9), txin(0), txin(3)]
+        ));
         assert!(!is_ordered_subsequence(&originals, &vec![txin(1), txin(0)]));
         assert!(!is_ordered_subsequence(&originals, &vec![txin(0)]));
     }
@@ -1290,6 +1318,68 @@ mod test {
                 ctx.process_proposal(proposal).unwrap_err().to_string(),
                 InternalProposalError::MissingOrShuffledInputs.to_string()
             );
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_witness_utxo_changed() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+            proposal.inputs[0]
+                .witness_utxo
+                .as_mut()
+                .expect("test sender input should have witness UTXO information")
+                .value += Amount::from_sat(1);
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::SenderTxinUtxoInfoChanged.to_string()
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_non_witness_utxo_changed() -> Result<(), BoxError> {
+            let mut ctx = create_psbt_context()?;
+            let previous_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx_unchecked_fee_rate();
+            ctx.original_psbt.inputs[0].non_witness_utxo = Some(previous_tx.clone());
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+            proposal.inputs[0].non_witness_utxo = Some(previous_tx);
+            proposal.inputs[0]
+                .non_witness_utxo
+                .as_mut()
+                .expect("test sender input should have non-witness UTXO information")
+                .output[0]
+                .value += Amount::from_sat(1);
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::SenderTxinUtxoInfoChanged.to_string()
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_utxo_info_unchanged_or_stripped() -> Result<(), BoxError> {
+            let mut ctx = create_psbt_context()?;
+            let previous_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx_unchecked_fee_rate();
+            ctx.original_psbt.inputs[0].non_witness_utxo = Some(previous_tx.clone());
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+            proposal.inputs[0].non_witness_utxo = Some(previous_tx);
+
+            // Both fields must be present and matching, or the unchanged case below
+            // passes vacuously through `is_none_or`.
+            assert!(proposal.inputs[0].witness_utxo.is_some());
+            assert_eq!(proposal.inputs[0].witness_utxo, ctx.original_psbt.inputs[0].witness_utxo);
+            assert!(proposal.inputs[0].non_witness_utxo.is_some());
+
+            assert!(ctx.clone().process_proposal(proposal.clone()).is_ok());
+
+            // Tolerate receivers that strip UTXO data they do not need.
+            proposal.inputs[0].witness_utxo = None;
+            proposal.inputs[0].non_witness_utxo = None;
+
+            assert!(ctx.process_proposal(proposal).is_ok());
             Ok(())
         }
 

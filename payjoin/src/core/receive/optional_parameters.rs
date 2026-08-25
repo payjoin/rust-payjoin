@@ -98,6 +98,9 @@ impl Params {
                         Ok(fee_rate_sat_per_vb) => {
                             // TODO Parse with serde when rust-bitcoin supports it
                             let fee_rate_sat_per_kwu = fee_rate_sat_per_vb * 250.0_f32;
+                            if !(fee_rate_sat_per_kwu.is_finite() && fee_rate_sat_per_kwu >= 0.0) {
+                                return Err(Error::FeeRate);
+                            }
                             // since it's a minimum, we want to round up
                             FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64)
                         }
@@ -182,5 +185,15 @@ pub(crate) mod test {
         let params = Params::from_query_pairs(invalid_pair.into_iter(), supported_versions);
         assert!(params.is_err());
         assert_eq!(params.err().unwrap(), Error::UnknownVersion { supported_versions });
+    }
+
+    #[test]
+    fn min_fee_rate_rejected_when_negative() {
+        // A finite negative rate must be rejected outright, not clamped to
+        // zero by the saturating `as u64` cast.
+        assert_eq!(
+            Params::from_query_str("minfeerate=-1", &[Version::One]).unwrap_err(),
+            Error::FeeRate
+        );
     }
 }

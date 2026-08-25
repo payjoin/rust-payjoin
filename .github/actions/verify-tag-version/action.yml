@@ -1,7 +1,10 @@
 name: Verify tag version
 description: >
-  Check that the pushed tag is the expected prefix followed by exactly the
-  version about to be published, refusing to publish on any mismatch.
+  Check that the pushed tag is the expected prefix followed by the version
+  about to be published, refusing to publish on any mismatch. Tags carry
+  the full `{version}+payjoin-{version}` string; when the packed version
+  has no build metadata (npm, PyPI, and NuGet artifacts cannot carry it),
+  the tag's metadata is stripped before comparing.
 inputs:
   tag-prefix:
     description: Expected tag prefix, e.g. payjoin-csharp-
@@ -30,8 +33,16 @@ runs:
           exit 1
         fi
         tag_version="${TAG#"$PREFIX"}"
-        if [[ $tag_version != "$VERSION" ]]; then
-          echo "::error::tag $TAG implies version $tag_version but the packed version is $VERSION; refusing to publish"
+        compare_version="$tag_version"
+        # A packed version without build metadata comes from a registry
+        # that cannot represent it, so the tag is compared with its
+        # metadata stripped; a packed version that carries metadata must
+        # match the tag exactly.
+        if [[ $VERSION != *+* ]]; then
+          compare_version="${tag_version%%+*}"
+        fi
+        if [[ $compare_version != "$VERSION" ]]; then
+          echo "::error::tag $TAG implies version $compare_version but the packed version is $VERSION; refusing to publish"
           exit 1
         fi
         echo "version=$tag_version" >>"$GITHUB_OUTPUT"

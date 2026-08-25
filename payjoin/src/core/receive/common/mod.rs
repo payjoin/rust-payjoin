@@ -561,7 +561,10 @@ impl WantsFeeRange {
             .output
             .iter()
             .fold(Weight::ZERO, |acc, txo| acc + txo.weight());
-        let output_contribution_weight = payjoin_outputs_weight - original_outputs_weight;
+        // If the receiver's substitution shrank the total output size, the
+        // contribution is negative; treat it as zero rather than underflowing.
+        let output_contribution_weight =
+            payjoin_outputs_weight.checked_sub(original_outputs_weight).unwrap_or(Weight::ZERO);
         tracing::trace!("output_contribution_weight : {output_contribution_weight}");
         output_contribution_weight
     }
@@ -1371,5 +1374,22 @@ mod tests {
             .calculate_psbt_with_fee_range(Some(fee_rate), Some(fee_rate))
             .expect("a fee exactly equal to the change value must not error");
         assert_eq!(psbt.unsigned_tx.output[0].value, Amount::ZERO);
+    }
+
+    // Substituting a receiver output script smaller than the original shrinks
+    // the total output weight; the Weight subtraction must saturate at zero
+    // instead of underflowing.
+    #[test]
+    fn shrinking_output_substitution_does_not_underflow() {
+        let original = original_from_test_vector();
+        let mut wants_fee_range =
+            WantsOutputs::new(original, vec![0]).commit_outputs().commit_inputs();
+        wants_fee_range.proposal.payjoin_psbt.unsigned_tx.output[0].script_pubkey =
+            ScriptBuf::new();
+
+        let psbt = wants_fee_range
+            .calculate_psbt_with_fee_range(None, None)
+            .expect("shrinking substitution must not underflow output weight");
+        assert!(psbt.unsigned_tx.output[0].script_pubkey.is_empty());
     }
 }

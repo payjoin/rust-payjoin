@@ -18,7 +18,7 @@
 
 use bitcoin::psbt::{Psbt, PsbtSighashType};
 use bitcoin::sighash::TapSighashType;
-use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
+use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxIn, TxOut, Weight};
 pub use error::{BuildSenderError, ResponseError, ValidationError, WellKnownError};
 pub(crate) use error::{InternalBuildSenderError, InternalProposalError, InternalValidationError};
 
@@ -285,6 +285,21 @@ fn commits_to_all_inputs_and_outputs(sighash_type: PsbtSighashType) -> bool {
     matches!(sighash_type.taproot_hash_ty(), Ok(TapSighashType::Default | TapSighashType::All))
 }
 
+/// Whether `originals` appear among `proposed` in the same relative order.
+///
+/// BIP 78 forbids the receiver from shuffling: its additional inputs "must be inserted at a
+/// random index", so the sender's inputs must survive as an ordered subsequence of the
+/// proposal's.
+fn is_ordered_subsequence<'a>(
+    originals: impl IntoIterator<Item = &'a TxIn>,
+    proposed: impl IntoIterator<Item = &'a TxIn>,
+) -> bool {
+    let mut proposed = proposed.into_iter();
+    originals
+        .into_iter()
+        .all(|original| proposed.any(|p| p.previous_output == original.previous_output))
+}
+
 impl PsbtContext {
     fn process_proposal(self, mut proposal: Psbt) -> InternalResult<Psbt> {
         self.basic_checks(&proposal)?;
@@ -367,6 +382,14 @@ impl PsbtContext {
         proposal: &Psbt,
         ensure_receiver_input_finalized: bool,
     ) -> InternalResult<()> {
+        ensure(
+            is_ordered_subsequence(
+                &self.original_psbt.unsigned_tx.input,
+                &proposal.unsigned_tx.input,
+            ),
+            InternalProposalError::MissingOrShuffledInputs,
+        )?;
+
         let mut original_inputs = self.original_psbt.input_pairs().peekable();
 
         for proposed in proposal.input_pairs() {
@@ -717,10 +740,11 @@ mod test {
     use bitcoin::absolute::LockTime;
     use bitcoin::bip32::{DerivationPath, Fingerprint};
     use bitcoin::ecdsa::Signature;
+    use bitcoin::hashes::Hash;
     use bitcoin::hex::FromHex;
     use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey, SECP256K1};
     use bitcoin::taproot::TaprootBuilder;
-    use bitcoin::{Amount, FeeRate, Script, ScriptBuf, Sequence, Witness};
+    use bitcoin::{Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Txid, Witness};
     use payjoin_test_utils::{
         BoxError, ADDITIONAL_FEE_OUTPUT_INDEX, MAX_ADDITIONAL_FEE_CONTRIBUTION,
         PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL, PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO,
@@ -745,6 +769,21 @@ mod test {
             min_fee_rate: FeeRate::ZERO,
             payee,
         })
+    }
+
+    #[test]
+    fn ordered_subsequence_requires_original_order() {
+        let txin = |vout| TxIn {
+            previous_output: OutPoint::new(Txid::all_zeros(), vout),
+            ..Default::default()
+        };
+        let originals = vec![txin(0), txin(1)];
+
+        assert!(is_ordered_subsequence(&originals, &vec![txin(0), txin(1)]));
+        // A receiver input inserted between the sender's is allowed.
+        assert!(is_ordered_subsequence(&originals, &vec![txin(0), txin(9), txin(1)]));
+        assert!(!is_ordered_subsequence(&originals, &vec![txin(1), txin(0)]));
+        assert!(!is_ordered_subsequence(&originals, &vec![txin(0)]));
     }
 
     #[test]
@@ -1238,6 +1277,19 @@ mod test {
                     original
                 }) if proposed == proposed_sequence && original == original_sequence
             ));
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_outpoint_changed() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+            proposal.unsigned_tx.input[0].previous_output.vout += 1;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::MissingOrShuffledInputs.to_string()
+            );
             Ok(())
         }
 

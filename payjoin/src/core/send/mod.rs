@@ -720,7 +720,7 @@ mod test {
     use bitcoin::hex::FromHex;
     use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey, SECP256K1};
     use bitcoin::taproot::TaprootBuilder;
-    use bitcoin::{Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Witness};
+    use bitcoin::{Amount, FeeRate, Script, ScriptBuf, Sequence, Witness};
     use payjoin_test_utils::{
         BoxError, ADDITIONAL_FEE_OUTPUT_INDEX, MAX_ADDITIONAL_FEE_CONTRIBUTION,
         PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL, PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO,
@@ -1397,14 +1397,9 @@ mod test {
             let ctx = create_psbt_context()?;
             let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
 
-            // If the outpoints are different, they are considered a receiver input and will be checked as such
-            let proposed_outpoint = proposal.unsigned_tx.input.first().unwrap().previous_output;
-            proposal.unsigned_tx.input.get_mut(0).unwrap().previous_output =
-                OutPoint::new(proposed_outpoint.txid, proposed_outpoint.vout + 1);
-
-            // Make the receiver's input un-finalized
-            proposal.inputs.get_mut(0).unwrap().final_script_sig = None;
-            proposal.inputs.get_mut(0).unwrap().final_script_witness = None;
+            // Make the receiver's input unfinalized.
+            proposal.inputs.get_mut(1).unwrap().final_script_sig = None;
+            proposal.inputs.get_mut(1).unwrap().final_script_witness = None;
 
             assert_eq!(
                 ctx.process_proposal(proposal).unwrap_err().to_string(),
@@ -1419,16 +1414,9 @@ mod test {
             let ctx = create_psbt_context()?;
             let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
 
-            // If the outpoints are different, they are considered a receiver input and will be checked as such
-            let proposed_outpoint = proposal.unsigned_tx.input.first().unwrap().previous_output;
-            proposal.unsigned_tx.input.get_mut(0).unwrap().previous_output =
-                OutPoint::new(proposed_outpoint.txid, proposed_outpoint.vout + 1);
-            proposal.inputs.get_mut(0).unwrap().final_script_sig = Some(ScriptBuf::new());
-            proposal.inputs.get_mut(0).unwrap().final_script_witness = Some(Witness::new());
-
-            // Make the receiver's input un-finalized
-            proposal.inputs.get_mut(0).unwrap().witness_utxo = None;
-            proposal.inputs.get_mut(0).unwrap().non_witness_utxo = None;
+            // Remove the receiver's UTXO information.
+            proposal.inputs.get_mut(1).unwrap().witness_utxo = None;
+            proposal.inputs.get_mut(1).unwrap().non_witness_utxo = None;
 
             assert_eq!(
                 ctx.process_proposal(proposal).unwrap_err().to_string(),
@@ -1443,16 +1431,9 @@ mod test {
             let mut ctx = create_psbt_context()?;
             let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
 
-            // If the outpoints are different, they are considered a receiver input and will be checked as such
-            let proposed_outpoint = proposal.unsigned_tx.input.first().unwrap().previous_output;
-            proposal.unsigned_tx.input.get_mut(0).unwrap().previous_output =
-                OutPoint::new(proposed_outpoint.txid, proposed_outpoint.vout + 1);
-            proposal.inputs.get_mut(0).unwrap().final_script_sig = Some(ScriptBuf::new());
-            proposal.inputs.get_mut(0).unwrap().final_script_witness = Some(Witness::new());
-
             // Ensure the sequence is different
             let sequence = ctx.original_psbt.unsigned_tx.input.get_mut(0).unwrap().sequence;
-            proposal.unsigned_tx.input.get_mut(0).unwrap().sequence =
+            proposal.unsigned_tx.input.get_mut(1).unwrap().sequence =
                 Sequence::from_consensus(sequence.to_consensus_u32() + 1);
 
             assert_eq!(

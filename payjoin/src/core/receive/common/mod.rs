@@ -524,9 +524,18 @@ impl WantsFeeRange {
             return Err(InternalPayloadError::FeeTooHigh(proposed_fee_rate, max_fee_rate));
         }
         if receiver_additional_fee >= Amount::ONE_SAT {
-            // Remove additional miner fee from the receiver's specified output
-            payjoin_psbt.unsigned_tx.output[self.proposal.change_vout].value -=
-                receiver_additional_fee;
+            // Remove additional miner fee from the receiver's specified output.
+            // Reject rather than underflow when a small payment plus a high
+            // sender minfeerate makes the fee exceed the change output's value.
+            let change_output = &mut payjoin_psbt.unsigned_tx.output[self.proposal.change_vout];
+            change_output.value =
+                change_output.value.checked_sub(receiver_additional_fee).ok_or_else(|| {
+                    InternalPayloadError::FeeTooHigh(
+                        receiver_additional_fee
+                            / (input_contribution_weight + output_contribution_weight),
+                        max_fee_rate,
+                    )
+                })?;
         }
         Ok(payjoin_psbt)
     }
@@ -1302,5 +1311,65 @@ mod tests {
             wants_outputs.original.params.additional_fee_contribution, None,
             "a contribution past the dust value is out of range"
         );
+    }
+
+    // A receiver fee exceeding the receiver change output's value must return
+    // FeeTooHigh instead of panicking on the Amount subtraction.
+    #[test]
+    fn receiver_fee_exceeding_change_outputs_fee_too_high() {
+        use crate::receive::InternalPayloadError;
+
+        let original = original_from_test_vector();
+        let mut wants_fee_range =
+            WantsOutputs::new(original, vec![0]).commit_outputs().commit_inputs();
+        let payjoin_psbt = &mut wants_fee_range.proposal.payjoin_psbt;
+        // A large additional output makes the receiver owe substantial weight
+        // fees while the change output stays too small to cover them.
+        payjoin_psbt.unsigned_tx.output.push(TxOut {
+            value: Amount::ZERO,
+            script_pubkey: ScriptBuf::from_bytes(vec![0x51; 10_000]),
+        });
+        payjoin_psbt.outputs.push(Default::default());
+        payjoin_psbt.unsigned_tx.output[0].value = Amount::from_sat(100);
+
+        // Equal min and max rates so the max_fee check passes and only the
+        // change-value check fires.
+        let fee_rate = FeeRate::from_sat_per_vb_u32(25_000);
+        let result = wants_fee_range.calculate_psbt_with_fee_range(Some(fee_rate), Some(fee_rate));
+        match result {
+            Err(InternalPayloadError::FeeTooHigh(proposed, max)) => {
+                assert_eq!(max, fee_rate);
+                assert!(proposed > FeeRate::BROADCAST_MIN);
+            }
+            _ => panic!("expected FeeTooHigh when receiver fee exceeds change output"),
+        }
+    }
+
+    // A receiver fee exactly equal to the change output's value must succeed
+    // and drain the change output to zero rather than error, pinning the
+    // strict inequality of the change-value check.
+    #[test]
+    fn receiver_fee_equal_to_change_drains_change_to_zero() {
+        let original = original_from_test_vector();
+        let mut wants_fee_range =
+            WantsOutputs::new(original, vec![0]).commit_outputs().commit_inputs();
+        let payjoin_psbt = &mut wants_fee_range.proposal.payjoin_psbt;
+        // One extra 1-byte-script output contributes 8 + 1 + 1 = 10 bytes
+        // = 40 weight units, so at 1 sat/vb (250 sat/kwu) the receiver fee is
+        // exactly ceil(40 * 250 / 1000) = 10 sats.
+        payjoin_psbt
+            .unsigned_tx
+            .output
+            .push(TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::from_bytes(vec![0x51]) });
+        payjoin_psbt.outputs.push(Default::default());
+        payjoin_psbt.unsigned_tx.output[0].value = Amount::from_sat(10);
+
+        // Equal min and max rates so the max_fee check passes and only the
+        // change-value boundary is exercised.
+        let fee_rate = FeeRate::from_sat_per_vb_u32(1);
+        let psbt = wants_fee_range
+            .calculate_psbt_with_fee_range(Some(fee_rate), Some(fee_rate))
+            .expect("a fee exactly equal to the change value must not error");
+        assert_eq!(psbt.unsigned_tx.output[0].value, Amount::ZERO);
     }
 }

@@ -603,15 +603,21 @@ fn clear_unneeded_fields(psbt: &mut Psbt) {
     }
 }
 
-/// Ensure that an additional fee output is sufficient to pay for the specified additional fee
+/// Ensure that an additional fee output can pay for the specified additional fee
+/// without dropping to its dust value, so an honest sender never offers a
+/// contribution the receiver will ignore.
 fn check_fee_output_amount(
     output: &TxOut,
     fee: bitcoin::Amount,
     clamp_fee_contribution: bool,
 ) -> Result<bitcoin::Amount, InternalBuildSenderError> {
-    if output.value < fee {
+    let max_contribution = output
+        .value
+        .checked_sub(output.script_pubkey.minimal_non_dust())
+        .unwrap_or(bitcoin::Amount::ZERO);
+    if fee > max_contribution {
         if clamp_fee_contribution {
-            Ok(output.value)
+            Ok(max_contribution)
         } else {
             Err(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution)
         }
@@ -679,12 +685,15 @@ fn determine_fee_contribution(
     fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
     clamp_fee_contribution: bool,
 ) -> Result<Option<AdditionalFeeContribution>, InternalBuildSenderError> {
-    Ok(match fee_contribution {
+    let contribution = match fee_contribution {
         Some((fee, None)) => find_change_index(psbt, payee, fee, clamp_fee_contribution)?,
         Some((fee, Some(index))) =>
             Some(check_change_index(psbt, payee, fee, index, clamp_fee_contribution)?),
         None => None,
-    })
+    };
+    // A clamped zero contribution offers the receiver nothing and would only
+    // advertise a fee output the receiver must leave untouched.
+    Ok(contribution.filter(|contribution| contribution.max_amount > bitcoin::Amount::ZERO))
 }
 
 fn serialize_url(
@@ -852,10 +861,60 @@ mod test {
             Script::from_bytes(&<Vec<u8> as FromHex>::from_hex(
                 "0014b60943f60c3ee848828bdace7474a92e81f3fcdd",
             )?),
-            Some((Amount::from_sat(95983068), None)),
+            // The change output (vout 0) holds 95983068 sats and is P2SH with
+            // a 540 sat dust value, so the contribution must leave 540 sats.
+            Some((Amount::from_sat(95983068 - 540), None)),
             false,
         );
         assert!(fee_contribution.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn test_fee_contribution_above_dust_margin() -> Result<(), BoxError> {
+        let payee_script = ScriptBuf::from_hex("0014b60943f60c3ee848828bdace7474a92e81f3fcdd")?;
+        let mut psbt = PARSED_ORIGINAL_PSBT.clone();
+        psbt.unsigned_tx.output[0].value = Amount::from_sat(1000);
+
+        // A contribution of 1000 sats from a 1000 sat P2SH output would leave
+        // it dust, so it must be rejected rather than offered to the receiver.
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            &payee_script,
+            Some((Amount::from_sat(1000), None)),
+            false,
+        );
+        assert_eq!(
+            fee_contribution,
+            Err(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution)
+        );
+
+        // With clamping, the contribution is decreased to the output's value
+        // minus its 540 sat dust value.
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            &payee_script,
+            Some((Amount::from_sat(1000), None)),
+            true,
+        );
+        assert_eq!(
+            fee_contribution,
+            Ok(Some(AdditionalFeeContribution {
+                max_amount: Amount::from_sat(1000 - 540),
+                vout: 0,
+            }))
+        );
+
+        // An output that cannot afford any contribution above dust contributes
+        // nothing at all.
+        psbt.unsigned_tx.output[0].value = Amount::from_sat(540);
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            &payee_script,
+            Some((Amount::from_sat(1000), None)),
+            true,
+        );
+        assert_eq!(fee_contribution, Ok(None));
         Ok(())
     }
 

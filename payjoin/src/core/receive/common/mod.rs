@@ -32,13 +32,27 @@ pub struct OriginalContext {
 impl OriginalContext {
     /// Live and replay both route through here so the param sanitization can't diverge.
     pub(super) fn new(original_psbt: Psbt, mut params: Params, owned_vouts: &[usize]) -> Self {
-        if let Some((_, additional_fee_output_index)) = params.additional_fee_contribution {
+        if let Some((max_additional_fee_contribution, additional_fee_output_index)) =
+            params.additional_fee_contribution
+        {
             // Per BIP78, ignore a fee-contribution index that is out of bounds or
             // pointing at a receiver output.
             // https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#optional-parameters
-            if additional_fee_output_index >= original_psbt.unsigned_tx.output.len()
-                || owned_vouts.contains(&additional_fee_output_index)
-            {
+            // Also ignore a contribution outside the valid range: subtracting
+            // more than the fee output's value minus its dust value would leave
+            // a dust output.
+            let fee_output = original_psbt.unsigned_tx.output.get(additional_fee_output_index);
+            let in_valid_range = match fee_output {
+                Some(fee_output) if !owned_vouts.contains(&additional_fee_output_index) => {
+                    let max_contribution = fee_output
+                        .value
+                        .checked_sub(fee_output.script_pubkey.minimal_non_dust())
+                        .unwrap_or(Amount::ZERO);
+                    max_additional_fee_contribution <= max_contribution
+                }
+                _ => false,
+            };
+            if !in_valid_range {
                 params.additional_fee_contribution = None;
             }
         }
@@ -483,7 +497,10 @@ impl WantsFeeRange {
                     .iter()
                     .position(|txo| txo.script_pubkey == sender_fee_output.script_pubkey)
                     .expect("Sender output is missing from payjoin PSBT");
-                // Determine the additional amount that the sender will pay in fees
+                // Determine the additional amount that the sender will pay in fees.
+                // Sanitization bounds the contribution to the fee output's value
+                // minus its dust value, and the sender output is copied unchanged
+                // into the payjoin PSBT, so the subtraction cannot underflow.
                 let sender_additional_fee = min(max_additional_fee_contribution, additional_fee);
                 tracing::trace!("sender_additional_fee: {sender_additional_fee}");
                 // Remove additional miner fee from the sender's specified output
@@ -1212,5 +1229,78 @@ mod tests {
                 Some(FeeRate::from_sat_per_vb_u32(1000)),
             )
             .expect("fee calculation should succeed without the sender contribution");
+    }
+
+    // A `maxadditionalfeecontribution` outside the valid range — greater than
+    // the fee output's value minus its dust value — must be ignored at
+    // sanitization so the receiver, not the sender output, pays the additional
+    // fee, rather than clamped or underflowing the output's Amount subtraction.
+    #[test]
+    fn excessive_fee_contribution_is_ignored() {
+        let mut original = original_from_test_vector();
+        let sender_script = original.psbt.unsigned_tx.output[0].script_pubkey.clone();
+        // Fee index 0 is a sender output when the receiver owns vout 1, so the
+        // contribution survives the index checks; the 100_000_000 sat
+        // contribution exceeds the output's 95983068 sat value and is out of
+        // range.
+        original.params.additional_fee_contribution = Some((Amount::from_sat(100_000_000), 0));
+
+        let wants_inputs = WantsOutputs::new(original, vec![1]).commit_outputs();
+        assert_eq!(
+            wants_inputs.original.params.additional_fee_contribution, None,
+            "out-of-range fee contribution must be dropped at sanitization"
+        );
+
+        let proposal_psbt = Psbt::from_str(RECEIVER_INPUT_CONTRIBUTION).unwrap();
+        let input = InputPair::new(
+            proposal_psbt.unsigned_tx.input[1].clone(),
+            proposal_psbt.inputs[1].clone(),
+            None,
+        )
+        .unwrap();
+        let wants_fee_range = wants_inputs
+            .contribute_inputs([input])
+            .expect("contribution should succeed")
+            .commit_inputs();
+
+        let psbt = wants_fee_range
+            .calculate_psbt_with_fee_range(
+                Some(FeeRate::from_sat_per_vb_u32(1000)),
+                Some(FeeRate::from_sat_per_vb_u32(1000)),
+            )
+            .expect("receiver must cover the fee without the sender contribution");
+
+        let sender_out = psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .find(|txo| txo.script_pubkey == sender_script)
+            .expect("sender output must be present");
+        assert_eq!(sender_out.value, Amount::from_sat(95_983_068));
+    }
+
+    // A contribution of exactly the fee output's value minus its dust value is
+    // the top of the valid range and must survive sanitization; one sat more
+    // must be dropped.
+    #[test]
+    fn fee_contribution_dust_boundary() {
+        let mut original = original_from_test_vector();
+        let fee_output = original.psbt.unsigned_tx.output[0].clone();
+        let max_contribution = fee_output.value - fee_output.script_pubkey.minimal_non_dust();
+
+        original.params.additional_fee_contribution = Some((max_contribution, 0));
+        let wants_outputs = WantsOutputs::new(original.clone(), vec![1]);
+        assert_eq!(
+            wants_outputs.original.params.additional_fee_contribution,
+            Some((max_contribution, 0)),
+            "a contribution leaving exactly the dust value is in range"
+        );
+
+        original.params.additional_fee_contribution = Some((max_contribution + Amount::ONE_SAT, 0));
+        let wants_outputs = WantsOutputs::new(original, vec![1]);
+        assert_eq!(
+            wants_outputs.original.params.additional_fee_contribution, None,
+            "a contribution past the dust value is out of range"
+        );
     }
 }

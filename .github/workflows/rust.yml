@@ -11,7 +11,7 @@ jobs:
         rust:
           - 1.85.0 # MSRV
           - stable
-          - nightly-2026-08-21 # pinned nightly, bumped weekly by contrib/bump-nightly.sh
+          - nightly-2026-08-25 # pinned nightly, bumped weekly by contrib/bump-nightly.sh
     env:
       # Override the value from the rust-toolchain file
       # This is necessary because even though the correct toolchain
@@ -137,7 +137,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           # pinned nightly, bumped weekly by contrib/bump-nightly.sh
-          toolchain: nightly-2026-08-21
+          toolchain: nightly-2026-08-25
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
       - name: "Build fuzz targets"

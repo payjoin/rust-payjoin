@@ -609,14 +609,10 @@ fn check_fee_output_amount(
     fee: bitcoin::Amount,
     clamp_fee_contribution: bool,
 ) -> Result<bitcoin::Amount, InternalBuildSenderError> {
-    if output.value < fee {
-        if clamp_fee_contribution {
-            Ok(output.value)
-        } else {
-            Err(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution)
-        }
-    } else {
-        Ok(fee)
+    match output.value.checked_sub(fee) {
+        Some(_) => Ok(fee),
+        None if clamp_fee_contribution => Ok(output.value),
+        None => Err(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution),
     }
 }
 
@@ -679,12 +675,15 @@ fn determine_fee_contribution(
     fee_contribution: Option<(bitcoin::Amount, Option<usize>)>,
     clamp_fee_contribution: bool,
 ) -> Result<Option<AdditionalFeeContribution>, InternalBuildSenderError> {
-    Ok(match fee_contribution {
+    let contribution = match fee_contribution {
         Some((fee, None)) => find_change_index(psbt, payee, fee, clamp_fee_contribution)?,
         Some((fee, Some(index))) =>
             Some(check_change_index(psbt, payee, fee, index, clamp_fee_contribution)?),
         None => None,
-    })
+    };
+    // A clamped zero contribution offers the receiver nothing and would only
+    // advertise a fee output the receiver must leave untouched.
+    Ok(contribution.filter(|contribution| contribution.max_amount > bitcoin::Amount::ZERO))
 }
 
 fn serialize_url(
@@ -852,10 +851,56 @@ mod test {
             Script::from_bytes(&<Vec<u8> as FromHex>::from_hex(
                 "0014b60943f60c3ee848828bdace7474a92e81f3fcdd",
             )?),
+            // The change output (vout 0) holds 95983068 sats, so the
+            // contribution must not exceed the output's value.
             Some((Amount::from_sat(95983068), None)),
             false,
         );
         assert!(fee_contribution.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn test_fee_contribution_above_output_value() -> Result<(), BoxError> {
+        let payee_script = ScriptBuf::from_hex("0014b60943f60c3ee848828bdace7474a92e81f3fcdd")?;
+        let mut psbt = PARSED_ORIGINAL_PSBT.clone();
+        psbt.unsigned_tx.output[0].value = Amount::from_sat(1000);
+
+        // A contribution above the 1000 sat output's value must be rejected
+        // rather than offered to the receiver.
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            &payee_script,
+            Some((Amount::from_sat(1500), None)),
+            false,
+        );
+        assert_eq!(
+            fee_contribution,
+            Err(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution)
+        );
+
+        // With clamping, the contribution is decreased to the output's value.
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            &payee_script,
+            Some((Amount::from_sat(1500), None)),
+            true,
+        );
+        assert_eq!(
+            fee_contribution,
+            Ok(Some(AdditionalFeeContribution { max_amount: Amount::from_sat(1000), vout: 0 }))
+        );
+
+        // An output that cannot afford any contribution contributes nothing
+        // at all.
+        psbt.unsigned_tx.output[0].value = Amount::ZERO;
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            &payee_script,
+            Some((Amount::from_sat(1000), None)),
+            true,
+        );
+        assert_eq!(fee_contribution, Ok(None));
         Ok(())
     }
 

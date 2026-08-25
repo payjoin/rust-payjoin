@@ -11,8 +11,9 @@ use_lockfile Cargo-recent.lock
 
 cd "$REPO_ROOT/payjoin-ffi/dart"
 
-echo "==> Testing the production lockfile checker..."
+echo "==> Testing the contrib checkers..."
 bash ./contrib/check_production_lock_test.sh
+bash ./contrib/check_reproducible_test.sh
 
 echo "==> Checking the production native Cargo.lock..."
 bash ./contrib/check_production_lock.sh native/Cargo.toml native/Cargo.lock

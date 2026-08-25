@@ -200,9 +200,9 @@ pub fn decrypt_message_a(
     cursor.read_to_end(&mut ciphertext).map_err(|_| HpkeError::PayloadTooShort)?;
     let plaintext = decryption_ctx.open(&ciphertext, &[])?;
 
-    let reply_pk = pubkey_from_compressed_bytes(&plaintext[..PUBLIC_KEY_SIZE])?;
-
-    let body = &plaintext[PUBLIC_KEY_SIZE..];
+    let (reply_pk_bytes, body) =
+        plaintext.split_at_checked(PUBLIC_KEY_SIZE).ok_or(HpkeError::PayloadTooShort)?;
+    let reply_pk = pubkey_from_compressed_bytes(reply_pk_bytes)?;
 
     Ok((body.to_vec(), reply_pk))
 }

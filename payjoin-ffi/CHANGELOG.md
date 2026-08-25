@@ -1,5 +1,11 @@
 ## Unreleased
 
+- Dart: the native library no longer records the paths it was built
+  from, so two builds of one release from different directories produce
+  the same bytes. The build hook sets `CARGO_ENCODED_RUSTFLAGS`, so
+  `rustflags` from your Cargo config no longer apply to the payjoin
+  native build.
+
 ## [0.25.0]
 
 - Publish the Python, JavaScript, C#, and Dart packages from one signed

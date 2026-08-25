@@ -102,7 +102,16 @@ impl Params {
                                 return Err(Error::FeeRate);
                             }
                             // since it's a minimum, we want to round up
-                            FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu.ceil() as u64)
+                            let fee_rate_sat_per_kwu = fee_rate_sat_per_kwu.ceil() as u64;
+                            // Reject absurd rates before they reach fee arithmetic:
+                            // a saturated u64::MAX sat/kwu would overflow the
+                            // Weight * FeeRate fee computation.
+                            if FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu)
+                                > bitcoin::Psbt::DEFAULT_MAX_FEE_RATE
+                            {
+                                return Err(Error::FeeRate);
+                            }
+                            FeeRate::from_sat_per_kwu(fee_rate_sat_per_kwu)
                         }
                         Err(_) => return Err(Error::FeeRate),
                     },
@@ -195,5 +204,24 @@ pub(crate) mod test {
             Params::from_query_str("minfeerate=-1", &[Version::One]).unwrap_err(),
             Error::FeeRate
         );
+    }
+
+    #[test]
+    fn min_fee_rate_rejected_above_sanity_ceiling() {
+        // A rate whose sat/kwu saturates near u64::MAX must be rejected rather
+        // than reaching fee arithmetic where Weight * FeeRate would overflow.
+        assert_eq!(
+            Params::from_query_str("minfeerate=100000000000000000000", &[Version::One])
+                .unwrap_err(),
+            Error::FeeRate
+        );
+    }
+
+    #[test]
+    fn min_fee_rate_at_ceiling_is_accepted() {
+        // `DEFAULT_MAX_FEE_RATE` (25000 sat/vB) is the boundary and must pass.
+        let params =
+            Params::from_query_str("minfeerate=25000", &[Version::One]).expect("valid feerate");
+        assert_eq!(params.min_fee_rate, bitcoin::Psbt::DEFAULT_MAX_FEE_RATE);
     }
 }

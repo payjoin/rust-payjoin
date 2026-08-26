@@ -7,7 +7,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>true</IsPackable>
     <PackageId>Payjoin</PackageId>
-    <Version>0.24.0-preview.1</Version>
+    <Version>0.1.0+payjoin-1.0.0</Version>
     <Title>Payjoin</Title>
     <Authors>Payjoin Dev Kit Contributors</Authors>
     <Description>C# bindings for payjoin-ffi, generated from rust-payjoin via UniFFI.</Description>

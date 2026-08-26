@@ -2711,6 +2711,7 @@ dependencies = [
  "bitcoin_uri",
  "hkdf 0.12.4",
  "http",
+ "http-body",
  "once_cell",
  "payjoin-test-utils",
  "percent-encoding-rfc3986",

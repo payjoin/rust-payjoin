@@ -538,6 +538,7 @@ version = "0.32.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb0ce8bd5baaa0d303a19915a6d93afed161f528654e42da2a7a97d05c59499a"
 dependencies = [
+ "arbitrary",
  "base58ck",
  "base64 0.21.7",
  "bech32",
@@ -624,6 +625,7 @@ version = "0.1.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cb95693f371d089a4b5b6fc41c6f3ea6e01ee8c15388335dfac8ea685173b51"
 dependencies = [
+ "arbitrary",
  "bitcoin-consensus-encoding",
  "serde",
 ]
@@ -2699,6 +2701,7 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 name = "payjoin"
 version = "1.0.0"
 dependencies = [
+ "arbitrary",
  "bhttp",
  "bitcoin",
  "bitcoin-hpke",
@@ -2778,6 +2781,7 @@ dependencies = [
 name = "payjoin-fuzz"
 version = "0.0.1"
 dependencies = [
+ "arbitrary",
  "home",
  "libfuzzer-sys",
  "payjoin",

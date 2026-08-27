@@ -11,9 +11,11 @@ cargo-fuzz = true
 default = []
 
 [dependencies]
+arbitrary = { version = "1.0.1" }
 home = "=0.5.11"
 libfuzzer-sys = { version = "0.4.10" }
 payjoin = { path = "../payjoin", default-features = false, features = [
+  "arbitrary",
   "_core",
   "v1",
   "v2",
@@ -38,5 +40,11 @@ bench = false
 [[bin]]
 name = "directory_short_id"
 path = "fuzz_targets/directory/short_id.rs"
+doc = false
+bench = false
+
+[[bin]]
+name = "url_arbitrary_url"
+path = "fuzz_targets/url/arbitrary_url.rs"
 doc = false
 bench = false

@@ -152,7 +152,7 @@ jobs:
           subject-path: ${{ steps.locate.outputs.tarball }}
 
       - name: Publish to npmjs.com
-        run: npm publish "${{ steps.locate.outputs.tarball }}"
+        run: npm publish "./${{ steps.locate.outputs.tarball }}"
 
   github-release:
     name: "Attach tarball + SHA256SUMS to the GitHub release"

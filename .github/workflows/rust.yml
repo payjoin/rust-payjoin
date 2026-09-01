@@ -35,6 +35,8 @@ jobs:
           echo "$(nix build .#nginx-with-stream --print-out-paths --no-link)/bin" >> $GITHUB_PATH
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.rust == 'stable' && 'stable-workspace' || '' }}
       - name: Run tests
         run: RUST_LOG=debug bash contrib/test.sh
 

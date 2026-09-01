@@ -36,7 +36,7 @@ jobs:
       - name: "Use cache"
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ${{ matrix.rust == 'stable' && 'stable-workspace' || '' }}
+          shared-key: ${{ matrix.rust == 'stable' && 'stable-workspace' || matrix.rust == '1.85.0' && 'msrv-workspace' || '' }}
       - name: Run tests
         run: RUST_LOG=debug bash contrib/test.sh
 

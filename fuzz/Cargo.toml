@@ -48,3 +48,9 @@ name = "url_arbitrary_url"
 path = "fuzz_targets/url/arbitrary_url.rs"
 doc = false
 bench = false
+
+[[bin]]
+name = "uri_deserialize_pjuri_v2"
+path = "fuzz_targets/uri/deserialize_pjuri_v2.rs"
+doc = false
+bench = false

@@ -270,8 +270,12 @@ impl WantsInputs {
     /// Based on the paper, we are looking for the candidate input which, when added to the
     /// transaction with 2 existing outputs, results in the minimum input amount to be greater than the minimum
     /// output amount. Note that when calculating the minimum output amount, we consider the
-    /// post-contribution amounts, and expect the output which pays to the receiver to have its
-    /// value increased by the amount of the candidate input.
+    /// post-contribution amounts.
+    ///
+    /// The receiver's own output (`change_vout`) still holds its pre-contribution value, so it is
+    /// excluded from the minimum and folded back in increased by the candidate. That increase is
+    /// an upper bound — a candidate partly consumed by receiver outputs added earlier raises it by
+    /// less — which only ever rejects a candidate, never accepts one that fails the heuristic.
     ///
     /// Errors if the transaction does not have exactly 2 outputs.
     pub(super) fn avoid_uih(
@@ -288,7 +292,9 @@ impl WantsInputs {
             .unsigned_tx
             .output
             .iter()
-            .map(|output| output.value)
+            .enumerate()
+            .filter(|(vout, _)| *vout != self.proposal.change_vout)
+            .map(|(_, output)| output.value)
             .min()
             .unwrap_or(Amount::MAX_MONEY);
 
@@ -689,6 +695,25 @@ mod tests {
         let candidate = candidate_input_from_test_vector(Amount::from_sat(3_000_000));
         let result = wants_inputs.avoid_uih(std::slice::from_ref(&candidate));
         assert_eq!(result.unwrap(), candidate);
+    }
+
+    #[test]
+    fn avoid_uih_uses_post_contribution_receiver_output() {
+        let original = original_from_test_vector();
+        let mut wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        // Smallest output before the contribution, but not after it.
+        wants_inputs.proposal.payjoin_psbt.unsigned_tx.output[0].value = Amount::ONE_SAT;
+        wants_inputs.proposal.payjoin_psbt.unsigned_tx.output[1].value =
+            Amount::from_sat(4_000_000);
+        let candidate = candidate_input_from_test_vector(Amount::from_sat(3_000_000));
+
+        let result = wants_inputs.avoid_uih(std::slice::from_ref(&candidate));
+
+        // Post-contribution the receiver's output holds 3_000_001 sat, above the candidate.
+        assert_eq!(
+            result.unwrap_err(),
+            CoinSelectionError::from(InternalCoinSelectionError::NotFound)
+        );
     }
 
     #[test]

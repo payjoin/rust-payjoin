@@ -1172,9 +1172,8 @@ impl Receiver<WantsInputs> {
     /// avoiding the Unnecessary Input Heuristic 2 (UIH2) outlined in [Unnecessary Input
     /// Heuristics and PayJoin Transactions by Ghesmati et al. (2022)](https://eprint.iacr.org/2022/589).
     ///
-    /// Privacy preservation is only supported for 2-output transactions. If the PSBT has more than
-    /// 2 outputs or if none of the candidates are suitable for avoiding UIH2, this function
-    /// defaults to the first candidate in `candidate_inputs` list.
+    /// If the PSBT has fewer than 2 outputs, or if none of the candidates are suitable for
+    /// avoiding UIH2, this function defaults to the first candidate in `candidate_inputs` list.
     pub fn try_preserving_privacy(
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,

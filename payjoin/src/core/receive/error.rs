@@ -370,10 +370,8 @@ impl fmt::Display for CoinSelectionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.0 {
             InternalCoinSelectionError::Empty => write!(f, "No candidates available for selection"),
-            InternalCoinSelectionError::UnsupportedOutputLength => write!(
-                f,
-                "Current privacy selection implementation only supports 2-output transactions"
-            ),
+            InternalCoinSelectionError::UnsupportedOutputLength =>
+                write!(f, "Privacy preserving selection requires at least 2 outputs"),
             InternalCoinSelectionError::NotFound =>
                 write!(f, "No selection candidates improve privacy"),
         }

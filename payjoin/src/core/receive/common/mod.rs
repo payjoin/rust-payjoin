@@ -253,9 +253,8 @@ impl WantsInputs {
     /// avoiding the Unnecessary Input Heuristic 2 (UIH2) outlined in [Unnecessary Input
     /// Heuristics and PayJoin Transactions by Ghesmati et al. (2022)](https://eprint.iacr.org/2022/589).
     ///
-    /// Privacy preservation is only supported for 2-output transactions. If the PSBT has more than
-    /// 2 outputs or if none of the candidates are suitable for avoiding UIH2, this function
-    /// defaults to the first candidate in `candidate_inputs` list.
+    /// If the PSBT has fewer than 2 outputs, or if none of the candidates are suitable for
+    /// avoiding UIH2, this function defaults to the first candidate in `candidate_inputs` list.
     pub fn try_preserving_privacy(
         &self,
         candidate_inputs: impl IntoIterator<Item = InputPair>,
@@ -267,22 +266,26 @@ impl WantsInputs {
     /// Returns the candidate input which avoids the UIH2 defined in [Unnecessary Input
     /// Heuristics and PayJoin Transactions by Ghesmati et al. (2022)](https://eprint.iacr.org/2022/589).
     ///
-    /// Based on the paper, we are looking for the candidate input which, when added to the
-    /// transaction with 2 existing outputs, results in the minimum input amount to be greater than the minimum
-    /// output amount. Note that when calculating the minimum output amount, we consider the
-    /// post-contribution amounts.
+    /// An analyst who assumes output `o` is the spender's change treats input `i` as unnecessary
+    /// when `i <= o`, since dropping `i` would still fund every other output. The optimal change
+    /// heuristic (UIH1) points that assumption at the smallest output, so a transaction avoids
+    /// UIH2 exactly when its smallest input exceeds its smallest output, for any number of
+    /// outputs. Beyond 2 an analyst has more than one change hypothesis to try and this check only
+    /// defeats the UIH1 one, so it is correspondingly weaker there.
+    ///
+    /// Both minimums are taken over post-contribution amounts.
     ///
     /// The receiver's own output (`change_vout`) still holds its pre-contribution value, so it is
     /// excluded from the minimum and folded back in increased by the candidate. That increase is
     /// an upper bound — a candidate partly consumed by receiver outputs added earlier raises it by
     /// less — which only ever rejects a candidate, never accepts one that fails the heuristic.
     ///
-    /// Errors if the transaction does not have exactly 2 outputs.
+    /// Errors below 2 outputs: with no change output there is nothing for UIH1 to identify.
     pub(super) fn avoid_uih(
         &self,
         candidate_inputs: &[InputPair],
     ) -> Result<InputPair, CoinSelectionError> {
-        if self.proposal.payjoin_psbt.outputs.len() != 2 {
+        if self.proposal.payjoin_psbt.outputs.len() < 2 {
             return Err(InternalCoinSelectionError::UnsupportedOutputLength.into());
         }
 
@@ -695,6 +698,61 @@ mod tests {
         let candidate = candidate_input_from_test_vector(Amount::from_sat(3_000_000));
         let result = wants_inputs.avoid_uih(std::slice::from_ref(&candidate));
         assert_eq!(result.unwrap(), candidate);
+    }
+
+    #[test]
+    fn avoid_uih_supports_three_outputs() {
+        let original = original_from_test_vector();
+        let mut wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        wants_inputs.proposal.payjoin_psbt.unsigned_tx.output[0].value =
+            Amount::from_sat(2_000_000);
+        wants_inputs.proposal.payjoin_psbt.unsigned_tx.output[1].value =
+            Amount::from_sat(1_000_000);
+        wants_inputs
+            .proposal
+            .payjoin_psbt
+            .unsigned_tx
+            .output
+            .push(TxOut { value: Amount::from_sat(4_000_000), script_pubkey: ScriptBuf::new() });
+        wants_inputs.proposal.payjoin_psbt.outputs.push(Default::default());
+        let candidate = candidate_input_from_test_vector(Amount::from_sat(3_000_000));
+
+        let selected = wants_inputs.avoid_uih(std::slice::from_ref(&candidate));
+
+        assert_eq!(selected.unwrap(), candidate);
+    }
+
+    /// The n-input, m-output shape that motivates #551: batched payments and multiparty proposals
+    /// carry more than one input as well as more than two outputs.
+    #[test]
+    fn avoid_uih_supports_multiple_inputs_and_outputs() {
+        let original = original_from_test_vector();
+        let mut wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        wants_inputs.proposal.payjoin_psbt.unsigned_tx.output[0].value =
+            Amount::from_sat(2_000_000);
+        wants_inputs.proposal.payjoin_psbt.unsigned_tx.output[1].value =
+            Amount::from_sat(3_500_000);
+        wants_inputs
+            .proposal
+            .payjoin_psbt
+            .unsigned_tx
+            .output
+            .push(TxOut { value: Amount::from_sat(6_000_000), script_pubkey: ScriptBuf::new() });
+        wants_inputs.proposal.payjoin_psbt.outputs.push(Default::default());
+        // Below the test vector's input, so this one sets the minimum input.
+        let existing = candidate_input_from_test_vector(Amount::from_sat(4_000_000));
+        wants_inputs.proposal.payjoin_psbt.unsigned_tx.input.push(existing.txin.clone());
+        wants_inputs.proposal.payjoin_psbt.inputs.push(existing.psbtin.clone());
+
+        let too_small = candidate_input_from_test_vector(Amount::from_sat(3_000_000));
+        let suitable = candidate_input_from_test_vector(Amount::from_sat(5_000_000));
+
+        let selected = wants_inputs.avoid_uih(&[too_small, suitable.clone()]);
+
+        // Minimum output is the 3_500_000 sat sender output. The 3_000_000 sat candidate drags the
+        // minimum input below it; the 5_000_000 sat one leaves the existing 4_000_000 sat input
+        // binding, which clears it.
+        assert_eq!(selected.unwrap(), suitable);
     }
 
     #[test]

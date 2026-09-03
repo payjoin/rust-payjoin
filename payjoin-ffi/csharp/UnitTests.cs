@@ -254,6 +254,107 @@ public class CancelTests
     }
 }
 
+public class PersisterLoadAndCloseTests
+{
+    private static readonly byte[] OhttpKeysData = new byte[]
+    {
+        0x01, 0x00, 0x16, 0x04, 0xba, 0x48, 0xc4, 0x9c, 0x3d, 0x4a,
+        0x92, 0xa3, 0xad, 0x00, 0xec, 0xc6, 0x3a, 0x02, 0x4d, 0xa1,
+        0x0c, 0xed, 0x02, 0x18, 0x0c, 0x73, 0xec, 0x12, 0xd8, 0xa7,
+        0xad, 0x2c, 0xc9, 0x1b, 0xb4, 0x83, 0x82, 0x4f, 0xe2, 0xbe,
+        0xe8, 0xd2, 0x8b, 0xfe, 0x2e, 0xb2, 0xfc, 0x64, 0x53, 0xbc,
+        0x4d, 0x31, 0xcd, 0x85, 0x1e, 0x8a, 0x65, 0x40, 0xe8, 0x6c,
+        0x53, 0x82, 0xaf, 0x58, 0x8d, 0x37, 0x09, 0x57, 0x00, 0x04,
+        0x00, 0x01, 0x00, 0x03,
+    };
+
+    [Fact]
+    public void ReceiverLoadAndClose()
+    {
+        var persister = new InMemoryReceiverPersister();
+        var address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
+        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+
+        var initialized = new ReceiverBuilder(address, "https://example.com", ohttpKeys)
+            .Build()
+            .Save(persister);
+        Assert.Equal(1, persister.Load().Length);
+        Assert.False(persister.Closed);
+
+        // Cancelling is terminal, so saving it must close the persister.
+        initialized.Cancel().Save(persister);
+
+        Assert.True(persister.Closed);
+        Assert.Equal(2, persister.Load().Length);
+    }
+
+    [Fact]
+    public async Task ReceiverLoadAndCloseAsync()
+    {
+        var persister = new InMemoryReceiverPersisterAsync();
+        var address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
+        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+
+        var initialized = await new ReceiverBuilder(address, "https://example.com", ohttpKeys)
+            .Build()
+            .SaveAsync(persister);
+        Assert.Equal(1, (await persister.Load()).Length);
+        Assert.False(persister.Closed);
+
+        await initialized.Cancel().SaveAsync(persister);
+
+        Assert.True(persister.Closed);
+        Assert.Equal(2, (await persister.Load()).Length);
+    }
+
+    [Fact]
+    public void SenderLoadAndClose()
+    {
+        var address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
+        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var receiver = new ReceiverBuilder(address, "https://example.com", ohttpKeys)
+            .Build()
+            .Save(new InMemoryReceiverPersister());
+
+        var persister = new InMemorySenderPersister();
+        var withReplyKey = new SenderBuilder(PayjoinMethods.OriginalPsbt(), receiver.PjUri())
+            .BuildRecommended(1000)
+            .Save(persister);
+        var pendingFallback = withReplyKey.Cancel().Save(persister);
+        Assert.Equal(2, persister.Load().Length);
+        Assert.False(persister.Closed);
+
+        // Closing the fallback is terminal, so saving it must close the persister.
+        pendingFallback.Close().Save(persister);
+
+        Assert.True(persister.Closed);
+        Assert.Equal(3, persister.Load().Length);
+    }
+
+    [Fact]
+    public async Task SenderLoadAndCloseAsync()
+    {
+        var address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
+        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var receiver = await new ReceiverBuilder(address, "https://example.com", ohttpKeys)
+            .Build()
+            .SaveAsync(new InMemoryReceiverPersisterAsync());
+
+        var persister = new InMemorySenderPersisterAsync();
+        var withReplyKey = await new SenderBuilder(PayjoinMethods.OriginalPsbt(), receiver.PjUri())
+            .BuildRecommended(1000)
+            .SaveAsync(persister);
+        var pendingFallback = await withReplyKey.Cancel().SaveAsync(persister);
+        Assert.Equal(2, (await persister.Load()).Length);
+        Assert.False(persister.Closed);
+
+        await pendingFallback.Close().SaveAsync(persister);
+
+        Assert.True(persister.Closed);
+        Assert.Equal(3, (await persister.Load()).Length);
+    }
+}
+
 public class ValidationTests
 {
     private static readonly byte[] OhttpKeysData = new byte[]

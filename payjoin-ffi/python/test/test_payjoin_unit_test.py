@@ -139,6 +139,128 @@ class TestSenderAsyncPersistence(unittest.TestCase):
         asyncio.run(run_test())
 
 
+class TestPersisterLoadAndClose(unittest.TestCase):
+    def test_receiver_load_and_close(self):
+        persister = InMemoryReceiverPersister()
+        initialized = (
+            payjoin.ReceiverBuilder(
+                "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+                "https://example.com",
+                payjoin.OhttpKeys.decode(
+                    bytes.fromhex(
+                        "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"
+                    )
+                ),
+            )
+            .build()
+            .save(persister)
+        )
+        self.assertEqual(len(persister.load()), 1)
+        self.assertFalse(persister.closed)
+
+        # Cancelling is terminal, so saving it must close the persister.
+        initialized.cancel().save(persister)
+
+        self.assertTrue(persister.closed)
+        self.assertEqual(len(persister.load()), 2)
+
+    def test_receiver_load_and_close_async(self):
+        import asyncio
+
+        async def run_test():
+            persister = InMemoryReceiverPersisterAsync()
+            initialized = await (
+                payjoin.ReceiverBuilder(
+                    "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+                    "https://example.com",
+                    payjoin.OhttpKeys.decode(
+                        bytes.fromhex(
+                            "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"
+                        )
+                    ),
+                )
+                .build()
+                .save_async(persister)
+            )
+            self.assertEqual(len(await persister.load()), 1)
+            self.assertFalse(persister.closed)
+
+            await initialized.cancel().save_async(persister)
+
+            self.assertTrue(persister.closed)
+            self.assertEqual(len(await persister.load()), 2)
+
+        asyncio.run(run_test())
+
+    def test_sender_load_and_close(self):
+        # Create a receiver to just get the pj uri
+        receiver = (
+            payjoin.ReceiverBuilder(
+                "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+                "https://example.com",
+                payjoin.OhttpKeys.decode(
+                    bytes.fromhex(
+                        "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"
+                    )
+                ),
+            )
+            .build()
+            .save(InMemoryReceiverPersister())
+        )
+
+        persister = InMemorySenderPersister()
+        with_reply_key = (
+            payjoin.SenderBuilder(payjoin.original_psbt(), receiver.pj_uri())
+            .build_recommended(1000)
+            .save(persister)
+        )
+        pending_fallback = with_reply_key.cancel().save(persister)
+        self.assertEqual(len(persister.load()), 2)
+        self.assertFalse(persister.closed)
+
+        # Closing the fallback is terminal, so saving it must close the persister.
+        pending_fallback.close().save(persister)
+
+        self.assertTrue(persister.closed)
+        self.assertEqual(len(persister.load()), 3)
+
+    def test_sender_load_and_close_async(self):
+        import asyncio
+
+        async def run_test():
+            # Create a receiver to just get the pj uri
+            receiver = await (
+                payjoin.ReceiverBuilder(
+                    "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+                    "https://example.com",
+                    payjoin.OhttpKeys.decode(
+                        bytes.fromhex(
+                            "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"
+                        )
+                    ),
+                )
+                .build()
+                .save_async(InMemoryReceiverPersisterAsync())
+            )
+
+            persister = InMemorySenderPersisterAsync()
+            with_reply_key = await (
+                payjoin.SenderBuilder(payjoin.original_psbt(), receiver.pj_uri())
+                .build_recommended(1000)
+                .save_async(persister)
+            )
+            pending_fallback = await with_reply_key.cancel().save_async(persister)
+            self.assertEqual(len(await persister.load()), 2)
+            self.assertFalse(persister.closed)
+
+            await pending_fallback.close().save_async(persister)
+
+            self.assertTrue(persister.closed)
+            self.assertEqual(len(await persister.load()), 3)
+
+        asyncio.run(run_test())
+
+
 class TestReceiverCancel(unittest.TestCase):
     def test_receiver_cancel(self):
         persister = InMemoryReceiverPersister()

@@ -284,6 +284,127 @@ function runUnitTests(name: string, payjoin: typeof nodejsPayjoin) {
         });
     });
 
+    describe(`[${name}] Persister load and close tests`, () => {
+        test("receiver load and close", () => {
+            const persister = new InMemoryReceiverPersister();
+            const ohttpKeys = payjoin.OhttpKeys.decode(OHTTP_KEYS);
+
+            const initialized = new payjoin.ReceiverBuilder(
+                "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+                "https://example.com",
+                ohttpKeys,
+            )
+                .build()
+                .save(persister);
+            assert.strictEqual(persister.load().length, 1);
+            assert.strictEqual(persister.closed, false);
+
+            // Cancelling is terminal, so saving it must close the persister.
+            initialized.cancel().save(persister);
+
+            assert.strictEqual(persister.closed, true);
+            assert.strictEqual(
+                persister.load().length,
+                2,
+                "load should still return every event after close",
+            );
+        });
+
+        test("receiver load and close async", async () => {
+            const persister = new InMemoryReceiverPersisterAsync();
+            const ohttpKeys = payjoin.OhttpKeys.decode(OHTTP_KEYS);
+
+            const initialized = await new payjoin.ReceiverBuilder(
+                "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+                "https://example.com",
+                ohttpKeys,
+            )
+                .build()
+                .saveAsync(persister);
+            assert.strictEqual((await persister.load()).length, 1);
+            assert.strictEqual(persister.closed, false);
+
+            await initialized.cancel().saveAsync(persister);
+
+            assert.strictEqual(persister.closed, true);
+            assert.strictEqual(
+                (await persister.load()).length,
+                2,
+                "load should still return every event after close",
+            );
+        });
+
+        test("sender load and close", () => {
+            const receiverPersister = new InMemoryReceiverPersister();
+            const ohttpKeys = payjoin.OhttpKeys.decode(OHTTP_KEYS);
+            const uri = new payjoin.ReceiverBuilder(
+                "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+                "https://example.com",
+                ohttpKeys,
+            )
+                .build()
+                .save(receiverPersister)
+                .pjUri();
+
+            const persister = new InMemorySenderPersister();
+            const pendingFallback = new payjoin.SenderBuilder(
+                ORIGINAL_PSBT,
+                uri,
+            )
+                .buildRecommended(BigInt(1000))
+                .save(persister)
+                .cancel()
+                .save(persister);
+            assert.strictEqual(persister.load().length, 2);
+            assert.strictEqual(persister.closed, false);
+
+            // Closing the fallback is terminal, so saving it must close the
+            // persister.
+            pendingFallback.close().save(persister);
+
+            assert.strictEqual(persister.closed, true);
+            assert.strictEqual(
+                persister.load().length,
+                3,
+                "load should still return every event after close",
+            );
+        });
+
+        test("sender load and close async", async () => {
+            const receiverPersister = new InMemoryReceiverPersisterAsync();
+            const ohttpKeys = payjoin.OhttpKeys.decode(OHTTP_KEYS);
+            const receiver = await new payjoin.ReceiverBuilder(
+                "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+                "https://example.com",
+                ohttpKeys,
+            )
+                .build()
+                .saveAsync(receiverPersister);
+
+            const persister = new InMemorySenderPersisterAsync();
+            const withReplyKey = await new payjoin.SenderBuilder(
+                ORIGINAL_PSBT,
+                receiver.pjUri(),
+            )
+                .buildRecommended(BigInt(1000))
+                .saveAsync(persister);
+            const pendingFallback = await withReplyKey
+                .cancel()
+                .saveAsync(persister);
+            assert.strictEqual((await persister.load()).length, 2);
+            assert.strictEqual(persister.closed, false);
+
+            await pendingFallback.close().saveAsync(persister);
+
+            assert.strictEqual(persister.closed, true);
+            assert.strictEqual(
+                (await persister.load()).length,
+                3,
+                "load should still return every event after close",
+            );
+        });
+    });
+
     describe(`[${name}] Async Persistence tests`, () => {
         test("receiver async persistence", async () => {
             const persister = new InMemoryReceiverPersisterAsync();

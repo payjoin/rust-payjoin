@@ -253,6 +253,133 @@ void main() {
     });
   });
 
+  group("Test Persister Load And Close", () {
+    test("Test receiver load and close", () {
+      var persister = InMemoryReceiverPersister();
+      var initialized = payjoin.ReceiverBuilder(
+        address: "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+        directory: "https://example.com",
+        ohttpKeys: payjoin.OhttpKeys.decode(
+          bytes: Uint8List.fromList(
+            hex.decode(
+              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
+            ),
+          ),
+        ),
+      ).build().save(persister: persister);
+      expect(persister.load().length, 1);
+      expect(persister.closed, isFalse);
+
+      // Cancelling is terminal, so saving it must close the persister.
+      initialized.cancel().save(persister: persister);
+
+      expect(persister.closed, isTrue);
+      expect(
+        persister.load().length,
+        2,
+        reason: "load should still return every event after close",
+      );
+    });
+
+    test("Test receiver load and close async", () async {
+      var persister = InMemoryReceiverPersisterAsync();
+      var initialized = await payjoin.ReceiverBuilder(
+        address: "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+        directory: "https://example.com",
+        ohttpKeys: payjoin.OhttpKeys.decode(
+          bytes: Uint8List.fromList(
+            hex.decode(
+              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
+            ),
+          ),
+        ),
+      ).build().saveAsync(persister: persister);
+      expect((await persister.load()).length, 1);
+      expect(persister.closed, isFalse);
+
+      await initialized.cancel().saveAsync(persister: persister);
+
+      expect(persister.closed, isTrue);
+      expect(
+        (await persister.load()).length,
+        2,
+        reason: "load should still return every event after close",
+      );
+    });
+
+    test("Test sender load and close", () {
+      // Create a receiver to just get the pj uri
+      var receiver = payjoin.ReceiverBuilder(
+        address: "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+        directory: "https://example.com",
+        ohttpKeys: payjoin.OhttpKeys.decode(
+          bytes: Uint8List.fromList(
+            hex.decode(
+              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
+            ),
+          ),
+        ),
+      ).build().save(persister: InMemoryReceiverPersister());
+
+      var persister = InMemorySenderPersister();
+      var withReplyKey = payjoin.SenderBuilder(
+        psbt: payjoin.originalPsbt(),
+        uri: receiver.pjUri(),
+      ).buildRecommended(minFeeRateSatPerKwu: 1000).save(persister: persister);
+      var pendingFallback = withReplyKey.cancel().save(persister: persister);
+      expect(persister.load().length, 2);
+      expect(persister.closed, isFalse);
+
+      // Closing the fallback is terminal, so saving it must close the persister.
+      pendingFallback!.close().save(persister: persister);
+
+      expect(persister.closed, isTrue);
+      expect(
+        persister.load().length,
+        3,
+        reason: "load should still return every event after close",
+      );
+    });
+
+    test("Test sender load and close async", () async {
+      // Create a receiver to just get the pj uri
+      var receiver = await payjoin.ReceiverBuilder(
+        address: "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
+        directory: "https://example.com",
+        ohttpKeys: payjoin.OhttpKeys.decode(
+          bytes: Uint8List.fromList(
+            hex.decode(
+              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
+            ),
+          ),
+        ),
+      ).build().saveAsync(persister: InMemoryReceiverPersisterAsync());
+
+      var persister = InMemorySenderPersisterAsync();
+      var withReplyKey =
+          await payjoin.SenderBuilder(
+                psbt: payjoin.originalPsbt(),
+                uri: receiver.pjUri(),
+              )
+              .buildRecommended(minFeeRateSatPerKwu: 1000)
+              .saveAsync(persister: persister);
+      var pendingFallback = await withReplyKey.cancel().saveAsync(
+        persister: persister,
+      );
+      expect((await persister.load()).length, 2);
+      expect(persister.closed, isFalse);
+
+      await pendingFallback!.close().saveAsync(persister: persister);
+
+      expect(persister.closed, isTrue);
+      expect(
+        (await persister.load()).length,
+        3,
+        reason: "load should still return every event after close",
+      );
+    });
+  });
+
   group("Test Async Persistence", () {
     test("Test receiver async persistence", () async {
       var persister = InMemoryReceiverPersisterAsync();

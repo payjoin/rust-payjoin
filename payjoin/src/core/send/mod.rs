@@ -18,7 +18,7 @@
 
 use bitcoin::psbt::{Psbt, PsbtSighashType};
 use bitcoin::sighash::TapSighashType;
-use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxOut, Weight};
+use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxIn, TxOut, Weight};
 pub use error::{BuildSenderError, ResponseError, ValidationError, WellKnownError};
 pub(crate) use error::{InternalBuildSenderError, InternalProposalError, InternalValidationError};
 
@@ -285,6 +285,21 @@ fn commits_to_all_inputs_and_outputs(sighash_type: PsbtSighashType) -> bool {
     matches!(sighash_type.taproot_hash_ty(), Ok(TapSighashType::Default | TapSighashType::All))
 }
 
+/// Whether `originals` appear among `proposed` in the same relative order.
+///
+/// BIP 78 forbids the receiver from shuffling: its additional inputs "must be inserted at a
+/// random index", so the sender's inputs must survive as an ordered subsequence of the
+/// proposal's.
+fn is_ordered_subsequence<'a>(
+    originals: impl IntoIterator<Item = &'a TxIn>,
+    proposed: impl IntoIterator<Item = &'a TxIn>,
+) -> bool {
+    let mut proposed = proposed.into_iter();
+    originals
+        .into_iter()
+        .all(|original| proposed.any(|p| p.previous_output == original.previous_output))
+}
+
 impl PsbtContext {
     fn process_proposal(self, mut proposal: Psbt) -> InternalResult<Psbt> {
         self.basic_checks(&proposal)?;
@@ -367,6 +382,14 @@ impl PsbtContext {
         proposal: &Psbt,
         ensure_receiver_input_finalized: bool,
     ) -> InternalResult<()> {
+        ensure(
+            is_ordered_subsequence(
+                &self.original_psbt.unsigned_tx.input,
+                &proposal.unsigned_tx.input,
+            ),
+            InternalProposalError::MissingOrShuffledInputs,
+        )?;
+
         let mut original_inputs = self.original_psbt.input_pairs().peekable();
 
         for proposed in proposal.input_pairs() {
@@ -404,6 +427,26 @@ impl PsbtContext {
                             InternalProposalError::SenderTxinNonAllSighashType,
                         )?;
                     }
+                    // BIP 78 says nothing about the receiver altering UTXO data on the
+                    // sender's inputs. Its reference implementation overwrites these
+                    // fields with the sender's own values without ever reading them,
+                    // and its proposal vectors return them unchanged. Rejecting a
+                    // mismatch is our policy, not a spec requirement; `is_none_or`
+                    // stays lenient toward receivers that strip what they do not need.
+                    ensure(
+                        proposed
+                            .psbtin
+                            .witness_utxo
+                            .as_ref()
+                            .is_none_or(|utxo| Some(utxo) == original.psbtin.witness_utxo.as_ref()),
+                        InternalProposalError::SenderTxinUtxoInfoChanged,
+                    )?;
+                    ensure(
+                        proposed.psbtin.non_witness_utxo.as_ref().is_none_or(|utxo| {
+                            Some(utxo) == original.psbtin.non_witness_utxo.as_ref()
+                        }),
+                        InternalProposalError::SenderTxinUtxoInfoChanged,
+                    )?;
                     original_inputs.next();
                 }
                 // theirs (receiver)
@@ -717,10 +760,11 @@ mod test {
     use bitcoin::absolute::LockTime;
     use bitcoin::bip32::{DerivationPath, Fingerprint};
     use bitcoin::ecdsa::Signature;
+    use bitcoin::hashes::Hash;
     use bitcoin::hex::FromHex;
     use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey, SECP256K1};
     use bitcoin::taproot::TaprootBuilder;
-    use bitcoin::{Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Witness};
+    use bitcoin::{Amount, FeeRate, OutPoint, Script, ScriptBuf, Sequence, Txid, Witness};
     use payjoin_test_utils::{
         BoxError, ADDITIONAL_FEE_OUTPUT_INDEX, MAX_ADDITIONAL_FEE_CONTRIBUTION,
         PARSED_ORIGINAL_PSBT, PARSED_PAYJOIN_PROPOSAL, PARSED_PAYJOIN_PROPOSAL_WITH_SENDER_INFO,
@@ -745,6 +789,29 @@ mod test {
             min_fee_rate: FeeRate::ZERO,
             payee,
         })
+    }
+
+    #[test]
+    fn ordered_subsequence_requires_original_order() {
+        let txin = |vout| TxIn {
+            previous_output: OutPoint::new(Txid::all_zeros(), vout),
+            ..Default::default()
+        };
+        let originals = vec![txin(0), txin(1)];
+
+        assert!(is_ordered_subsequence(&originals, &vec![txin(0), txin(1)]));
+        // Receiver inputs may be inserted before, between, and after the sender's.
+        assert!(is_ordered_subsequence(&originals, &vec![txin(0), txin(9), txin(1)]));
+        assert!(is_ordered_subsequence(
+            &originals,
+            &vec![txin(3), txin(0), txin(9), txin(1), txin(3)]
+        ));
+        assert!(!is_ordered_subsequence(
+            &originals,
+            &vec![txin(3), txin(1), txin(9), txin(0), txin(3)]
+        ));
+        assert!(!is_ordered_subsequence(&originals, &vec![txin(1), txin(0)]));
+        assert!(!is_ordered_subsequence(&originals, &vec![txin(0)]));
     }
 
     #[test]
@@ -1242,6 +1309,81 @@ mod test {
         }
 
         #[test]
+        fn test_sender_input_outpoint_changed() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+            proposal.unsigned_tx.input[0].previous_output.vout += 1;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::MissingOrShuffledInputs.to_string()
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_witness_utxo_changed() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+            proposal.inputs[0]
+                .witness_utxo
+                .as_mut()
+                .expect("test sender input should have witness UTXO information")
+                .value += Amount::from_sat(1);
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::SenderTxinUtxoInfoChanged.to_string()
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_non_witness_utxo_changed() -> Result<(), BoxError> {
+            let mut ctx = create_psbt_context()?;
+            let previous_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx_unchecked_fee_rate();
+            ctx.original_psbt.inputs[0].non_witness_utxo = Some(previous_tx.clone());
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+            proposal.inputs[0].non_witness_utxo = Some(previous_tx);
+            proposal.inputs[0]
+                .non_witness_utxo
+                .as_mut()
+                .expect("test sender input should have non-witness UTXO information")
+                .output[0]
+                .value += Amount::from_sat(1);
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::SenderTxinUtxoInfoChanged.to_string()
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn test_sender_input_utxo_info_unchanged_or_stripped() -> Result<(), BoxError> {
+            let mut ctx = create_psbt_context()?;
+            let previous_tx = PARSED_ORIGINAL_PSBT.clone().extract_tx_unchecked_fee_rate();
+            ctx.original_psbt.inputs[0].non_witness_utxo = Some(previous_tx.clone());
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+            proposal.inputs[0].non_witness_utxo = Some(previous_tx);
+
+            // Both fields must be present and matching, or the unchanged case below
+            // passes vacuously through `is_none_or`.
+            assert!(proposal.inputs[0].witness_utxo.is_some());
+            assert_eq!(proposal.inputs[0].witness_utxo, ctx.original_psbt.inputs[0].witness_utxo);
+            assert!(proposal.inputs[0].non_witness_utxo.is_some());
+
+            assert!(ctx.clone().process_proposal(proposal.clone()).is_ok());
+
+            // Tolerate receivers that strip UTXO data they do not need.
+            proposal.inputs[0].witness_utxo = None;
+            proposal.inputs[0].non_witness_utxo = None;
+
+            assert!(ctx.process_proposal(proposal).is_ok());
+            Ok(())
+        }
+
+        #[test]
         fn test_sender_input_final_script_sig_is_present() -> Result<(), BoxError> {
             let ctx = create_psbt_context()?;
             let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
@@ -1397,14 +1539,9 @@ mod test {
             let ctx = create_psbt_context()?;
             let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
 
-            // If the outpoints are different, they are considered a receiver input and will be checked as such
-            let proposed_outpoint = proposal.unsigned_tx.input.first().unwrap().previous_output;
-            proposal.unsigned_tx.input.get_mut(0).unwrap().previous_output =
-                OutPoint::new(proposed_outpoint.txid, proposed_outpoint.vout + 1);
-
-            // Make the receiver's input un-finalized
-            proposal.inputs.get_mut(0).unwrap().final_script_sig = None;
-            proposal.inputs.get_mut(0).unwrap().final_script_witness = None;
+            // Make the receiver's input unfinalized.
+            proposal.inputs.get_mut(1).unwrap().final_script_sig = None;
+            proposal.inputs.get_mut(1).unwrap().final_script_witness = None;
 
             assert_eq!(
                 ctx.process_proposal(proposal).unwrap_err().to_string(),
@@ -1419,16 +1556,9 @@ mod test {
             let ctx = create_psbt_context()?;
             let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
 
-            // If the outpoints are different, they are considered a receiver input and will be checked as such
-            let proposed_outpoint = proposal.unsigned_tx.input.first().unwrap().previous_output;
-            proposal.unsigned_tx.input.get_mut(0).unwrap().previous_output =
-                OutPoint::new(proposed_outpoint.txid, proposed_outpoint.vout + 1);
-            proposal.inputs.get_mut(0).unwrap().final_script_sig = Some(ScriptBuf::new());
-            proposal.inputs.get_mut(0).unwrap().final_script_witness = Some(Witness::new());
-
-            // Make the receiver's input un-finalized
-            proposal.inputs.get_mut(0).unwrap().witness_utxo = None;
-            proposal.inputs.get_mut(0).unwrap().non_witness_utxo = None;
+            // Remove the receiver's UTXO information.
+            proposal.inputs.get_mut(1).unwrap().witness_utxo = None;
+            proposal.inputs.get_mut(1).unwrap().non_witness_utxo = None;
 
             assert_eq!(
                 ctx.process_proposal(proposal).unwrap_err().to_string(),
@@ -1443,16 +1573,9 @@ mod test {
             let mut ctx = create_psbt_context()?;
             let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
 
-            // If the outpoints are different, they are considered a receiver input and will be checked as such
-            let proposed_outpoint = proposal.unsigned_tx.input.first().unwrap().previous_output;
-            proposal.unsigned_tx.input.get_mut(0).unwrap().previous_output =
-                OutPoint::new(proposed_outpoint.txid, proposed_outpoint.vout + 1);
-            proposal.inputs.get_mut(0).unwrap().final_script_sig = Some(ScriptBuf::new());
-            proposal.inputs.get_mut(0).unwrap().final_script_witness = Some(Witness::new());
-
             // Ensure the sequence is different
             let sequence = ctx.original_psbt.unsigned_tx.input.get_mut(0).unwrap().sequence;
-            proposal.unsigned_tx.input.get_mut(0).unwrap().sequence =
+            proposal.unsigned_tx.input.get_mut(1).unwrap().sequence =
                 Sequence::from_consensus(sequence.to_consensus_u32() + 1);
 
             assert_eq!(

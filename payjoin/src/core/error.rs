@@ -89,6 +89,15 @@ impl<SessionState, SessionEvent> ReplayError<SessionState, SessionEvent> {
             _ => None,
         }
     }
+
+    /// Returns the application storage error that failed the replay, if any.
+    #[cfg(test)]
+    pub(crate) fn persistence_failure(&self) -> Option<&ImplementationError> {
+        match &self.0 {
+            InternalReplayError::PersistenceFailure(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(feature = "v2")]

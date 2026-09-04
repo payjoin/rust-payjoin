@@ -252,6 +252,9 @@ mod tests {
     use payjoin_test_utils::{BoxError, EXAMPLE_URL};
 
     use super::*;
+    use crate::persist::test_support::{
+        assert_persistence_failure, FailingAsyncPersister, FailingPersister, PersisterFailure,
+    };
     use crate::persist::{InMemoryAsyncPersister, InMemoryPersister};
     use crate::receive::tests::original_from_test_vector;
     use crate::receive::v2::test::{mock_err, SHARED_CONTEXT};
@@ -782,6 +785,39 @@ mod tests {
             .into();
         assert_eq!(err.to_string(), expected_err.to_string());
         assert!(persister.inner.lock().await.is_closed);
+    }
+
+    /// A `load` that fails aborts replay before any event is examined.
+    #[tokio::test]
+    async fn replay_surfaces_load_failure() {
+        let err = replay_event_log(&FailingPersister::<SessionEvent>::on_load())
+            .expect_err("load failure should fail replay");
+        assert_persistence_failure(&err, PersisterFailure::Load);
+
+        let err = replay_event_log_async(&FailingAsyncPersister::<SessionEvent>::on_load())
+            .await
+            .expect_err("async load failure should fail replay");
+        assert_persistence_failure(&err, PersisterFailure::Load);
+    }
+
+    /// Replay closes the session when the event log is invalid, so an event log
+    /// that both replays badly and fails to close reports the close failure:
+    /// storage is broken, which is the more actionable of the two errors. The
+    /// invalid first event below is what drives replay into that close call.
+    #[tokio::test]
+    async fn replay_surfaces_close_failure() {
+        let err = replay_event_log(&FailingPersister::on_close(vec![
+            SessionEvent::CheckedBroadcastSuitability(),
+        ]))
+        .expect_err("close failure should replace the invalid-event error");
+        assert_persistence_failure(&err, PersisterFailure::Close);
+
+        let err = replay_event_log_async(&FailingAsyncPersister::on_close(vec![
+            SessionEvent::CheckedBroadcastSuitability(),
+        ]))
+        .await
+        .expect_err("async close failure should replace the invalid-event error");
+        assert_persistence_failure(&err, PersisterFailure::Close);
     }
 
     #[tokio::test]

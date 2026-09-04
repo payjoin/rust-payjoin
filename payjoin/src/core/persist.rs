@@ -1100,6 +1100,136 @@ where
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use std::error::Error;
+
+    use super::*;
+    use crate::error::ReplayError;
+
+    /// Which [`SessionPersister`] method a fault-injecting persister fails on.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum PersisterFailure {
+        Load,
+        Close,
+    }
+
+    /// Storage error reported by the fault-injecting persisters.
+    #[derive(Debug)]
+    pub(crate) struct TestStorageError(PersisterFailure);
+
+    impl fmt::Display for TestStorageError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self.0 {
+                PersisterFailure::Load => write!(f, "load failed"),
+                PersisterFailure::Close => write!(f, "close failed"),
+            }
+        }
+    }
+
+    impl Error for TestStorageError {}
+
+    /// Session persister that fails on exactly one of `load` or `close`, so
+    /// replay's persistence error paths can be exercised.
+    pub(crate) struct FailingPersister<V> {
+        events: Vec<V>,
+        failure: PersisterFailure,
+    }
+
+    impl<V> FailingPersister<V> {
+        pub(crate) fn on_load() -> Self { Self { events: vec![], failure: PersisterFailure::Load } }
+
+        pub(crate) fn on_close(events: Vec<V>) -> Self {
+            Self { events, failure: PersisterFailure::Close }
+        }
+    }
+
+    impl<V> SessionPersister for FailingPersister<V>
+    where
+        V: Clone + 'static,
+    {
+        type InternalStorageError = TestStorageError;
+        type SessionEvent = V;
+
+        fn save_event(&self, _event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+            Ok(())
+        }
+
+        fn load(
+            &self,
+        ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError>
+        {
+            match self.failure {
+                PersisterFailure::Load => Err(TestStorageError(PersisterFailure::Load)),
+                PersisterFailure::Close => Ok(Box::new(self.events.clone().into_iter())),
+            }
+        }
+
+        fn close(&self) -> Result<(), Self::InternalStorageError> {
+            match self.failure {
+                PersisterFailure::Load => Ok(()),
+                PersisterFailure::Close => Err(TestStorageError(PersisterFailure::Close)),
+            }
+        }
+    }
+
+    /// Async counterpart of [`FailingPersister`].
+    pub(crate) struct FailingAsyncPersister<V>(FailingPersister<V>);
+
+    impl<V> FailingAsyncPersister<V> {
+        pub(crate) fn on_load() -> Self { Self(FailingPersister::on_load()) }
+
+        pub(crate) fn on_close(events: Vec<V>) -> Self { Self(FailingPersister::on_close(events)) }
+    }
+
+    impl<V> AsyncSessionPersister for FailingAsyncPersister<V>
+    where
+        V: Clone + Send + Sync + 'static,
+    {
+        type InternalStorageError = TestStorageError;
+        type SessionEvent = V;
+
+        async fn save_event(
+            &self,
+            _event: Self::SessionEvent,
+        ) -> Result<(), Self::InternalStorageError> {
+            Ok(())
+        }
+
+        async fn load(
+            &self,
+        ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent> + Send>, Self::InternalStorageError>
+        {
+            match self.0.failure {
+                PersisterFailure::Load => Err(TestStorageError(PersisterFailure::Load)),
+                PersisterFailure::Close => Ok(Box::new(self.0.events.clone().into_iter())),
+            }
+        }
+
+        async fn close(&self) -> Result<(), Self::InternalStorageError> {
+            match self.0.failure {
+                PersisterFailure::Load => Ok(()),
+                PersisterFailure::Close => Err(TestStorageError(PersisterFailure::Close)),
+            }
+        }
+    }
+
+    /// Assert that replay failed on persistence, and that the failure came from
+    /// the injected fault rather than from some other storage error.
+    pub(crate) fn assert_persistence_failure<SessionState, SessionEvent>(
+        err: &ReplayError<SessionState, SessionEvent>,
+        expected: PersisterFailure,
+    ) {
+        let implementation_error =
+            err.persistence_failure().expect("replay should fail on persistence");
+        let storage_error = implementation_error
+            .source()
+            .and_then(|source| source.downcast_ref::<TestStorageError>())
+            .expect("persistence failure should carry the injected storage error");
+        assert_eq!(storage_error.0, expected);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use serde::{Deserialize, Serialize};
 
@@ -1843,5 +1973,65 @@ mod tests {
         assert!(transient_error.is_transient());
         assert!(!transient_error.is_fatal());
         assert_eq!(transient_error.transient_state(), Some("Current state".to_string()));
+    }
+
+    #[test]
+    fn in_memory_persister_load_and_close() {
+        let persister = InMemoryPersister::default();
+        assert!(
+            persister.load().expect("empty load should not fail").next().is_none(),
+            "a fresh persister should load no events"
+        );
+
+        let saved = ["first", "second", "third"];
+        for event in saved {
+            persister
+                .save_event(InMemoryTestEvent(event.to_string()))
+                .expect("save should not fail");
+        }
+
+        let loaded = |persister: &InMemoryPersister<InMemoryTestEvent>| {
+            persister.load().expect("load should not fail").map(|event| event.0).collect::<Vec<_>>()
+        };
+        assert_eq!(loaded(&persister), saved, "load should replay events in save order");
+        assert_eq!(loaded(&persister), saved, "load should not consume the event log");
+
+        assert!(!persister.inner.lock().expect("lock should not be poisoned").is_closed);
+        persister.close().expect("close should not fail");
+        assert!(persister.inner.lock().expect("lock should not be poisoned").is_closed);
+        assert_eq!(loaded(&persister), saved, "closing should not discard the event log");
+    }
+
+    #[tokio::test]
+    async fn in_memory_async_persister_load_and_close() {
+        let persister = InMemoryAsyncPersister::default();
+        assert!(
+            persister.load().await.expect("empty load should not fail").next().is_none(),
+            "a fresh persister should load no events"
+        );
+
+        let saved = ["first", "second", "third"];
+        for event in saved {
+            persister
+                .save_event(InMemoryTestEvent(event.to_string()))
+                .await
+                .expect("save should not fail");
+        }
+
+        async fn loaded(persister: &InMemoryAsyncPersister<InMemoryTestEvent>) -> Vec<String> {
+            persister
+                .load()
+                .await
+                .expect("load should not fail")
+                .map(|event| event.0)
+                .collect::<Vec<_>>()
+        }
+        assert_eq!(loaded(&persister).await, saved, "load should replay events in save order");
+        assert_eq!(loaded(&persister).await, saved, "load should not consume the event log");
+
+        assert!(!persister.inner.lock().await.is_closed);
+        persister.close().await.expect("close should not fail");
+        assert!(persister.inner.lock().await.is_closed);
+        assert_eq!(loaded(&persister).await, saved, "closing should not discard the event log");
     }
 }

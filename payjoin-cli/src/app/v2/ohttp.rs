@@ -124,6 +124,15 @@ impl MailroomManager {
                     self.add_failed_directory(directory.clone());
                     return Err(anyhow!("Directory {directory} returned unexpected status: {e}"));
                 }
+                Err(payjoin::io::Error::OhttpKeysBodyTooLarge(len)) => {
+                    tracing::debug!(
+                        "Directory {directory} returned an oversized OHTTP keys body via relay {selected_relay}: {len} bytes"
+                    );
+                    self.add_failed_directory(directory.clone());
+                    return Err(anyhow!(
+                        "Directory {directory} returned an oversized OHTTP keys body: {len} bytes"
+                    ));
+                }
                 Err(e) => {
                     tracing::debug!("Failed to connect to relay: {selected_relay}, {e:?}");
                     self.add_failed_relay(selected_relay);

@@ -7,6 +7,15 @@ use reqwest::{Client, Proxy};
 use crate::into_url::IntoUrl;
 use crate::OhttpKeys;
 
+/// Upper bound on the size of an OHTTP key configuration response body.
+///
+/// Derived from the Ohttp Key Config (RFC 9458) wire format: `key_id(1) + kem_id(2) +
+/// K-256 public key(65) + cipher suite vector length(2) + cipher suites` where
+/// the suite vector is u16-length-bounded (at most 65532 bytes of suites). Any
+/// larger response cannot decode and is rejected before being fully buffered
+/// to prevent memory exhaustion from a hostile payjoin directory.
+pub(crate) const MAX_OHTTP_KEYS_BODY_LEN: usize = 1 + 2 + 65 + 2 + u16::MAX as usize - 3;
+
 /// Fetch the ohttp keys from the specified payjoin directory via proxy.
 ///
 /// * `ohttp_relay`: The http CONNECT method proxy to request the ohttp keys from a payjoin
@@ -69,7 +78,21 @@ async fn parse_ohttp_keys_response(res: reqwest::Response) -> Result<OhttpKeys, 
         return Err(Error::UnexpectedStatusCode(res.status()));
     }
 
-    let body = res.bytes().await?.to_vec();
+    if let Some(len) = res.content_length() {
+        if len > MAX_OHTTP_KEYS_BODY_LEN as u64 {
+            return Err(Error::OhttpKeysBodyTooLarge(len));
+        }
+    }
+
+    let mut body = Vec::new();
+    let mut res = res;
+    while let Some(chunk) = res.chunk().await? {
+        body.extend_from_slice(&chunk);
+        if body.len() > MAX_OHTTP_KEYS_BODY_LEN {
+            return Err(Error::OhttpKeysBodyTooLarge(body.len() as u64));
+        }
+    }
+
     OhttpKeys::decode(&body).map_err(|e| {
         Error::Internal(InternalError(InternalErrorInner::InvalidOhttpKeys(e.to_string())))
     })
@@ -80,6 +103,9 @@ async fn parse_ohttp_keys_response(res: reqwest::Response) -> Result<OhttpKeys, 
 pub enum Error {
     /// When the payjoin directory returns an unexpected status code
     UnexpectedStatusCode(http::StatusCode),
+    /// When the payjoin directory returns an OHTTP key configuration body
+    /// larger than `MAX_OHTTP_KEYS_BODY_LEN`
+    OhttpKeysBodyTooLarge(u64),
     /// Internal errors that should not be pattern matched by users
     #[doc(hidden)]
     Internal(InternalError),
@@ -126,6 +152,10 @@ impl std::fmt::Display for Error {
             Self::UnexpectedStatusCode(code) => {
                 write!(f, "Unexpected status code from payjoin directory: {code}")
             }
+            Self::OhttpKeysBodyTooLarge(len) => write!(
+                f,
+                "OHTTP keys body of {len} bytes exceeds the maximum of {MAX_OHTTP_KEYS_BODY_LEN} bytes"
+            ),
             Self::Internal(InternalError(e)) => e.fmt(f),
         }
     }
@@ -153,6 +183,7 @@ impl std::error::Error for Error {
         match self {
             Self::Internal(InternalError(e)) => e.source(),
             Self::UnexpectedStatusCode(_) => None,
+            Self::OhttpKeysBodyTooLarge(_) => None,
         }
     }
 }
@@ -182,6 +213,9 @@ impl From<InternalErrorInner> for Error {
 
 #[cfg(test)]
 mod tests {
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
     use http::StatusCode;
     use reqwest::Response;
 
@@ -189,6 +223,39 @@ mod tests {
 
     fn mock_response(status: StatusCode, body: Vec<u8>) -> Response {
         Response::from(http::response::Response::builder().status(status).body(body).unwrap())
+    }
+
+    /// Wraps a body so it reports no exact size, the way a `Transfer-Encoding:
+    /// chunked` response does. `reqwest::Response::content_length` reads the
+    /// body's size hint rather than a header, so a plain `Vec<u8>` body always
+    /// has a known length and never reaches the streaming size check.
+    struct UnknownLengthBody(reqwest::Body);
+
+    impl http_body::Body for UnknownLengthBody {
+        type Data = <reqwest::Body as http_body::Body>::Data;
+        type Error = <reqwest::Body as http_body::Body>::Error;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+            Pin::new(&mut self.0).poll_frame(cx)
+        }
+    }
+
+    /// Builds a 200 response whose body length is unknown up front, forcing
+    /// `parse_ohttp_keys_response` through its streaming size check.
+    fn mock_chunked_response(body: Vec<u8>) -> Response {
+        let body = reqwest::Body::wrap(UnknownLengthBody(reqwest::Body::from(body)));
+        let response = Response::from(
+            http::response::Response::builder().status(StatusCode::OK).body(body).unwrap(),
+        );
+        assert_eq!(
+            response.content_length(),
+            None,
+            "chunked mock must have no known length, or the streaming check is never exercised"
+        );
+        response
     }
 
     #[tokio::test]
@@ -232,6 +299,62 @@ mod tests {
                 Err(Error::Internal(InternalError(InternalErrorInner::InvalidOhttpKeys(_))))
             ),
             "expected InvalidOhttpKeys error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_max_body_len_boundary() {
+        // number is literal pin of MAX_OHTTP_KEYS_BODY_LEN
+        let response = mock_response(StatusCode::OK, vec![0u8; 65602]);
+        assert!(
+            matches!(
+                parse_ohttp_keys_response(response).await,
+                Err(Error::Internal(InternalError(InternalErrorInner::InvalidOhttpKeys(_))))
+            ),
+            "body of exactly MAX_OHTTP_KEYS_BODY_LEN must not be rejected as oversized"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_parse_oversized_body_with_content_length() {
+        // number is literal pin of MAX_OHTTP_KEYS_BODY_LEN
+        let response = mock_response(StatusCode::OK, vec![0u8; 65602 + 1]);
+        assert_eq!(response.content_length(), Some(65602 + 1));
+
+        assert!(
+            matches!(
+                parse_ohttp_keys_response(response).await,
+                Err(Error::OhttpKeysBodyTooLarge(len)) if len == 65602 + 1
+            ),
+            "expected OhttpKeysBodyTooLarge from the declared length"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_parse_oversized_body_without_content_length() {
+        // number is literal pin of MAX_OHTTP_KEYS_BODY_LEN
+        let response = mock_chunked_response(vec![0u8; 65602 + 1]);
+
+        assert!(
+            matches!(
+                parse_ohttp_keys_response(response).await,
+                Err(Error::OhttpKeysBodyTooLarge(_))
+            ),
+            "expected OhttpKeysBodyTooLarge from the streaming check"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_parse_body_without_content_length_at_boundary() {
+        // number is literal pin of MAX_OHTTP_KEYS_BODY_LEN
+        let response = mock_chunked_response(vec![0u8; 65602]);
+
+        assert!(
+            matches!(
+                parse_ohttp_keys_response(response).await,
+                Err(Error::Internal(InternalError(InternalErrorInner::InvalidOhttpKeys(_))))
+            ),
+            "streamed body of exactly MAX_OHTTP_KEYS_BODY_LEN must not be rejected as oversized"
         );
     }
 }

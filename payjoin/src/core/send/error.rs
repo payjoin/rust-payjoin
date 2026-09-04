@@ -54,7 +54,7 @@ impl fmt::Display for BuildSenderError {
             NoOutputs => write!(f, "the original transaction has no outputs"),
             MultiplePayeeOutputs => write!(f, "the original transaction has more than one output belonging to the payee"),
             MissingPayeeOutput => write!(f, "the output belonging to payee is missing from the original transaction"),
-            FeeOutputValueLowerThanFeeContribution => write!(f, "the value of fee output is lower than maximum allowed contribution"),
+            FeeOutputValueLowerThanFeeContribution => write!(f, "the value of fee output is lower than maximum allowed contribution, or the contribution would leave the output at or below its dust value"),
             AmbiguousChangeOutput => write!(f, "can not determine which output is change because there's more than two outputs"),
             ChangeIndexOutOfBounds => write!(f, "fee output index is points out of bounds"),
             ChangeIndexPointsAtPayee => write!(f, "fee output index is points at output belonging to the payee"),

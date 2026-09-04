@@ -32,13 +32,27 @@ pub struct OriginalContext {
 impl OriginalContext {
     /// Live and replay both route through here so the param sanitization can't diverge.
     pub(super) fn new(original_psbt: Psbt, mut params: Params, owned_vouts: &[usize]) -> Self {
-        if let Some((_, additional_fee_output_index)) = params.additional_fee_contribution {
+        if let Some((max_additional_fee_contribution, additional_fee_output_index)) =
+            params.additional_fee_contribution
+        {
             // Per BIP78, ignore a fee-contribution index that is out of bounds or
             // pointing at a receiver output.
             // https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#optional-parameters
-            if additional_fee_output_index >= original_psbt.unsigned_tx.output.len()
-                || owned_vouts.contains(&additional_fee_output_index)
-            {
+            // Also ignore a contribution outside the valid range: subtracting
+            // more than the fee output's value minus its dust value would leave
+            // a dust output.
+            let fee_output = original_psbt.unsigned_tx.output.get(additional_fee_output_index);
+            let in_valid_range = match fee_output {
+                Some(fee_output) if !owned_vouts.contains(&additional_fee_output_index) => {
+                    let max_contribution = fee_output
+                        .value
+                        .checked_sub(fee_output.script_pubkey.minimal_non_dust())
+                        .unwrap_or(Amount::ZERO);
+                    max_additional_fee_contribution <= max_contribution
+                }
+                _ => false,
+            };
+            if !in_valid_range {
                 params.additional_fee_contribution = None;
             }
         }
@@ -483,7 +497,10 @@ impl WantsFeeRange {
                     .iter()
                     .position(|txo| txo.script_pubkey == sender_fee_output.script_pubkey)
                     .expect("Sender output is missing from payjoin PSBT");
-                // Determine the additional amount that the sender will pay in fees
+                // Determine the additional amount that the sender will pay in fees.
+                // Sanitization bounds the contribution to the fee output's value
+                // minus its dust value, and the sender output is copied unchanged
+                // into the payjoin PSBT, so the subtraction cannot underflow.
                 let sender_additional_fee = min(max_additional_fee_contribution, additional_fee);
                 tracing::trace!("sender_additional_fee: {sender_additional_fee}");
                 // Remove additional miner fee from the sender's specified output
@@ -507,9 +524,18 @@ impl WantsFeeRange {
             return Err(InternalPayloadError::FeeTooHigh(proposed_fee_rate, max_fee_rate));
         }
         if receiver_additional_fee >= Amount::ONE_SAT {
-            // Remove additional miner fee from the receiver's specified output
-            payjoin_psbt.unsigned_tx.output[self.proposal.change_vout].value -=
-                receiver_additional_fee;
+            // Remove additional miner fee from the receiver's specified output.
+            // Reject rather than underflow when a small payment plus a high
+            // sender minfeerate makes the fee exceed the change output's value.
+            let change_output = &mut payjoin_psbt.unsigned_tx.output[self.proposal.change_vout];
+            change_output.value =
+                change_output.value.checked_sub(receiver_additional_fee).ok_or_else(|| {
+                    InternalPayloadError::FeeTooHigh(
+                        receiver_additional_fee
+                            / (input_contribution_weight + output_contribution_weight),
+                        max_fee_rate,
+                    )
+                })?;
         }
         Ok(payjoin_psbt)
     }
@@ -535,7 +561,10 @@ impl WantsFeeRange {
             .output
             .iter()
             .fold(Weight::ZERO, |acc, txo| acc + txo.weight());
-        let output_contribution_weight = payjoin_outputs_weight - original_outputs_weight;
+        // If the receiver's substitution shrank the total output size, the
+        // contribution is negative; treat it as zero rather than underflowing.
+        let output_contribution_weight =
+            payjoin_outputs_weight.checked_sub(original_outputs_weight).unwrap_or(Weight::ZERO);
         tracing::trace!("output_contribution_weight : {output_contribution_weight}");
         output_contribution_weight
     }
@@ -1212,5 +1241,155 @@ mod tests {
                 Some(FeeRate::from_sat_per_vb_u32(1000)),
             )
             .expect("fee calculation should succeed without the sender contribution");
+    }
+
+    // A `maxadditionalfeecontribution` outside the valid range — greater than
+    // the fee output's value minus its dust value — must be ignored at
+    // sanitization so the receiver, not the sender output, pays the additional
+    // fee, rather than clamped or underflowing the output's Amount subtraction.
+    #[test]
+    fn excessive_fee_contribution_is_ignored() {
+        let mut original = original_from_test_vector();
+        let sender_script = original.psbt.unsigned_tx.output[0].script_pubkey.clone();
+        // Fee index 0 is a sender output when the receiver owns vout 1, so the
+        // contribution survives the index checks; the 100_000_000 sat
+        // contribution exceeds the output's 95983068 sat value and is out of
+        // range.
+        original.params.additional_fee_contribution = Some((Amount::from_sat(100_000_000), 0));
+
+        let wants_inputs = WantsOutputs::new(original, vec![1]).commit_outputs();
+        assert_eq!(
+            wants_inputs.original.params.additional_fee_contribution, None,
+            "out-of-range fee contribution must be dropped at sanitization"
+        );
+
+        let proposal_psbt = Psbt::from_str(RECEIVER_INPUT_CONTRIBUTION).unwrap();
+        let input = InputPair::new(
+            proposal_psbt.unsigned_tx.input[1].clone(),
+            proposal_psbt.inputs[1].clone(),
+            None,
+        )
+        .unwrap();
+        let wants_fee_range = wants_inputs
+            .contribute_inputs([input])
+            .expect("contribution should succeed")
+            .commit_inputs();
+
+        let psbt = wants_fee_range
+            .calculate_psbt_with_fee_range(
+                Some(FeeRate::from_sat_per_vb_u32(1000)),
+                Some(FeeRate::from_sat_per_vb_u32(1000)),
+            )
+            .expect("receiver must cover the fee without the sender contribution");
+
+        let sender_out = psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .find(|txo| txo.script_pubkey == sender_script)
+            .expect("sender output must be present");
+        assert_eq!(sender_out.value, Amount::from_sat(95_983_068));
+    }
+
+    // A contribution of exactly the fee output's value minus its dust value is
+    // the top of the valid range and must survive sanitization; one sat more
+    // must be dropped.
+    #[test]
+    fn fee_contribution_dust_boundary() {
+        let mut original = original_from_test_vector();
+        let fee_output = original.psbt.unsigned_tx.output[0].clone();
+        let max_contribution = fee_output.value - fee_output.script_pubkey.minimal_non_dust();
+
+        original.params.additional_fee_contribution = Some((max_contribution, 0));
+        let wants_outputs = WantsOutputs::new(original.clone(), vec![1]);
+        assert_eq!(
+            wants_outputs.original.params.additional_fee_contribution,
+            Some((max_contribution, 0)),
+            "a contribution leaving exactly the dust value is in range"
+        );
+
+        original.params.additional_fee_contribution = Some((max_contribution + Amount::ONE_SAT, 0));
+        let wants_outputs = WantsOutputs::new(original, vec![1]);
+        assert_eq!(
+            wants_outputs.original.params.additional_fee_contribution, None,
+            "a contribution past the dust value is out of range"
+        );
+    }
+
+    // A receiver fee exceeding the receiver change output's value must return
+    // FeeTooHigh instead of panicking on the Amount subtraction.
+    #[test]
+    fn receiver_fee_exceeding_change_outputs_fee_too_high() {
+        use crate::receive::InternalPayloadError;
+
+        let original = original_from_test_vector();
+        let mut wants_fee_range =
+            WantsOutputs::new(original, vec![0]).commit_outputs().commit_inputs();
+        let payjoin_psbt = &mut wants_fee_range.proposal.payjoin_psbt;
+        // A large additional output makes the receiver owe substantial weight
+        // fees while the change output stays too small to cover them.
+        payjoin_psbt.unsigned_tx.output.push(TxOut {
+            value: Amount::ZERO,
+            script_pubkey: ScriptBuf::from_bytes(vec![0x51; 10_000]),
+        });
+        payjoin_psbt.outputs.push(Default::default());
+        payjoin_psbt.unsigned_tx.output[0].value = Amount::from_sat(100);
+
+        // Equal min and max rates so the max_fee check passes and only the
+        // change-value check fires.
+        let fee_rate = FeeRate::from_sat_per_vb_u32(25_000);
+        let result = wants_fee_range.calculate_psbt_with_fee_range(Some(fee_rate), Some(fee_rate));
+        match result {
+            Err(InternalPayloadError::FeeTooHigh(proposed, max)) => {
+                assert_eq!(max, fee_rate);
+                assert!(proposed > FeeRate::BROADCAST_MIN);
+            }
+            _ => panic!("expected FeeTooHigh when receiver fee exceeds change output"),
+        }
+    }
+
+    // A receiver fee exactly equal to the change output's value must succeed
+    // and drain the change output to zero rather than error, pinning the
+    // strict inequality of the change-value check.
+    #[test]
+    fn receiver_fee_equal_to_change_drains_change_to_zero() {
+        let original = original_from_test_vector();
+        let mut wants_fee_range =
+            WantsOutputs::new(original, vec![0]).commit_outputs().commit_inputs();
+        let payjoin_psbt = &mut wants_fee_range.proposal.payjoin_psbt;
+        // One extra 1-byte-script output contributes 8 + 1 + 1 = 10 bytes
+        // = 40 weight units, so at 1 sat/vb (250 sat/kwu) the receiver fee is
+        // exactly ceil(40 * 250 / 1000) = 10 sats.
+        payjoin_psbt
+            .unsigned_tx
+            .output
+            .push(TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::from_bytes(vec![0x51]) });
+        payjoin_psbt.outputs.push(Default::default());
+        payjoin_psbt.unsigned_tx.output[0].value = Amount::from_sat(10);
+
+        // Equal min and max rates so the max_fee check passes and only the
+        // change-value boundary is exercised.
+        let fee_rate = FeeRate::from_sat_per_vb_u32(1);
+        let psbt = wants_fee_range
+            .calculate_psbt_with_fee_range(Some(fee_rate), Some(fee_rate))
+            .expect("a fee exactly equal to the change value must not error");
+        assert_eq!(psbt.unsigned_tx.output[0].value, Amount::ZERO);
+    }
+
+    // Substituting a receiver output script smaller than the original shrinks
+    // the total output weight; the Weight subtraction must saturate at zero
+    // instead of underflowing.
+    #[test]
+    fn shrinking_output_substitution_does_not_underflow() {
+        let original = original_from_test_vector();
+        let mut wants_fee_range =
+            WantsOutputs::new(original, vec![0]).commit_outputs().commit_inputs();
+        wants_fee_range.proposal.payjoin_psbt.unsigned_tx.output[0].script_pubkey =
+            ScriptBuf::new();
+
+        let psbt = wants_fee_range
+            .calculate_psbt_with_fee_range(None, None)
+            .expect("shrinking substitution must not underflow output weight");
+        assert!(psbt.unsigned_tx.output[0].script_pubkey.is_empty());
     }
 }

@@ -8,6 +8,8 @@ import 'package:test/test.dart';
 import 'package:payjoin/http.dart' as payjoin_http;
 import 'package:payjoin/payjoin.dart' as payjoin;
 
+import 'fixtures.dart' as fixtures;
+
 const _localhostCertPem =
     '-----BEGIN CERTIFICATE-----\n'
     'MIIBmDCCAT+gAwIBAgIUZmuZcOJ7AKPKxmXUdl8mALQqLjkwCgYIKoZIzj0EAwIw\n'
@@ -28,21 +30,7 @@ const _localhostKeyPem =
     '1f17kOSt4gPp9WH21EiioVJREvUvyraYsjEuXhbkvgdEm4+QpUKJQj3+\n'
     '-----END PRIVATE KEY-----';
 
-final _ohttpKeysBytes = Uint8List.fromList(
-  _hexToBytes(
-    '01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad'
-    '2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382'
-    'af588d370957000400010003',
-  ),
-);
-
-List<int> _hexToBytes(String hex) {
-  final bytes = <int>[];
-  for (var i = 0; i < hex.length; i += 2) {
-    bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
-  }
-  return bytes;
-}
+final _ohttpKeysBytes = fixtures.ohttpKeys;
 
 Uint8List _localhostCertDer() => base64.decode(
   _localhostCertPem.replaceAll(RegExp(r'-----[^-]+-----|\s'), ''),

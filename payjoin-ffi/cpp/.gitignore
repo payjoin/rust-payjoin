@@ -1,0 +1,10 @@
+# Generated bindings
+src/*.hpp
+src/*.cpp
+
+# Native library copied for tests
+/lib/*.so
+/lib/*.dylib
+
+# CMake build tree
+build/

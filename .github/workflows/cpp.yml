@@ -1,0 +1,31 @@
+name: Build and Test Cpp
+on:
+  workflow_run:
+    workflows: ["Flake maintenance"]
+    types: [requested]
+    branches:
+      - "update_flake_lock_action"
+  pull_request:
+    paths:
+      - payjoin-ffi/**
+      # The jobs run inside the flake's dev shell, so changes to the flake
+      # change this workflow's environment.
+      - flake.nix
+      - flake.lock
+
+jobs:
+  build-cpp-and-test:
+    name: "Build and test cpp"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-26.04, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
+      - name: "Build and test"
+        run: nix develop .#cpp -c bash ./payjoin-ffi/cpp/contrib/test.sh

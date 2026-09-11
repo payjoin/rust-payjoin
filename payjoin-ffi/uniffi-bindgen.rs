@@ -31,6 +31,10 @@ fn uniffi_bindgen() {
             )
             .expect("Failed to generate dart bindings");
         }
+        #[cfg(feature = "cpp")]
+        Some("cpp") => {
+            uniffi_bindgen_cpp::main().expect("Failed to generate cpp bindings");
+        }
         #[cfg(feature = "csharp")]
         Some("csharp") => {
             uniffi_bindgen_cs::main().expect("Failed to generate csharp bindings");

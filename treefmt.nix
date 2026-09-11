@@ -3,6 +3,7 @@
   projectRootFile = "flake.nix";
   programs = {
     dart-format.enable = true;
+    clang-format.enable = true;
     nixfmt.enable = true;
     prettier.enable = true;
     ruff-format.enable = true;
@@ -23,6 +24,7 @@
   };
   settings = {
     formatter = {
+      clang-format.includes = [ "payjoin-ffi/cpp/tests/*" ];
       dart-format.options = [
         "--language-version"
         "latest"

@@ -1,0 +1,15 @@
+# Generated UniFFI Kotlin
+src/main/kotlin/org/
+
+# Native library copied by generate_bindings.sh
+/lib/*.so
+/lib/*.dylib
+/lib/*.dll
+
+# Gradle
+.gradle/
+build/
+local.properties
+
+.idea/
+.DS_Store

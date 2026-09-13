@@ -1,0 +1,42 @@
+name: Build and Test Kotlin
+on:
+  workflow_run:
+    workflows: ["Flake maintenance"]
+    types: [requested]
+    branches:
+      - "update_flake_lock_action"
+  pull_request:
+    paths:
+      - payjoin-ffi/**
+      # The jobs run inside the flake's kotlin dev shell, so changes to
+      # the flake change this workflow's environment.
+      - flake.nix
+      - flake.lock
+      - .github/workflows/kotlin.yml
+
+jobs:
+  build-kotlin-and-test:
+    name: "Build and test kotlin"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-26.04, macos-latest]
+    env:
+      RUSTUP_TOOLCHAIN: 1.85.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: "Install Rust 1.85.0"
+        uses: dtolnay/rust-toolchain@1.85.0
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: msrv-workspace
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
+      - name: "Build and test"
+        run: nix develop .#kotlin -c bash ./payjoin-ffi/kotlin/contrib/test.sh
+      - name: "Compile production bindings"
+        run: |
+          nix develop .#kotlin -c env PAYJOIN_FFI_FEATURES= bash ./payjoin-ffi/kotlin/scripts/generate_bindings.sh
+          nix develop .#kotlin -c bash -c 'cd payjoin-ffi/kotlin && ./gradlew --no-daemon compileKotlin'

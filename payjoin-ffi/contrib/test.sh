@@ -2,7 +2,7 @@
 set -e
 cd "$(dirname "$0")/.."
 cargo test --package payjoin-ffi --verbose --features=_manual-tls,_test-utils
-BINDINGS="dart javascript python csharp"
+BINDINGS="dart javascript python csharp kotlin"
 pids=()
 tmpfiles=()
 for binding in $BINDINGS; do

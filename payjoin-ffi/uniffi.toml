@@ -2,6 +2,16 @@
 package_name = "org.payjoindevkit"
 cdylib_name = "payjoin_ffi"
 
+# AutoCloseable/Disposable.close() drops the Rust handle. Payjoin also exports
+# protocol close() on these types. Rename only the Kotlin protocol methods.
+[bindings.kotlin.rename]
+"ReceiverPendingFallback.close" = "closeSession"
+"SenderPendingFallback.close" = "closeSession"
+"JsonReceiverSessionPersister.close" = "closeSession"
+"JsonReceiverSessionPersisterAsync.close" = "closeSession"
+"JsonSenderSessionPersister.close" = "closeSession"
+"JsonSenderSessionPersisterAsync.close" = "closeSession"
+
 [bindings.python]
 cdylib_name = "payjoin_ffi"
 

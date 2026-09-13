@@ -389,6 +389,25 @@
           BITCOIND_SKIP_DOWNLOAD = 1;
         };
 
+        kotlinDevShell = pkgs.mkShell {
+          name = "kotlin-dev";
+          packages =
+            with pkgs;
+            [
+              rustVersions.msrv
+              jdk21
+              python3
+              bzip2
+            ]
+            ++ lib.optionals pkgs.stdenv.isLinux [
+              pkg-config
+              openssl
+              clang
+            ];
+          BITCOIND_EXE = pkgs.lib.getExe' pkgs.bitcoind "bitcoind";
+          BITCOIND_SKIP_DOWNLOAD = 1;
+        };
+
         # Rust toolchain for the python dev shell: msrv pinned to match
         # payjoin-ffi/python build requirements, with per-arch targets added
         # so cargo can build artifacts under nix for payjoin-ffi/python/scripts/generate_bindings.sh
@@ -502,6 +521,7 @@
           javascript = javascriptDevShell;
           csharp = csharpDevShell;
           dart = dartDevShell;
+          kotlin = kotlinDevShell;
         };
         formatter = treefmtEval.config.build.wrapper;
         checks =

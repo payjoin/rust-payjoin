@@ -1,10 +1,33 @@
 package org.payjoindevkit
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
 class ValidationTests {
+    @Test
+    fun oversizedScriptPreservesNestedError() {
+        val ex = assertFailsWith<InputPairException.FfiValidation> {
+            InputPair(validInput(), PsbtInput(TxOut(1u, ByteArray(10_001) { 0x51 }), null, null), null)
+        }
+        val detail = assertIs<FfiValidationException.ScriptTooLarge>(ex.v1)
+        assertEquals(10_001uL, detail.len)
+        assertEquals(10_000uL, detail.max)
+    }
+
+    @Test
+    fun zeroAndExcessiveWeightPreserveNestedError() {
+        for (weight in listOf(0uL, 4_000_001uL)) {
+            val ex = assertFailsWith<InputPairException.FfiValidation> {
+                InputPair(validInput(), PsbtInput(TxOut(1u, byteArrayOf(0x6a)), null, null), Weight(weight))
+            }
+            val detail = assertIs<FfiValidationException.WeightOutOfRange>(ex.v1)
+            assertEquals(weight, detail.weightUnits)
+            assertEquals(4_000_000uL, detail.maxWu)
+        }
+    }
+
     @Test
     fun receiverBuilderRejectsBadAddress() {
         val ohttpKeys = OhttpKeys.decode(ohttpKeysData)
@@ -149,3 +172,5 @@ private fun v2PjUri(): PjUri {
         ohttpKeys,
     ).build().save(persister).pjUri()
 }
+
+private fun validInput() = TxIn(OutPoint("00".repeat(32), 0u), ByteArray(0), 0u, emptyList())

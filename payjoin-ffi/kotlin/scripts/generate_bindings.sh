@@ -38,7 +38,7 @@ run_cargo() {
 
 # compiler-artifact filenames include target-dir, CARGO_BUILD_TARGET, and profile.
 NATIVE_LIB="$(
-    run_cargo build --message-format=json --profile "$PAYJOIN_FFI_PROFILE" -p payjoin-ffi |
+    run_cargo build --message-format=json-render-diagnostics --profile "$PAYJOIN_FFI_PROFILE" -p payjoin-ffi |
         python3 -c '
 import json, os, sys
 

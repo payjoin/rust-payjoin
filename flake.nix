@@ -396,6 +396,7 @@
             [
               rustVersions.msrv
               jdk21
+              python3
               bzip2
             ]
             ++ lib.optionals pkgs.stdenv.isLinux [

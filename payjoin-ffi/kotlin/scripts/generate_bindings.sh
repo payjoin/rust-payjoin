@@ -21,10 +21,9 @@ cd "$SCRIPT_DIR/../.."
 echo "Generating payjoin Kotlin..."
 PAYJOIN_FFI_FEATURES=${PAYJOIN_FFI_FEATURES-_test-utils}
 PAYJOIN_FFI_PROFILE=${PAYJOIN_FFI_PROFILE:-dev}
-if [[ $PAYJOIN_FFI_PROFILE == "dev" ]]; then
-    TARGET_PROFILE_DIR=debug
-else
-    TARGET_PROFILE_DIR=$PAYJOIN_FFI_PROFILE
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required to parse cargo --message-format=json" >&2
+    exit 1
 fi
 # Empty FEATURE_ARGS + `set -u` is unbound on macOS bash 3.2. Pass --features only when set.
 run_cargo() {
@@ -37,16 +36,33 @@ run_cargo() {
     fi
 }
 
-run_cargo build --profile "$PAYJOIN_FFI_PROFILE" -p payjoin-ffi
+# compiler-artifact filenames include target-dir, CARGO_BUILD_TARGET, and profile.
+NATIVE_LIB="$(
+    run_cargo build --message-format=json --profile "$PAYJOIN_FFI_PROFILE" -p payjoin-ffi |
+        python3 -c '
+import json, os, sys
 
-# cargo metadata honors CARGO_TARGET_DIR and [build] target-dir. The kotlin
-# nix shell has no python/jq; metadata is one line so sed is enough.
-TARGET_ROOT="$(cargo metadata --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
-if [[ -z $TARGET_ROOT ]]; then
-    echo "failed to read target_directory from cargo metadata" >&2
-    exit 1
-fi
-NATIVE_LIB="$TARGET_ROOT/$TARGET_PROFILE_DIR/$LIBNAME"
+libname = sys.argv[1]
+found = None
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        msg = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if msg.get("reason") != "compiler-artifact":
+        continue
+    for filename in msg.get("filenames") or []:
+        if os.path.basename(filename) == libname:
+            found = filename
+if not found:
+    sys.stderr.write("cargo build did not report %s\n" % libname)
+    sys.exit(1)
+print(found)
+' "$LIBNAME"
+)"
 
 OUT_DIR="kotlin/src/main/kotlin"
 mkdir -p "$OUT_DIR"

@@ -391,8 +391,12 @@ impl App {
             .map_err(|e| Error::Implementation(ImplementationError::new(e)))?
             .commit_outputs();
 
-        let wants_fee_range = try_contributing_inputs(payjoin.clone(), &self.wallet)
-            .map_err(Error::Implementation)?;
+        let wants_fee_range = try_contributing_inputs(
+            payjoin.clone(),
+            &self.wallet,
+            self.config.receive_options.consolidate,
+        )
+        .map_err(Error::Implementation)?;
         let provisional_payjoin =
             wants_fee_range.apply_fee_range(None, self.config.max_fee_rate)?;
 
@@ -408,9 +412,14 @@ impl App {
 fn try_contributing_inputs(
     payjoin: payjoin::receive::v1::WantsInputs,
     wallet: &BitcoindWallet,
+    consolidate: Option<usize>,
 ) -> Result<payjoin::receive::v1::WantsFeeRange, ImplementationError> {
-    let candidate_inputs =
-        wallet.list_unspent().map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+    let candidate_inputs = if consolidate.is_some() {
+        wallet.list_unspent_smallest_first()
+    } else {
+        wallet.list_unspent()
+    }
+    .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
 
     if candidate_inputs.is_empty() {
         return Err(ImplementationError::from(
@@ -421,13 +430,19 @@ fn try_contributing_inputs(
         ));
     }
 
-    let selected_input =
-        payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::new)?;
-
-    Ok(payjoin
-        .contribute_inputs(vec![selected_input])
-        .map_err(ImplementationError::new)?
-        .commit_inputs())
+    let inputs = match consolidate {
+        Some(max) => {
+            let available = candidate_inputs.len();
+            let mut inputs = candidate_inputs;
+            inputs.truncate(max);
+            println!("Contributing {} of {available} UTXOs", inputs.len());
+            inputs
+        }
+        None => vec![payjoin
+            .try_preserving_privacy(candidate_inputs)
+            .map_err(ImplementationError::new)?],
+    };
+    Ok(payjoin.contribute_inputs(inputs).map_err(ImplementationError::new)?.commit_inputs())
 }
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {

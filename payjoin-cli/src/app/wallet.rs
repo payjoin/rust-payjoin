@@ -192,12 +192,28 @@ impl BitcoindWallet {
 
     /// List unspent UTXOs
     pub fn list_unspent(&self) -> Result<Vec<InputPair>> {
+        Ok(self.list_unspent_raw()?.into_iter().map(input_pair_from_corepc).collect())
+    }
+
+    /// List unspent UTXOs, smallest first.
+    ///
+    /// Consolidation contributes a bounded number of UTXOs, so the bound
+    /// should fall on the smallest ones: every input costs the same to
+    /// spend regardless of value, which makes small UTXOs the most
+    /// expensive to spend later relative to what they hold.
+    pub fn list_unspent_smallest_first(&self) -> Result<Vec<InputPair>> {
+        let mut unspent = self.list_unspent_raw()?;
+        unspent.sort_by_key(|utxo| Amount::from_btc(utxo.amount.to_btc()).expect("Valid amount"));
+        Ok(unspent.into_iter().map(input_pair_from_corepc).collect())
+    }
+
+    fn list_unspent_raw(&self) -> Result<Vec<ListUnspentItem>> {
         let unspent = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
                 .block_on(async { self.rpc.list_unspent(None, None, None, None, None).await })
         })
         .context("Failed to list unspent")?;
-        Ok(unspent.0.into_iter().map(input_pair_from_corepc).collect())
+        Ok(unspent.0)
     }
 
     /// Check if wallet has any spendable UTXOs

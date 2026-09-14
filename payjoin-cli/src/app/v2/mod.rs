@@ -325,7 +325,7 @@ impl AppTrait for App {
 
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
-        let persister = ReceiverPersister::new(self.db.clone())?;
+        let persister = ReceiverPersister::new(self.db.clone(), &self.config.receive_options)?;
         let (directory, ohttp_keys) = loop {
             let directory = self.mailroom_manager.choose_directory()?;
             match self
@@ -1096,7 +1096,12 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
-        let candidate_inputs = wallet.list_unspent()?;
+        let consolidate = persister.receive_options()?.consolidate;
+        let candidate_inputs = if consolidate.is_some() {
+            wallet.list_unspent_smallest_first()?
+        } else {
+            wallet.list_unspent()?
+        };
 
         if candidate_inputs.is_empty() {
             let id = persister.session_id();
@@ -1105,9 +1110,24 @@ impl App {
             ));
         }
 
-        let selected_input = proposal.try_preserving_privacy(candidate_inputs)?;
-        let proposal =
-            proposal.contribute_inputs(vec![selected_input])?.commit_inputs().save(persister)?;
+        let inputs = match consolidate {
+            // Consolidation deliberately forgoes the UIH-avoiding selection:
+            // the point is to sweep the receiver's UTXO set into the payjoin
+            // output instead of paying for a separate consolidation tx. The
+            // count is capped because BIP77 pads every message to a fixed
+            // size, so an oversized proposal cannot be sent at all.
+            Some(max) => {
+                let available = candidate_inputs.len();
+                let mut inputs = candidate_inputs;
+                inputs.truncate(max);
+                let contributed = inputs.len();
+                persister.print(format_args!("Contributing {contributed} of {available} UTXOs"));
+                inputs
+            }
+            None => vec![proposal.try_preserving_privacy(candidate_inputs)?],
+        };
+
+        let proposal = proposal.contribute_inputs(inputs)?.commit_inputs().save(persister)?;
         Ok(ReceiveSession::WantsFeeRange(proposal))
     }
 

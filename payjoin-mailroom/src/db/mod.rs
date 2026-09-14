@@ -72,6 +72,12 @@ pub trait Db: Clone + Send + Sync + 'static {
         mailbox_id: &ShortId,
     ) -> impl Future<Output = Result<Arc<Vec<u8>>, Error<Self::OperationalError>>> + Send;
 
+    /// Read a stored v2 payload if present, without waiting.
+    fn peek_v2_payload(
+        &self,
+        mailbox_id: &ShortId,
+    ) -> impl Future<Output = Result<Option<Arc<Vec<u8>>>, Error<Self::OperationalError>>> + Send;
+
     /// Write a v1 response payload.
     fn post_v1_response(
         &self,
@@ -91,6 +97,7 @@ pub trait Db: Clone + Send + Sync + 'static {
 pub enum DbRequest {
     PostV2Payload { mailbox_id: ShortId, payload: Vec<u8> },
     WaitForV2Payload { mailbox_id: ShortId },
+    PeekV2Payload { mailbox_id: ShortId },
     PostV1Response { mailbox_id: ShortId, payload: Vec<u8> },
     PostV1RequestAndWaitForResponse { mailbox_id: ShortId, payload: Vec<u8> },
 }
@@ -99,6 +106,7 @@ pub enum DbRequest {
 pub enum DbResponse {
     PostV2Payload(Option<()>),
     WaitForV2Payload(Arc<Vec<u8>>),
+    PeekV2Payload(Option<Arc<Vec<u8>>>),
     PostV1Response(()),
     PostV1RequestAndWaitForResponse(Arc<Vec<u8>>),
 }
@@ -134,6 +142,8 @@ impl Service<DbRequest> for FilesDbService {
                     Ok(DbResponse::PostV2Payload(db.post_v2_payload(&mailbox_id, payload).await?)),
                 DbRequest::WaitForV2Payload { mailbox_id } =>
                     Ok(DbResponse::WaitForV2Payload(db.wait_for_v2_payload(&mailbox_id).await?)),
+                DbRequest::PeekV2Payload { mailbox_id } =>
+                    Ok(DbResponse::PeekV2Payload(db.peek_v2_payload(&mailbox_id).await?)),
                 DbRequest::PostV1Response { mailbox_id, payload } => {
                     db.post_v1_response(&mailbox_id, payload).await?;
                     Ok(DbResponse::PostV1Response(()))
@@ -196,6 +206,21 @@ impl Db for DbServiceAdapter {
         match response {
             DbResponse::WaitForV2Payload(result) => Ok(result),
             _ => Err(Self::invalid_response("wait_for_v2_payload")),
+        }
+    }
+
+    async fn peek_v2_payload(
+        &self,
+        mailbox_id: &ShortId,
+    ) -> Result<Option<Arc<Vec<u8>>>, Error<Self::OperationalError>> {
+        let response = self
+            .inner
+            .clone()
+            .oneshot(DbRequest::PeekV2Payload { mailbox_id: *mailbox_id })
+            .await?;
+        match response {
+            DbResponse::PeekV2Payload(result) => Ok(result),
+            _ => Err(Self::invalid_response("peek_v2_payload")),
         }
     }
 
@@ -270,6 +295,14 @@ impl<D: Db> Db for MetricsDb<D> {
     ) -> Result<Arc<Vec<u8>>, Error<Self::OperationalError>> {
         self.metrics.record_short_id(mailbox_id);
         self.inner.wait_for_v2_payload(mailbox_id).await
+    }
+
+    async fn peek_v2_payload(
+        &self,
+        mailbox_id: &ShortId,
+    ) -> Result<Option<Arc<Vec<u8>>>, Error<Self::OperationalError>> {
+        self.metrics.record_short_id(mailbox_id);
+        self.inner.peek_v2_payload(mailbox_id).await
     }
 
     async fn post_v1_response(

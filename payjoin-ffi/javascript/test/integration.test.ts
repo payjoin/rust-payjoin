@@ -1,3 +1,4 @@
+import { ORIGINAL_PSBT } from "./fixtures.ts";
 import * as testUtils from "../test-utils/index.js";
 import assert from "assert";
 import { readFileSync } from "node:fs";
@@ -507,7 +508,7 @@ function testFfiValidation(payjoin: PayjoinModule): void {
     const pjUri = payjoin.Uri.parse(
         "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com",
     ).checkPjSupported();
-    const psbt = testUtils.originalPsbt();
+    const psbt = ORIGINAL_PSBT;
     assert.throws(() => {
         new payjoin.SenderBuilder(psbt, pjUri).buildRecommended(
             18446744073709551615n,

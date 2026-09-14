@@ -9,6 +9,7 @@ import "package:payjoin/http.dart" as payjoin_http;
 import "package:payjoin/payjoin.dart" as payjoin;
 import "package:payjoin/test_utils.dart" as test_utils;
 
+import "fixtures.dart" as fixtures;
 import "utils.dart";
 
 late test_utils.BitcoindEnv env;
@@ -477,7 +478,7 @@ void main() {
         ohttpKeys: ohttpKeys,
       ).build().save(persister: recvPersister).pjUri();
 
-      final psbt = test_utils.originalPsbt();
+      final psbt = fixtures.originalPsbt;
       // Large enough to overflow fee * weight but still parsable as Dart int.
       const overflowFeeRate = 5000000000000; // sat/kwu
       expect(

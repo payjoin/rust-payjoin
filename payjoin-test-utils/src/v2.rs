@@ -244,3 +244,18 @@ pub fn ohttp_key_config_bytes() -> Vec<u8> {
 pub fn ohttp_server() -> ohttp::Server {
     ohttp::Server::new(test_key_config()).expect("valid ohttp server")
 }
+
+#[cfg(test)]
+mod tests {
+    use bitcoin::hex::FromHex;
+
+    use super::*;
+
+    #[test]
+    fn shared_binding_ohttp_fixture_roundtrips() {
+        let bytes = Vec::from_hex(include_str!("../fixtures/ohttp-keys.hex").trim())
+            .expect("valid hex fixture");
+        let keys = OhttpKeys::decode(&bytes).expect("valid OHTTP key configuration");
+        assert_eq!(keys.encode().expect("encodable OHTTP key configuration"), bytes);
+    }
+}

@@ -44,24 +44,12 @@ public class UriTests
 
 public class PersistenceTests
 {
-    private static readonly byte[] OhttpKeysData = new byte[]
-    {
-        0x01, 0x00, 0x16, 0x04, 0xba, 0x48, 0xc4, 0x9c, 0x3d, 0x4a,
-        0x92, 0xa3, 0xad, 0x00, 0xec, 0xc6, 0x3a, 0x02, 0x4d, 0xa1,
-        0x0c, 0xed, 0x02, 0x18, 0x0c, 0x73, 0xec, 0x12, 0xd8, 0xa7,
-        0xad, 0x2c, 0xc9, 0x1b, 0xb4, 0x83, 0x82, 0x4f, 0xe2, 0xbe,
-        0xe8, 0xd2, 0x8b, 0xfe, 0x2e, 0xb2, 0xfc, 0x64, 0x53, 0xbc,
-        0x4d, 0x31, 0xcd, 0x85, 0x1e, 0x8a, 0x65, 0x40, 0xe8, 0x6c,
-        0x53, 0x82, 0xaf, 0x58, 0x8d, 0x37, 0x09, 0x57, 0x00, 0x04,
-        0x00, 0x01, 0x00, 0x03,
-    };
-
     [Fact]
     public void ReceiverPersistence()
     {
         var persister = new InMemoryReceiverPersister();
         var address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
-        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var ohttpKeys = OhttpKeys.Decode(TestVectors.OhttpKeys);
 
         var builder = new ReceiverBuilder(address, "https://example.com", ohttpKeys);
         var transition = builder.Build();
@@ -78,7 +66,7 @@ public class PersistenceTests
     {
         var receiverPersister = new InMemoryReceiverPersister();
         var address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
-        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var ohttpKeys = OhttpKeys.Decode(TestVectors.OhttpKeys);
 
         var receiver = new ReceiverBuilder(address, "https://example.com", ohttpKeys)
             .Build()
@@ -86,7 +74,7 @@ public class PersistenceTests
         var uri = receiver.PjUri();
 
         var senderPersister = new InMemorySenderPersister();
-        var psbt = PayjoinMethods.OriginalPsbt();
+        var psbt = TestVectors.OriginalPsbt;
         
         var withReplyKey = new SenderBuilder(psbt, uri)
             .BuildRecommended(1000)
@@ -103,7 +91,7 @@ public class PersistenceTests
     {
         var persister = new InMemoryReceiverPersisterAsync();
         var address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
-        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var ohttpKeys = OhttpKeys.Decode(TestVectors.OhttpKeys);
 
         var builder = new ReceiverBuilder(address, "https://example.com", ohttpKeys);
         var transition = builder.Build();
@@ -120,7 +108,7 @@ public class PersistenceTests
     {
         var receiverPersister = new InMemoryReceiverPersisterAsync();
         var address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
-        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var ohttpKeys = OhttpKeys.Decode(TestVectors.OhttpKeys);
 
         var receiver = await new ReceiverBuilder(address, "https://example.com", ohttpKeys)
             .Build()
@@ -128,7 +116,7 @@ public class PersistenceTests
         var uri = receiver.PjUri();
 
         var senderPersister = new InMemorySenderPersisterAsync();
-        var psbt = PayjoinMethods.OriginalPsbt();
+        var psbt = TestVectors.OriginalPsbt;
 
         var withReplyKey = await new SenderBuilder(psbt, uri)
             .BuildRecommended(1000)
@@ -143,24 +131,12 @@ public class PersistenceTests
 
 public class CancelTests
 {
-    private static readonly byte[] OhttpKeysData = new byte[]
-    {
-        0x01, 0x00, 0x16, 0x04, 0xba, 0x48, 0xc4, 0x9c, 0x3d, 0x4a,
-        0x92, 0xa3, 0xad, 0x00, 0xec, 0xc6, 0x3a, 0x02, 0x4d, 0xa1,
-        0x0c, 0xed, 0x02, 0x18, 0x0c, 0x73, 0xec, 0x12, 0xd8, 0xa7,
-        0xad, 0x2c, 0xc9, 0x1b, 0xb4, 0x83, 0x82, 0x4f, 0xe2, 0xbe,
-        0xe8, 0xd2, 0x8b, 0xfe, 0x2e, 0xb2, 0xfc, 0x64, 0x53, 0xbc,
-        0x4d, 0x31, 0xcd, 0x85, 0x1e, 0x8a, 0x65, 0x40, 0xe8, 0x6c,
-        0x53, 0x82, 0xaf, 0x58, 0x8d, 0x37, 0x09, 0x57, 0x00, 0x04,
-        0x00, 0x01, 0x00, 0x03,
-    };
-
     [Fact]
     public void ReceiverCancelFromInitialized()
     {
         var persister = new InMemoryReceiverPersister();
         var address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
-        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var ohttpKeys = OhttpKeys.Decode(TestVectors.OhttpKeys);
 
         var initialized = new ReceiverBuilder(address, "https://example.com", ohttpKeys)
             .Build()
@@ -179,7 +155,7 @@ public class CancelTests
     {
         var persister = new InMemoryReceiverPersisterAsync();
         var address = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
-        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var ohttpKeys = OhttpKeys.Decode(TestVectors.OhttpKeys);
 
         var initialized = await new ReceiverBuilder(address, "https://example.com", ohttpKeys)
             .Build()
@@ -198,7 +174,7 @@ public class CancelTests
     {
         var receiverPersister = new InMemoryReceiverPersister();
         var address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
-        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var ohttpKeys = OhttpKeys.Decode(TestVectors.OhttpKeys);
 
         var receiver = new ReceiverBuilder(address, "https://example.com", ohttpKeys)
             .Build()
@@ -206,7 +182,7 @@ public class CancelTests
         var uri = receiver.PjUri();
 
         var senderPersister = new InMemorySenderPersister();
-        var psbt = PayjoinMethods.OriginalPsbt();
+        var psbt = TestVectors.OriginalPsbt;
         var withReplyKey = new SenderBuilder(psbt, uri)
             .BuildRecommended(1000)
             .Save(senderPersister);
@@ -228,7 +204,7 @@ public class CancelTests
     {
         var receiverPersister = new InMemoryReceiverPersisterAsync();
         var address = "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK";
-        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var ohttpKeys = OhttpKeys.Decode(TestVectors.OhttpKeys);
 
         var receiver = await new ReceiverBuilder(address, "https://example.com", ohttpKeys)
             .Build()
@@ -236,7 +212,7 @@ public class CancelTests
         var uri = receiver.PjUri();
 
         var senderPersister = new InMemorySenderPersisterAsync();
-        var psbt = PayjoinMethods.OriginalPsbt();
+        var psbt = TestVectors.OriginalPsbt;
         var withReplyKey = await new SenderBuilder(psbt, uri)
             .BuildRecommended(1000)
             .SaveAsync(senderPersister);
@@ -256,21 +232,9 @@ public class CancelTests
 
 public class ValidationTests
 {
-    private static readonly byte[] OhttpKeysData = new byte[]
-    {
-        0x01, 0x00, 0x16, 0x04, 0xba, 0x48, 0xc4, 0x9c, 0x3d, 0x4a,
-        0x92, 0xa3, 0xad, 0x00, 0xec, 0xc6, 0x3a, 0x02, 0x4d, 0xa1,
-        0x0c, 0xed, 0x02, 0x18, 0x0c, 0x73, 0xec, 0x12, 0xd8, 0xa7,
-        0xad, 0x2c, 0xc9, 0x1b, 0xb4, 0x83, 0x82, 0x4f, 0xe2, 0xbe,
-        0xe8, 0xd2, 0x8b, 0xfe, 0x2e, 0xb2, 0xfc, 0x64, 0x53, 0xbc,
-        0x4d, 0x31, 0xcd, 0x85, 0x1e, 0x8a, 0x65, 0x40, 0xe8, 0x6c,
-        0x53, 0x82, 0xaf, 0x58, 0x8d, 0x37, 0x09, 0x57, 0x00, 0x04,
-        0x00, 0x01, 0x00, 0x03,
-    };
-
     private static PjUri CreateV2PjUri()
     {
-        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var ohttpKeys = OhttpKeys.Decode(TestVectors.OhttpKeys);
         var persister = new InMemoryReceiverPersister();
         using var builder = new ReceiverBuilder("2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK", "https://example.com", ohttpKeys);
         using var transition = builder.Build();
@@ -281,7 +245,7 @@ public class ValidationTests
     [Fact]
     public void ReceiverBuilderRejectsBadAddress()
     {
-        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var ohttpKeys = OhttpKeys.Decode(TestVectors.OhttpKeys);
         
         Assert.Throws<ReceiverBuilderException.InvalidAddress>(() =>
         {
@@ -322,7 +286,7 @@ public class ValidationTests
     [Fact]
     public void ReceiverBuilderRejectsAmountOverflow()
     {
-        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var ohttpKeys = OhttpKeys.Decode(TestVectors.OhttpKeys);
         using var builder = new ReceiverBuilder(
             "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
             "https://example.com",
@@ -337,7 +301,7 @@ public class ValidationTests
     [Fact]
     public void ReceiverBuilderRejectsExpirationOverflow()
     {
-        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var ohttpKeys = OhttpKeys.Decode(TestVectors.OhttpKeys);
         using var builder = new ReceiverBuilder(
             "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
             "https://example.com",
@@ -353,7 +317,7 @@ public class ValidationTests
     public void SenderBuilderWithAdditionalFeeRejectsFeeContributionOverflow()
     {
         using var uri = CreateV2PjUri();
-        var psbt = PayjoinMethods.OriginalPsbt();
+        var psbt = TestVectors.OriginalPsbt;
         using var builder = new SenderBuilder(psbt, uri);
 
         var ex = Assert.Throws<SenderInputException.FfiValidation>(() =>
@@ -368,7 +332,7 @@ public class ValidationTests
     public void SenderBuilderWithAdditionalFeeRejectsFeeRateOverflow()
     {
         using var uri = CreateV2PjUri();
-        var psbt = PayjoinMethods.OriginalPsbt();
+        var psbt = TestVectors.OriginalPsbt;
         using var builder = new SenderBuilder(psbt, uri);
 
         var ex = Assert.Throws<SenderInputException.FfiValidation>(() =>
@@ -383,7 +347,7 @@ public class ValidationTests
     public void SenderBuilderNonIncentivizingRejectsFeeRateOverflow()
     {
         using var uri = CreateV2PjUri();
-        var psbt = PayjoinMethods.OriginalPsbt();
+        var psbt = TestVectors.OriginalPsbt;
         using var builder = new SenderBuilder(psbt, uri);
 
         var ex = Assert.Throws<SenderInputException.FfiValidation>(() =>

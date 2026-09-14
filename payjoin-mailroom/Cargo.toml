@@ -10,7 +10,7 @@ categories = [
   "web-programming",
 ]
 license = "MITNFA"
-edition = "2021"
+edition = "2024"
 rust-version = "1.85.0"
 
 [features]
@@ -87,11 +87,6 @@ tower = "0.5.2"
 tower-http = { version = "0.6.11", features = ["trace"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
-unicode-segmentation = "=1.12.0"
-
-# Pinned transitive dependencies that appear unused to cargo-machete
-[package.metadata.cargo-machete]
-ignored = ["unicode-segmentation"]
 
 [dev-dependencies]
 mockito = "1.7.0"

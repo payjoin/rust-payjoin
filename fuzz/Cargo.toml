@@ -2,7 +2,7 @@
 name = "payjoin-fuzz"
 version = "0.0.1"
 publish = false
-edition = "2021"
+edition = "2024"
 
 [package.metadata]
 cargo-fuzz = true
@@ -12,7 +12,6 @@ default = []
 
 [dependencies]
 arbitrary = { version = "1.0.1" }
-home = "=0.5.11"
 libfuzzer-sys = { version = "0.4.10" }
 payjoin = { path = "../payjoin", default-features = false, features = [
   "arbitrary",
@@ -20,10 +19,6 @@ payjoin = { path = "../payjoin", default-features = false, features = [
   "v1",
   "v2",
 ] }
-
-# Pinned transitive dependencies that appear unused to cargo-machete
-[package.metadata.cargo-machete]
-ignored = ["home"]
 
 [[bin]]
 name = "uri_deserialize_pjuri"

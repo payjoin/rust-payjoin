@@ -22,13 +22,13 @@ fn do_test(data: &[u8]) {
     // Path 2: attacker-controlled URL path segment, decoded as bech32
     // without a checksum. This is the actual parsing path exercised by
     // payjoin-mailroom when routing /{id} requests.
-    if let Ok(s) = std::str::from_utf8(data) {
-        if let Ok(id) = s.parse::<ShortId>() {
-            let reencoded = id.to_string();
-            let reparsed: ShortId =
-                reencoded.parse().expect("re-encoding a parsed ShortId must re-parse");
-            assert_eq!(reparsed, id, "round-trip mismatch via FromStr/Display: {s}");
-        }
+    if let Ok(s) = std::str::from_utf8(data)
+        && let Ok(id) = s.parse::<ShortId>()
+    {
+        let reencoded = id.to_string();
+        let reparsed: ShortId =
+            reencoded.parse().expect("re-encoding a parsed ShortId must re-parse");
+        assert_eq!(reparsed, id, "round-trip mismatch via FromStr/Display: {s}");
     }
 }
 

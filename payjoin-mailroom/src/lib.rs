@@ -227,7 +227,7 @@ pub async fn serve_acme(
 /// Generate random sentinel tag at startup.
 /// The relay and directory share this tag in a best-effort attempt
 /// at detecting self loops.
-fn generate_sentinel_tag() -> SentinelTag { SentinelTag::new(rand::thread_rng().gen()) }
+fn generate_sentinel_tag() -> SentinelTag { SentinelTag::new(rand::thread_rng().r#gen()) }
 
 #[cfg(feature = "access-control")]
 impl Connected<IncomingStream<'_, Listener>> for middleware::MaybePeerIp {

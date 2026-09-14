@@ -12,7 +12,7 @@ categories = [
   "network-programming",
 ]
 license = "MITNFA"
-edition = "2021"
+edition = "2024"
 rust-version = "1.85"
 exclude = ["tests"]
 

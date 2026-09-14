@@ -17,10 +17,10 @@ fn do_test(data: &[u8]) {
             url.query_pairs_mut().append_pair(key, value);
             url.clear_query();
         }
-        if let Some(mut segs) = url.path_segments_mut() {
-            if let Ok(segment) = u.arbitrary::<&str>() {
-                segs.push(segment);
-            }
+        if let Some(mut segs) = url.path_segments_mut()
+            && let Ok(segment) = u.arbitrary::<&str>()
+        {
+            segs.push(segment);
         }
         if let Ok(segment) = String::arbitrary(&mut u) {
             let _ = url.join(&segment);

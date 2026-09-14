@@ -391,8 +391,12 @@ impl App {
             .map_err(|e| Error::Implementation(ImplementationError::new(e)))?
             .commit_outputs();
 
-        let wants_fee_range = try_contributing_inputs(payjoin.clone(), &self.wallet)
-            .map_err(Error::Implementation)?;
+        let wants_fee_range = try_contributing_inputs(
+            payjoin.clone(),
+            &self.wallet,
+            self.config.receive_options.consolidate,
+        )
+        .map_err(Error::Implementation)?;
         let provisional_payjoin =
             wants_fee_range.apply_fee_range(None, self.config.max_fee_rate)?;
 
@@ -408,26 +412,39 @@ impl App {
 fn try_contributing_inputs(
     payjoin: payjoin::receive::v1::WantsInputs,
     wallet: &BitcoindWallet,
+    consolidate: Option<usize>,
 ) -> Result<payjoin::receive::v1::WantsFeeRange, ImplementationError> {
-    let candidate_inputs =
-        wallet.list_unspent().map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+    let inputs = if consolidate.is_some() {
+        // Consolidation deliberately forgoes the UIH-avoiding selection: the point
+        // is to sweep the receiver's UTXO set into the payjoin output instead of
+        // paying for a separate consolidation tx.
+        let (selected, available) = wallet
+            .select_receiver_utxos(consolidate)
+            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+        if selected.is_empty() {
+            return Err(no_spendable_utxos());
+        }
+        println!("Contributing {} of {available} UTXOs", selected.len());
+        selected
+    } else {
+        let candidate_inputs = wallet
+            .list_unspent()
+            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+        if candidate_inputs.is_empty() {
+            return Err(no_spendable_utxos());
+        }
+        vec![payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::new)?]
+    };
+    Ok(payjoin.contribute_inputs(inputs).map_err(ImplementationError::new)?.commit_inputs())
+}
 
-    if candidate_inputs.is_empty() {
-        return Err(ImplementationError::from(
-            anyhow::anyhow!(
-                "No spendable UTXOs available in wallet. Please fund your wallet before resuming this session"
-            )
-            .into_boxed_dyn_error(),
-        ));
-    }
-
-    let selected_input =
-        payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::new)?;
-
-    Ok(payjoin
-        .contribute_inputs(vec![selected_input])
-        .map_err(ImplementationError::new)?
-        .commit_inputs())
+fn no_spendable_utxos() -> ImplementationError {
+    ImplementationError::from(
+        anyhow!(
+            "No spendable UTXOs available in wallet. Please fund your wallet before resuming this session"
+        )
+        .into_boxed_dyn_error(),
+    )
 }
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {

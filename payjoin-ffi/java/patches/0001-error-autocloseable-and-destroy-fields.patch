@@ -1,0 +1,32 @@
+diff --git a/src/templates/ErrorTemplate.java b/src/templates/ErrorTemplate.java
+index fe13136..dbf9e5d 100644
+--- a/src/templates/ErrorTemplate.java
++++ b/src/templates/ErrorTemplate.java
+@@ -16 +16,2 @@ public class {{ type_name }} extends java.lang.Exception {
+-    public static class {{ variant|error_variant_name }} extends {{ type_name }}{% if contains_object_references %}, AutoCloseable{% endif %} {
++    {#- A flat variant carries only a message, so it never owns an object to close. -#}
++    public static class {{ variant|error_variant_name }} extends {{ type_name }} {
+@@ -27 +28 @@ public class {{ type_name }} extends java.lang.Exception {
+-public class {{ type_name }} extends java.lang.Exception {
++public class {{ type_name }} extends java.lang.Exception{% if contains_object_references %} implements AutoCloseable{% endif %} {
+@@ -31,0 +33,7 @@ public class {{ type_name }} extends java.lang.Exception {
++    {% if contains_object_references %}
++    {#- Callers catch and hold the base type, so try-with-resources has to work there; the
++        object-holding variants override this. -#}
++    @Override
++    public void close() {}
++    {% endif %}
++
+@@ -35 +43 @@ public class {{ type_name }} extends java.lang.Exception {
+-    public static class {{ variant_name }} extends {{ type_name }}{% if contains_object_references %}, AutoCloseable{% endif %} {
++    public static class {{ variant_name }} extends {{ type_name }} {
+@@ -68 +76 @@ public class {{ type_name }} extends java.lang.Exception {
+-      void close() {
++      public void close() {
+diff --git a/src/templates/macros.java b/src/templates/macros.java
+index bf7bd03..426104b 100644
+--- a/src/templates/macros.java
++++ b/src/templates/macros.java
+@@ -223 +223 @@ v{{- field_num -}}
+-        this.{{ field.name()|var_name }}{%- if !loop.last %}, {% endif -%}
++        this.{% call field_name(field, loop.index) %}{%- if !loop.last %}, {% endif -%}

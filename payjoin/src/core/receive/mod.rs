@@ -386,7 +386,9 @@ impl OriginalPayload {
         let original_psbt_fee = self.psbt.fee().map_err(|e| {
             InternalPayloadError::ParsePsbt(bitcoin::psbt::PsbtParseError::PsbtEncoding(e))
         })?;
-        Ok(original_psbt_fee / self.psbt.clone().extract_tx_unchecked_fee_rate().weight())
+        original_psbt_fee
+            .div_by_weight_floor(self.psbt.clone().extract_tx_unchecked_fee_rate().weight())
+            .ok_or(InternalPayloadError::FeeCalculationOverflow)
     }
 
     pub fn check_broadcast_suitability(
@@ -1199,5 +1201,40 @@ pub(crate) mod tests {
             ..Default::default()
         };
         assert!(psbt_input_is_signed(&input));
+    }
+
+    #[test]
+    fn psbt_fee_rate_rejects_overflowing_fee() {
+        let mut original = original_from_test_vector();
+        // A sender is free to claim any prevout value it likes. Anything above
+        // u64::MAX / 1000 sats makes the sat/kwu conversion overflow, which used
+        // to wrap silently in release builds and hand back a bogus fee rate.
+        original
+            .psbt
+            .inputs
+            .first_mut()
+            .expect("test vector has an input")
+            .witness_utxo
+            .as_mut()
+            .expect("test vector input has a witness utxo")
+            .value = Amount::MAX;
+
+        let err = original
+            .clone()
+            .psbt_fee_rate()
+            .expect_err("Fee rate should not be computable from an overflowing fee");
+        assert!(matches!(err, InternalPayloadError::FeeCalculationOverflow));
+
+        // The same PSBT must be rejected at the first receiver check rather than
+        // panicking or passing the min-fee-rate comparison with a wrapped value.
+        let err = original
+            .check_broadcast_suitability(Some(FeeRate::from_sat_per_vb_u32(1)), |_| Ok(true))
+            .expect_err("Broadcast suitability should fail on an overflowing fee");
+        assert!(matches!(
+            err,
+            Error::Protocol(ProtocolError::OriginalPayload(PayloadError(
+                InternalPayloadError::FeeCalculationOverflow
+            )))
+        ));
     }
 }

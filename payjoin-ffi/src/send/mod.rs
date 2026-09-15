@@ -356,7 +356,8 @@ impl SenderBuilder {
         let psbt = payjoin::bitcoin::psbt::Psbt::from_str(psbt.as_str())
             .map_err(PsbtParseError::from)
             .map_err(SenderInputError::Psbt)?;
-        let builder = payjoin::send::v2::SenderBuilder::new(psbt, Arc::unwrap_or_clone(uri).into());
+        let builder = payjoin::send::v2::SenderBuilder::new(psbt, Arc::unwrap_or_clone(uri).into())
+            .map_err(|e| SenderInputError::Build(Arc::new(e.into())))?;
         Ok(builder.into())
     }
 

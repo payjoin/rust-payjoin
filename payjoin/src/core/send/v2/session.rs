@@ -320,6 +320,7 @@ mod tests {
                 .check_pj_supported()
                 .expect("Payjoin to be supported"),
         )
+        .expect("v2 URI should be supported")
         .build_recommended(FeeRate::BROADCAST_MIN)
         .unwrap()
         .save(&InMemoryPersister::default())
@@ -354,6 +355,7 @@ mod tests {
                 .check_pj_supported()
                 .expect("Payjoin to be supported"),
         )
+        .expect("v2 URI should be supported")
         .build_recommended(FeeRate::BROADCAST_MIN)
         .unwrap()
         .save(&InMemoryPersister::default())
@@ -390,6 +392,7 @@ mod tests {
                 .check_pj_supported()
                 .expect("Payjoin to be supported"),
         )
+        .expect("v2 URI should be supported")
         .build_recommended(FeeRate::BROADCAST_MIN)
         .unwrap()
         .save(&InMemoryPersister::default())
@@ -437,6 +440,7 @@ mod tests {
                 .check_pj_supported()
                 .expect("Payjoin to be supported"),
         )
+        .expect("v2 URI should be supported")
         .build_recommended(FeeRate::BROADCAST_MIN)
         .unwrap()
         .save(&InMemoryPersister::default())
@@ -479,6 +483,7 @@ mod tests {
                 .check_pj_supported()
                 .expect("Payjoin to be supported"),
         )
+        .expect("v2 URI should be supported")
         .build_recommended(FeeRate::BROADCAST_MIN)
         .unwrap()
         .save(&InMemoryPersister::default())

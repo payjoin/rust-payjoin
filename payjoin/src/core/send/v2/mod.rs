@@ -71,12 +71,12 @@ impl SenderBuilder {
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`Sender`]
-    pub fn new(psbt: Psbt, uri: PjUri) -> Self {
+    pub fn new(psbt: Psbt, uri: PjUri) -> Result<Self, BuildSenderError> {
         match uri.extras().pj_param() {
             #[cfg(feature = "v1")]
-            crate::uri::PjParam::V1(_) => unimplemented!("V2 SenderBuilder only supports v2 URLs"),
+            crate::uri::PjParam::V1(_) => Err(InternalBuildSenderError::UnsupportedVersion.into()),
             crate::uri::PjParam::V2(pj_param) =>
-                Self::from_parts(psbt, pj_param, uri.address(), uri.amount()),
+                Ok(Self::from_parts(psbt, pj_param, uri.address(), uri.amount())),
         }
     }
 
@@ -721,6 +721,24 @@ mod test {
         Ok(())
     }
 
+    #[cfg(feature = "v1")]
+    #[test]
+    fn v1_uri_returns_error_instead_of_panicking() {
+        const V1_PJ_URI: &str =
+            "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02&pjos=0&pj=HTTPS://EXAMPLE.COM/";
+        let uri = crate::Uri::try_from(V1_PJ_URI)
+            .expect("valid URI")
+            .assume_checked()
+            .check_pj_supported()
+            .expect("payjoin should be supported");
+
+        let err = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), uri)
+            .err()
+            .expect("v1 URI should be rejected");
+
+        assert_eq!(err.to_string(), "v2 sender does not support v1 payjoin URIs");
+    }
+
     #[test]
     fn test_v2_sender_builder() {
         let address = Address::from_str("2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7")
@@ -736,6 +754,7 @@ mod test {
             .expect("receiver should succeed")
             .pj_uri();
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
+            .expect("v2 URI should be supported")
             .build_recommended(FeeRate::BROADCAST_MIN)
             .expect("build on test vector should succeed")
             .save(&InMemoryPersister::default())
@@ -757,6 +776,7 @@ mod test {
         assert_eq!(req_ctx.session_context.psbt_ctx.min_fee_rate, FeeRate::from_sat_per_kwu(250));
         // ensure that the other builder methods also enable output substitution
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
+            .expect("v2 URI should be supported")
             .build_non_incentivizing(FeeRate::BROADCAST_MIN)
             .expect("build on test vector should succeed")
             .save(&InMemoryPersister::default())
@@ -766,6 +786,7 @@ mod test {
             OutputSubstitution::Enabled
         );
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri.clone())
+            .expect("v2 URI should be supported")
             .build_with_additional_fee(Amount::ZERO, Some(0), FeeRate::BROADCAST_MIN, false)
             .expect("build on test vector should succeed")
             .save(&InMemoryPersister::default())
@@ -776,6 +797,7 @@ mod test {
         );
         // ensure that a v2 sender may still disable output substitution if they prefer.
         let req_ctx = SenderBuilder::new(PARSED_ORIGINAL_PSBT.clone(), pj_uri)
+            .expect("v2 URI should be supported")
             .always_disable_output_substitution()
             .build_recommended(FeeRate::BROADCAST_MIN)
             .expect("build on test vector should succeed")

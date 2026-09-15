@@ -317,7 +317,7 @@ mod integration {
                 // Inside the Sender:
                 let psbt = build_original_psbt(&sender, &expired_receiver.pj_uri())?;
                 // Test that an expired pj_url errors
-                let expired_req_ctx = SenderBuilder::new(psbt, expired_receiver.pj_uri())
+                let expired_req_ctx = SenderBuilder::new(psbt, expired_receiver.pj_uri())?
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)?
                     .save(&send_persister)?;
 
@@ -390,7 +390,7 @@ mod integration {
                     .check_pj_supported()
                     .map_err(|e| e.to_string())?;
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let req_ctx = SenderBuilder::new(psbt, pj_uri)
+                let req_ctx = SenderBuilder::new(psbt, pj_uri)?
                     .build_recommended(FeeRate::BROADCAST_MIN)?
                     .save(&sender_persister)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
@@ -841,7 +841,7 @@ mod integration {
                 .check_pj_supported()
                 .map_err(|e| e.to_string())?;
             let psbt = build_sweep_psbt(sender, &pj_uri)?;
-            let req_ctx = SenderBuilder::new(psbt, pj_uri)
+            let req_ctx = SenderBuilder::new(psbt, pj_uri)?
                 .build_recommended(FeeRate::BROADCAST_MIN)?
                 .save(send_persister)?;
             let (Request { url, body, content_type, .. }, send_ctx) =

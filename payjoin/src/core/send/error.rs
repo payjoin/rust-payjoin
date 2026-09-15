@@ -18,6 +18,8 @@ pub(crate) enum InternalBuildSenderError {
     InvalidOriginalInput(crate::psbt::PsbtInputsError),
     InconsistentOriginalPsbt(crate::psbt::InconsistentPsbt),
     OriginalTxinNonAllSighashType,
+    #[cfg(all(feature = "v1", feature = "v2"))]
+    UnsupportedVersion,
     NoInputs,
     PayeeValueNotEqual,
     NoOutputs,
@@ -49,6 +51,8 @@ impl fmt::Display for BuildSenderError {
             InvalidOriginalInput(e) => write!(f, "an input in the original transaction is invalid: {e:#?}"),
             InconsistentOriginalPsbt(e) => write!(f, "the original transaction is inconsistent: {e:#?}"),
             OriginalTxinNonAllSighashType => write!(f, "an input in the original transaction requests a sighash type other than SIGHASH_ALL"),
+            #[cfg(all(feature = "v1", feature = "v2"))]
+            UnsupportedVersion => write!(f, "v2 sender does not support v1 payjoin URIs"),
             NoInputs => write!(f, "the original transaction has no inputs"),
             PayeeValueNotEqual => write!(f, "the value in original transaction doesn't equal value requested in the payment link"),
             NoOutputs => write!(f, "the original transaction has no outputs"),
@@ -72,6 +76,8 @@ impl std::error::Error for BuildSenderError {
             InvalidOriginalInput(error) => Some(error),
             InconsistentOriginalPsbt(error) => Some(error),
             OriginalTxinNonAllSighashType => None,
+            #[cfg(all(feature = "v1", feature = "v2"))]
+            UnsupportedVersion => None,
             NoInputs => None,
             PayeeValueNotEqual => None,
             NoOutputs => None,

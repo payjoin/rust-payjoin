@@ -770,7 +770,7 @@ impl<Err: std::error::Error, CurrentState> fmt::Display for RejectTransient<Err,
 }
 
 /// Error type that represents all possible errors that can be returned when processing a state transition
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct PersistedError<
     ApiError: std::error::Error,
     StorageError: std::error::Error,
@@ -910,7 +910,7 @@ impl<
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum ApiError<Err, ErrorState = (), CurrentState = ()> {
     /// Error indicating that the session should be retried from the same state,
     /// which is returned alongside the error
@@ -921,7 +921,7 @@ pub(crate) enum ApiError<Err, ErrorState = (), CurrentState = ()> {
     FatalWithState(Err, ErrorState),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum InternalPersistedError<ApiErr, StorageErr, ErrorState = (), CurrentState = ()>
 where
     ApiErr: std::error::Error,
@@ -1138,7 +1138,10 @@ mod tests {
         success: Option<SuccessState>,
     }
 
-    fn verify_sync<SuccessState: std::fmt::Debug + PartialEq, ErrorState: std::error::Error>(
+    fn verify_sync<
+        SuccessState: std::fmt::Debug + PartialEq,
+        ErrorState: std::error::Error + PartialEq,
+    >(
         persister: &InMemoryPersister<InMemoryTestEvent>,
         result: Result<SuccessState, ErrorState>,
         expected_result: &ExpectedResult<SuccessState, ErrorState>,
@@ -1159,9 +1162,7 @@ mod tests {
                 assert_eq!(Some(actual), expected_result.success.as_ref());
             }
             (Err(actual), Some(expected)) => {
-                // TODO: replace .to_string() with .eq(). This would introduce a trait bound on the internal API error type
-                // And not all internal API errors implement PartialEq
-                assert_eq!(actual.to_string(), expected.to_string());
+                assert_eq!(actual, expected);
             }
             _ => panic!("Unexpected result state"),
         }
@@ -1169,7 +1170,7 @@ mod tests {
 
     async fn verify_async<
         SuccessState: std::fmt::Debug + PartialEq + Send,
-        ErrorState: std::error::Error + Send,
+        ErrorState: std::error::Error + PartialEq + Send,
     >(
         persister: &InMemoryAsyncPersister<InMemoryTestEvent>,
         result: Result<SuccessState, ErrorState>,
@@ -1188,9 +1189,7 @@ mod tests {
                 assert_eq!(Some(actual), expected_result.success.as_ref());
             }
             (Err(actual), Some(exp)) => {
-                // TODO: replace .to_string() with .eq(). This would introduce a trait bound on the internal API error type
-                // And not all internal API errors implement PartialEq
-                assert_eq!(actual.to_string(), exp.to_string());
+                assert_eq!(actual, exp);
             }
             _ => panic!("Unexpected result state"),
         }
@@ -1402,7 +1401,11 @@ mod tests {
                     events: vec![fatal_event.clone()],
                     is_closed: false,
                     error: Some(
-                        InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
+                        InternalPersistedError::Api(ApiError::FatalWithState(
+                            InMemoryTestError {},
+                            next_state.clone(),
+                        ))
+                        .into(),
                     ),
                     success: None,
                 },

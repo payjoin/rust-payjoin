@@ -336,10 +336,9 @@ mod test {
         )
         .build_recommended(FeeRate::MIN);
         assert!(sender.is_ok(), "{:#?}", sender.err());
-        assert_eq!(
-            sender.unwrap().psbt_ctx.fee_contribution.unwrap().max_amount,
-            Amount::from_sat(0)
-        );
+        // A zero fee contribution offers the receiver nothing and is dropped
+        // instead of advertised in the request.
+        assert!(sender.unwrap().psbt_ctx.fee_contribution.is_none());
 
         Ok(())
     }
@@ -364,10 +363,9 @@ mod test {
         )
         .build_recommended(FeeRate::MIN);
         assert!(sender.is_ok(), "{:#?}", sender.err());
-        assert_eq!(
-            sender.unwrap().psbt_ctx.fee_contribution.unwrap().max_amount,
-            Amount::from_sat(0)
-        );
+        // A zero fee contribution offers the receiver nothing and is dropped
+        // instead of advertised in the request.
+        assert!(sender.unwrap().psbt_ctx.fee_contribution.is_none());
 
         let mut psbt = Psbt::from_str(MULTIPARTY_ORIGINAL_PSBT_ONE).unwrap();
         psbt.unsigned_tx.input.pop();
@@ -382,6 +380,7 @@ mod test {
         )
         .build_recommended(FeeRate::from_sat_per_vb(170000000).expect("Could not determine feerate"));
         assert!(sender.is_ok(), "{:#?}", sender.err());
+        // The contribution is clamped to the change output's value.
         assert_eq!(
             sender.unwrap().psbt_ctx.fee_contribution.unwrap().max_amount,
             Amount::from_sat(9999999822)
@@ -402,7 +401,8 @@ mod test {
         assert_eq!(&sender.psbt_ctx.payee, &pj_uri(PJ_URI).address().script_pubkey());
         let fee_contribution =
             sender.psbt_ctx.fee_contribution.expect("sender should contribute fees");
-        assert_eq!(fee_contribution.max_amount, psbt.unsigned_tx.output[0].value);
+        // The contribution is clamped to the change output's value.
+        assert_eq!(fee_contribution.max_amount, Amount::from_sat(95983068));
         assert_eq!(fee_contribution.vout, 0);
         assert_eq!(sender.psbt_ctx.min_fee_rate, FeeRate::from_sat_per_kwu(500000000));
     }

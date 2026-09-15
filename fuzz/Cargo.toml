@@ -12,7 +12,10 @@ default = []
 
 [dependencies]
 arbitrary = { version = "1.0.1" }
+bhttp = { version = "0.6.1" }
+hpke = { package = "bitcoin-hpke", version = "0.13.0" }
 libfuzzer-sys = { version = "0.4.10" }
+ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
 payjoin = { path = "../payjoin", default-features = false, features = [
   "arbitrary",
   "_core",
@@ -53,5 +56,11 @@ bench = false
 [[bin]]
 name = "roundtrip_v1"
 path = "fuzz_targets/roundtrip/v1.rs"
+doc = false
+bench = false
+
+[[bin]]
+name = "roundtrip_v2"
+path = "fuzz_targets/roundtrip/v2.rs"
 doc = false
 bench = false

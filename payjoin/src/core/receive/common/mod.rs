@@ -489,7 +489,7 @@ impl WantsFeeRange {
                     .unsigned_tx
                     .output
                     .iter()
-                    .position(|txo| txo.script_pubkey == sender_fee_output.script_pubkey)
+                    .position(|txo| txo == sender_fee_output)
                     .expect("Sender output is missing from payjoin PSBT");
                 // Determine the additional amount that the sender will pay in fees
                 let sender_additional_fee = min(max_additional_fee_contribution, additional_fee);
@@ -1195,6 +1195,89 @@ mod tests {
             .find(|txo| txo.script_pubkey == sender_script)
             .expect("sender output must be present");
         assert_eq!(sender_out.value, sender_value_before - sender_additional_fee);
+    }
+
+    // The receiver may add an output that reuses the sender's fee output script, and
+    // the interleave shuffle can place it ahead of the sender's output. Matching the
+    // fee output by script alone would then debit the receiver's output instead of the
+    // sender's, so the lookup must match the whole `TxOut`.
+    #[test]
+    fn fee_contribution_resolves_duplicate_script_to_sender_output() {
+        let original = original_from_test_vector();
+        let sender_fee_output = original.psbt.unsigned_tx.output[0].clone();
+        let wants_outputs = WantsOutputs::new(original, vec![1]);
+        let receiver_script =
+            wants_outputs.payjoin_psbt.unsigned_tx.output[1].script_pubkey.clone();
+        let receiver_value = wants_outputs.payjoin_psbt.unsigned_tx.output[1].value;
+
+        // A receiver output that shares the sender's fee script but not its value,
+        // carved out of the receiver's own output so the transaction stays balanced.
+        let lookalike = TxOut {
+            value: Amount::from_sat(1_000),
+            script_pubkey: sender_fee_output.script_pubkey.clone(),
+        };
+        assert_ne!(lookalike.value, sender_fee_output.value);
+        let receiver_output = TxOut {
+            value: receiver_value - lookalike.value,
+            script_pubkey: receiver_script.clone(),
+        };
+        let mut rng = StdRng::seed_from_u64(0);
+        let wants_outputs = (0..64)
+            .find_map(|_| {
+                let candidate = wants_outputs
+                    .clone()
+                    .replace_receiver_outputs_with_rng(
+                        [receiver_output.clone(), lookalike.clone()],
+                        &receiver_script,
+                        &mut rng,
+                    )
+                    .expect("substitution should succeed");
+                (candidate.payjoin_psbt.unsigned_tx.output[0] == lookalike).then_some(candidate)
+            })
+            .expect("shuffle should place the lookalike ahead of the sender output");
+        let sender_vout = wants_outputs
+            .payjoin_psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .position(|txo| *txo == sender_fee_output)
+            .expect("sender output must survive substitution");
+        assert!(sender_vout > 0, "lookalike must precede the sender output");
+
+        let proposal_psbt = Psbt::from_str(RECEIVER_INPUT_CONTRIBUTION).unwrap();
+        let input = InputPair::new(
+            proposal_psbt.unsigned_tx.input[1].clone(),
+            proposal_psbt.inputs[1].clone(),
+            None,
+        )
+        .unwrap();
+        let wants_fee_range = wants_outputs
+            .commit_outputs()
+            .contribute_inputs([input])
+            .expect("contribution should succeed")
+            .commit_inputs();
+        let (max_contribution, _) = wants_fee_range
+            .original
+            .params
+            .additional_fee_contribution
+            .expect("contribution should survive sanitization");
+
+        let psbt = wants_fee_range
+            .calculate_psbt_with_fee_range(
+                Some(FeeRate::from_sat_per_vb_u32(10)),
+                Some(FeeRate::from_sat_per_vb_u32(1000)),
+            )
+            .expect("fee range should be valid");
+
+        assert_eq!(
+            psbt.unsigned_tx.output[0], lookalike,
+            "receiver's lookalike output must be untouched"
+        );
+        assert_eq!(
+            psbt.unsigned_tx.output[sender_vout].value,
+            sender_fee_output.value - max_contribution,
+            "sender's output must carry the fee contribution"
+        );
     }
 
     // A sender-supplied `additionalfeeoutputindex` past the end of the original outputs

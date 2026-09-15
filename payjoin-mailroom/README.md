@@ -47,8 +47,44 @@ systemctl enable --now payjoin-mailroom
 ## Telemetry
 
 payjoin-mailroom supports **optional** OpenTelemetry-based telemetry (metrics).
-Build with `--features telemetry` and configure via the [`[telemetry]`](config.example.com) config section.
+Build with `--features telemetry` and configure via the [`[telemetry]`](config.example.toml) config section.
 When no telemetry configuration is present, it falls back to local-only console tracing.
+Metrics are local-only by default: nothing is exported unless a `[telemetry]` section is configured.
+
+### What leaves the operator boundary
+
+Precise metrics (per-request counters, live in-flight and tunnel gauges) never
+leave the process. When export is configured, the only metrics pushed to the
+OTLP endpoint are unlabelled coarse weekly gauges, designed to support
+ecosystem traction measurement without providing per-request telemetry:
+
+- **Settled weekly windows.** Each exported count covers one completed
+  Monday-to-Monday UTC week (`EXPORT_WINDOW_DAYS` in `src/metrics.rs`). The
+  in-progress week is never exported, preventing live probing and daily
+  differencing of overlapping windows.
+- **Small-count suppression.** Windows whose raw count is below
+  `suppression_threshold` (default 10) are dropped entirely, not rounded: a
+  small operator's weekly count of 1-2 could be tied to a known real-world
+  event.
+- **Quantization.** Surviving counts are rounded to the nearest
+  `quantization_bin` (default 5), so exported values carry no small-integer
+  precision to subtract against.
+- **Attribute minimization.** Exported metric points carry no attributes. The
+  resource carries only `service.name` and a Foundation-issued opaque
+  `reporter.id`; its operator mapping belongs outside Grafana. Tests fail if
+  any other metric or resource attribute appears.
+- **Reliable coarse delivery.** The exporter pushes daily, but every push in a
+  reporting week carries the same frozen aggregate for the preceding completed
+  week. This provides retry opportunities without exposing daily traffic
+  volume; daily delivery time remains liveness metadata.
+
+The Foundation should restrict raw reporter-labelled series to its telemetry
+operators, retain them briefly, and publish aggregate dashboards only. A future
+collector can aggregate across reporters and remove `reporter.id` before data
+reaches Grafana.
+
+`export_enabled = false` keeps the `[telemetry]` section's structured JSON
+logging while disabling the metrics export entirely.
 
 ## Access Control
 

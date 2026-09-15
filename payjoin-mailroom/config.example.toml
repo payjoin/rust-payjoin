@@ -2,7 +2,7 @@
 #
 # Configuration can also be set via environment variables with the `PJ_`
 # prefix.  Nested values use double underscores as separators, e.g.
-# PJ_TELEMETRY__OPERATOR_DOMAIN="your-domain.example.com"
+# PJ_TELEMETRY__REPORTER_ID="foundation-issued-opaque-id"
 
 # Address and port to listen on
 # listener = "[::]:8080"
@@ -22,9 +22,23 @@
 # Authentication token for the OTLP endpoint 
 # auth_token = "<base64 instanceID:token>"
 
-# The domain you are running the payjoin-mailroom from.
-# This serves as an identifier for metrics collection.
-# operator_domain = "your-domain.example.com"
+# Foundation-issued opaque reporting ID. Do not use a domain, hostname, or
+# operator name. Its mapping to an operator is kept outside Grafana.
+# reporter_id = "foundation-issued-opaque-id"
+
+# Master switch for the metrics export. When false, the [telemetry] section's
+# structured JSON logging is kept but no metrics leave this machine.
+# Omitting the whole [telemetry] section is also local-only.
+# export_enabled = true
+
+# Exported counts cover one completed Monday-to-Monday UTC week and are coarsened
+# before export so aggregates cannot deanonymize users or fingerprint this
+# operator. Windows whose raw count is below this threshold are not exported
+# at all.
+# suppression_threshold = 10
+
+# Exported counts are rounded to the nearest multiple of this bin.
+# quantization_bin = 5
 
 # --- Access-control (requires `access-control` feature) ---
 # [access_control]

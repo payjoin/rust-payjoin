@@ -29,7 +29,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use bitcoin::psbt::Psbt;
-use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, TxOut, Txid};
+use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
 pub use error::{CreateRequestError, SessionError};
 pub(crate) use error::{InternalCreateRequestError, InternalSessionError};
 use serde::de::Deserializer;
@@ -60,7 +60,10 @@ use crate::persist::{
     MaybeTerminalSuccessTransition, MaybeTerminalTransition, MaybeTransientTransition,
     NextStateTransition, TerminalTransition,
 };
-use crate::receive::{parse_payload, InputPair, OriginalPayload, PsbtContext};
+use crate::receive::{
+    mark_checklist, parse_payload, ChecklistItem, InputOwnership, InputPair, InputSeenBefore,
+    MarkedChecklistItem, OriginalPayload, OutputOwnership, PsbtContext,
+};
 use crate::time::Time;
 use crate::uri::ShortId;
 use crate::{ImplementationError, IntoUrl, IntoUrlError, Request, Version};
@@ -782,6 +785,10 @@ impl Receiver<UncheckedOriginalPayload> {
 /// UTXOs. Interactive receivers can skip that check and call
 /// [`Receiver<UncheckedOriginalPayload>::assume_interactive_receiver`] instead.
 /// Either path advances to [`Receiver<MaybeInputsOwned>`].
+///
+/// To perform the broadcast check without a synchronous callback, use
+/// [`Receiver<UncheckedOriginalPayload>::extract_tx_to_check_broadcast_suitability`]
+/// and [`Receiver<UncheckedOriginalPayload>::apply_broadcast_suitability`].
 impl Receiver<UncheckedOriginalPayload> {
     /// Check that the sender's Original PSBT is suitable for broadcast, ensuring
     /// it can be used as a fallback if the payjoin does not complete.
@@ -799,7 +806,46 @@ impl Receiver<UncheckedOriginalPayload> {
         Receiver<HasReplyableError>,
         Self,
     > {
-        match self.state.original.check_broadcast_suitability(min_fee_rate, can_broadcast) {
+        let tx = self.extract_tx_to_check_broadcast_suitability();
+        match can_broadcast(&tx) {
+            Ok(is_broadcast_suitable) =>
+                self.apply_broadcast_suitability(min_fee_rate, is_broadcast_suitable),
+            Err(e) => MaybeFatalTransition::transient(e.into(), self),
+        }
+    }
+
+    /// Extract the Original PSBT transaction so the caller can check that it is
+    /// suitable for broadcast, ensuring it can be used as a fallback if the payjoin
+    /// does not complete.
+    ///
+    /// Submit the result of the check to
+    /// [`Receiver<UncheckedOriginalPayload>::apply_broadcast_suitability`].
+    ///
+    /// Returns the extracted [`bitcoin::Transaction`].
+    pub fn extract_tx_to_check_broadcast_suitability(&self) -> bitcoin::Transaction {
+        self.original.psbt.clone().extract_tx_unchecked_fee_rate()
+    }
+
+    /// Apply the result of the broadcast suitability check to advance the state machine.
+    ///
+    /// Use [`Receiver<UncheckedOriginalPayload>::extract_tx_to_check_broadcast_suitability`]
+    /// to obtain the transaction that needs to be checked. Optionally enforce a minimum fee
+    /// rate on the Original PSBT to further raise the cost of probing attacks.
+    ///
+    /// Returns a [`MaybeFatalTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<MaybeInputsOwned>`] to continue validation.
+    pub fn apply_broadcast_suitability(
+        self,
+        min_fee_rate: Option<FeeRate>,
+        is_broadcast_suitable: bool,
+    ) -> MaybeFatalTransition<
+        SessionEvent,
+        Receiver<MaybeInputsOwned>,
+        Error,
+        Receiver<HasReplyableError>,
+        Self,
+    > {
+        match self.state.original.apply_broadcast_suitability(min_fee_rate, is_broadcast_suitable) {
             Ok(()) => MaybeFatalTransition::success(
                 SessionEvent::CheckedBroadcastSuitability(),
                 Receiver {
@@ -864,6 +910,10 @@ pub struct MaybeInputsOwned {
 ///
 /// Call [`Receiver<MaybeInputsOwned>::check_inputs_not_owned`] to advance to
 /// [`Receiver<MaybeInputsSeen>`] to continue validation.
+///
+/// To perform this check without a synchronous callback, use
+/// [`Receiver<MaybeInputsOwned>::inputs_owned_checklist`] and
+/// [`Receiver<MaybeInputsOwned>::apply_inputs_owned_checklist`].
 impl Receiver<MaybeInputsOwned> {
     /// Extract the transaction from the Original PSBT for scheduling broadcast as a
     /// fallback in case the payjoin does not complete.
@@ -888,7 +938,41 @@ impl Receiver<MaybeInputsOwned> {
         Receiver<HasReplyableError>,
         Self,
     > {
-        match self.state.original.check_inputs_not_owned(is_owned) {
+        match mark_checklist(self.inputs_owned_checklist(), is_owned) {
+            Ok(marked_checklist) => self.apply_inputs_owned_checklist(marked_checklist),
+            Err(e) => MaybeFatalTransition::transient(e.into(), self),
+        }
+    }
+
+    /// Get the [`ChecklistItem`]s holding the input outpoints that need to be checked for
+    /// ownership by the receiver, preventing an attacker from spending the receiver's
+    /// own inputs.
+    ///
+    /// Each [`ChecklistItem`] must be marked with its result to obtain a
+    /// [`MarkedChecklistItem`], which can then be collected and submitted to
+    /// [`Receiver<MaybeInputsOwned>::apply_inputs_owned_checklist`].
+    pub fn inputs_owned_checklist(&self) -> impl Iterator<Item = ChecklistItem<InputOwnership>> {
+        self.state.original.inputs_owned_checklist()
+    }
+
+    /// Apply the input ownership checklist results to advance the state machine.
+    ///
+    /// Use [`Receiver<MaybeInputsOwned>::inputs_owned_checklist`] to obtain the items
+    /// that need to be checked.
+    ///
+    /// Returns a [`MaybeFatalTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<MaybeInputsSeen>`] to continue validation.
+    pub fn apply_inputs_owned_checklist(
+        self,
+        marked_checklist: impl IntoIterator<Item = MarkedChecklistItem<InputOwnership>>,
+    ) -> MaybeFatalTransition<
+        SessionEvent,
+        Receiver<MaybeInputsSeen>,
+        Error,
+        Receiver<HasReplyableError>,
+        Self,
+    > {
+        match self.state.original.apply_inputs_owned_checklist(marked_checklist) {
             Ok(()) => MaybeFatalTransition::success(
                 SessionEvent::CheckedInputsNotOwned(),
                 Receiver {
@@ -941,6 +1025,10 @@ pub struct MaybeInputsSeen {
 ///
 /// Call [`Receiver<MaybeInputsSeen>::check_no_inputs_seen_before`] to advance to
 /// [`Receiver<OutputsUnknown>`] to continue validation.
+///
+/// To perform this check without a synchronous callback, use
+/// [`Receiver<MaybeInputsSeen>::inputs_seen_checklist`] and
+/// [`Receiver<MaybeInputsSeen>::apply_inputs_seen_checklist`].
 impl Receiver<MaybeInputsSeen> {
     /// Check that none of the inputs have been seen before, preventing input
     /// probing and replay attacks (where inputs have been used in a previous
@@ -958,7 +1046,41 @@ impl Receiver<MaybeInputsSeen> {
         Receiver<HasReplyableError>,
         Self,
     > {
-        match self.state.original.check_no_inputs_seen_before(is_known) {
+        match mark_checklist(self.inputs_seen_checklist(), is_known) {
+            Ok(marked_checklist) => self.apply_inputs_seen_checklist(marked_checklist),
+            Err(e) => MaybeFatalTransition::transient(e.into(), self),
+        }
+    }
+
+    /// Get the [`ChecklistItem`]s holding the input outpoints that need to be checked
+    /// for whether the receiver has seen them before, preventing input probing and
+    /// replay attacks.
+    ///
+    /// Each [`ChecklistItem`] must be marked with its result to obtain a
+    /// [`MarkedChecklistItem`], which can then be collected and submitted to
+    /// [`Receiver<MaybeInputsSeen>::apply_inputs_seen_checklist`].
+    pub fn inputs_seen_checklist(&self) -> impl Iterator<Item = ChecklistItem<InputSeenBefore>> {
+        self.state.original.inputs_seen_checklist()
+    }
+
+    /// Apply the inputs-seen checklist results to advance the state machine.
+    ///
+    /// Use [`Receiver<MaybeInputsSeen>::inputs_seen_checklist`] to obtain the items
+    /// that need to be checked.
+    ///
+    /// Returns a [`MaybeFatalTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<OutputsUnknown>`] to continue validation.
+    pub fn apply_inputs_seen_checklist(
+        self,
+        marked_checklist: impl IntoIterator<Item = MarkedChecklistItem<InputSeenBefore>>,
+    ) -> MaybeFatalTransition<
+        SessionEvent,
+        Receiver<OutputsUnknown>,
+        Error,
+        Receiver<HasReplyableError>,
+        Self,
+    > {
+        match self.state.original.apply_inputs_seen_checklist(marked_checklist) {
             Ok(()) => MaybeFatalTransition::success(
                 SessionEvent::CheckedNoInputsSeenBefore(),
                 Receiver {
@@ -1005,6 +1127,10 @@ pub struct OutputsUnknown {
 /// The receiver should only accept Original PSBTs from the sender that actually send
 /// them money. Call [`Receiver<OutputsUnknown>::identify_receiver_outputs`] to advance
 /// to [`Receiver<WantsOutputs>`] to continue the proposal.
+///
+/// To perform this check without a synchronous callback, use
+/// [`Receiver<OutputsUnknown>::outputs_owned_checklist`] and
+/// [`Receiver<OutputsUnknown>::apply_outputs_owned_checklist`].
 impl Receiver<OutputsUnknown> {
     /// Identify which outputs in the original transaction belong to the receiver
     /// and ensure at least one output pays the receiver.
@@ -1024,8 +1150,46 @@ impl Receiver<OutputsUnknown> {
         Receiver<HasReplyableError>,
         Self,
     > {
+        match mark_checklist(self.outputs_owned_checklist(), &mut |script: &ScriptBuf| {
+            is_receiver_output(script.as_script())
+        }) {
+            Ok(marked_checklist) => self.apply_outputs_owned_checklist(marked_checklist),
+            Err(e) => MaybeFatalTransition::transient(e.into(), self),
+        }
+    }
+
+    /// Get the [`ChecklistItem`]s holding the output scripts that need to be checked
+    /// for ownership by the receiver, ensuring at least one output pays the receiver.
+    ///
+    /// Each [`ChecklistItem`] must be marked with its result to obtain a
+    /// [`MarkedChecklistItem`], which can then be collected and submitted to
+    /// [`Receiver<OutputsUnknown>::apply_outputs_owned_checklist`].
+    pub fn outputs_owned_checklist(&self) -> impl Iterator<Item = ChecklistItem<OutputOwnership>> {
+        self.state.original.outputs_owned_checklist()
+    }
+
+    /// Apply the output ownership checklist results to advance the state machine.
+    ///
+    /// Use [`Receiver<OutputsUnknown>::outputs_owned_checklist`] to obtain the items
+    /// that need to be checked.
+    ///
+    /// If the sender designated a receiver output for fee subtraction, that designation
+    /// is cleared so the receiver does not accidentally subtract fees from their own output.
+    ///
+    /// Returns a [`MaybeFatalTransition`] that, once successfully persisted, yields a
+    /// [`Receiver<WantsOutputs>`] to continue the proposal.
+    pub fn apply_outputs_owned_checklist(
+        self,
+        marked_checklist: impl IntoIterator<Item = MarkedChecklistItem<OutputOwnership>>,
+    ) -> MaybeFatalTransition<
+        SessionEvent,
+        Receiver<WantsOutputs>,
+        Error,
+        Receiver<HasReplyableError>,
+        Self,
+    > {
         let fallback_tx = Some(self.state.fallback_tx());
-        match self.state.original.clone().identify_receiver_outputs(is_receiver_output) {
+        match self.state.original.apply_outputs_owned_checklist(marked_checklist) {
             Ok(inner) => MaybeFatalTransition::success(
                 SessionEvent::IdentifiedReceiverOutputs(inner.owned_vouts.clone()),
                 Receiver { state: WantsOutputs { inner }, session_context: self.session_context },
@@ -1319,6 +1483,10 @@ pub struct ProvisionalProposal {
 ///
 /// Call [`Receiver<ProvisionalProposal>::finalize_proposal`] to advance to
 /// [`Receiver<PayjoinProposal>`].
+///
+/// To sign without a synchronous callback, use
+/// [`Receiver<ProvisionalProposal>::psbt_to_sign`] and
+/// [`Receiver<ProvisionalProposal>::finalize_signed_proposal`].
 impl Receiver<ProvisionalProposal> {
     /// Finalize the proposal by signing the PSBT via the `wallet_process_psbt` callback.
     ///
@@ -1329,32 +1497,52 @@ impl Receiver<ProvisionalProposal> {
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, ImplementationError, Self>
     {
-        let payjoin_psbt =
-            match self.state.psbt_context.clone().finalize_proposal(wallet_process_psbt) {
-                Ok(payjoin_psbt) => payjoin_psbt,
-                Err(e) => {
-                    return MaybeTransientTransition::transient(e, self);
-                }
-            };
-        let psbt_context = PsbtContext {
-            payjoin_psbt: payjoin_psbt.clone(),
-            original_psbt: self.state.psbt_context.original_psbt,
-        };
-        let payjoin_proposal = PayjoinProposal { psbt_context: psbt_context.clone() };
-        MaybeTransientTransition::success(
-            SessionEvent::FinalizedProposal(payjoin_psbt),
-            Receiver { state: payjoin_proposal, session_context: self.session_context },
-        )
+        let psbt = self.psbt_to_sign();
+        let signed_psbt = wallet_process_psbt(&psbt);
+        match signed_psbt {
+            Ok(signed_psbt) => self.finalize_signed_proposal(&signed_psbt),
+            Err(e) => MaybeTransientTransition::transient(e, self),
+        }
     }
 
     /// Extract the PSBT that needs to be signed by the receiver's wallet.
     ///
     /// In some applications the entity that progresses the typestate is different from the
     /// entity that has access to the private keys, so the PSBT to sign must be accessible to
-    /// such implementers.
+    /// such implementers. Submit the signed PSBT to
+    /// [`Receiver<ProvisionalProposal>::finalize_signed_proposal`].
     ///
     /// Returns the Payjoin proposal [`Psbt`] to be signed.
     pub fn psbt_to_sign(&self) -> Psbt { self.state.psbt_context.psbt_to_sign() }
+
+    /// Finalize the receiver-signed Payjoin proposal into a PSBT the sender will find
+    /// acceptable before they sign and broadcast it to the network.
+    ///
+    /// Use [`Receiver<ProvisionalProposal>::psbt_to_sign`] to obtain the unsigned PSBT for
+    /// the receiver to sign and return here.
+    ///
+    /// Returns a [`MaybeTransientTransition`] that, once successfully persisted, yields the
+    /// final [`Receiver<PayjoinProposal>`].
+    pub fn finalize_signed_proposal(
+        self,
+        signed_psbt: &Psbt,
+    ) -> MaybeTransientTransition<SessionEvent, Receiver<PayjoinProposal>, ImplementationError, Self>
+    {
+        let original_psbt = self.state.psbt_context.original_psbt.clone();
+        let payjoin_psbt =
+            match self.state.psbt_context.finalize_signed_proposal(signed_psbt.clone()) {
+                Ok(payjoin_psbt) => payjoin_psbt,
+                Err(e) => {
+                    return MaybeTransientTransition::transient(e, self);
+                }
+            };
+        let psbt_context = PsbtContext { payjoin_psbt: payjoin_psbt.clone(), original_psbt };
+        let payjoin_proposal = PayjoinProposal { psbt_context: psbt_context.clone() };
+        MaybeTransientTransition::success(
+            SessionEvent::FinalizedProposal(payjoin_psbt),
+            Receiver { state: payjoin_proposal, session_context: self.session_context },
+        )
+    }
 
     pub(crate) fn apply_payjoin_proposal(self, payjoin_psbt: Psbt) -> ReceiveSession {
         let psbt_context = PsbtContext {
@@ -1617,6 +1805,14 @@ pub struct Monitor {
 ///
 /// Call [`Receiver<Monitor>::check_for_transaction`] to confirm the status of the transaction in the
 /// network and conclude the Payjoin session.
+///
+/// To monitor without a synchronous callback, first check
+/// [`Receiver<Monitor>::proposal_txid_is_stable`]: if the proposal txid is not stable,
+/// conclude the session with [`Receiver<Monitor>::payjoin_sent`]. Otherwise, use
+/// [`Receiver<Monitor>::extract_payjoin_proposal_txid`] and
+/// [`Receiver<Monitor>::extract_fallback_txid`] to obtain the txids to look up, then
+/// conclude the session with [`Receiver<Monitor>::payjoin_tx_exists`] or
+/// [`Receiver<Monitor>::fallback_tx_exists`].
 impl Receiver<Monitor> {
     /// Check the network for the payjoin or fallback transaction via the `find_transaction`
     /// callback.
@@ -1628,39 +1824,18 @@ impl Receiver<Monitor> {
         self,
         find_transaction: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,
     ) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, Error> {
-        let fallback_tx = self.state.fallback_tx();
-
         // If the fallback transaction included any non-SegWit inputs, then the transaction ID of
         // the Payjoin proposal is going to change when the sender signs their non-SegWit address
         // one more time. The receiver cannot monitor the transaction, and should conclude the session.
         if !self.proposal_txid_is_stable() {
-            return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                SessionOutcome::PayjoinProposalSent,
-            ));
+            return self.payjoin_sent();
         }
 
-        let payjoin_proposal = &self.state.psbt_context.payjoin_psbt;
-        let payjoin_txid = payjoin_proposal.unsigned_tx.compute_txid();
         // If the sender is spending SegWit-only inputs, then the transaction ID of the Payjoin proposal
         // is not going to change when the sender signs it. So we can use the TXID to check the
         // network for the Payjoin proposal.
-        match find_transaction(payjoin_txid) {
-            Ok(Some(tx)) => {
-                let tx_id = tx.compute_txid();
-                if tx_id != payjoin_txid {
-                    return MaybeFatalOrSuccessTransition::transient(
-                        Error::Implementation(ImplementationError::from(
-                            format!("Payjoin transaction ID mismatch. Expected: {payjoin_txid}, Got: {tx_id}").as_str(),
-                        )),
-                        self,
-                    );
-                }
-                // Payjoin transaction with SegWit inputs was detected. Complete the session,
-                // recording the txid of the transaction that settled it.
-                return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                    SessionOutcome::Success(tx_id),
-                ));
-            }
+        match find_transaction(self.extract_payjoin_proposal_txid()) {
+            Ok(Some(tx)) => return self.payjoin_tx_exists(tx),
             Ok(None) => {}
             Err(e) =>
                 return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e), self),
@@ -1668,17 +1843,89 @@ impl Receiver<Monitor> {
 
         // If the Payjoin proposal was not found, check the fallback transaction, as it is
         // the second of two transactions whose IDs the receiver is aware of.
-        match find_transaction(fallback_tx.compute_txid()) {
-            Ok(Some(_)) =>
-                return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                    SessionOutcome::FallbackBroadcasted,
-                )),
+        match find_transaction(self.extract_fallback_txid()) {
+            Ok(Some(_)) => return self.fallback_tx_exists(),
             Ok(None) => {}
             Err(e) =>
                 return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e), self),
         }
 
         MaybeFatalOrSuccessTransition::no_results(self)
+    }
+
+    /// Extract the txid of the fallback transaction to look it up on the network.
+    ///
+    /// Call [`Receiver<Monitor>::fallback_tx_exists`] to conclude the session if the
+    /// fallback has been found on the network.
+    ///
+    /// Returns the fallback transaction's [`Txid`].
+    pub fn extract_fallback_txid(&self) -> Txid { self.state.fallback_tx().compute_txid() }
+
+    /// Extract the txid of the Payjoin proposal transaction to look it up on the network.
+    ///
+    /// Pass the Payjoin proposal transaction to [`Receiver<Monitor>::payjoin_tx_exists`] to
+    /// conclude the session.
+    ///
+    /// Returns the Payjoin proposal transaction's [`Txid`].
+    pub fn extract_payjoin_proposal_txid(&self) -> Txid {
+        self.state.psbt_context.payjoin_psbt.clone().extract_tx_unchecked_fee_rate().compute_txid()
+    }
+
+    /// Conclude the session when the Payjoin proposal's txid cannot be tracked.
+    ///
+    /// When the sender spends non-SegWit inputs the proposal txid changes once they sign,
+    /// so its broadcast cannot be monitored; see
+    /// [`Receiver<Monitor>::proposal_txid_is_stable`].
+    ///
+    /// Returns a [`MaybeFatalOrSuccessTransition`] that, once successfully persisted, closes
+    /// the session with [`SessionOutcome::PayjoinProposalSent`].
+    pub fn payjoin_sent(&self) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, Error> {
+        MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+            SessionOutcome::PayjoinProposalSent,
+        ))
+    }
+
+    /// Conclude the session when the fallback transaction has been found on the network.
+    ///
+    /// Use [`Receiver<Monitor>::extract_fallback_txid`] to obtain the txid to look up.
+    ///
+    /// Returns a [`MaybeFatalOrSuccessTransition`] that, once successfully persisted, closes
+    /// the session with [`SessionOutcome::FallbackBroadcasted`].
+    pub fn fallback_tx_exists(&self) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, Error> {
+        MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+            SessionOutcome::FallbackBroadcasted,
+        ))
+    }
+
+    /// Conclude the session when the Payjoin proposal transaction has been found on the
+    /// network.
+    ///
+    /// Use [`Receiver<Monitor>::extract_payjoin_proposal_txid`] to obtain the txid to look
+    /// up, then pass the found transaction here. If its txid does not match the proposal, a
+    /// transient error is returned so the caller can retry.
+    ///
+    /// Returns a [`MaybeFatalOrSuccessTransition`] that, once successfully persisted, closes
+    /// the session with [`SessionOutcome::Success`].
+    pub fn payjoin_tx_exists(
+        &self,
+        tx: Transaction,
+    ) -> MaybeFatalOrSuccessTransition<SessionEvent, Self, Error> {
+        let payjoin_txid = self.state.psbt_context.payjoin_psbt.unsigned_tx.compute_txid();
+        let tx_id = tx.compute_txid();
+        if tx_id != payjoin_txid {
+            return MaybeFatalOrSuccessTransition::transient(
+                Error::Implementation(ImplementationError::from(
+                    format!(
+                        "Payjoin transaction ID mismatch. Expected: {payjoin_txid}, Got: {tx_id}"
+                    )
+                    .as_str(),
+                )),
+                self.clone(),
+            );
+        }
+        // Payjoin transaction with SegWit inputs was detected. Complete the session,
+        // recording the txid of the transaction that settled it.
+        MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(SessionOutcome::Success(tx_id)))
     }
 }
 

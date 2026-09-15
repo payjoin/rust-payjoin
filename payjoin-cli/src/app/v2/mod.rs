@@ -5,6 +5,7 @@ use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate, Transaction};
 use payjoin::persist::{OptionalTransitionOutcome, SessionPersister};
+use payjoin::receive::mark_checklist;
 use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
     MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
@@ -1021,13 +1022,11 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
-        let proposal = proposal
-            .check_broadcast_suitability(None, |tx| {
-                wallet
-                    .can_broadcast(tx)
-                    .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-            })
-            .save(persister)?;
+        let is_broadcast_suitable = wallet
+            .can_broadcast(&proposal.extract_tx_to_check_broadcast_suitability())
+            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+        let proposal =
+            proposal.apply_broadcast_suitability(None, is_broadcast_suitable).save(persister)?;
 
         persister.print(
             "Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:",
@@ -1042,13 +1041,13 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
-        let proposal = proposal
-            .check_inputs_not_owned(&mut |outpoint| {
-                wallet
-                    .is_my_outpoint(outpoint)
-                    .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-            })
-            .save(persister)?;
+        let checklist = proposal.inputs_owned_checklist();
+        let marked_checklist = mark_checklist(checklist, &mut |outpoint| {
+            wallet
+                .is_my_outpoint(outpoint)
+                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+        })?;
+        let proposal = proposal.apply_inputs_owned_checklist(marked_checklist).save(persister)?;
         Ok(ReceiveSession::MaybeInputsSeen(proposal))
     }
 
@@ -1057,11 +1056,11 @@ impl App {
         proposal: Receiver<MaybeInputsSeen>,
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
-        let proposal = proposal
-            .check_no_inputs_seen_before(&mut |input| {
-                Ok(self.db.insert_input_seen_before(*input)?)
-            })
-            .save(persister)?;
+        let checklist = proposal.inputs_seen_checklist();
+        let marked_checklist = mark_checklist(checklist, &mut |input| {
+            Ok(self.db.insert_input_seen_before(*input)?)
+        })?;
+        let proposal = proposal.apply_inputs_seen_checklist(marked_checklist).save(persister)?;
         Ok(ReceiveSession::OutputsUnknown(proposal))
     }
 
@@ -1071,13 +1070,13 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
-        let proposal = proposal
-            .identify_receiver_outputs(&mut |output_script| {
-                wallet
-                    .is_mine(output_script)
-                    .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-            })
-            .save(persister)?;
+        let checklist = proposal.outputs_owned_checklist();
+        let marked_checklist = mark_checklist(checklist, &mut |output_script| {
+            wallet
+                .is_mine(output_script)
+                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+        })?;
+        let proposal = proposal.apply_outputs_owned_checklist(marked_checklist).save(persister)?;
         Ok(ReceiveSession::WantsOutputs(proposal))
     }
 
@@ -1126,13 +1125,11 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
-        let proposal = proposal
-            .finalize_proposal(|psbt| {
-                wallet
-                    .process_psbt(psbt)
-                    .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-            })
-            .save(persister)?;
+        let psbt = proposal.psbt_to_sign();
+        let signed_psbt = wallet
+            .process_psbt(&psbt)
+            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+        let proposal = proposal.finalize_signed_proposal(&signed_psbt).save(persister)?;
         Ok(ReceiveSession::PayjoinProposal(proposal))
     }
 
@@ -1173,7 +1170,7 @@ impl App {
     /// session's perspective, so it stays local rather than in the driver.
     async fn monitor_payjoin_proposal(
         &self,
-        mut proposal: Receiver<Monitor>,
+        proposal: Receiver<Monitor>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
         // On a session resumption, the receiver will resume again in this state.
@@ -1185,33 +1182,30 @@ impl App {
 
         tracing::debug!("Polling for payment confirmation");
 
+        let fallback_txid = proposal.extract_fallback_txid();
+        let payjoin_txid = proposal.extract_payjoin_proposal_txid();
+        let get_raw_tx = |txid| {
+            self.wallet()
+                .get_raw_transaction(&txid)
+                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+        };
+        if !proposal.proposal_txid_is_stable() {
+            proposal.payjoin_sent().save(persister)?;
+            println!("Unable to monitor for fallback tx containing non-segwit inputs, completing session");
+            return Ok(());
+        }
         let result = tokio::time::timeout(timeout_duration, async {
             loop {
                 interval.tick().await;
-                let check_result = proposal
-                    .check_for_transaction(|txid| {
-                        self.wallet()
-                            .get_raw_transaction(&txid)
-                            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-                    })
-                    .save(persister);
-
-                match check_result {
-                    Ok(OptionalTransitionOutcome::Progress(())) => {
-                        persister.print("Payjoin transaction detected in the mempool!");
-                        return Ok(());
-                    }
-                    Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
-                        proposal = current_state;
-                    }
-                    Err(e) if e.is_transient() => {
-                        tracing::debug!(
-                            "Transient error checking for transaction, retrying: {e:?}"
-                        );
-                        proposal =
-                            e.transient_state().expect("transient error carries current state");
-                    }
-                    Err(e) => return Err(e.into()),
+                if let Some(tx) = get_raw_tx(payjoin_txid)? {
+                    proposal.payjoin_tx_exists(tx).save(persister)?;
+                    println!("Payjoin transaction detected in the mempool!");
+                    return Ok(());
+                };
+                if get_raw_tx(fallback_txid)?.is_some() {
+                    proposal.fallback_tx_exists().save(persister)?;
+                    println!("Fallback transaction detected in the mempool!");
+                    return Ok(());
                 }
             }
         })

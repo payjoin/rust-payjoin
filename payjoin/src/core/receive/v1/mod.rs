@@ -81,6 +81,10 @@ impl UncheckedOriginalPayload {
 /// Interactive receivers can skip that check and call
 /// [`Self::assume_interactive_receiver`] instead. Either path advances to
 /// [`MaybeInputsOwned`].
+///
+/// To perform the broadcast check without a synchronous callback, use
+/// [`Self::extract_tx_to_check_broadcast_suitability`] and
+/// [`Self::apply_broadcast_suitability`].
 #[derive(Debug, Clone)]
 pub struct UncheckedOriginalPayload {
     original: OriginalPayload,
@@ -96,7 +100,34 @@ impl UncheckedOriginalPayload {
         min_fee_rate: Option<FeeRate>,
         can_broadcast: impl Fn(&bitcoin::Transaction) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsOwned, Error> {
-        self.original.check_broadcast_suitability(min_fee_rate, can_broadcast)?;
+        let tx = self.extract_tx_to_check_broadcast_suitability();
+        self.apply_broadcast_suitability(min_fee_rate, can_broadcast(&tx)?)
+    }
+
+    /// Extract the Original PSBT transaction so the caller can check that it is
+    /// suitable for broadcast, ensuring it can be used as a fallback if the payjoin
+    /// does not complete.
+    ///
+    /// Submit the result of the check to [`Self::apply_broadcast_suitability`].
+    ///
+    /// Returns the extracted [`bitcoin::Transaction`].
+    pub fn extract_tx_to_check_broadcast_suitability(&self) -> bitcoin::Transaction {
+        self.original.psbt.clone().extract_tx_unchecked_fee_rate()
+    }
+
+    /// Apply the result of the broadcast suitability check to advance the state machine.
+    ///
+    /// Use [`Self::extract_tx_to_check_broadcast_suitability`] to obtain the transaction
+    /// that needs to be checked. Optionally enforce a minimum fee rate on the Original PSBT
+    /// to further raise the cost of probing attacks.
+    ///
+    /// Returns a [`MaybeInputsOwned`] to continue validation.
+    pub fn apply_broadcast_suitability(
+        self,
+        min_fee_rate: Option<FeeRate>,
+        is_broadcast_suitable: bool,
+    ) -> Result<MaybeInputsOwned, Error> {
+        self.original.apply_broadcast_suitability(min_fee_rate, is_broadcast_suitable)?;
         Ok(MaybeInputsOwned { original: self.original })
     }
 
@@ -119,6 +150,9 @@ impl UncheckedOriginalPayload {
 ///
 /// Call [`Self::check_inputs_not_owned`] to advance to [`MaybeInputsSeen`] to continue
 /// validation.
+///
+/// To perform this check without a synchronous callback, use
+/// [`Self::inputs_owned_checklist`] and [`Self::apply_inputs_owned_checklist`].
 #[derive(Debug, Clone)]
 pub struct MaybeInputsOwned {
     pub(crate) original: OriginalPayload,
@@ -141,7 +175,30 @@ impl MaybeInputsOwned {
         self,
         is_owned: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<MaybeInputsSeen, Error> {
-        self.original.check_inputs_not_owned(is_owned)?;
+        let marked_checklist = mark_checklist(self.inputs_owned_checklist(), is_owned)?;
+        self.apply_inputs_owned_checklist(marked_checklist)
+    }
+
+    /// Get the [`ChecklistItem`]s holding the input outpoints that need to be checked for
+    /// ownership by the receiver, preventing an attacker from spending the receiver's
+    /// own inputs.
+    ///
+    /// Each [`ChecklistItem`] must be marked with its result to obtain a [`MarkedChecklistItem`],
+    /// which can then be collected and submitted to [`Self::apply_inputs_owned_checklist`].
+    pub fn inputs_owned_checklist(&self) -> impl Iterator<Item = ChecklistItem<InputOwnership>> {
+        self.original.inputs_owned_checklist()
+    }
+
+    /// Apply the input ownership checklist results to advance the state machine.
+    ///
+    /// Use [`Self::inputs_owned_checklist`] to obtain the items that need to be checked.
+    ///
+    /// Returns a [`MaybeInputsSeen`] to continue validation.
+    pub fn apply_inputs_owned_checklist(
+        self,
+        marked_checklist: impl IntoIterator<Item = MarkedChecklistItem<InputOwnership>>,
+    ) -> Result<MaybeInputsSeen, Error> {
+        self.original.apply_inputs_owned_checklist(marked_checklist)?;
         Ok(MaybeInputsSeen { original: self.original })
     }
 }
@@ -157,6 +214,9 @@ impl MaybeInputsOwned {
 ///
 /// Call [`Self::check_no_inputs_seen_before`] to advance to [`OutputsUnknown`] to
 /// continue validation.
+///
+/// To perform this check without a synchronous callback, use
+/// [`Self::inputs_seen_checklist`] and [`Self::apply_inputs_seen_checklist`].
 #[derive(Debug, Clone)]
 pub struct MaybeInputsSeen {
     original: OriginalPayload,
@@ -171,7 +231,30 @@ impl MaybeInputsSeen {
         self,
         is_known: &mut impl FnMut(&OutPoint) -> Result<bool, ImplementationError>,
     ) -> Result<OutputsUnknown, Error> {
-        self.original.check_no_inputs_seen_before(is_known)?;
+        let marked_checklist = mark_checklist(self.inputs_seen_checklist(), is_known)?;
+        self.apply_inputs_seen_checklist(marked_checklist)
+    }
+
+    /// Get the [`ChecklistItem`]s holding the input outpoints that need to be checked
+    /// for whether the receiver has seen them before, preventing input probing and
+    /// replay attacks.
+    ///
+    /// Each [`ChecklistItem`] must be marked with its result to obtain a [`MarkedChecklistItem`],
+    /// which can then be collected and submitted to [`Self::apply_inputs_seen_checklist`].
+    pub fn inputs_seen_checklist(&self) -> impl Iterator<Item = ChecklistItem<InputSeenBefore>> {
+        self.original.inputs_seen_checklist()
+    }
+
+    /// Apply the inputs-seen checklist results to advance the state machine.
+    ///
+    /// Use [`Self::inputs_seen_checklist`] to obtain the items that need to be checked.
+    ///
+    /// Returns an [`OutputsUnknown`] to continue validation.
+    pub fn apply_inputs_seen_checklist(
+        self,
+        marked_checklist: impl IntoIterator<Item = MarkedChecklistItem<InputSeenBefore>>,
+    ) -> Result<OutputsUnknown, Error> {
+        self.original.apply_inputs_seen_checklist(marked_checklist)?;
         Ok(OutputsUnknown { original: self.original })
     }
 }
@@ -181,6 +264,9 @@ impl MaybeInputsSeen {
 /// The receiver should only accept Original PSBTs from the sender that actually send
 /// them money. Call [`Self::identify_receiver_outputs`] to advance to [`WantsOutputs`]
 /// to continue the proposal.
+///
+/// To perform this check without a synchronous callback, use
+/// [`Self::outputs_owned_checklist`] and [`Self::apply_outputs_owned_checklist`].
 #[derive(Debug, Clone)]
 pub struct OutputsUnknown {
     original: OriginalPayload,
@@ -199,7 +285,37 @@ impl OutputsUnknown {
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
     ) -> Result<WantsOutputs, Error> {
-        self.original.identify_receiver_outputs(is_receiver_output)
+        let marked_checklist =
+            mark_checklist(self.outputs_owned_checklist(), &mut |script: &ScriptBuf| {
+                is_receiver_output(script.as_script())
+            })?;
+        self.apply_outputs_owned_checklist(marked_checklist)
+    }
+
+    /// Get the [`ChecklistItem`]s holding the output scripts that need to be checked
+    /// for ownership by the receiver, ensuring at least one output pays the receiver.
+    ///
+    /// Each [`ChecklistItem`] must be marked with its result to obtain a [`MarkedChecklistItem`],
+    /// which can then be collected and submitted to [`Self::apply_outputs_owned_checklist`].
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
+    pub fn outputs_owned_checklist(&self) -> impl Iterator<Item = ChecklistItem<OutputOwnership>> {
+        self.original.outputs_owned_checklist()
+    }
+
+    /// Apply the output ownership checklist results to advance the state machine.
+    ///
+    /// Use [`Self::outputs_owned_checklist`] to obtain the items that need to be checked.
+    ///
+    /// If the sender designated a receiver output for fee subtraction, that designation
+    /// is cleared so the receiver does not accidentally subtract fees from their own output.
+    ///
+    /// Returns a [`WantsOutputs`] to continue the proposal.
+    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
+    pub fn apply_outputs_owned_checklist(
+        &self,
+        marked_checklist: impl IntoIterator<Item = MarkedChecklistItem<OutputOwnership>>,
+    ) -> Result<WantsOutputs, Error> {
+        self.original.apply_outputs_owned_checklist(marked_checklist)
     }
 }
 
@@ -268,6 +384,9 @@ impl crate::receive::common::WantsFeeRange {
 /// inputs of, and is ready to be signed and finalized.
 ///
 /// Call [`Self::finalize_proposal`] to advance to [`PayjoinProposal`].
+///
+/// To sign without a synchronous callback, use [`Self::psbt_to_sign`] and
+/// [`Self::finalize_signed_proposal`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProvisionalProposal {
     psbt_context: PsbtContext,
@@ -281,21 +400,31 @@ impl ProvisionalProposal {
         self,
         wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
     ) -> Result<PayjoinProposal, Error> {
-        let finalized_psbt = self
-            .psbt_context
-            .finalize_proposal(wallet_process_psbt)
-            .map_err(|e| Error::Implementation(ImplementationError::new(e)))?;
-        Ok(PayjoinProposal { payjoin_psbt: finalized_psbt })
+        let psbt = self.psbt_to_sign();
+        let signed_psbt = wallet_process_psbt(&psbt)?;
+        self.finalize_signed_proposal(&signed_psbt)
     }
 
     /// Extract the PSBT that needs to be signed by the receiver's wallet.
     ///
     /// In some applications the entity that progresses the typestate is different from the
     /// entity that has access to the private keys, so the PSBT to sign must be accessible to
-    /// such implementers.
+    /// such implementers. Submit the signed PSBT to [`Self::finalize_signed_proposal`].
     ///
     /// Returns the Payjoin proposal [`Psbt`] to be signed.
     pub fn psbt_to_sign(&self) -> Psbt { self.psbt_context.psbt_to_sign() }
+
+    /// Finalize the receiver-signed Payjoin proposal into a PSBT the sender will find
+    /// acceptable before they sign and broadcast it to the network.
+    ///
+    /// Use [`Self::psbt_to_sign`] to obtain the unsigned PSBT for the receiver to sign
+    /// and return here.
+    ///
+    /// Returns the final [`PayjoinProposal`].
+    pub fn finalize_signed_proposal(self, signed_psbt: &Psbt) -> Result<PayjoinProposal, Error> {
+        let finalized_psbt = self.psbt_context.finalize_signed_proposal(signed_psbt.clone())?;
+        Ok(PayjoinProposal { payjoin_psbt: finalized_psbt })
+    }
 }
 
 /// Typestate for a signed and finalized Payjoin proposal that is to be sent to the

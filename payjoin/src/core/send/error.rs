@@ -177,6 +177,7 @@ pub(crate) enum InternalProposalError {
     PayeeTookContributedFee,
     FeeContributionPaysOutputSizeIncrease,
     FeeRateBelowMinimum,
+    FeeCalculationOverflow,
     Psbt(bitcoin::psbt::Error),
 }
 
@@ -216,6 +217,7 @@ impl fmt::Display for InternalProposalError {
             PayeeTookContributedFee => write!(f, "payee tried to take fee contribution for himself"),
             FeeContributionPaysOutputSizeIncrease => write!(f, "fee contribution pays for additional outputs"),
             FeeRateBelowMinimum =>  write!(f, "the fee rate of proposed transaction is below minimum"),
+            FeeCalculationOverflow =>  write!(f, "the fee rate of proposed transaction overflows arithmetic"),
             Psbt(e) => write!(f, "psbt error: {e}"),
         }
     }
@@ -251,6 +253,7 @@ impl std::error::Error for InternalProposalError {
             PayeeTookContributedFee => None,
             FeeContributionPaysOutputSizeIncrease => None,
             FeeRateBelowMinimum => None,
+            FeeCalculationOverflow => None,
             Psbt(error) => Some(error),
         }
     }

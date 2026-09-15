@@ -339,8 +339,11 @@ impl PsbtContext {
         )?;
         if self.min_fee_rate > FeeRate::ZERO {
             let proposed_weight = proposal.clone().extract_tx_unchecked_fee_rate().weight();
+            let proposed_fee_rate = proposed_fee
+                .div_by_weight_floor(proposed_weight)
+                .ok_or(InternalProposalError::FeeCalculationOverflow)?;
             ensure(
-                proposed_fee / proposed_weight >= self.min_fee_rate,
+                proposed_fee_rate >= self.min_fee_rate,
                 InternalProposalError::FeeRateBelowMinimum,
             )?;
         }
@@ -1193,6 +1196,31 @@ mod test {
                 "http://localhost?v=2&additionalfeeoutputindex=0&maxadditionalfeecontribution=1000"
             )?
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_fee_calculation_overflow() -> Result<(), BoxError> {
+        let mut ctx = create_psbt_context()?;
+        // The guard only runs when a minimum fee rate was requested.
+        ctx.min_fee_rate = FeeRate::from_sat_per_vb_u32(1);
+
+        let mut proposal = ctx.original_psbt.clone();
+        // A malicious receiver claims an absurd value for an input it
+        // contributed. Anything above u64::MAX / 1000 sats makes the
+        // sat/kwu conversion overflow, which used to wrap silently in
+        // release builds and could pass the min-fee-rate check.
+        proposal.inputs[0]
+            .witness_utxo
+            .as_mut()
+            .expect("test vector input has a witness utxo")
+            .value = Amount::MAX;
+
+        let err = ctx
+            .check_fees(&proposal, Amount::ZERO)
+            .expect_err("Fee rate should not be computable from an overflowing fee");
+        assert!(matches!(err, InternalProposalError::FeeCalculationOverflow));
+
         Ok(())
     }
 

@@ -2,6 +2,9 @@ name: Continuous integration
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   Test:
     runs-on: ubuntu-26.04
@@ -20,22 +23,25 @@ jobs:
       RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: "Install ${{ matrix.rust }} toolchain"
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
           # The toolchain must be specified manually, as this action ignores the rust-toolchain override
           # https://github.com/dtolnay/rust-toolchain?tab=readme-ov-file#inputs
           toolchain: ${{ matrix.rust }}
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: "Add nginxWithStream to PATH"
         run: |
           # This is necessary for payjoin-mailroom integration tests
           echo "$(nix build .#nginx-with-stream --print-out-paths --no-link)/bin" >> $GITHUB_PATH
       - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
           shared-key: ${{ matrix.rust == 'stable' && 'stable-workspace' || matrix.rust == '1.85.0' && 'msrv-workspace' || '' }}
       - name: Run tests
         run: RUST_LOG=debug bash contrib/test.sh
@@ -44,11 +50,15 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: "Run code linting"
         run: nix develop -c ./contrib/lint.sh
       - name: "Run documentation linting"
@@ -67,24 +77,28 @@ jobs:
       RUSTUP_TOOLCHAIN: stable
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: "Install toolchain"
         # rust-cache usage with stable Rust is most effective, as a cache is tied to the Rust version
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: "Add nginxWithStream to PATH"
         run: |
           # This is necessary for payjoin-mailroom integration tests
           echo "$(nix build .#nginx-with-stream --print-out-paths --no-link)/bin" >> $GITHUB_PATH
       - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: "Install cargo-llvm-cov"
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@5f1c7d47567fbeb225672537fc0c8ea05af39882 # cargo-llvm-cov
       - name: "Generate code coverage for tests"
         run: bash contrib/coverage.sh
       - name: "Upload report to coveralls"
-        uses: coverallsapp/github-action@v2
+        uses: coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329 # v2.3.8
         with:
           fail-on-error: false
 
@@ -92,8 +106,10 @@ jobs:
     name: Code spell check
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v6
-      - uses: codespell-project/actions-codespell@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
+      - uses: codespell-project/actions-codespell@8f01853be192eb0f849a5c7d721450e7a467c579 # v2.2
 
   DiffMutants:
     name: Diff cargo-mutants
@@ -102,28 +118,35 @@ jobs:
       RUSTUP_TOOLCHAIN: stable
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
           fetch-depth: 0 # required for full diff context
       - name: Fetch base branch for diff
-        run: git fetch origin ${{ github.base_ref }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git fetch origin "$BASE_REF"
       - name: Relative diff
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           git branch -av
-          git diff origin/${{ github.base_ref }}.. -- '*.rs' | tee git.diff
-      - uses: taiki-e/install-action@v2
+          git diff origin/${BASE_REF}.. -- '*.rs' | tee git.diff
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
         with:
           tool: cargo-mutants@27.1.0
       - name: "Install toolchain"
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: Run cargo-mutants on diff
         run: >
           cargo mutants --no-shuffle --in-diff git.diff
           --test-tool=cargo --timeout=500 --build-timeout=500
       - name: Upload mutants.out
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: mutants-incremental-cargo.out
@@ -134,13 +157,17 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: "Install nightly toolchain"
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
           # pinned nightly, bumped weekly by contrib/bump-nightly.sh
           toolchain: nightly-2026-09-14
       - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: "Build fuzz targets"
         run: cd fuzz && cargo build

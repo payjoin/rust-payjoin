@@ -5,14 +5,19 @@ on:
     - cron: "0 11 * * 2" # weekly Tuesday, after Monday's flake maintenance
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   validate-toolchain:
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: Update nightly toolchain pin
         run: ./contrib/bump-nightly.sh
       - name: Validate pinned toolchain
@@ -26,19 +31,23 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: Update nightly toolchain pin
         run: ./contrib/bump-nightly.sh
       - name: Mint bot token
         id: bot-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         with:
           app-id: ${{ vars.BOT_APP_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - name: Create pull request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7.0.11
         with:
           title: "chore: update nightly toolchain pin"
           commit-message: "chore: update nightly toolchain pin"

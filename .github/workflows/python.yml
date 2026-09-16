@@ -1,10 +1,6 @@
 name: Build and Test Python
 on:
-  workflow_run:
-    workflows: ["Flake maintenance"]
-    types: [requested]
-    branches:
-      - "update_flake_lock_action"
+  workflow_call:
   pull_request:
     paths:
       - payjoin-ffi/**
@@ -15,6 +11,9 @@ on:
   push:
     tags:
       - "payjoin-python-[0-9]*"
+
+permissions:
+  contents: read
 
 jobs:
   build-python-and-test:
@@ -27,15 +26,18 @@ jobs:
       RUSTUP_TOOLCHAIN: 1.85.0
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
-      - name: "Install Rust 1.85.0"
-        uses: dtolnay/rust-toolchain@1.85.0
-      - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
+      - name: "Install Rust 1.85.0"
+        uses: dtolnay/rust-toolchain@3230091d7ef9483f601620abacc570c22cf44d22 # 1.85.0
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
           shared-key: msrv-workspace
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: "Build and test"
         run: nix develop .#python --command bash ./payjoin-ffi/python/contrib/test.sh
 
@@ -52,17 +54,21 @@ jobs:
         platform: [linux-x64, macos-universal2]
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: Build the wheel
         run: nix develop .#python --command bash ./payjoin-ffi/python/contrib/build-wheel.sh
         env:
           PAYJOIN_WHEEL_PLATFORM: ${{ matrix.platform }}
       - name: Upload wheel
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: payjoin-python-wheel-${{ matrix.platform }}
           path: payjoin-ffi/python/dist/*.whl
@@ -77,13 +83,13 @@ jobs:
         os: [ubuntu-26.04, macos-latest, macos-15-intel]
     steps:
       - name: Download wheels
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: payjoin-python-wheel-*
           merge-multiple: true
           path: dist
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           # Deliberately not the version the wheel was built with: the
           # wheels are tagged py3-none (the bindings load the library
@@ -116,7 +122,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/payjoin-python-')
     permissions:
       contents: read
-    uses: ./.github/workflows/verify-tag-hygiene.yml
+    uses: $/.github/workflows/verify-tag-hygiene.yml
 
   publish-pypi:
     name: "Publish to PyPI (trusted publishing / OIDC)"
@@ -130,10 +136,12 @@ jobs:
       contents: read # needed only to check out the in-repo verify-tag-version action
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: Download wheels
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: payjoin-python-wheel-*
           merge-multiple: true
@@ -159,19 +167,19 @@ jobs:
           echo "version=$versions" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag matches packed artifact version
-        uses: ./.github/actions/verify-tag-version
+        uses: $/.github/actions/verify-tag-version
         with:
           tag-prefix: payjoin-python-
           version: ${{ steps.locate.outputs.version }}
 
       - name: Attest build provenance (wheels)
         # A consumer runs: gh attestation verify <file>.whl -R payjoin/rust-payjoin
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@8beda2b7ed98355c0e97c0a63bec38ae472e66c4 # v4
         with:
           subject-path: dist/*.whl
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           packages-dir: dist
 
@@ -181,7 +189,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/payjoin-python-')
     permissions:
       contents: write # create/update the Release for this tag and upload assets
-    uses: ./.github/workflows/release-assets.yml
+    uses: $/.github/workflows/release-assets.yml
     with:
       artifact-pattern: payjoin-python-wheel-*
       tag-prefix: payjoin-python-

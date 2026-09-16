@@ -7,9 +7,9 @@ runs:
   using: composite
   steps:
     - name: Install nix
-      uses: DeterminateSystems/determinate-nix-action@main
+      uses: DeterminateSystems/determinate-nix-action@021c8a1bd3570eb21f5c20a054812b0c4d9ca614 # main
     - name: Use nix cache
-      uses: nix-community/cache-nix-action@v7
+      uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
       with:
         primary-key: nix-${{ runner.os }}-${{ github.job }}-${{ hashFiles('flake.nix', 'flake.lock') }}
         restore-prefixes-first-match: nix-${{ runner.os }}-${{ github.job }}-

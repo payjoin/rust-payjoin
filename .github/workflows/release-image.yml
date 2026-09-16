@@ -21,13 +21,15 @@ jobs:
       packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # main
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.PAYJOIN_DOCKER_RW }}
@@ -51,17 +53,19 @@ jobs:
       packages: write
     steps:
       - name: Wait for other workflows
-        uses: lewagon/wait-on-check-action@v1.5.0
+        uses: lewagon/wait-on-check-action@a499964d3917700d29a2a8baf3f16b078d609410 # v1.5.0
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           running-workflow-name: "Build and upload image artifact"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # main
 
       - name: Build and save image artifact
         run: |
@@ -76,7 +80,7 @@ jobs:
           ls -lh payjoin-mailroom-${TAG}.tar
 
       - name: Upload image artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: payjoin-mailroom-image-${{ github.sha }}
           path: payjoin-mailroom-*.tar

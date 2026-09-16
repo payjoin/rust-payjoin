@@ -25,6 +25,12 @@ fi
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+cd "$REPO_ROOT"
+source contrib/lockfile.sh
+use_lockfile Cargo-recent.lock
+
 # Navigate to payjoin-ffi directory (parent of csharp, which is parent of scripts)
 cd "$SCRIPT_DIR/../.."
 

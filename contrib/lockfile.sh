@@ -16,6 +16,10 @@ _cleanup_lockfile() {
 
 use_lockfile() {
     local src="$1"
+    # Already in place, from an enclosing script or an earlier run.
+    if cmp -s "$src" "$LOCKFILE"; then
+        return 0
+    fi
     if ! mkdir "$LOCKDIR" 2>/dev/null; then
         echo "Another instance is running. If you're sure it's not, remove $LOCKDIR and try again." >&2
         exit 1

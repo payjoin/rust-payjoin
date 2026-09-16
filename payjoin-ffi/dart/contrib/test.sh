@@ -11,8 +11,8 @@ use_lockfile Cargo-recent.lock
 
 cd "$REPO_ROOT/payjoin-ffi/dart"
 
-echo "==> Cleaning nested Cargo.lock..."
-rm -f native/Cargo.lock
+echo "==> Seeding the nested workspace's Cargo.lock from the maintained lockfile..."
+cp "$REPO_ROOT/Cargo-recent.lock" native/Cargo.lock
 
 echo "==> Generating FFI bindings..."
 bash ./scripts/generate_bindings.sh

@@ -101,6 +101,12 @@ rid_to_cross_tool() {
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CSHARP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+REPO_ROOT="$(cd "$CSHARP_DIR/../.." && pwd)"
+cd "$REPO_ROOT"
+source contrib/lockfile.sh
+use_lockfile Cargo-recent.lock
+
 cd "$CSHARP_DIR"
 
 RID=${PAYJOIN_FFI_RID:-$(detect_rid)}

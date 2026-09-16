@@ -21,3 +21,9 @@ crate-type = ["staticlib", "cdylib"]
 payjoin-ffi = { git = "https://github.com/payjoin/rust-payjoin.git", rev = "60d0adbf4ee8e60090209d55e9864893a4acc30e", features = [
   "dart",
 ] }
+# Not used directly. yoke-derive 0.8.3 needs Rust 1.87 but declares no rust-version,
+# so consumers' fresh resolution on the toolchain above picks it. Drop once upstream fixes it.
+yoke-derive = "=0.8.2"
+
+[package.metadata.cargo-machete]
+ignored = ["yoke-derive"]

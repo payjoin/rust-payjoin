@@ -31,6 +31,13 @@ if command -v rustup >/dev/null 2>&1 &&
     rustup target add wasm32-unknown-unknown
 fi
 
+# ubrn's generated wasm crate and the test-utils napi addon are workspaces of
+# their own; seed both from the maintained lockfile.
+JS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+mkdir -p "$JS_DIR/rust_modules/wasm"
+cp "$JS_DIR/../../Cargo-recent.lock" "$JS_DIR/rust_modules/wasm/Cargo.lock"
+cp "$JS_DIR/../../Cargo-recent.lock" "$JS_DIR/test-utils/Cargo.lock"
+
 npm run build
 
 # The test-utils addon is a dev-only native helper for the integration tests.

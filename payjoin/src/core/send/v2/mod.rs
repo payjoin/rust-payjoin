@@ -71,6 +71,18 @@ impl SenderBuilder {
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`Sender`]
+    ///
+    /// # Panics
+    ///
+    /// Panics if the URI's `pj` endpoint is BIP 78 (v1) only. A v2 sender cannot
+    /// pay a v1 receiver, and a URI scanned from a QR code may well be one, so
+    /// match on [`PjUri::extras`]`().pj_param()` and call
+    /// [`SenderBuilder::from_parts`] with the [`crate::PjParam::V2`] contents
+    /// instead. That leaves the v1 case for the caller to handle.
+    #[deprecated(
+        since = "1.0.1",
+        note = "panics on v1 payjoin URIs; match on the URI's `PjParam` and use `SenderBuilder::from_parts`"
+    )]
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {
         match uri.extras().pj_param() {
             #[cfg(feature = "v1")]
@@ -80,6 +92,16 @@ impl SenderBuilder {
         }
     }
 
+    /// Prepare the context from which to make Sender requests from the parts of a
+    /// [`PjUri`]: its BIP 77 `pj` parameter, the receiver's address, and the
+    /// requested amount, if any.
+    ///
+    /// Obtain `pj_param` by matching [`crate::PjParam::V2`] out of
+    /// [`PjUri::extras`]`().pj_param()`. A BIP 78 (v1) endpoint cannot be paid
+    /// by this sender; the `v1` module's `SenderBuilder` handles those.
+    ///
+    /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
+    /// to create a [`Sender`]
     pub fn from_parts(
         psbt: Psbt,
         pj_param: &PjParam,
@@ -722,6 +744,7 @@ mod test {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_v2_sender_builder() {
         let address = Address::from_str("2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7")
             .expect("valid address")

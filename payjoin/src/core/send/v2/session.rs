@@ -195,6 +195,20 @@ mod tests {
     /// Expired V2 Payjoin URI without Amount inspired by BIP 77 test vector
     const PJ_URI: &str = "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?pjos=0&pj=HTTPS://PAYJO.IN/TXJCGKTKXLUUZ%23EX1WKV8CEC-OH1QYPM59NK2LXXS4890SUAXXYT25Z2VAPHP0X7YEYCJXGWAG6UG9ZU6NQ-RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV";
 
+    fn sender_builder(psbt: bitcoin::Psbt) -> SenderBuilder {
+        let uri = Uri::try_from(PJ_URI)
+            .expect("Valid uri")
+            .assume_checked()
+            .check_pj_supported()
+            .expect("Payjoin to be supported");
+        match uri.extras().pj_param() {
+            crate::PjParam::V2(pj_param) =>
+                SenderBuilder::from_parts(psbt, pj_param, uri.address(), uri.amount()),
+            #[cfg(feature = "v1")]
+            crate::PjParam::V1(_) => panic!("PJ_URI is a v2 URI"),
+        }
+    }
+
     #[test]
     fn test_sender_session_event_serialization_roundtrip() {
         let keypair = HpkeKeyPair::gen_keypair();
@@ -312,18 +326,11 @@ mod tests {
     #[tokio::test]
     async fn test_sender_session_history_with_expired_session() {
         let psbt = PARSED_ORIGINAL_PSBT.clone();
-        let sender = SenderBuilder::new(
-            psbt.clone(),
-            Uri::try_from(PJ_URI)
-                .expect("Valid uri")
-                .assume_checked()
-                .check_pj_supported()
-                .expect("Payjoin to be supported"),
-        )
-        .build_recommended(FeeRate::BROADCAST_MIN)
-        .unwrap()
-        .save(&InMemoryPersister::default())
-        .unwrap();
+        let sender = sender_builder(psbt.clone())
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .unwrap()
+            .save(&InMemoryPersister::default())
+            .unwrap();
         let test = SessionHistoryTest {
             events: vec![SessionEvent::Created(Box::new(sender.session_context.clone()))],
             expected_session_history: SessionHistoryExpectedOutcome {
@@ -346,18 +353,11 @@ mod tests {
     #[tokio::test]
     async fn test_sender_session_history_with_reply_key_event() {
         let psbt = PARSED_ORIGINAL_PSBT.clone();
-        let mut sender = SenderBuilder::new(
-            psbt.clone(),
-            Uri::try_from(PJ_URI)
-                .expect("Valid uri")
-                .assume_checked()
-                .check_pj_supported()
-                .expect("Payjoin to be supported"),
-        )
-        .build_recommended(FeeRate::BROADCAST_MIN)
-        .unwrap()
-        .save(&InMemoryPersister::default())
-        .unwrap();
+        let mut sender = sender_builder(psbt.clone())
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .unwrap()
+            .save(&InMemoryPersister::default())
+            .unwrap();
         sender.session_context.pj_param.expiration =
             Time::from_now(std::time::Duration::from_secs(60)).unwrap();
         let test = SessionHistoryTest {
@@ -382,18 +382,11 @@ mod tests {
     #[test]
     fn status_is_completed_for_closed_success() {
         let psbt = PARSED_ORIGINAL_PSBT.clone();
-        let sender = SenderBuilder::new(
-            psbt.clone(),
-            Uri::try_from(PJ_URI)
-                .expect("Valid uri")
-                .assume_checked()
-                .check_pj_supported()
-                .expect("Payjoin to be supported"),
-        )
-        .build_recommended(FeeRate::BROADCAST_MIN)
-        .unwrap()
-        .save(&InMemoryPersister::default())
-        .unwrap();
+        let sender = sender_builder(psbt.clone())
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .unwrap()
+            .save(&InMemoryPersister::default())
+            .unwrap();
 
         let reply_key = HpkeKeyPair::gen_keypair();
         let endpoint = Url::parse(&sender.endpoint()).expect("Could not parse url");
@@ -429,18 +422,11 @@ mod tests {
     #[test]
     fn status_prefers_closed_outcome_over_expired() {
         let psbt = PARSED_ORIGINAL_PSBT.clone();
-        let mut sender = SenderBuilder::new(
-            psbt,
-            Uri::try_from(PJ_URI)
-                .expect("Valid uri")
-                .assume_checked()
-                .check_pj_supported()
-                .expect("Payjoin to be supported"),
-        )
-        .build_recommended(FeeRate::BROADCAST_MIN)
-        .unwrap()
-        .save(&InMemoryPersister::default())
-        .unwrap();
+        let mut sender = sender_builder(psbt)
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .unwrap()
+            .save(&InMemoryPersister::default())
+            .unwrap();
         sender.session_context.pj_param.expiration =
             Time::try_from(SystemTime::now() - Duration::from_secs(1))
                 .expect("expiration in the past");
@@ -471,18 +457,11 @@ mod tests {
     #[tokio::test]
     async fn test_replaying_closed_sender_session_past_expiration_is_not_expired() {
         let psbt = PARSED_ORIGINAL_PSBT.clone();
-        let sender = SenderBuilder::new(
-            psbt,
-            Uri::try_from(PJ_URI)
-                .expect("Valid uri")
-                .assume_checked()
-                .check_pj_supported()
-                .expect("Payjoin to be supported"),
-        )
-        .build_recommended(FeeRate::BROADCAST_MIN)
-        .unwrap()
-        .save(&InMemoryPersister::default())
-        .unwrap();
+        let sender = sender_builder(psbt)
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .unwrap()
+            .save(&InMemoryPersister::default())
+            .unwrap();
 
         let persister = InMemoryPersister::<SessionEvent>::default();
         persister

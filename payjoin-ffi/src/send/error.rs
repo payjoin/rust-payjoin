@@ -44,6 +44,10 @@ pub enum SenderInputError {
     Build(Arc<SenderBuilderError>),
     #[error(transparent)]
     FfiValidation(FfiValidationError),
+    /// The URI's `pj` endpoint is BIP 78 (v1) only. This sender speaks BIP 77
+    /// (v2) and cannot pay a v1 receiver, so fall back to a plain transaction.
+    #[error("The payjoin URI is a BIP 78 (v1) endpoint, which this sender does not support")]
+    UnsupportedPjVersion,
 }
 
 impl From<FfiValidationError> for SenderInputError {

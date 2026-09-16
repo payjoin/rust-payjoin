@@ -504,18 +504,33 @@ function testFfiValidation(payjoin: PayjoinModule): void {
         assert.strictEqual(inner.tag, "WeightOutOfRange");
     }
 
-    const pjUri = payjoin.Uri.parse(
+    const v1PjUri = payjoin.Uri.parse(
         "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com",
     ).checkPjSupported();
+    const v2PjUri = payjoin.Uri.parse(
+        "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?pjos=0&pj=HTTPS://PAYJO.IN/TXJCGKTKXLUUZ%23EX1WKV8CEC-OH1QYPM59NK2LXXS4890SUAXXYT25Z2VAPHP0X7YEYCJXGWAG6UG9ZU6NQ-RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV",
+    ).checkPjSupported();
     const psbt = testUtils.originalPsbt();
-    assert.throws(() => {
-        new payjoin.SenderBuilder(psbt, pjUri).buildRecommended(
+    try {
+        new payjoin.SenderBuilder(psbt, v2PjUri).buildRecommended(
             18446744073709551615n,
         );
-    }, /RuntimeError/);
+        assert.fail("Expected FeeRateOutOfRange error");
+    } catch (e) {
+        const [inner] = payjoin.SenderInputError.FfiValidation.getInner(e);
+        assert.strictEqual(inner.tag, "FeeRateOutOfRange");
+    }
+
+    // A BIP 78 (v1) endpoint must surface as a typed error the caller can handle.
+    try {
+        new payjoin.SenderBuilder(psbt, v1PjUri);
+        assert.fail("Expected UnsupportedPjVersion error");
+    } catch (e) {
+        assert.ok(payjoin.SenderInputError.UnsupportedPjVersion.instanceOf(e));
+    }
 
     assert.throws(() => {
-        pjUri.setAmountSats(tooLargeAmount);
+        v1PjUri.setAmountSats(tooLargeAmount);
     }, /AmountOutOfRange/);
 }
 

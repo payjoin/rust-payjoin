@@ -19,8 +19,9 @@ jobs:
     if: "${{ !contains(github.event.pull_request.labels.*.name, 'changelog: none') }}"
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
           fetch-depth: 0
       - name: Require a changelog line for each changed release crate
         env:

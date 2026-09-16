@@ -7,6 +7,9 @@ on:
     paths-ignore:
       - "flake.lock"
 
+permissions:
+  contents: read
+
 jobs:
   flake-check:
     runs-on: ubuntu-26.04
@@ -19,10 +22,12 @@ jobs:
           - maintenance
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # main
 
       - name: Run full flake check
         run: nix build .#checks.x86_64-linux.${{ matrix.checks }}

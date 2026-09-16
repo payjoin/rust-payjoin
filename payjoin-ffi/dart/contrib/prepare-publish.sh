@@ -20,10 +20,12 @@ cd "$REPO_ROOT/payjoin-ffi/dart"
 echo "==> Generating production FFI bindings..."
 PAYJOIN_FFI_FEATURES="" bash ./scripts/generate_bindings.sh
 
-# A Cargo.lock resolved against the .cargo/config.toml path overlay would
-# hand consumers a dependency graph they cannot reproduce.
-echo "==> Cleaning nested Cargo.lock..."
-rm -f native/Cargo.lock
+# The archive ships native/Cargo.lock so consumers resolve the same graph
+# the release was tested against, and hook/build.dart builds it with
+# --locked. A lockfile resolved against the .cargo/config.local.toml path
+# overlay would pin a workspace they do not have.
+echo "==> Checking the production native Cargo.lock..."
+bash ./contrib/check_production_lock.sh native/Cargo.toml native/Cargo.lock
 
 echo "==> Verifying the publish archive..."
 # The dry run exits 65 whenever validation reports anything, and one
@@ -42,5 +44,21 @@ unexpected="$(grep '^\* ' <<<"$report" | grep -v "^\* \`dart analyze\` found" ||
 if [[ -n $unexpected ]]; then
     echo "Unexpected validation findings; fix them before publishing:" >&2
     printf '%s\n' "$unexpected" >&2
+    exit 1
+fi
+
+# The dry run prints the archive as a tree, so assert on its entries rather
+# than on paths. `.pubignore` decides both of these: it withholds `.cargo/`,
+# and it must keep withholding it once the overlay is only a development
+# aid, while native/Cargo.lock has to stay out of that list.
+contents="$(grep -- '── ' <<<"$report" || true)"
+if ! grep -q 'Cargo\.lock' <<<"$contents"; then
+    echo "The archive is missing native/Cargo.lock:" >&2
+    printf '%s\n' "$contents" >&2
+    exit 1
+fi
+if grep -q '\.cargo' <<<"$contents"; then
+    echo "The archive carries the development Cargo overlay:" >&2
+    printf '%s\n' "$contents" >&2
     exit 1
 fi

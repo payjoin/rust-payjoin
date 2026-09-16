@@ -3,6 +3,7 @@ target
 !example.config.toml
 *.sqlite
 Cargo.lock
+!payjoin-ffi/dart/native/Cargo.lock
 .vscode
 mutants.out*
 *.ikm

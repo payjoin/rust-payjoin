@@ -12,6 +12,3 @@ doc/api/
 
 # Auto-generated bindings
 lib/payjoin.dart
-
-# Local Cargo overlay for monorepo dev
-!.cargo/config.toml

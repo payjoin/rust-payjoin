@@ -1,0 +1,9 @@
+{
+    "name": "payjoin-smoke",
+    "version": "0.0.0",
+    "private": true,
+    "description": "Installs the packed npm tarball through a committed lockfile so the smoke test never installs anything ad-hoc.",
+    "dependencies": {
+        "payjoin": "file:./pkg/payjoin.tgz"
+    }
+}

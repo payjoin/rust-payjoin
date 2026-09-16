@@ -33,13 +33,14 @@ jobs:
       prerelease: ${{ steps.meta.outputs.prerelease }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Fetch master
         run: git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: Verify tag hygiene
         env:
           TAG: ${{ github.ref_name }}
@@ -70,19 +71,19 @@ jobs:
 
   python:
     needs: verify-tag
-    uses: ./.github/workflows/python.yml
+    uses: $/.github/workflows/python.yml
   javascript:
     needs: verify-tag
-    uses: ./.github/workflows/javascript.yml
+    uses: $/.github/workflows/javascript.yml
   csharp:
     needs: verify-tag
-    uses: ./.github/workflows/csharp.yml
+    uses: $/.github/workflows/csharp.yml
   dart:
     needs: verify-tag
-    uses: ./.github/workflows/dart.yml
+    uses: $/.github/workflows/dart.yml
   kotlin:
     needs: verify-tag
-    uses: ./.github/workflows/kotlin.yml
+    uses: $/.github/workflows/kotlin.yml
 
   publish-python:
     name: Publish to PyPI
@@ -94,7 +95,7 @@ jobs:
       attestations: write # actions/attest-build-provenance writes the attestation
     steps:
       - name: Download wheels
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: payjoin-python-wheel-*
           merge-multiple: true
@@ -110,11 +111,11 @@ jobs:
           fi
       - name: Attest build provenance
         # A consumer runs: gh attestation verify <file>.whl -R payjoin/rust-payjoin
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*.whl
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist
 
@@ -128,19 +129,16 @@ jobs:
       attestations: write # actions/attest writes the attestation
     steps:
       - name: Download npm package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: payjoin-javascript-npm-package
           path: dist
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "24"
+          node-version: "24" # ships npm 11, needed for OIDC trusted publishing
           registry-url: https://registry.npmjs.org
-      - name: Update npm
-        run: |
-          npm install -g npm@11
-          npm --version
+          package-manager-cache: false # publishing workflow: cache would be poisonable
       - name: Locate the tarball
         id: locate
         run: |
@@ -154,7 +152,7 @@ jobs:
           echo "tarball=${pkgs[0]}" >>"$GITHUB_OUTPUT"
       - name: Attest build provenance
         # A consumer runs: gh attestation verify <file>.tgz -R payjoin/rust-payjoin
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ steps.locate.outputs.tarball }}
       - name: Publish to npmjs.com
@@ -175,12 +173,12 @@ jobs:
       attestations: write # actions/attest writes the attestation
     steps:
       - name: Download NuGet package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: payjoin-csharp-nuget-package
           path: dist
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: "10.0.x"
       - name: Locate the package
@@ -197,12 +195,12 @@ jobs:
       - name: Attest build provenance
         # Attesting the .nupkg covers every RID native lib inside it; a consumer
         # runs: gh attestation verify <file>.nupkg -R payjoin/rust-payjoin
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ steps.locate.outputs.nupkg }}
       - name: NuGet login (OIDC -> short-lived API key)
         id: login
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with:
           user: ${{ secrets.NUGET_USER }}
       - name: Push to nuget.org
@@ -226,11 +224,13 @@ jobs:
       contents: read
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: Download the staged package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: payjoin-dart-pub-package
           path: dist
@@ -258,9 +258,11 @@ jobs:
       VERSION: ${{ needs.verify-tag.outputs.version }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - name: Download every package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: payjoin-*
           merge-multiple: true
@@ -297,11 +299,24 @@ jobs:
             echo "CHANGELOG_EOF"
           } >>"$GITHUB_OUTPUT"
       - name: Create release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          body: ${{ steps.changelog.outputs.body }}
-          prerelease: ${{ needs.verify-tag.outputs.prerelease }}
-          fail_on_unmatched_files: true
-          files: dist/*
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.verify-tag.outputs.prerelease }}
+          BODY: ${{ steps.changelog.outputs.body }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/release-notes.md"
+          printf '%s\n' "$BODY" >"$notes"
+          args=(--title "Release $TAG" --notes-file "$notes")
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          # A re-run after a partial failure edits the release that already
+          # exists and re-uploads its assets instead of failing.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" "${args[@]}"
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" "${args[@]}" dist/*
+          fi

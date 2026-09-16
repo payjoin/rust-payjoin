@@ -11,8 +11,10 @@ use_lockfile Cargo-recent.lock
 
 cd "$REPO_ROOT/payjoin-ffi/dart"
 
-echo "==> Cleaning nested Cargo.lock..."
-rm -f native/Cargo.lock
+echo "==> Seeding native wrapper dependencies from the maintained lockfile..."
+# The wrapper is a separate workspace. Preserve the tested dependency versions
+# when Cargo adds its wrapper package during the native build hook.
+cp "$REPO_ROOT/Cargo.lock" native/Cargo.lock
 
 echo "==> Generating FFI bindings..."
 bash ./scripts/generate_bindings.sh

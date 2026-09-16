@@ -590,7 +590,7 @@ namespace Payjoin.Tests
             using var receiver = receiveTransition.Save(recvPersister);
             using var pjUri = receiver.PjUri();
 
-            var psbt = PayjoinMethods.OriginalPsbt();
+            var psbt = TestVectors.OriginalPsbt;
 
             var feeRateOutOfRange = Assert.Throws<SenderInputException.FfiValidation>(() =>
             {

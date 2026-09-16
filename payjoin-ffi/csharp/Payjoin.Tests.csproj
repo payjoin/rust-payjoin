@@ -24,6 +24,12 @@
     <Compile Remove="src/**/*.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="../../payjoin-test-utils/fixtures/*"
+          Link="fixtures/%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- Include native library - copied to output directory for testing -->
   <Target Name="CopyNativeLibraries" AfterTargets="Build">
     <Copy SourceFiles="lib/libpayjoin_ffi.so" DestinationFolder="$(TargetDir)" Condition="Exists('lib/libpayjoin_ffi.so')" />

@@ -1,9 +1,7 @@
-import 'dart:typed_data';
-
-import 'package:convert/convert.dart';
 import 'package:test/test.dart';
 import "package:payjoin/payjoin.dart" as payjoin;
 
+import "fixtures.dart" as fixtures;
 import "utils.dart";
 
 void main() {
@@ -64,13 +62,7 @@ void main() {
       payjoin.ReceiverBuilder(
         address: "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
         directory: "https://example.com",
-        ohttpKeys: payjoin.OhttpKeys.decode(
-          bytes: Uint8List.fromList(
-            hex.decode(
-              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
-            ),
-          ),
-        ),
+        ohttpKeys: payjoin.OhttpKeys.decode(bytes: fixtures.ohttpKeys),
       ).build().save(persister: persister);
       final result = payjoin.replayReceiverEventLog(persister: persister);
       expect(
@@ -85,18 +77,12 @@ void main() {
       var receiver = payjoin.ReceiverBuilder(
         address: "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
         directory: "https://example.com",
-        ohttpKeys: payjoin.OhttpKeys.decode(
-          bytes: Uint8List.fromList(
-            hex.decode(
-              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
-            ),
-          ),
-        ),
+        ohttpKeys: payjoin.OhttpKeys.decode(bytes: fixtures.ohttpKeys),
       ).build().save(persister: receiver_persister);
       var uri = receiver.pjUri();
 
       var sender_persister = InMemorySenderPersister();
-      var psbt = payjoin.originalPsbt();
+      var psbt = fixtures.originalPsbt;
       payjoin.SenderBuilder(psbt: psbt, uri: uri)
           .buildRecommended(minFeeRateSatPerKwu: 1000)
           .save(persister: sender_persister);
@@ -117,13 +103,7 @@ void main() {
       var initialized = payjoin.ReceiverBuilder(
         address: "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
         directory: "https://example.com",
-        ohttpKeys: payjoin.OhttpKeys.decode(
-          bytes: Uint8List.fromList(
-            hex.decode(
-              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
-            ),
-          ),
-        ),
+        ohttpKeys: payjoin.OhttpKeys.decode(bytes: fixtures.ohttpKeys),
       ).build().save(persister: persister);
       var cancelTransition = initialized.cancel();
       var fallbackTx = cancelTransition.save(persister: persister);
@@ -141,13 +121,7 @@ void main() {
       var initialized = await payjoin.ReceiverBuilder(
         address: "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
         directory: "https://example.com",
-        ohttpKeys: payjoin.OhttpKeys.decode(
-          bytes: Uint8List.fromList(
-            hex.decode(
-              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
-            ),
-          ),
-        ),
+        ohttpKeys: payjoin.OhttpKeys.decode(bytes: fixtures.ohttpKeys),
       ).build().saveAsync(persister: persister);
       var cancelTransition = initialized.cancel();
       var fallbackTx = await cancelTransition.saveAsync(persister: persister);
@@ -169,18 +143,12 @@ void main() {
       var receiver = payjoin.ReceiverBuilder(
         address: "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
         directory: "https://example.com",
-        ohttpKeys: payjoin.OhttpKeys.decode(
-          bytes: Uint8List.fromList(
-            hex.decode(
-              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
-            ),
-          ),
-        ),
+        ohttpKeys: payjoin.OhttpKeys.decode(bytes: fixtures.ohttpKeys),
       ).build().save(persister: receiver_persister);
       var uri = receiver.pjUri();
 
       var sender_persister = InMemorySenderPersister();
-      var psbt = payjoin.originalPsbt();
+      var psbt = fixtures.originalPsbt;
       var withReplyKey = payjoin.SenderBuilder(psbt: psbt, uri: uri)
           .buildRecommended(minFeeRateSatPerKwu: 1000)
           .save(persister: sender_persister);
@@ -212,18 +180,12 @@ void main() {
       var receiver = await payjoin.ReceiverBuilder(
         address: "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
         directory: "https://example.com",
-        ohttpKeys: payjoin.OhttpKeys.decode(
-          bytes: Uint8List.fromList(
-            hex.decode(
-              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
-            ),
-          ),
-        ),
+        ohttpKeys: payjoin.OhttpKeys.decode(bytes: fixtures.ohttpKeys),
       ).build().saveAsync(persister: receiver_persister);
       var uri = receiver.pjUri();
 
       var sender_persister = InMemorySenderPersisterAsync();
-      var psbt = payjoin.originalPsbt();
+      var psbt = fixtures.originalPsbt;
       var withReplyKey = await payjoin.SenderBuilder(psbt: psbt, uri: uri)
           .buildRecommended(minFeeRateSatPerKwu: 1000)
           .saveAsync(persister: sender_persister);
@@ -259,13 +221,7 @@ void main() {
       await payjoin.ReceiverBuilder(
         address: "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
         directory: "https://example.com",
-        ohttpKeys: payjoin.OhttpKeys.decode(
-          bytes: Uint8List.fromList(
-            hex.decode(
-              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
-            ),
-          ),
-        ),
+        ohttpKeys: payjoin.OhttpKeys.decode(bytes: fixtures.ohttpKeys),
       ).build().saveAsync(persister: persister);
       final result = await payjoin.replayReceiverEventLogAsync(
         persister: persister,
@@ -282,18 +238,12 @@ void main() {
       var receiver = await payjoin.ReceiverBuilder(
         address: "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK",
         directory: "https://example.com",
-        ohttpKeys: payjoin.OhttpKeys.decode(
-          bytes: Uint8List.fromList(
-            hex.decode(
-              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
-            ),
-          ),
-        ),
+        ohttpKeys: payjoin.OhttpKeys.decode(bytes: fixtures.ohttpKeys),
       ).build().saveAsync(persister: receiver_persister);
       var uri = receiver.pjUri();
 
       var sender_persister = InMemorySenderPersisterAsync();
-      var psbt = payjoin.originalPsbt();
+      var psbt = fixtures.originalPsbt;
       await payjoin.SenderBuilder(psbt: psbt, uri: uri)
           .buildRecommended(minFeeRateSatPerKwu: 1000)
           .saveAsync(persister: sender_persister);

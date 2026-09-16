@@ -15,6 +15,7 @@ sys.path.insert(
     0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 )
 
+from .fixtures import ORIGINAL_PSBT
 from .utils import InMemoryReceiverPersister, InMemorySenderPersister
 
 
@@ -80,7 +81,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         ).pj_uri()
 
         with self.assertRaises(SenderInputError.FfiValidation) as ctx:
-            SenderBuilder(original_psbt(), pj_uri).build_recommended(2**64 - 1)
+            SenderBuilder(ORIGINAL_PSBT, pj_uri).build_recommended(2**64 - 1)
         self.assertIsInstance(ctx.exception[0], FfiValidationError.FeeRateOutOfRange)
 
         # PjUri rejects amount out of range.

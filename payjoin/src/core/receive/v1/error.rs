@@ -11,10 +11,10 @@ use std::error;
 ///
 /// The error messages are formatted as JSON strings according to the BIP-78 spec with appropriate
 /// error codes and human-readable messages.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct RequestError(InternalRequestError);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum InternalRequestError {
     /// A required HTTP header is missing from the request
     MissingHeader(&'static str),

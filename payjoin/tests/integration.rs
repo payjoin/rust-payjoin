@@ -440,12 +440,13 @@ mod integration {
                     .expect_err("should fail")
                     .api_error()
                     .expect("expected api error");
-                // TODO: this should be replaced by comparing the error itself once the error types impl PartialEq
-                // Issue: https://github.com/payjoin/rust-payjoin/issues/645
-                assert_eq!(
-                    server_error.to_string(),
-                    "Protocol error: The receiver rejected the original PSBT."
-                );
+                match server_error {
+                    payjoin::receive::Error::Protocol(
+                        payjoin::receive::ProtocolError::OriginalPayload(_),
+                    ) => {}
+                    server_error =>
+                        panic!("expected original payload rejection, got: {server_error:#?}"),
+                }
 
                 let (session, session_history) = replay_receiver_event_log(&persister)?;
                 assert_eq!(session_history.status(), SessionStatus::Active);

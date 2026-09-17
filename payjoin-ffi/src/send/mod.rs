@@ -351,12 +351,25 @@ impl SenderBuilder {
     ///
     /// Call [`SenderBuilder::build_recommended()`] or other `build` methods
     /// to create a [`WithReplyKey`]
+    ///
+    /// Only BIP 77 (v2) payjoin URIs are supported. A URI whose `pj` endpoint is
+    /// BIP 78 (v1) only fails with [`SenderInputError::UnsupportedPjVersion`].
     #[uniffi::constructor]
     pub fn new(psbt: String, uri: Arc<PjUri>) -> Result<Self, SenderInputError> {
         let psbt = payjoin::bitcoin::psbt::Psbt::from_str(psbt.as_str())
             .map_err(PsbtParseError::from)
             .map_err(SenderInputError::Psbt)?;
-        let builder = payjoin::send::v2::SenderBuilder::new(psbt, Arc::unwrap_or_clone(uri).into());
+        let uri: payjoin::PjUri = Arc::unwrap_or_clone(uri).into();
+        // These bindings expose no v1 sender, so a BIP 78 endpoint is refused up front.
+        let builder = match uri.extras().pj_param() {
+            payjoin::PjParam::V2(pj_param) => payjoin::send::v2::SenderBuilder::from_parts(
+                psbt,
+                pj_param,
+                uri.address(),
+                uri.amount(),
+            ),
+            _ => return Err(SenderInputError::UnsupportedPjVersion),
+        };
         Ok(builder.into())
     }
 
@@ -833,5 +846,40 @@ impl payjoin::persist::AsyncSessionPersister for AsyncCallbackPersisterAdapter {
     ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send {
         let persister = self.callback_persister.clone();
         async move { persister.close().await }
+    }
+}
+
+#[cfg(all(test, feature = "_test-utils"))]
+mod tests {
+    use payjoin_test_utils::ORIGINAL_PSBT;
+
+    use super::*;
+    use crate::uri::Uri;
+
+    const V1_PJ_URI: &str =
+        "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com";
+    const V2_PJ_URI: &str = "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?pjos=0&pj=HTTPS://PAYJO.IN/TXJCGKTKXLUUZ%23EX1WKV8CEC-OH1QYPM59NK2LXXS4890SUAXXYT25Z2VAPHP0X7YEYCJXGWAG6UG9ZU6NQ-RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV";
+
+    // check_pj_supported accepts BIP 78 and BIP 77 endpoints alike, so a v1 URI
+    // reaches SenderBuilder::new and the version check has to happen there.
+    fn pj_uri(uri: &str) -> Arc<PjUri> {
+        Uri::parse(uri.to_string())
+            .expect("valid URI")
+            .check_pj_supported()
+            .expect("payjoin to be supported")
+    }
+
+    #[test]
+    fn v1_uri_is_rejected_with_typed_error() {
+        let err = SenderBuilder::new(ORIGINAL_PSBT.to_string(), pj_uri(V1_PJ_URI))
+            .err()
+            .expect("v1 URI must be rejected");
+        assert!(matches!(err, SenderInputError::UnsupportedPjVersion), "got {err:?}");
+    }
+
+    #[test]
+    fn v2_uri_is_accepted() {
+        SenderBuilder::new(ORIGINAL_PSBT.to_string(), pj_uri(V2_PJ_URI))
+            .expect("v2 URI must be accepted");
     }
 }

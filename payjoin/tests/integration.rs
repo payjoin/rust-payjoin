@@ -210,7 +210,7 @@ mod integration {
         };
         use payjoin::send::v2::{replay_event_log as replay_sender_event_log, SenderBuilder};
         use payjoin::send::ResponseError;
-        use payjoin::{OhttpKeys, PjUri};
+        use payjoin::{OhttpKeys, PjParam, PjUri};
         use payjoin_test_utils::{
             BoxSendSyncError, InMemoryPersister, SessionPersister, TestServices,
         };
@@ -219,6 +219,16 @@ mod integration {
         use reqwest::Response;
 
         use super::*;
+
+        /// Build a v2 sender the way a wallet does: match the URI's `pj` parameter and
+        /// hand the v2 parts to `from_parts`.
+        fn sender_builder(psbt: Psbt, pj_uri: &PjUri) -> SenderBuilder {
+            match pj_uri.extras().pj_param() {
+                PjParam::V2(pj_param) =>
+                    SenderBuilder::from_parts(psbt, pj_param, pj_uri.address(), pj_uri.amount()),
+                _ => panic!("v2 receiver issued a v1 payjoin URI"),
+            }
+        }
 
         /// Possible actions the sender can take after receiving the Payjoin proposal from the
         /// receiver.
@@ -317,7 +327,7 @@ mod integration {
                 // Inside the Sender:
                 let psbt = build_original_psbt(&sender, &expired_receiver.pj_uri())?;
                 // Test that an expired pj_url errors
-                let expired_req_ctx = SenderBuilder::new(psbt, expired_receiver.pj_uri())
+                let expired_req_ctx = sender_builder(psbt, &expired_receiver.pj_uri())
                     .build_non_incentivizing(FeeRate::BROADCAST_MIN)?
                     .save(&send_persister)?;
 
@@ -390,7 +400,7 @@ mod integration {
                     .check_pj_supported()
                     .map_err(|e| e.to_string())?;
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let req_ctx = SenderBuilder::new(psbt, pj_uri)
+                let req_ctx = sender_builder(psbt, &pj_uri)
                     .build_recommended(FeeRate::BROADCAST_MIN)?
                     .save(&sender_persister)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
@@ -842,7 +852,7 @@ mod integration {
                 .check_pj_supported()
                 .map_err(|e| e.to_string())?;
             let psbt = build_sweep_psbt(sender, &pj_uri)?;
-            let req_ctx = SenderBuilder::new(psbt, pj_uri)
+            let req_ctx = sender_builder(psbt, &pj_uri)
                 .build_recommended(FeeRate::BROADCAST_MIN)?
                 .save(send_persister)?;
             let (Request { url, body, content_type, .. }, send_ctx) =

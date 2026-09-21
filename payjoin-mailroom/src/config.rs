@@ -10,6 +10,7 @@ use tokio_listener::ListenerAddress;
 pub struct Config {
     pub listener: ListenerAddress,
     pub storage_dir: PathBuf,
+    pub log_format: LogFormat,
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub timeout: Duration,
     #[serde(deserialize_with = "deserialize_duration_secs")]
@@ -21,6 +22,17 @@ pub struct Config {
     pub acme: Option<AcmeConfig>,
     #[cfg(feature = "access-control")]
     pub access_control: Option<AccessControlConfig>,
+}
+
+/// Format of the log lines the mailroom writes to stdout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+    /// One human-readable line per event.
+    #[default]
+    Text,
+    /// One JSON object per event, for log collectors.
+    Json,
 }
 
 /// V1 protocol configuration.
@@ -86,6 +98,7 @@ impl Default for Config {
         Self {
             listener: "[::]:8080".parse().expect("valid default listener address"),
             storage_dir: PathBuf::from("./data"),
+            log_format: LogFormat::default(),
             timeout: Duration::from_secs(30),
             mailbox_ttl: Duration::from_secs(60 * 60 * 24 * 7), // 1 week
             v1: None,
@@ -117,6 +130,7 @@ impl Config {
         Self {
             listener,
             storage_dir,
+            log_format: LogFormat::default(),
             timeout,
             mailbox_ttl: Duration::from_secs(60 * 60 * 24 * 7), // 1 week
             v1,
@@ -149,5 +163,28 @@ impl Config {
             )
             .build()?
             .try_deserialize()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use config::FileFormat;
+
+    use super::*;
+
+    fn parse(toml: &str) -> Config {
+        config::Config::builder()
+            .add_source(File::from_str(toml, FileFormat::Toml))
+            .build()
+            .expect("builds")
+            .try_deserialize()
+            .expect("deserializes")
+    }
+
+    #[test]
+    fn log_format_defaults_to_text_and_accepts_json() {
+        assert_eq!(parse("").log_format, LogFormat::Text);
+        assert_eq!(parse("log_format = \"text\"").log_format, LogFormat::Text);
+        assert_eq!(parse("log_format = \"json\"").log_format, LogFormat::Json);
     }
 }

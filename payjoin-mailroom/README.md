@@ -11,6 +11,8 @@ Note that this binary is under active development and thus the CLI and configura
 
 payjoin-mailroom reads configuration from `config.toml` (or the path given with `--config`). Every setting can also be supplied via environment variables prefixed with `PJ_`, using double underscores for nesting (e.g., `PJ_TELEMETRY__ENDPOINT`).
 
+Logs go to stdout. `log_format = "text"`, the default, writes one readable line per event; `log_format = "json"` writes one JSON object per line for log collectors. `RUST_LOG` filters either.
+
 ## Usage
 
 ### Cargo
@@ -48,7 +50,7 @@ systemctl enable --now payjoin-mailroom
 
 payjoin-mailroom supports **optional** OpenTelemetry-based telemetry (metrics).
 Build with `--features telemetry` and configure via the [`[telemetry]`](config.example.com) config section.
-When no telemetry configuration is present, it falls back to local-only console tracing.
+Without that section nothing is exported. Logs are never exported either way; `log_format` chooses how they are written.
 
 ## Access Control
 

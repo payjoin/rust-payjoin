@@ -51,6 +51,9 @@ systemctl enable --now payjoin-mailroom
 payjoin-mailroom supports **optional** OpenTelemetry-based metrics export.
 Build with `--features telemetry` and configure the [`[telemetry]`](config.example.toml) config section.
 Without that section nothing is exported. Logs are never exported either way; `log_format` chooses how they are written.
+Whatever the format, the mailroom logs a `heartbeat` line once a minute with
+the requests in flight, the open bootstrap tunnels and, on Linux, the open
+file descriptor count and soft limit: the local view of connection pressure.
 
 ### What leaves the operator boundary
 

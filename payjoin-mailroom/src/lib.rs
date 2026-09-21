@@ -22,6 +22,7 @@ pub mod cli;
 pub mod config;
 pub mod db;
 pub mod directory;
+pub mod heartbeat;
 pub mod key_config;
 pub mod metrics;
 pub mod middleware;
@@ -48,6 +49,7 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
     let sentinel_tag = generate_sentinel_tag();
     let metrics = build_metrics(&config, meter_provider);
     let flush_on_exit = metrics.clone();
+    spawn_heartbeat(metrics.clone());
 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
@@ -176,6 +178,7 @@ pub async fn serve_acme(
     let sentinel_tag = generate_sentinel_tag();
     let metrics = build_metrics(&config, meter_provider);
     let flush_on_exit = metrics.clone();
+    spawn_heartbeat(metrics.clone());
 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
@@ -251,6 +254,11 @@ fn build_metrics(config: &Config, export_provider: Option<SdkMeterProvider>) -> 
             MetricsService::with_export(&provider).with_persisted_windows(&config.storage_dir),
         None => MetricsService::new(None),
     }
+}
+
+/// Logs connection pressure once a minute for as long as the runtime lives.
+fn spawn_heartbeat(metrics: MetricsService) {
+    tokio::spawn(heartbeat::run(metrics, || tokio::time::sleep(heartbeat::HEARTBEAT_INTERVAL)));
 }
 
 /// Resolves on SIGINT or SIGTERM, the signals a terminal and systemd use to

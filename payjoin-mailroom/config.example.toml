@@ -13,6 +13,10 @@
 # Request timeout in seconds
 # timeout = 30
 
+# Log format on stdout: "text" (one readable line per event) or "json"
+# (one JSON object per line, for log collectors).
+# log_format = "text"
+
 # --- Telemetry (requires `telemetry` feature) ---
 # [telemetry]
 

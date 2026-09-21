@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fmt, io};
@@ -386,11 +387,23 @@ pub struct MetricsService {
     tunnel_sheds_total: Counter<u64>,
     /// Total v1/v2 mailbox entries written, labelled by `version`
     db_entries_total: Counter<u64>,
+    /// Readable copies of the in-flight and open-tunnel counts. OpenTelemetry
+    /// up-down counters are write-only from the application's side, so the
+    /// heartbeat log reads these instead.
+    pressure: Arc<ConnectionPressure>,
     /// Weekly buckets feeding the settled-window export gauges.
     windows: Arc<Mutex<ExportWindows>>,
     _export_gauges: Vec<Arc<ObservableGauge<u64>>>,
     /// Keeps the export pipeline alive for as long as the service exists.
     _export_provider: Option<SdkMeterProvider>,
+}
+
+/// Live connection counts kept alongside the metric instruments so they can
+/// be read back in-process.
+#[derive(Default)]
+struct ConnectionPressure {
+    active_connections: AtomicI64,
+    active_tunnels: AtomicI64,
 }
 
 impl fmt::Debug for MetricsService {
@@ -454,6 +467,7 @@ impl MetricsService {
             active_tunnels,
             tunnel_sheds_total,
             db_entries_total,
+            pressure: Arc::new(ConnectionPressure::default()),
             windows: Arc::new(Mutex::new(ExportWindows::default())),
             _export_gauges: Vec::new(),
             _export_provider: None,
@@ -584,14 +598,32 @@ impl MetricsService {
     pub(crate) fn track_request(&self) -> InFlightGuard {
         self.http_requests_started_total.add(1, &[]);
         self.http_requests_in_flight.add(1, &[]);
+        self.pressure.active_connections.fetch_add(1, Ordering::Relaxed);
         let day = SystemTime::now().days_since_epoch();
         self.windows.lock().expect("windows lock poisoned").http_requests_started.add(day);
-        InFlightGuard { in_flight: self.http_requests_in_flight.clone() }
+        InFlightGuard {
+            in_flight: self.http_requests_in_flight.clone(),
+            pressure: self.pressure.clone(),
+        }
     }
 
-    pub fn record_tunnel_open(&self) { self.active_tunnels.add(1, &[]); }
+    pub fn record_tunnel_open(&self) {
+        self.active_tunnels.add(1, &[]);
+        self.pressure.active_tunnels.fetch_add(1, Ordering::Relaxed);
+    }
 
-    pub fn record_tunnel_close(&self) { self.active_tunnels.add(-1, &[]); }
+    pub fn record_tunnel_close(&self) {
+        self.active_tunnels.add(-1, &[]);
+        self.pressure.active_tunnels.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    /// HTTP requests currently in flight.
+    pub fn active_connections(&self) -> i64 {
+        self.pressure.active_connections.load(Ordering::Relaxed)
+    }
+
+    /// OHTTP bootstrap tunnels currently open.
+    pub fn active_tunnels(&self) -> i64 { self.pressure.active_tunnels.load(Ordering::Relaxed) }
 
     pub fn record_tunnel_shed(&self) {
         self.tunnel_sheds_total.add(1, &[]);
@@ -645,12 +677,14 @@ impl MetricsService {
 /// count upward.
 pub(crate) struct InFlightGuard {
     in_flight: UpDownCounter<i64>,
+    pressure: Arc<ConnectionPressure>,
 }
 
 impl Drop for InFlightGuard {
     fn drop(&mut self) {
         // Kept trivial and non-panicking: this runs during stack unwinding.
         self.in_flight.add(-1, &[]);
+        self.pressure.active_connections.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -957,6 +991,21 @@ mod tests {
         }
         provider.force_flush().expect("flush failed");
         assert_eq!(sum_u64(&exporter, HTTP_REQUESTS_TOTAL), 3);
+    }
+
+    #[test]
+    fn connection_shadows_track_open_and_close() {
+        let metrics = MetricsService::new(None);
+        assert_eq!((metrics.active_connections(), metrics.active_tunnels()), (0, 0));
+
+        let first = metrics.track_request();
+        let _second = metrics.track_request();
+        metrics.record_tunnel_open();
+        assert_eq!((metrics.active_connections(), metrics.active_tunnels()), (2, 1));
+
+        drop(first);
+        metrics.record_tunnel_close();
+        assert_eq!((metrics.active_connections(), metrics.active_tunnels()), (1, 0));
     }
 
     #[test]

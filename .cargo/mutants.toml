@@ -1,7 +1,7 @@
 additional_cargo_args = ["--all-features"]
 gitignore = true
-examine_globs = ["payjoin/src/**/*.rs"]
-exclude_globs = []
+examine_globs = ["payjoin/src/**/*.rs", "payjoin-ffi/src/**/*.rs"]
+exclude_globs = ["payjoin-ffi/src/test_utils.rs"]
 exclude_re = [
   "impl\\s+(std::fmt::|core::fmt::|fmt::)?(Display|Debug)",
   "deserialize",

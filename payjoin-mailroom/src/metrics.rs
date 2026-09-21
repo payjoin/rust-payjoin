@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, HashSet};
-use std::fmt;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{fmt, io};
 
 use opentelemetry::metrics::{Counter, MeterProvider, ObservableGauge, UpDownCounter};
 use opentelemetry::KeyValue;
@@ -73,12 +75,15 @@ impl SystemTimeExt for SystemTime {
 #[derive(Default)]
 struct WeeklyBuckets {
     weeks: BTreeMap<u64, u64>,
+    /// Set by `add`, cleared when the buckets are written to disk.
+    dirty: bool,
 }
 
 impl WeeklyBuckets {
     fn add(&mut self, day: u64) {
         let week = reporting_week(day);
         *self.weeks.entry(week).or_insert(0) += 1;
+        self.dirty = true;
         let cutoff = week.saturating_sub(1);
         while let Some((&k, _)) = self.weeks.first_key_value() {
             if k < cutoff {
@@ -108,23 +113,62 @@ impl WeeklyBuckets {
 #[derive(Default)]
 struct WeeklyIdSets {
     weeks: BTreeMap<u64, HashSet<[u8; 8]>>,
+    /// Set by `add`, cleared when the sets are written to disk.
+    dirty: bool,
 }
 
 impl WeeklyIdSets {
     fn add(&mut self, day: u64, id: [u8; 8]) {
         let week = reporting_week(day);
         let ids = self.weeks.entry(week).or_default();
-        if ids.len() < UNIQUE_SHORT_IDS_CAP {
-            ids.insert(id);
+        if ids.len() < UNIQUE_SHORT_IDS_CAP && ids.insert(id) {
+            self.dirty = true;
         }
         let cutoff = week.saturating_sub(1);
         while let Some((&k, _)) = self.weeks.first_key_value() {
             if k < cutoff {
                 self.weeks.pop_first();
+                self.dirty = true;
             } else {
                 break;
             }
         }
+    }
+
+    /// The header, then per week: the week number, the entry count, and
+    /// the entries, integers as big-endian u64 and IDs as their 8 bytes.
+    fn encode(&self) -> Vec<u8> {
+        let mut out = UNIQUE_SHORT_IDS_HEADER.to_vec();
+        for (week, ids) in &self.weeks {
+            out.extend_from_slice(&week.to_be_bytes());
+            out.extend_from_slice(&(ids.len() as u64).to_be_bytes());
+            for id in ids {
+                out.extend_from_slice(id);
+            }
+        }
+        out
+    }
+
+    /// Parses the output of [`WeeklyIdSets::encode`]. A truncated or
+    /// misframed file is unreadable as a whole rather than loaded in part.
+    fn decode(bytes: &[u8]) -> Result<Self, String> {
+        let mut rest = bytes.strip_prefix(UNIQUE_SHORT_IDS_HEADER).ok_or("expected header")?;
+        let mut sets = Self::default();
+        while !rest.is_empty() {
+            let week = take_u64(&mut rest)?;
+            let len = usize::try_from(take_u64(&mut rest)?)
+                .ok()
+                .and_then(|len| len.checked_mul(8))
+                .ok_or_else(|| format!("entry count of week {week} overflows"))?;
+            if rest.len() < len {
+                return Err(format!("week {week} is truncated"));
+            }
+            let (ids, tail) = rest.split_at(len);
+            let ids = ids.chunks_exact(8).map(|id| id.try_into().expect("8-byte chunk")).collect();
+            sets.weeks.insert(week, ids);
+            rest = tail;
+        }
+        Ok(sets)
     }
 
     /// Distinct IDs in the most recently completed fixed UTC week; see
@@ -148,6 +192,178 @@ struct ExportWindows {
     db_entries: WeeklyBuckets,
     tunnel_sheds: WeeklyBuckets,
     unique_short_ids: WeeklyIdSets,
+    /// Directory the windows are written to, when they outlive the process.
+    storage_dir: Option<PathBuf>,
+}
+
+/// Name of the bucket file under the storage directory.
+pub const WEEKLY_COUNTS_FILE: &str = "weekly_counts.txt";
+
+/// First line of the bucket file. A file with any other first line is
+/// treated as unreadable.
+const WEEKLY_COUNTS_HEADER: &str = "weekly_counts v1";
+
+/// Name of the ID-set file under the storage directory.
+pub const UNIQUE_SHORT_IDS_FILE: &str = "unique_short_ids.bin";
+
+/// Leading bytes of the ID-set file. A file that starts differently is
+/// treated as unreadable.
+const UNIQUE_SHORT_IDS_HEADER: &[u8] = b"unique_short_ids v1\n";
+
+fn take_u64(rest: &mut &[u8]) -> Result<u64, String> {
+    let (head, tail) = rest.split_first_chunk::<8>().ok_or("truncated file")?;
+    *rest = tail;
+    Ok(u64::from_be_bytes(*head))
+}
+
+impl ExportWindows {
+    fn buckets(&self) -> [(&'static str, &WeeklyBuckets); 4] {
+        [
+            ("http_requests", &self.http_requests),
+            ("http_requests_started", &self.http_requests_started),
+            ("db_entries", &self.db_entries),
+            ("tunnel_sheds", &self.tunnel_sheds),
+        ]
+    }
+
+    fn buckets_mut(&mut self) -> [(&'static str, &mut WeeklyBuckets); 4] {
+        [
+            ("http_requests", &mut self.http_requests),
+            ("http_requests_started", &mut self.http_requests_started),
+            ("db_entries", &mut self.db_entries),
+            ("tunnel_sheds", &mut self.tunnel_sheds),
+        ]
+    }
+
+    /// One line per bucket: the bucket name followed by `week=count` pairs.
+    fn encode(&self) -> String {
+        let mut out = format!("{WEEKLY_COUNTS_HEADER}\n");
+        for (name, bucket) in self.buckets() {
+            out.push_str(name);
+            for (week, count) in &bucket.weeks {
+                out.push_str(&format!(" {week}={count}"));
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// Parses the output of [`ExportWindows::encode`]. Every bucket line is
+    /// optional; unknown or malformed lines make the whole file unreadable
+    /// rather than silently loading a partial state.
+    fn decode(text: &str) -> Result<Self, String> {
+        let mut lines = text.lines();
+        if lines.next() != Some(WEEKLY_COUNTS_HEADER) {
+            return Err(format!("expected header {WEEKLY_COUNTS_HEADER:?}"));
+        }
+        let mut windows = Self::default();
+        for line in lines.filter(|line| !line.trim().is_empty()) {
+            let mut fields = line.split_whitespace();
+            let name = fields.next().unwrap_or_default();
+            let bucket = windows
+                .buckets_mut()
+                .into_iter()
+                .find_map(|(n, b)| (n == name).then_some(b))
+                .ok_or_else(|| format!("unknown bucket {name:?}"))?;
+            for pair in fields {
+                let (week, count) =
+                    pair.split_once('=').ok_or_else(|| format!("malformed entry {pair:?}"))?;
+                let week = week.parse().map_err(|_| format!("malformed week in {pair:?}"))?;
+                let count = count.parse().map_err(|_| format!("malformed count in {pair:?}"))?;
+                bucket.weeks.insert(week, count);
+            }
+        }
+        Ok(windows)
+    }
+
+    /// Loads the bucket file and the ID-set file under `storage_dir`, each
+    /// if it exists and parses.
+    ///
+    /// A missing file is a fresh install. An unreadable one is logged and
+    /// then treated the same way: losing at most two weeks of counters or
+    /// IDs is preferable to a mailroom that refuses to start.
+    fn load(storage_dir: &Path) -> Self {
+        let mut windows = Self::default();
+        let file = storage_dir.join(WEEKLY_COUNTS_FILE);
+        if let Some(bytes) = read_state_file(&file) {
+            match std::str::from_utf8(&bytes).map_err(|err| err.to_string()).and_then(Self::decode)
+            {
+                Ok(loaded) => windows = loaded,
+                Err(err) =>
+                    tracing::warn!(path = %file.display(), err, "ignoring unreadable weekly counts"),
+            }
+        }
+        let file = storage_dir.join(UNIQUE_SHORT_IDS_FILE);
+        if let Some(bytes) = read_state_file(&file) {
+            match WeeklyIdSets::decode(&bytes) {
+                Ok(loaded) => windows.unique_short_ids = loaded,
+                Err(err) => tracing::warn!(
+                    path = %file.display(), err, "ignoring unreadable unique short IDs"
+                ),
+            }
+        }
+        windows.storage_dir = Some(storage_dir.to_path_buf());
+        windows
+    }
+
+    /// Writes each file whose windows changed since its last write. A no-op
+    /// for windows that are not backed by a directory.
+    fn flush(&mut self) {
+        let Some(dir) = self.storage_dir.clone() else { return };
+        if self.buckets().iter().any(|(_, bucket)| bucket.dirty) {
+            let file = dir.join(WEEKLY_COUNTS_FILE);
+            match write_atomically(&file, self.encode().as_bytes()) {
+                Ok(()) =>
+                    for (_, bucket) in self.buckets_mut() {
+                        bucket.dirty = false;
+                    },
+                Err(err) =>
+                    tracing::warn!(path = %file.display(), %err, "failed to write weekly counts"),
+            }
+        }
+        if self.unique_short_ids.dirty {
+            let file = dir.join(UNIQUE_SHORT_IDS_FILE);
+            match write_atomically(&file, &self.unique_short_ids.encode()) {
+                Ok(()) => self.unique_short_ids.dirty = false,
+                Err(err) => tracing::warn!(
+                    path = %file.display(), %err, "failed to write unique short IDs"
+                ),
+            }
+        }
+    }
+}
+
+/// Reads a state file whole. A missing file is `None`; any other read
+/// error is logged and also `None`, so the caller starts fresh.
+fn read_state_file(path: &Path) -> Option<Vec<u8>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+        Err(err) => {
+            tracing::warn!(path = %path.display(), %err, "ignoring unreadable state file");
+            None
+        }
+    }
+}
+
+/// Writes `contents` to a process-specific temporary file next to `path`
+/// and renames it into place, so a reader (or a second process sharing the
+/// directory) only ever sees a complete file.
+fn write_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("state");
+    let tmp = dir.join(format!("{name}.{}.tmp", std::process::id()));
+    let written = (|| {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(contents)?;
+        file.sync_data()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
 }
 
 #[derive(Clone)]
@@ -258,6 +474,21 @@ impl MetricsService {
         service
     }
 
+    /// Backs the weekly buckets and ID sets with files under `storage_dir`,
+    /// loading whatever a previous process left there.
+    ///
+    /// Both are written on every export collection and on orderly shutdown
+    /// via [`MetricsService::flush_windows`], so a restart costs at most
+    /// what was recorded since the last hourly export.
+    pub fn with_persisted_windows(self, storage_dir: &Path) -> Self {
+        *self.windows.lock().expect("windows lock poisoned") = ExportWindows::load(storage_dir);
+        self
+    }
+
+    /// Writes the weekly buckets and ID sets to disk if they are file-backed
+    /// and changed.
+    pub fn flush_windows(&self) { self.windows.lock().expect("windows lock poisoned").flush(); }
+
     fn register_export_gauges(&mut self, provider: &SdkMeterProvider) {
         let meter = provider.meter("payjoin-mailroom");
 
@@ -267,7 +498,10 @@ impl MetricsService {
             .with_description("Completed HTTP requests in the last settled UTC reporting week")
             .with_callback(move |observer| {
                 let today = SystemTime::now().days_since_epoch();
-                let windows = windows.lock().expect("windows lock poisoned");
+                let mut windows = windows.lock().expect("windows lock poisoned");
+                // Every collection runs every gauge callback, so flushing
+                // from this one persists the buckets once per export.
+                windows.flush();
                 observer.observe(windows.http_requests.settled_window_count(today), &[]);
             })
             .build();
@@ -723,6 +957,153 @@ mod tests {
         }
         provider.force_flush().expect("flush failed");
         assert_eq!(sum_u64(&exporter, HTTP_REQUESTS_TOTAL), 3);
+    }
+
+    #[test]
+    fn weekly_counts_round_trip_through_the_file_format() {
+        let mut windows = ExportWindows::default();
+        let settled = reporting_week_start(100);
+        let active = reporting_week_start(101);
+        windows.http_requests.add(settled);
+        windows.http_requests.add(active);
+        windows.db_entries.add(settled);
+        windows.db_entries.add(settled);
+
+        let text = windows.encode();
+        assert!(text.starts_with(WEEKLY_COUNTS_HEADER), "{text}");
+        let reloaded = ExportWindows::decode(&text).expect("valid encoding");
+        assert_eq!(reloaded.http_requests.weeks, windows.http_requests.weeks);
+        assert_eq!(reloaded.db_entries.weeks, windows.db_entries.weeks);
+        assert!(reloaded.http_requests_started.weeks.is_empty());
+        assert!(reloaded.tunnel_sheds.weeks.is_empty());
+        assert_eq!(reloaded.db_entries.settled_window_count(active), 2);
+    }
+
+    #[test]
+    fn weekly_counts_reject_unreadable_files() {
+        assert!(ExportWindows::decode("").is_err(), "empty file has no header");
+        assert!(ExportWindows::decode("weekly_counts v2\n").is_err(), "unknown version");
+        let unknown = format!("{WEEKLY_COUNTS_HEADER}\nsomething_else 1=2\n");
+        assert!(ExportWindows::decode(&unknown).is_err(), "unknown bucket");
+        let malformed = format!("{WEEKLY_COUNTS_HEADER}\ndb_entries 1:2\n");
+        assert!(ExportWindows::decode(&malformed).is_err(), "malformed pair");
+        let negative = format!("{WEEKLY_COUNTS_HEADER}\ndb_entries 1=-2\n");
+        assert!(ExportWindows::decode(&negative).is_err(), "counts are unsigned");
+    }
+
+    /// The reason the buckets are on disk: a settled week recorded by one
+    /// process is exported by the next one over the same storage directory.
+    #[test]
+    fn settled_week_survives_restart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let counts = 15;
+
+        {
+            let (exporter, provider) = in_memory_provider();
+            let metrics = MetricsService::with_export(&provider).with_persisted_windows(dir.path());
+            metrics.seed_settled_week(counts);
+            // An export collection is what writes the buckets.
+            provider.force_flush().expect("flush failed");
+            assert_eq!(gauge_value(&exporter, DB_ENTRIES_WEEKLY), Some(counts));
+        }
+        assert!(dir.path().join(WEEKLY_COUNTS_FILE).exists(), "buckets were written on export");
+
+        let (exporter, provider) = in_memory_provider();
+        let metrics = MetricsService::with_export(&provider).with_persisted_windows(dir.path());
+        provider.force_flush().expect("flush failed");
+        assert_eq!(gauge_value(&exporter, DB_ENTRIES_WEEKLY), Some(counts));
+        assert_eq!(gauge_value(&exporter, HTTP_REQUESTS_WEEKLY), Some(counts));
+        assert_eq!(gauge_value(&exporter, UNIQUE_SHORT_IDS_WEEKLY), Some(counts));
+        drop(metrics);
+    }
+
+    #[test]
+    fn unique_short_ids_round_trip_through_the_file_format() {
+        let mut sets = WeeklyIdSets::default();
+        let settled = reporting_week_start(100);
+        let active = reporting_week_start(101);
+        sets.add(settled, [1; 8]);
+        sets.add(settled, [2; 8]);
+        sets.add(active, [3; 8]);
+
+        let bytes = sets.encode();
+        assert!(bytes.starts_with(UNIQUE_SHORT_IDS_HEADER));
+        assert_eq!(bytes.len(), UNIQUE_SHORT_IDS_HEADER.len() + 2 * 16 + 3 * 8);
+        let reloaded = WeeklyIdSets::decode(&bytes).expect("valid encoding");
+        assert_eq!(reloaded.weeks, sets.weeks);
+        assert_eq!(reloaded.settled_window_count(active), 2);
+
+        let empty = WeeklyIdSets::decode(UNIQUE_SHORT_IDS_HEADER).expect("header only");
+        assert!(empty.weeks.is_empty());
+    }
+
+    #[test]
+    fn unique_short_ids_reject_unreadable_files() {
+        assert!(WeeklyIdSets::decode(b"").is_err(), "empty file has no header");
+        assert!(WeeklyIdSets::decode(b"unique_short_ids v2\n").is_err(), "unknown version");
+        let mut sets = WeeklyIdSets::default();
+        sets.add(reporting_week_start(100), [1; 8]);
+        let bytes = sets.encode();
+        assert!(WeeklyIdSets::decode(&bytes[..bytes.len() - 1]).is_err(), "truncated entry");
+        assert!(WeeklyIdSets::decode(&bytes[..bytes.len() - 12]).is_err(), "truncated count");
+        let mut huge = UNIQUE_SHORT_IDS_HEADER.to_vec();
+        huge.extend_from_slice(&100u64.to_be_bytes());
+        huge.extend_from_slice(&u64::MAX.to_be_bytes());
+        assert!(WeeklyIdSets::decode(&huge).is_err(), "count past the end of the file");
+    }
+
+    /// Orderly shutdown writes the in-progress week too, so a restart within
+    /// a week loses nothing recorded before the signal.
+    #[test]
+    fn flush_windows_writes_the_in_progress_week() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (_, provider) = in_memory_provider();
+        let metrics = MetricsService::with_export(&provider).with_persisted_windows(dir.path());
+        metrics.record_db_entry(PayjoinVersion::Two);
+        metrics.record_short_id(&ShortId([7; 8]));
+        metrics.flush_windows();
+
+        let reloaded = ExportWindows::load(dir.path());
+        let this_week = reporting_week(SystemTime::now().days_since_epoch());
+        assert_eq!(reloaded.db_entries.weeks.get(&this_week), Some(&1));
+        assert_eq!(reloaded.unique_short_ids.weeks[&this_week].len(), 1);
+        assert!(!dir.path().read_dir().expect("dir").any(|entry| {
+            entry.expect("entry").file_name().to_string_lossy().ends_with(".tmp")
+        }));
+    }
+
+    #[test]
+    fn unreadable_bucket_file_starts_fresh_and_is_replaced() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join(WEEKLY_COUNTS_FILE);
+        std::fs::write(&file, "not a bucket file").expect("write");
+
+        let (exporter, provider) = in_memory_provider();
+        let metrics = MetricsService::with_export(&provider).with_persisted_windows(dir.path());
+        provider.force_flush().expect("flush failed");
+        assert_eq!(gauge_value(&exporter, HTTP_REQUESTS_WEEKLY), Some(0), "fresh state");
+
+        metrics.record_http_request("/health", "GET", 200);
+        metrics.flush_windows();
+        let text = std::fs::read_to_string(&file).expect("read");
+        assert!(ExportWindows::decode(&text).is_ok(), "the next write replaces the bad file");
+    }
+
+    #[test]
+    fn unreadable_id_file_starts_fresh_and_is_replaced() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join(UNIQUE_SHORT_IDS_FILE);
+        std::fs::write(&file, "not an id file").expect("write");
+
+        let (exporter, provider) = in_memory_provider();
+        let metrics = MetricsService::with_export(&provider).with_persisted_windows(dir.path());
+        provider.force_flush().expect("flush failed");
+        assert_eq!(gauge_value(&exporter, UNIQUE_SHORT_IDS_WEEKLY), Some(0), "fresh state");
+
+        metrics.record_short_id(&ShortId([9; 8]));
+        metrics.flush_windows();
+        let bytes = std::fs::read(&file).expect("read");
+        assert!(WeeklyIdSets::decode(&bytes).is_ok(), "the next write replaces the bad file");
     }
 
     /// Small counts are neither rounded nor withheld: hiding them would keep

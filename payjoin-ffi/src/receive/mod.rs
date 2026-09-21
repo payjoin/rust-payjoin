@@ -1833,3 +1833,237 @@ impl payjoin::persist::AsyncSessionPersister for AsyncCallbackPersisterAdapter {
         async move { persister.close().await }
     }
 }
+
+#[cfg(all(test, feature = "_test-utils"))]
+mod tests {
+    use payjoin_test_utils::ORIGINAL_PSBT;
+
+    use super::*;
+
+    const OHTTP_KEYS_HEX: &str = "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003";
+    const ADDRESS: &str = "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4";
+
+    fn decode_hex(s: &str) -> Vec<u8> {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex"))
+            .collect()
+    }
+
+    #[derive(Default)]
+    struct InMemoryReceiverPersister {
+        events: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl InMemoryReceiverPersister {
+        fn push_event(&self, event: String) {
+            self.events.lock().expect("lock not poisoned").push(event);
+        }
+    }
+
+    impl JsonReceiverSessionPersister for InMemoryReceiverPersister {
+        fn save(&self, event: String) -> Result<(), ForeignError> {
+            self.push_event(event);
+            Ok(())
+        }
+
+        fn load(&self) -> Result<Vec<String>, ForeignError> {
+            Ok(self.events.lock().expect("lock not poisoned").clone())
+        }
+
+        fn close(&self) -> Result<(), ForeignError> { Ok(()) }
+    }
+
+    fn saved_initialized(persister: Arc<InMemoryReceiverPersister>) -> Initialized {
+        ReceiverBuilder::new(
+            ADDRESS.to_string(),
+            "https://example.com".to_string(),
+            Arc::new(OhttpKeys::decode(decode_hex(OHTTP_KEYS_HEX)).expect("valid ohttp keys")),
+        )
+        .expect("valid receiver builder")
+        .build()
+        .save(persister)
+        .expect("receiver session should save")
+    }
+
+    fn retrieved_original_payload_event() -> String {
+        let psbt = Psbt::from_str(ORIGINAL_PSBT).expect("valid psbt");
+        serde_json::json!({
+            "RetrievedOriginalPayload": {
+                "original": {
+                    "psbt": psbt,
+                    "params": {
+                        "v": 1,
+                        "output_substitution": "Enabled",
+                        "additional_fee_contribution": [182, 0],
+                        "min_fee_rate": 250
+                    }
+                },
+                "reply_key": null
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn replayed_active_session_has_no_fallback_tx() {
+        let persister = Arc::new(InMemoryReceiverPersister::default());
+        let _initialized = saved_initialized(persister.clone());
+        let result = replay_receiver_event_log(persister).expect("replay should succeed");
+        assert!(matches!(result.state(), ReceiveSession::Initialized { .. }));
+        assert_eq!(result.session_history().fallback_tx(), None);
+    }
+
+    #[test]
+    fn replayed_original_payload_exposes_fallback_tx() {
+        let persister = Arc::new(InMemoryReceiverPersister::default());
+        let _initialized = saved_initialized(persister.clone());
+        let psbt = Psbt::from_str(ORIGINAL_PSBT).expect("valid psbt");
+        let retrieved = retrieved_original_payload_event();
+        persister.push_event(retrieved);
+        persister.push_event(r#"{"CheckedBroadcastSuitability":[]}"#.to_string());
+
+        let result = replay_receiver_event_log(persister).expect("replay should succeed");
+        let expected =
+            payjoin::bitcoin::consensus::encode::serialize(&psbt.extract_tx_unchecked_fee_rate());
+        match result.state() {
+            ReceiveSession::MaybeInputsOwned { inner } => {
+                assert_eq!(inner.extract_tx_to_schedule_broadcast(), expected)
+            }
+            _ => panic!("expected MaybeInputsOwned"),
+        }
+        assert_eq!(result.session_history().fallback_tx(), Some(expected));
+    }
+
+    #[test]
+    fn cancelled_session_yields_pending_fallback_tx() {
+        let persister = Arc::new(InMemoryReceiverPersister::default());
+        let _initialized = saved_initialized(persister.clone());
+        let psbt = Psbt::from_str(ORIGINAL_PSBT).expect("valid psbt");
+        let retrieved = retrieved_original_payload_event();
+        persister.push_event(retrieved);
+        persister.push_event(r#"{"CheckedBroadcastSuitability":[]}"#.to_string());
+        persister.push_event(r#""Cancelled""#.to_string());
+
+        let result = replay_receiver_event_log(persister).expect("replay should succeed");
+        let expected =
+            payjoin::bitcoin::consensus::encode::serialize(&psbt.extract_tx_unchecked_fee_rate());
+        match result.state() {
+            ReceiveSession::ReceiverPendingFallback { inner } => {
+                assert_eq!(inner.fallback_tx(), expected)
+            }
+            _ => panic!("expected ReceiverPendingFallback"),
+        }
+    }
+
+    struct NotOwnedInput;
+    impl IsInputOwned for NotOwnedInput {
+        fn callback(&self, _outpoint: OutPoint) -> Result<bool, ForeignError> { Ok(false) }
+    }
+
+    struct NotSeenOutput;
+    impl IsOutputKnown for NotSeenOutput {
+        fn callback(&self, _outpoint: OutPoint) -> Result<bool, ForeignError> { Ok(false) }
+    }
+
+    struct OwnsEveryScript;
+    impl IsScriptOwned for OwnsEveryScript {
+        fn callback(&self, _script: Vec<u8>) -> Result<bool, ForeignError> { Ok(true) }
+    }
+
+    struct IdentitySigner;
+    impl ProcessPsbt for IdentitySigner {
+        fn callback(&self, psbt: String) -> Result<String, ForeignError> { Ok(psbt) }
+    }
+
+    fn contributed_p2wsh_input() -> Arc<InputPair> {
+        let witness_script = vec![0x51];
+        use payjoin::bitcoin::hashes::Hash as _;
+        let mut hash_engine = payjoin::bitcoin::hashes::sha256::Hash::engine();
+        payjoin::bitcoin::hashes::HashEngine::input(&mut hash_engine, &witness_script);
+        let witness_script_hash = payjoin::bitcoin::WScriptHash::from(
+            payjoin::bitcoin::hashes::sha256::Hash::from_engine(hash_engine),
+        );
+        let script_pubkey =
+            payjoin::bitcoin::ScriptBuf::new_p2wsh(&witness_script_hash).into_bytes();
+        let txin = TxIn {
+            previous_output: OutPoint {
+                txid: "0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                vout: 0,
+            },
+            script_sig: Vec::new(),
+            sequence: 0xFFFFFFFF,
+            witness: vec![witness_script.clone()],
+        };
+        let psbtin = PsbtInput {
+            witness_utxo: Some(TxOut { value_sat: 49_999, script_pubkey }),
+            redeem_script: Some(vec![0x51]),
+            witness_script: Some(witness_script),
+        };
+        Arc::new(InputPair::new(txin, psbtin, None).expect("valid input pair"))
+    }
+
+    #[test]
+    fn proposal_psbt_preserves_contributed_input_fields() {
+        let persister = Arc::new(InMemoryReceiverPersister::default());
+        let _initialized = saved_initialized(persister.clone());
+        let retrieved = retrieved_original_payload_event();
+        persister.push_event(retrieved);
+        persister.push_event(r#"{"CheckedBroadcastSuitability":[]}"#.to_string());
+
+        let state = replay_receiver_event_log(persister.clone()).expect("replay should succeed");
+        let maybe_inputs_owned = match state.state() {
+            ReceiveSession::MaybeInputsOwned { inner } => inner,
+            _ => panic!("expected MaybeInputsOwned"),
+        };
+        let maybe_inputs_seen = maybe_inputs_owned
+            .check_inputs_not_owned(Arc::new(NotOwnedInput))
+            .save(persister.clone())
+            .expect("inputs should not be owned");
+        let outputs_unknown = maybe_inputs_seen
+            .check_no_inputs_seen_before(Arc::new(NotSeenOutput))
+            .save(persister.clone())
+            .expect("inputs should not be seen before");
+        let wants_outputs = outputs_unknown
+            .identify_receiver_outputs(Arc::new(OwnsEveryScript))
+            .save(persister.clone())
+            .expect("outputs should be identified");
+        let wants_inputs =
+            wants_outputs.commit_outputs().save(persister.clone()).expect("outputs should commit");
+        let wants_inputs = wants_inputs
+            .contribute_inputs(vec![contributed_p2wsh_input()])
+            .expect("inputs should contribute");
+        let wants_fee_range =
+            wants_inputs.commit_inputs().save(persister.clone()).expect("inputs should commit");
+        let provisional = wants_fee_range
+            .apply_fee_range(None, None)
+            .expect("fee range should apply")
+            .save(persister.clone())
+            .expect("proposal should save");
+
+        let psbt_to_sign = Psbt::from_str(&provisional.psbt_to_sign())
+            .expect("psbt_to_sign should be a valid psbt");
+        let contributed = psbt_to_sign
+            .inputs
+            .iter()
+            .find(|input| input.witness_script.is_some())
+            .expect("contributed input should keep its witness script");
+        assert_eq!(
+            contributed.witness_script.as_ref().expect("witness script").as_bytes(),
+            &[0x51]
+        );
+        assert_eq!(contributed.redeem_script.as_ref().expect("redeem script").as_bytes(), &[0x51]);
+        assert_eq!(contributed.witness_utxo.as_ref().expect("witness utxo").value.to_sat(), 49_999);
+
+        let proposal = provisional
+            .finalize_proposal(Arc::new(IdentitySigner))
+            .save(persister)
+            .expect("proposal should finalize");
+        let finalized = Psbt::from_str(&proposal.psbt()).expect("psbt should be a valid psbt");
+        assert_eq!(
+            finalized.extract_tx_unchecked_fee_rate().compute_txid(),
+            psbt_to_sign.extract_tx_unchecked_fee_rate().compute_txid()
+        );
+    }
+}

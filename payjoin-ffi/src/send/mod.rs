@@ -882,4 +882,144 @@ mod tests {
         SenderBuilder::new(ORIGINAL_PSBT.to_string(), pj_uri(V2_PJ_URI))
             .expect("v2 URI must be accepted");
     }
+
+    const OHTTP_KEYS_HEX: &str = "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003";
+
+    fn decode_hex(s: &str) -> Vec<u8> {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex"))
+            .collect()
+    }
+
+    #[derive(Default)]
+    struct InMemorySenderPersister {
+        events: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl InMemorySenderPersister {
+        fn push_event(&self, event: String) {
+            self.events.lock().expect("lock not poisoned").push(event);
+        }
+    }
+
+    impl JsonSenderSessionPersister for InMemorySenderPersister {
+        fn save(&self, event: String) -> Result<(), ForeignError> {
+            self.push_event(event);
+            Ok(())
+        }
+
+        fn load(&self) -> Result<Vec<String>, ForeignError> {
+            Ok(self.events.lock().expect("lock not poisoned").clone())
+        }
+
+        fn close(&self) -> Result<(), ForeignError> { Ok(()) }
+    }
+
+    fn receiver_pj_uri() -> Arc<PjUri> {
+        #[derive(Default)]
+        struct InMemoryReceiverPersister {
+            events: std::sync::Mutex<Vec<String>>,
+        }
+
+        impl crate::receive::JsonReceiverSessionPersister for InMemoryReceiverPersister {
+            fn save(&self, event: String) -> Result<(), ForeignError> {
+                self.events.lock().expect("lock not poisoned").push(event);
+                Ok(())
+            }
+
+            fn load(&self) -> Result<Vec<String>, ForeignError> {
+                Ok(self.events.lock().expect("lock not poisoned").clone())
+            }
+
+            fn close(&self) -> Result<(), ForeignError> { Ok(()) }
+        }
+
+        let persister = Arc::new(InMemoryReceiverPersister::default());
+        let initialized = crate::receive::ReceiverBuilder::new(
+            "2MuyMrZHkbHbfjudmKUy45dU4P17pjG2szK".to_string(),
+            "https://example.com".to_string(),
+            Arc::new(
+                crate::ohttp::OhttpKeys::decode(decode_hex(OHTTP_KEYS_HEX))
+                    .expect("valid ohttp keys"),
+            ),
+        )
+        .expect("valid receiver builder")
+        .build()
+        .save(persister)
+        .expect("receiver session should save");
+        Arc::new(initialized.pj_uri())
+    }
+
+    fn saved_sender(persister: Arc<InMemorySenderPersister>) -> WithReplyKey {
+        SenderBuilder::new(ORIGINAL_PSBT.to_string(), receiver_pj_uri())
+            .expect("valid sender builder")
+            .build_recommended(1000)
+            .expect("buildable sender")
+            .save(persister)
+            .expect("sender session should save")
+    }
+
+    fn expected_fallback_tx() -> Vec<u8> {
+        let psbt = payjoin::bitcoin::psbt::Psbt::from_str(ORIGINAL_PSBT).expect("valid psbt");
+        payjoin::bitcoin::consensus::encode::serialize(&psbt.extract_tx_unchecked_fee_rate())
+    }
+
+    #[test]
+    fn cancelled_sender_session_exposes_fallback_tx() {
+        let persister = Arc::new(InMemorySenderPersister::default());
+        let pending_fallback =
+            saved_sender(persister.clone()).cancel().save(persister.clone()).expect("cancel");
+        assert_eq!(pending_fallback.fallback_tx(), expected_fallback_tx());
+
+        let result = replay_sender_event_log(persister).expect("replay should succeed");
+        match result.state() {
+            SendSession::SenderPendingFallback { inner } => {
+                assert_eq!(inner.fallback_tx(), expected_fallback_tx())
+            }
+            _ => panic!("expected SenderPendingFallback"),
+        }
+        assert_eq!(result.session_history().fallback_tx(), expected_fallback_tx());
+        assert_eq!(result.session_history().pj_param().receiver_pubkey().len(), 33);
+    }
+
+    #[test]
+    fn closed_sender_session_reports_aborted_outcome() {
+        let persister = Arc::new(InMemorySenderPersister::default());
+        let pending_fallback =
+            saved_sender(persister.clone()).cancel().save(persister.clone()).expect("cancel");
+        pending_fallback.close().save(persister.clone()).expect("close should save");
+
+        let result = replay_sender_event_log(persister).expect("replay should succeed");
+        match result.state() {
+            SendSession::Closed { inner } => {
+                assert!(!inner.is_success());
+                assert!(inner.is_aborted());
+                assert_eq!(inner.success_psbt_base64(), None);
+            }
+            _ => panic!("expected Closed"),
+        }
+    }
+
+    #[test]
+    fn successful_sender_session_reports_psbt() {
+        let persister = Arc::new(InMemorySenderPersister::default());
+        let _ = saved_sender(persister.clone());
+        let psbt = payjoin::bitcoin::psbt::Psbt::from_str(ORIGINAL_PSBT).expect("valid psbt");
+        let success_event = serde_json::to_string(&payjoin::send::v2::SessionEvent::Closed(
+            payjoin::send::v2::SessionOutcome::Success(psbt.clone()),
+        ))
+        .expect("serializable event");
+        persister.push_event(success_event);
+
+        let result = replay_sender_event_log(persister).expect("replay should succeed");
+        match result.state() {
+            SendSession::Closed { inner } => {
+                assert!(inner.is_success());
+                assert!(!inner.is_aborted());
+                assert_eq!(inner.success_psbt_base64(), Some(psbt.to_string()));
+            }
+            _ => panic!("expected Closed"),
+        }
+    }
 }

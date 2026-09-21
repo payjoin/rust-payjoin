@@ -814,6 +814,25 @@ mod test {
     }
 
     #[test]
+    fn test_build_recommended_payee_is_first_output() -> Result<(), BoxError> {
+        let mut psbt = PARSED_ORIGINAL_PSBT.clone();
+        psbt.unsigned_tx.output.swap(0, 1);
+        psbt.outputs.swap(0, 1);
+        let payee = psbt.unsigned_tx.output[0].script_pubkey.clone();
+
+        let psbt_ctx = PsbtContextBuilder::new(psbt, payee, None)
+            .build_recommended(FeeRate::BROADCAST_MIN, OutputSubstitution::Disabled)?;
+
+        // The change output moved to vout 1, and it is the only output that can
+        // pay the receiver's input fee.
+        let fee_contribution =
+            psbt_ctx.fee_contribution.expect("sender should contribute fees from change");
+        assert_eq!(fee_contribution.vout, 1);
+        assert_eq!(fee_contribution.max_amount, Amount::from_sat(91));
+        Ok(())
+    }
+
+    #[test]
     fn test_determine_fees() -> Result<(), BoxError> {
         let fee_contribution = determine_fee_contribution(
             &PARSED_ORIGINAL_PSBT,

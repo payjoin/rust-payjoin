@@ -100,11 +100,16 @@ impl WantsOutputs {
     }
 
     /// Substitute the receiver output script with the provided script.
+    ///
+    /// Like [`Self::replace_receiver_outputs`], this leaves the receiver holding a single
+    /// output, carrying the drain output's value. Any further receiver outputs a prior
+    /// call added are dropped, and their value goes to fees.
     pub fn substitute_receiver_script(
         self,
         output_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
-        let output_value = self.original.original_psbt.unsigned_tx.output[self.change_vout].value;
+        // `change_vout` indexes the payjoin PSBT's outputs, not the original's.
+        let output_value = self.payjoin_psbt.unsigned_tx.output[self.change_vout].value;
         let outputs = [TxOut { value: output_value, script_pubkey: output_script.into() }];
         self.replace_receiver_outputs(outputs, output_script)
     }
@@ -1486,5 +1491,48 @@ mod tests {
             .calculate_psbt_with_fee_range(None, None)
             .expect("shrinking substitution must not underflow output weight");
         assert!(psbt.unsigned_tx.output[0].script_pubkey.is_empty());
+    }
+
+    // The seeds cover both placements of the drain: beyond the original output count,
+    // and in range at a moved position.
+    #[test]
+    fn substitute_after_replace_keeps_drain_value() {
+        let original = original_from_test_vector();
+        let orig_len = original.psbt.unsigned_tx.output.len();
+        let wants_outputs = WantsOutputs::new(original, vec![0]);
+        let drain = ScriptBuf::from_bytes(vec![0x51, 0x53]);
+        let drain_value = Amount::from_sat(10_000);
+        let replacements = vec![
+            TxOut { value: drain_value, script_pubkey: drain.clone() },
+            TxOut {
+                value: Amount::from_sat(20_000),
+                script_pubkey: ScriptBuf::from_bytes(vec![0x51, 0x54]),
+            },
+            TxOut {
+                value: Amount::from_sat(30_000),
+                script_pubkey: ScriptBuf::from_bytes(vec![0x51, 0x55]),
+            },
+        ];
+        let new_script = ScriptBuf::from_bytes(vec![0x51, 0x56]);
+        let mut saw_beyond_original = false;
+        let mut saw_moved_in_range = false;
+        for seed in 0..64u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let replaced = wants_outputs
+                .clone()
+                .replace_receiver_outputs_with_rng(replacements.clone(), &drain, &mut rng)
+                .expect("substitution succeeds");
+            let change_vout = replaced.change_vout;
+            saw_beyond_original |= change_vout >= orig_len;
+            saw_moved_in_range |= change_vout != 0 && change_vout < orig_len;
+            let next = replaced
+                .substitute_receiver_script(new_script.as_script())
+                .expect("script substitution succeeds");
+            let substituted = &next.payjoin_psbt.unsigned_tx.output[next.change_vout];
+            assert_eq!(substituted.script_pubkey, new_script, "seed {seed}");
+            assert_eq!(substituted.value, drain_value, "seed {seed}");
+        }
+        assert!(saw_beyond_original, "no seed placed the drain beyond the original output count");
+        assert!(saw_moved_in_range, "no seed moved the drain within the original output range");
     }
 }

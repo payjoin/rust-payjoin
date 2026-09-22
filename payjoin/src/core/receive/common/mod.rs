@@ -318,7 +318,13 @@ impl WantsInputs {
 
         for input_pair in candidate_inputs {
             let candidate_sats = input_pair.previous_txout().value;
-            let candidate_min_out = min(min_out_sats, prior_payment_sats + candidate_sats);
+            // The receiver output value is sender-supplied, so this sum can overflow.
+            let candidate_min_out = min(
+                min_out_sats,
+                prior_payment_sats
+                    .checked_add(candidate_sats)
+                    .ok_or(InternalCoinSelectionError::AmountOverflow)?,
+            );
             let candidate_min_in = min(min_in_sats, candidate_sats);
 
             if candidate_min_in > candidate_min_out {
@@ -379,9 +385,9 @@ impl WantsInputs {
 
         // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
-        let mut receiver_input_amount = Amount::ZERO;
+        let receiver_input_amount =
+            checked_sum(inputs.iter().map(|input_pair| input_pair.previous_txout().value))?;
         for input_pair in inputs.clone() {
-            receiver_input_amount += input_pair.previous_txout().value;
             let index = rng.gen_range(0..=self.proposal.payjoin_psbt.unsigned_tx.input.len());
             payjoin_psbt.inputs.insert(index, input_pair.psbtin);
             payjoin_psbt
@@ -391,10 +397,15 @@ impl WantsInputs {
         }
 
         // Add the receiver change amount to the receiver change output, if applicable
-        let receiver_min_input_amount = self.receiver_min_input_amount();
+        let receiver_min_input_amount = self.receiver_min_input_amount()?;
         if receiver_input_amount >= receiver_min_input_amount {
             let change_amount = receiver_input_amount - receiver_min_input_amount;
-            payjoin_psbt.unsigned_tx.output[self.proposal.change_vout].value += change_amount;
+            // The change output's starting value is sender-supplied, so this can overflow.
+            let change_output = &mut payjoin_psbt.unsigned_tx.output[self.proposal.change_vout];
+            change_output.value = change_output
+                .value
+                .checked_add(change_amount)
+                .ok_or(InternalInputContributionError::AmountOverflow)?;
         } else {
             return Err(InternalInputContributionError::ValueTooLow.into());
         }
@@ -413,22 +424,14 @@ impl WantsInputs {
     }
 
     // Compute the minimum amount that the receiver must contribute to the transaction as input.
-    fn receiver_min_input_amount(&self) -> Amount {
-        let output_amount = self
-            .proposal
-            .payjoin_psbt
-            .unsigned_tx
-            .output
-            .iter()
-            .fold(Amount::ZERO, |acc, output| acc + output.value);
-        let original_output_amount = self
-            .original
-            .original_psbt
-            .unsigned_tx
-            .output
-            .iter()
-            .fold(Amount::ZERO, |acc, output| acc + output.value);
-        output_amount.checked_sub(original_output_amount).unwrap_or(Amount::ZERO)
+    //
+    // Output values are sender-supplied, so either sum can overflow.
+    fn receiver_min_input_amount(&self) -> Result<Amount, InputContributionError> {
+        let output_amount =
+            checked_sum(self.proposal.payjoin_psbt.unsigned_tx.output.iter().map(|o| o.value))?;
+        let original_output_amount =
+            checked_sum(self.original.original_psbt.unsigned_tx.output.iter().map(|o| o.value))?;
+        Ok(output_amount.checked_sub(original_output_amount).unwrap_or(Amount::ZERO))
     }
 
     /// Commits the inputs as final, and moves on to the next typestate.
@@ -437,6 +440,15 @@ impl WantsInputs {
     pub fn commit_inputs(self) -> WantsFeeRange {
         WantsFeeRange { original: self.original, proposal: self.proposal }
     }
+}
+
+fn checked_sum(
+    amounts: impl IntoIterator<Item = Amount>,
+) -> Result<Amount, InputContributionError> {
+    amounts
+        .into_iter()
+        .try_fold(Amount::ZERO, |acc, amount| acc.checked_add(amount))
+        .ok_or(InternalInputContributionError::AmountOverflow.into())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1534,5 +1546,55 @@ mod tests {
         }
         assert!(saw_beyond_original, "no seed placed the drain beyond the original output count");
         assert!(saw_moved_in_range, "no seed moved the drain within the original output range");
+    }
+
+    // The overflow is in the output sums, before any change is credited.
+    #[test]
+    fn contribute_inputs_errors_on_overflowing_original_outputs() {
+        let mut original = original_from_test_vector();
+        original.psbt.unsigned_tx.output[0].value = Amount::from_sat(u64::MAX);
+        original.psbt.unsigned_tx.output[1].value = Amount::from_sat(u64::MAX);
+
+        let wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        let candidate = candidate_input_from_test_vector(Amount::from_sat(3_000_000));
+
+        assert_eq!(
+            wants_inputs.contribute_inputs([candidate]).unwrap_err(),
+            InputContributionError::from(InternalInputContributionError::AmountOverflow)
+        );
+    }
+
+    // The output sums stay within u64, so the overflow is the change credit.
+    #[test]
+    fn contribute_inputs_errors_crediting_change_to_inflated_output() {
+        let mut original = original_from_test_vector();
+        original.psbt.unsigned_tx.output[0].value = Amount::from_sat(u64::MAX - 10);
+        original.psbt.unsigned_tx.output[1].value = Amount::from_sat(5);
+
+        let wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        let candidate = candidate_input_from_test_vector(Amount::from_sat(3_000_000));
+
+        assert_eq!(
+            wants_inputs.contribute_inputs([candidate]).unwrap_err(),
+            InputContributionError::from(InternalInputContributionError::AmountOverflow)
+        );
+    }
+
+    #[test]
+    fn avoid_uih_errors_on_overflowing_receiver_output() {
+        let mut original = original_from_test_vector();
+        original.psbt.unsigned_tx.output[0].value = Amount::from_sat(u64::MAX);
+
+        let wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        let candidate = candidate_input_from_test_vector(Amount::from_sat(3_000_000));
+
+        assert_eq!(
+            wants_inputs.avoid_uih(std::slice::from_ref(&candidate)).unwrap_err(),
+            CoinSelectionError::from(InternalCoinSelectionError::AmountOverflow)
+        );
+        let selected = wants_inputs
+            .try_preserving_privacy([candidate.clone()])
+            .expect("falls back to the first candidate");
+        assert_eq!(selected, candidate);
     }
 }

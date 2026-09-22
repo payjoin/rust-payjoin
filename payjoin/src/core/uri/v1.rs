@@ -199,4 +199,14 @@ mod tests {
             "Expected PjParam::V1 for HTTP to onion domain without fragment"
         );
     }
+
+    /// An `.onion` label in the userinfo position must not satisfy the
+    /// onion-only exemption from the https requirement.
+    #[test]
+    fn test_userinfo_endpoint_rejected() {
+        let pj = "http://abcdefghijklmnop.onion:1@evil.com/pj";
+        let uri = format!("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj={pj}");
+        assert!(Uri::try_from(uri.as_str()).is_err());
+        assert!(PjParam::parse(pj).is_err());
+    }
 }

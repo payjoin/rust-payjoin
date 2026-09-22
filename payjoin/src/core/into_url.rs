@@ -107,8 +107,14 @@ mod tests {
 
     #[test]
     fn into_url_rejects_userinfo() {
-        let err = "http://user@example.com/".into_url().unwrap_err();
-        assert_eq!(err.to_string(), "invalid host");
+        for input in [
+            "http://user@example.com/",
+            "http://user:pw@example.com/",
+            "https://user:pw@example.com:8080/",
+        ] {
+            let err = input.into_url().unwrap_err();
+            assert_eq!(err, Error::ParseError(UrlParseError::UserinfoNotSupported), "{input}");
+        }
     }
 
     #[test]

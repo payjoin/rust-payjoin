@@ -155,6 +155,12 @@ pub enum ParseError {
     InvalidPort,
     /// The host was not a valid domain, IPv4 literal, or IPv6 literal.
     InvalidHost,
+    /// The authority contained a `user[:password]@` prefix.
+    ///
+    /// Payjoin endpoints never carry credentials, and a userinfo prefix
+    /// changes which host a standards-compliant client connects to, so the
+    /// parser rejects it rather than attempting to interpret it.
+    UserinfoNotSupported,
 }
 
 impl fmt::Display for ParseError {
@@ -165,6 +171,7 @@ impl fmt::Display for ParseError {
             ParseError::InvalidFormat => write!(f, "invalid format"),
             ParseError::InvalidPort => write!(f, "invalid port"),
             ParseError::InvalidHost => write!(f, "invalid host"),
+            ParseError::UserinfoNotSupported => write!(f, "userinfo not supported"),
         }
     }
 }
@@ -182,12 +189,15 @@ impl Url {
     ///
     /// The input must be of the form `scheme://host[:port][/path][?query][#fragment]`.
     /// An empty path is normalised to `/`. The scheme is lower-cased.
+    /// A `user[:password]@` prefix in the authority is rejected with
+    /// [`ParseError::UserinfoNotSupported`].
     pub fn parse(input: &str) -> Result<Url, ParseError> {
         let (rest, scheme) = parse_scheme(input)?;
         let (_rest, host, port, path, query, fragment) =
             if let Some(rest) = rest.strip_prefix("://") {
+                reject_userinfo(rest)?;
                 let (rest, host) = parse_host(rest)?;
-                let (rest, port) = parse_port(rest).unwrap_or((rest, None));
+                let (rest, port) = parse_port(rest)?;
                 let (path, query, fragment) = parse_path_query_fragment(rest);
                 (rest, host, port, path, query, fragment)
             } else {
@@ -402,6 +412,22 @@ fn parse_scheme(input: &str) -> Result<(&str, String), ParseError> {
 
     let scheme = scheme.to_lowercase();
     Ok((&input[scheme.len()..], scheme))
+}
+
+/// Reject an RFC 3986 `userinfo@` prefix in the authority.
+///
+/// `input` starts immediately after `://`. The authority runs up to the first
+/// `/`, `?`, or `#`. The `@` separator is not permitted in a host or port, so
+/// any `@` before that boundary can only introduce userinfo. It is rejected
+/// outright: the host this parser would report is the text before the `@`,
+/// while a client following RFC 3986 connects to the host after it, and the
+/// two must never disagree.
+fn reject_userinfo(input: &str) -> Result<(), ParseError> {
+    let authority_end = input.find(['/', '?', '#']).unwrap_or(input.len());
+    if input[..authority_end].contains('@') {
+        return Err(ParseError::UserinfoNotSupported);
+    }
+    Ok(())
 }
 
 fn parse_host(input: &str) -> Result<(&str, Host), ParseError> {
@@ -769,5 +795,67 @@ mod tests {
     #[test]
     fn test_parse_ipv6_too_many_groups_rejected() {
         assert!(matches!(Url::parse("http://[1:2:3:4::5:6:7:8]/"), Err(ParseError::InvalidHost)));
+    }
+
+    #[test]
+    fn test_userinfo_rejected_in_authority() {
+        // One input per way the authority can end (`/`, `?`, `#`, end of
+        // input), plus the `host:port@host` shape that reads as a plain host
+        // and port to a parser without userinfo handling, and an IPv6 literal.
+        for input in [
+            "https://user:pw@example.com/",
+            "https://user:pw@example.com?q=1",
+            "https://user:pw@example.com#f",
+            "https://user:pw@example.com",
+            "https://example.com:80@evil.com/",
+            "http://a:b@[::1]:80/",
+        ] {
+            assert!(
+                matches!(Url::parse(input), Err(ParseError::UserinfoNotSupported)),
+                "{input} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_at_sign_allowed_outside_authority() {
+        let url = Url::parse("https://h/p@th?q=a@b#f@g").unwrap();
+        assert_eq!(url.host_str(), "h");
+        assert_eq!(url.path(), "/p@th");
+        assert_eq!(url.query(), Some("q=a@b"));
+        assert_eq!(url.fragment(), Some("f@g"));
+        assert_eq!(url.as_str(), "https://h/p@th?q=a@b#f@g");
+
+        let url = Url::parse("https://h?q=a@b").unwrap();
+        assert_eq!(url.host_str(), "h");
+        assert_eq!(url.query(), Some("q=a@b"));
+
+        let url = Url::parse("https://h#f@g").unwrap();
+        assert_eq!(url.host_str(), "h");
+        assert_eq!(url.fragment(), Some("f@g"));
+    }
+
+    #[test]
+    fn test_malformed_port_rejected() {
+        // A non-digit anywhere in the port and a value past u16 are the two
+        // ways `parse_port` fails.
+        for input in ["https://host:12ab/x", "https://host:99999/"] {
+            assert!(
+                matches!(Url::parse(input), Err(ParseError::InvalidPort)),
+                "{input} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_empty_port_means_no_port() {
+        let url = Url::parse("https://host:/").unwrap();
+        assert_eq!(url.port(), None);
+        assert_eq!(url.path(), "/");
+        assert_eq!(url.as_str(), "https://host/");
+
+        let url = Url::parse("http://[::1]:/x").unwrap();
+        assert_eq!(url.port(), None);
+        assert_eq!(url.path(), "/x");
     }
 }

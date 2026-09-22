@@ -219,6 +219,24 @@ impl PsbtContextBuilder {
             }
         }
 
+        // The declared type above is advisory: BIP 174 has finalizers clear
+        // it, so on a finalized input the only authoritative sighash type is
+        // the byte the signer actually appended to each signature.
+        for (index, input) in psbt.input_pairs().enumerate() {
+            let signed_types = input.final_signature_sighash_types().map_err(|error| {
+                InternalBuildSenderError::OriginalTxinMalformedSignature { index, error }
+            })?;
+            for signed in signed_types {
+                ensure(
+                    commits_to_all_inputs_and_outputs(signed),
+                    InternalBuildSenderError::OriginalTxinSignatureNonAllSighashType {
+                        index,
+                        sighash_type: signed,
+                    },
+                )?;
+            }
+        }
+
         check_single_payee(&psbt, &self.payee, self.amount)?;
         let fee_contribution = determine_fee_contribution(
             &psbt,
@@ -1454,6 +1472,266 @@ mod test {
                 });
             }
             Ok(())
+        }
+
+        /// The Original PSBT fixture's input, with its declared sighash type
+        /// cleared the way a BIP 174 finalizer leaves it, and the trailing
+        /// sighash byte of the witness signature rewritten to `flag`.
+        fn original_psbt_with_witness_sighash_flag(flag: u8) -> Psbt {
+            let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();
+            original_psbt.inputs[0].sighash_type = None;
+            let mut witness = original_psbt.inputs[0]
+                .final_script_witness
+                .as_ref()
+                .expect("fixture input is finalized with a witness")
+                .to_vec();
+            *witness[0].last_mut().expect("signature has a sighash byte") = flag;
+            original_psbt.inputs[0].final_script_witness = Some(Witness::from_slice(&witness));
+            original_psbt
+        }
+
+        fn build_original(original_psbt: Psbt) -> Result<PsbtContext, BuildSenderError> {
+            let payee = original_psbt.unsigned_tx.output[1].script_pubkey.clone();
+            PsbtContextBuilder::new(original_psbt, payee, None).build(OutputSubstitution::Disabled)
+        }
+
+        fn assert_rejected_signature_sighash(
+            original_psbt: Psbt,
+            flag: u8,
+            expected: InternalBuildSenderError,
+        ) {
+            assert_eq!(
+                build_original(original_psbt).unwrap_err().to_string(),
+                BuildSenderError::from(expected).to_string(),
+                "signature sighash flag {flag:#04x} should be rejected in the Original PSBT",
+            );
+        }
+
+        #[test]
+        fn test_sender_input_signed_with_non_all_sighash_is_rejected() {
+            use bitcoin::psbt::PsbtSighashType;
+
+            // The finalized signature, not the optional declared field, is what
+            // the signer committed to. Every non-committing flag must be caught
+            // even when the declared field has been cleared.
+            for flag in [0x02, 0x03, 0x81, 0x82, 0x83] {
+                assert_rejected_signature_sighash(
+                    original_psbt_with_witness_sighash_flag(flag),
+                    flag,
+                    InternalBuildSenderError::OriginalTxinSignatureNonAllSighashType {
+                        index: 0,
+                        sighash_type: PsbtSighashType::from_u32(u32::from(flag)),
+                    },
+                );
+            }
+        }
+
+        #[test]
+        fn test_sender_input_signed_with_nonstandard_sighash_is_rejected() {
+            // A flag byte that is not a sighash type at all cannot be shown to
+            // commit to anything, so it is a malformed signature.
+            for flag in [0x00, 0x04, 0x80, 0xff] {
+                let original_psbt = original_psbt_with_witness_sighash_flag(flag);
+                let err = build_original(original_psbt).unwrap_err().to_string();
+                assert!(
+                    err.contains("malformed signature"),
+                    "signature sighash flag {flag:#04x} should be a malformed signature, got: {err}",
+                );
+            }
+        }
+
+        #[test]
+        fn test_sender_input_signed_with_all_sighash_is_accepted() {
+            // The honest finalized path: SIGHASH_ALL signature, declared field
+            // cleared by the finalizer.
+            build_original(original_psbt_with_witness_sighash_flag(0x01))
+                .expect("SIGHASH_ALL signature with no declared type should build");
+        }
+
+        #[test]
+        fn test_sender_input_declared_all_sighash_does_not_excuse_signature() {
+            use bitcoin::psbt::PsbtSighashType;
+            use bitcoin::sighash::EcdsaSighashType;
+
+            // Declared SIGHASH_ALL but signed with SIGHASH_NONE: the signature
+            // is what the signer committed to, so the declared field cannot
+            // vouch for it.
+            let mut original_psbt = original_psbt_with_witness_sighash_flag(0x02);
+            original_psbt.inputs[0].sighash_type =
+                Some(PsbtSighashType::from(EcdsaSighashType::All));
+            assert_rejected_signature_sighash(
+                original_psbt,
+                0x02,
+                InternalBuildSenderError::OriginalTxinSignatureNonAllSighashType {
+                    index: 0,
+                    sighash_type: PsbtSighashType::from(EcdsaSighashType::None),
+                },
+            );
+
+            // Declared and signed types agree: accepted.
+            let mut original_psbt = original_psbt_with_witness_sighash_flag(0x01);
+            original_psbt.inputs[0].sighash_type =
+                Some(PsbtSighashType::from(EcdsaSighashType::All));
+            build_original(original_psbt).expect("declared and signed SIGHASH_ALL should build");
+        }
+
+        /// The Original PSBT fixture with input 0 turned into a P2TR key path
+        /// spend carrying `signature` as its only witness element.
+        fn original_psbt_with_taproot_key_path_signature(signature: &[u8]) -> Psbt {
+            let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();
+            let (_, pk) = SECP256K1.generate_keypair(&mut bitcoin::key::rand::thread_rng());
+            let script_pubkey = ScriptBuf::new_p2tr(SECP256K1, pk.x_only_public_key().0, None);
+            let input = &mut original_psbt.inputs[0];
+            input.sighash_type = None;
+            input.witness_utxo.as_mut().expect("fixture has a witness utxo").script_pubkey =
+                script_pubkey;
+            input.final_script_sig = None;
+            input.final_script_witness = Some(Witness::from_slice(&[signature]));
+            original_psbt
+        }
+
+        #[test]
+        fn test_sender_taproot_key_path_signature_sighash() {
+            use bitcoin::psbt::PsbtSighashType;
+            use bitcoin::sighash::TapSighashType;
+
+            let schnorr = [0xab; 64];
+
+            // 64 bytes is SIGHASH_DEFAULT, which commits to everything.
+            build_original(original_psbt_with_taproot_key_path_signature(&schnorr))
+                .expect("64-byte SIGHASH_DEFAULT signature should build");
+
+            // 65 bytes with an explicit SIGHASH_ALL.
+            let mut signature = schnorr.to_vec();
+            signature.push(0x01);
+            build_original(original_psbt_with_taproot_key_path_signature(&signature))
+                .expect("65-byte SIGHASH_ALL signature should build");
+
+            for (flag, sighash_type) in
+                [(0x02, TapSighashType::None), (0x83, TapSighashType::SinglePlusAnyoneCanPay)]
+            {
+                let mut signature = schnorr.to_vec();
+                signature.push(flag);
+                assert_rejected_signature_sighash(
+                    original_psbt_with_taproot_key_path_signature(&signature),
+                    flag,
+                    InternalBuildSenderError::OriginalTxinSignatureNonAllSighashType {
+                        index: 0,
+                        sighash_type: PsbtSighashType::from(sighash_type),
+                    },
+                );
+            }
+        }
+
+        #[test]
+        fn test_sender_p2pkh_signature_sighash() {
+            use bitcoin::psbt::PsbtSighashType;
+            use bitcoin::sighash::EcdsaSighashType;
+            use bitcoin::PublicKey;
+
+            // Legacy inputs carry the signature in the scriptSig instead of
+            // the witness, so the flag has to be read from there.
+            let original_psbt_with_p2pkh_sighash_flag = |flag: u8| -> Psbt {
+                let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();
+                let witness = original_psbt.inputs[0]
+                    .final_script_witness
+                    .as_ref()
+                    .expect("fixture input is finalized with a witness")
+                    .to_vec();
+                let mut signature = witness[0].clone();
+                *signature.last_mut().expect("signature has a sighash byte") = flag;
+                let pubkey = PublicKey::from_slice(&witness[1]).expect("fixture has a pubkey");
+
+                let input = &mut original_psbt.inputs[0];
+                input.sighash_type = None;
+                input.witness_utxo.as_mut().expect("fixture has a witness utxo").script_pubkey =
+                    ScriptBuf::new_p2pkh(&pubkey.pubkey_hash());
+                input.final_script_witness = None;
+                input.final_script_sig = Some(
+                    bitcoin::script::Builder::new()
+                        .push_slice(
+                            <&bitcoin::script::PushBytes>::try_from(signature.as_slice())
+                                .expect("signature fits a push"),
+                        )
+                        .push_key(&pubkey)
+                        .into_script(),
+                );
+                original_psbt
+            };
+
+            build_original(original_psbt_with_p2pkh_sighash_flag(0x01))
+                .expect("P2PKH SIGHASH_ALL signature should build");
+
+            assert_rejected_signature_sighash(
+                original_psbt_with_p2pkh_sighash_flag(0x02),
+                0x02,
+                InternalBuildSenderError::OriginalTxinSignatureNonAllSighashType {
+                    index: 0,
+                    sighash_type: PsbtSighashType::from(EcdsaSighashType::None),
+                },
+            );
+        }
+
+        #[test]
+        fn test_sender_p2wsh_multisig_signature_sighash() {
+            use bitcoin::opcodes::all::{OP_CHECKMULTISIG, OP_PUSHNUM_2};
+            use bitcoin::psbt::PsbtSighashType;
+            use bitcoin::sighash::EcdsaSighashType;
+
+            // A script spend carries several signatures and every one of them
+            // must commit to all inputs and outputs, not only the first.
+            let original_psbt_with_p2wsh_sighash_flags = |flag_a: u8, flag_b: u8| -> Psbt {
+                let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();
+                let witness = original_psbt.inputs[0]
+                    .final_script_witness
+                    .as_ref()
+                    .expect("fixture input is finalized with a witness")
+                    .to_vec();
+                let signature = |flag: u8| {
+                    let mut signature = witness[0].clone();
+                    *signature.last_mut().expect("signature has a sighash byte") = flag;
+                    signature
+                };
+                let pubkey = |secret: u8| {
+                    PublicKey::from_secret_key(
+                        SECP256K1,
+                        &SecretKey::from_slice(&[secret; 32]).expect("nonzero secret is valid"),
+                    )
+                    .serialize()
+                };
+                let witness_script = bitcoin::script::Builder::new()
+                    .push_opcode(OP_PUSHNUM_2)
+                    .push_slice(pubkey(1))
+                    .push_slice(pubkey(2))
+                    .push_opcode(OP_PUSHNUM_2)
+                    .push_opcode(OP_CHECKMULTISIG)
+                    .into_script();
+
+                let input = &mut original_psbt.inputs[0];
+                input.sighash_type = None;
+                input.witness_utxo.as_mut().expect("fixture has a witness utxo").script_pubkey =
+                    ScriptBuf::new_p2wsh(&witness_script.wscript_hash());
+                input.final_script_sig = None;
+                input.final_script_witness = Some(Witness::from_slice(&[
+                    Vec::new(),
+                    signature(flag_a),
+                    signature(flag_b),
+                    witness_script.to_bytes(),
+                ]));
+                original_psbt
+            };
+
+            build_original(original_psbt_with_p2wsh_sighash_flags(0x01, 0x01))
+                .expect("P2WSH SIGHASH_ALL signatures should build");
+
+            assert_rejected_signature_sighash(
+                original_psbt_with_p2wsh_sighash_flags(0x01, 0x02),
+                0x02,
+                InternalBuildSenderError::OriginalTxinSignatureNonAllSighashType {
+                    index: 0,
+                    sighash_type: PsbtSighashType::from(EcdsaSighashType::None),
+                },
+            );
         }
 
         #[test]

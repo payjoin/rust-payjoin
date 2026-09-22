@@ -4,9 +4,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use bitcoin::address::FromScriptError;
-use bitcoin::psbt::Psbt;
+use bitcoin::psbt::{Psbt, PsbtSighashType};
+use bitcoin::script::Instruction;
 use bitcoin::transaction::InputWeightPrediction;
-use bitcoin::{bip32, psbt, Address, AddressType, Network, TxIn, TxOut, Weight};
+use bitcoin::{bip32, psbt, Address, AddressType, Network, Script, TxIn, TxOut, Weight};
 /// Shared non-witness weight for txid (32), index (4), and sequence (4) fields.
 /// We only need to add the weight of the txid: 32, index: 4 and sequence: 4 as rust_bitcoin
 /// already accounts for the scriptsig length when calculating InputWeightPrediction
@@ -255,6 +256,189 @@ impl InternalInputPair<'_> {
         let input_weight = iwp.weight() + NON_WITNESS_INPUT_WEIGHT;
         Ok(input_weight)
     }
+
+    /// Returns the sighash type carried by each signature in this input's
+    /// finalized signature data (`final_script_sig` and
+    /// `final_script_witness`), or an error if a signature is malformed.
+    ///
+    /// The sighash type a signer actually used is the trailing byte of the
+    /// signature itself, not the optional `PSBT_IN_SIGHASH_TYPE` field, which
+    /// finalizers clear. An input that is not finalized yields an empty list.
+    ///
+    /// Which stack elements hold signatures is decided by the spent
+    /// scriptPubKey (and the redeemScript for P2SH). For single-key templates
+    /// the signature position is fixed and must parse. For script templates
+    /// every element other than the script itself is inspected and anything
+    /// that parses as a signature is reported.
+    pub fn final_signature_sighash_types(
+        &self,
+    ) -> Result<Vec<PsbtSighashType>, FinalSignatureError> {
+        let script_pubkey = &self.previous_txout()?.script_pubkey;
+        let script_sig = self.psbtin.final_script_sig.as_deref().filter(|s| !s.is_empty());
+        let witness = self.psbtin.final_script_witness.as_ref().filter(|w| !w.is_empty());
+
+        let script_sig_pushes = |script: &Script| -> Result<Vec<Vec<u8>>, FinalSignatureError> {
+            script
+                .instructions()
+                .filter_map(|instruction| match instruction {
+                    Ok(Instruction::PushBytes(bytes)) => Some(Ok(bytes.as_bytes().to_vec())),
+                    Ok(Instruction::Op(_)) => None,
+                    Err(e) => Some(Err(e.into())),
+                })
+                .collect()
+        };
+
+        let redeem_script =
+            if script_pubkey.is_p2sh() { script_sig.and_then(Script::redeem_script) } else { None };
+        let witness_program = redeem_script.or(Some(script_pubkey));
+
+        match witness_program {
+            Some(program) if program.is_p2wpkh() => match witness {
+                Some(witness) => {
+                    let signature = witness.nth(0).ok_or(FinalSignatureError::NotASignature)?;
+                    Ok(vec![required_signature_sighash_type(signature)?])
+                }
+                None => Ok(Vec::new()),
+            },
+            Some(program) if program.is_p2wsh() => match witness {
+                // The last element is the witnessScript.
+                Some(witness) => scan_for_signatures(witness.iter().take(witness.len() - 1)),
+                None => Ok(Vec::new()),
+            },
+            Some(program) if program.is_p2tr() && redeem_script.is_none() => match witness {
+                Some(witness) => match witness.taproot_control_block() {
+                    None => {
+                        let signature = witness.nth(0).ok_or(FinalSignatureError::NotASignature)?;
+                        Ok(vec![required_signature_sighash_type(signature)?])
+                    }
+                    // Script path: skip the leaf script, the control block and,
+                    // when present, the annex.
+                    Some(_) => {
+                        let trailing = 2 + usize::from(witness.taproot_annex().is_some());
+                        scan_for_signatures(witness.iter().take(witness.len() - trailing))
+                    }
+                },
+                None => Ok(Vec::new()),
+            },
+            _ if script_pubkey.is_p2pkh() => match script_sig {
+                Some(script_sig) => {
+                    let pushes = script_sig_pushes(script_sig)?;
+                    let signature = pushes.first().ok_or(FinalSignatureError::NotASignature)?;
+                    Ok(vec![required_signature_sighash_type(signature)?])
+                }
+                None => Ok(Vec::new()),
+            },
+            // Bare scripts, P2PK, and P2SH wrapping something other than a
+            // witness program: signatures may sit anywhere in the scriptSig
+            // (or the witness, for an unknown witness program). For P2SH the
+            // last push is the redeemScript.
+            _ => {
+                let mut pushes = match script_sig {
+                    Some(script_sig) => script_sig_pushes(script_sig)?,
+                    None => Vec::new(),
+                };
+                if redeem_script.is_some() {
+                    pushes.pop();
+                }
+                let mut sighash_types = scan_for_signatures(pushes.iter().map(Vec::as_slice))?;
+                if let Some(witness) = witness {
+                    sighash_types.extend(scan_for_signatures(witness.iter())?);
+                }
+                Ok(sighash_types)
+            }
+        }
+    }
+}
+
+/// Parses a stack element that is required to be a signature and returns its
+/// sighash type.
+fn required_signature_sighash_type(bytes: &[u8]) -> Result<PsbtSighashType, FinalSignatureError> {
+    signature_sighash_type(bytes)?.ok_or(FinalSignatureError::NotASignature)
+}
+
+/// Returns the sighash type of every stack element that parses as a
+/// signature, in stack order.
+///
+/// A data push that happens to parse as a DER signature is reported as one.
+/// That can only make the caller reject an input it might have accepted, which
+/// is the safe direction when the alternative is missing a real signature.
+fn scan_for_signatures<'a>(
+    elements: impl Iterator<Item = &'a [u8]>,
+) -> Result<Vec<PsbtSighashType>, FinalSignatureError> {
+    elements.filter_map(|bytes| signature_sighash_type(bytes).transpose()).collect()
+}
+
+/// Returns the sighash type of a stack element if it is a signature.
+///
+/// ECDSA signatures are DER followed by a sighash byte; Schnorr signatures are
+/// 64 bytes (`SIGHASH_DEFAULT`) or 65 bytes with a trailing sighash byte.
+/// `Ok(None)` means the element is not a signature. An element that is
+/// recognizably a signature but carries an invalid sighash byte is an error
+/// rather than `None`, so it cannot pass as data.
+fn signature_sighash_type(bytes: &[u8]) -> Result<Option<PsbtSighashType>, FinalSignatureError> {
+    if let Some((_, der)) = bytes.split_last() {
+        if bitcoin::secp256k1::ecdsa::Signature::from_der(der).is_ok() {
+            let signature = bitcoin::ecdsa::Signature::from_slice(bytes)?;
+            return Ok(Some(signature.sighash_type.into()));
+        }
+    }
+    if matches!(bytes.len(), 64 | 65) {
+        let signature = bitcoin::taproot::Signature::from_slice(bytes)?;
+        return Ok(Some(signature.sighash_type.into()));
+    }
+    Ok(None)
+}
+
+/// Error reading the signatures out of a finalized PSBT input.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum FinalSignatureError {
+    PrevTxOut(PrevTxOutError),
+    Script(bitcoin::script::Error),
+    Ecdsa(bitcoin::ecdsa::Error),
+    Taproot(bitcoin::taproot::SigFromSliceError),
+    /// The stack element where the script template places a signature does
+    /// not parse as one.
+    NotASignature,
+}
+
+impl fmt::Display for FinalSignatureError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::PrevTxOut(e) => write!(f, "invalid previous transaction output: {e}"),
+            Self::Script(e) => write!(f, "malformed final scriptSig: {e}"),
+            Self::Ecdsa(e) => write!(f, "malformed ECDSA signature: {e}"),
+            Self::Taproot(e) => write!(f, "malformed Schnorr signature: {e}"),
+            Self::NotASignature => write!(f, "expected a signature in the finalized input data"),
+        }
+    }
+}
+
+impl std::error::Error for FinalSignatureError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::PrevTxOut(e) => Some(e),
+            Self::Script(e) => Some(e),
+            Self::Ecdsa(e) => Some(e),
+            Self::Taproot(e) => Some(e),
+            Self::NotASignature => None,
+        }
+    }
+}
+
+impl From<PrevTxOutError> for FinalSignatureError {
+    fn from(value: PrevTxOutError) -> Self { Self::PrevTxOut(value) }
+}
+
+impl From<bitcoin::script::Error> for FinalSignatureError {
+    fn from(value: bitcoin::script::Error) -> Self { Self::Script(value) }
+}
+
+impl From<bitcoin::ecdsa::Error> for FinalSignatureError {
+    fn from(value: bitcoin::ecdsa::Error) -> Self { Self::Ecdsa(value) }
+}
+
+impl From<bitcoin::taproot::SigFromSliceError> for FinalSignatureError {
+    fn from(value: bitcoin::taproot::SigFromSliceError) -> Self { Self::Taproot(value) }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -430,10 +614,17 @@ impl From<AddressTypeError> for InputWeightError {
 
 #[cfg(test)]
 mod test {
-    use bitcoin::{Psbt, ScriptBuf, Transaction, TxOut};
+    use bitcoin::opcodes::all::{OP_CHECKMULTISIG, OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_PUSHNUM_2};
+    use bitcoin::psbt::PsbtSighashType;
+    use bitcoin::script::{Builder, PushBytes};
+    use bitcoin::secp256k1::{PublicKey, SecretKey, SECP256K1};
+    use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
+    use bitcoin::{psbt, Amount, Psbt, ScriptBuf, Transaction, TxIn, TxOut, Witness};
     use payjoin_test_utils::PARSED_ORIGINAL_PSBT;
 
-    use crate::psbt::{InputWeightError, InternalInputPair, InternalPsbtInputError, PsbtExt};
+    use crate::psbt::{
+        FinalSignatureError, InputWeightError, InternalInputPair, InternalPsbtInputError, PsbtExt,
+    };
 
     #[test]
     fn validate_input_utxos() {
@@ -574,5 +765,234 @@ mod test {
         let pair: InternalInputPair = InternalInputPair { txin, psbtin: &psbtin };
         let weight = pair.expected_input_weight();
         assert_eq!(weight.unwrap_err(), InputWeightError::NoRedeemScript)
+    }
+
+    /// The finalized ECDSA signature from the Original PSBT fixture with its
+    /// trailing sighash byte replaced by `flag`.
+    fn der_signature_with_flag(flag: u8) -> Vec<u8> {
+        let witness = PARSED_ORIGINAL_PSBT.inputs[0]
+            .final_script_witness
+            .as_ref()
+            .expect("fixture input is finalized with a witness");
+        let mut signature = witness.nth(0).expect("fixture witness carries a signature").to_vec();
+        *signature.last_mut().expect("signature has a sighash byte") = flag;
+        signature
+    }
+
+    fn push(bytes: &[u8]) -> &PushBytes {
+        <&PushBytes>::try_from(bytes).expect("fixture data fits a push")
+    }
+
+    fn pubkey(secret: u8) -> PublicKey {
+        PublicKey::from_secret_key(
+            SECP256K1,
+            &SecretKey::from_slice(&[secret; 32]).expect("nonzero secret is valid"),
+        )
+    }
+
+    /// A 2-of-2 multisig witnessScript (or redeemScript).
+    fn multisig_2_of_2() -> ScriptBuf {
+        Builder::new()
+            .push_opcode(OP_PUSHNUM_2)
+            .push_slice(pubkey(1).serialize())
+            .push_slice(pubkey(2).serialize())
+            .push_opcode(OP_PUSHNUM_2)
+            .push_opcode(OP_CHECKMULTISIG)
+            .into_script()
+    }
+
+    /// The finalized witness of a 2-of-2 multisig spend: the CHECKMULTISIG
+    /// dummy, both signatures, then the witnessScript.
+    fn multisig_witness(flag_a: u8, flag_b: u8, witness_script: &ScriptBuf) -> Witness {
+        Witness::from_slice(&[
+            Vec::new(),
+            der_signature_with_flag(flag_a),
+            der_signature_with_flag(flag_b),
+            witness_script.to_bytes(),
+        ])
+    }
+
+    /// Reads the signature sighash types out of an input spending
+    /// `script_pubkey` that has been finalized with the given fields.
+    fn final_signature_sighash_types(
+        script_pubkey: ScriptBuf,
+        final_script_sig: Option<ScriptBuf>,
+        final_script_witness: Option<Witness>,
+    ) -> Result<Vec<PsbtSighashType>, FinalSignatureError> {
+        let txin = TxIn::default();
+        let psbtin = psbt::Input {
+            witness_utxo: Some(TxOut { value: Amount::from_sat(1_000), script_pubkey }),
+            final_script_sig,
+            final_script_witness,
+            ..Default::default()
+        };
+        InternalInputPair { txin: &txin, psbtin: &psbtin }.final_signature_sighash_types()
+    }
+
+    #[test]
+    fn final_signature_sighash_types_p2wsh_multisig() {
+        let witness_script = multisig_2_of_2();
+        let script_pubkey = ScriptBuf::new_p2wsh(&witness_script.wscript_hash());
+
+        // Both signatures are reported in stack order; the empty dummy and the
+        // witnessScript are not.
+        assert_eq!(
+            final_signature_sighash_types(
+                script_pubkey.clone(),
+                None,
+                Some(multisig_witness(0x01, 0x01, &witness_script)),
+            ),
+            Ok(vec![EcdsaSighashType::All.into(), EcdsaSighashType::All.into()]),
+        );
+        assert_eq!(
+            final_signature_sighash_types(
+                script_pubkey,
+                None,
+                Some(multisig_witness(0x01, 0x02, &witness_script)),
+            ),
+            Ok(vec![EcdsaSighashType::All.into(), EcdsaSighashType::None.into()]),
+        );
+    }
+
+    #[test]
+    fn final_signature_sighash_types_p2sh_p2wsh_multisig() {
+        let witness_script = multisig_2_of_2();
+        let redeem_script = ScriptBuf::new_p2wsh(&witness_script.wscript_hash());
+        let script_pubkey = ScriptBuf::new_p2sh(&redeem_script.script_hash());
+        let script_sig = Builder::new().push_slice(push(redeem_script.as_bytes())).into_script();
+
+        assert_eq!(
+            final_signature_sighash_types(
+                script_pubkey.clone(),
+                Some(script_sig.clone()),
+                Some(multisig_witness(0x01, 0x01, &witness_script)),
+            ),
+            Ok(vec![EcdsaSighashType::All.into(), EcdsaSighashType::All.into()]),
+        );
+        assert_eq!(
+            final_signature_sighash_types(
+                script_pubkey,
+                Some(script_sig),
+                Some(multisig_witness(0x01, 0x02, &witness_script)),
+            ),
+            Ok(vec![EcdsaSighashType::All.into(), EcdsaSighashType::None.into()]),
+        );
+    }
+
+    /// A P2TR script path spend of a 2-of-2 CHECKSIG leaf. The witness carries
+    /// both Schnorr signatures, the leaf script and a control block with a
+    /// one-node merkle path, followed by an annex when one is given.
+    ///
+    /// The control block is 65 bytes ending in a byte that is not a sighash
+    /// type, so scanning it by mistake is an error rather than a silent pass.
+    fn taproot_script_path_witness(
+        signature_a: &[u8],
+        signature_b: &[u8],
+        annex: Option<&[u8]>,
+    ) -> Witness {
+        let leaf_script = Builder::new()
+            .push_slice(pubkey(1).x_only_public_key().0.serialize())
+            .push_opcode(OP_CHECKSIGVERIFY)
+            .push_slice(pubkey(2).x_only_public_key().0.serialize())
+            .push_opcode(OP_CHECKSIG)
+            .into_script();
+        let mut control_block = vec![0xc0];
+        control_block.extend_from_slice(&pubkey(3).x_only_public_key().0.serialize());
+        control_block.extend_from_slice(&[0xff; 32]);
+
+        let mut elements =
+            vec![signature_b.to_vec(), signature_a.to_vec(), leaf_script.to_bytes(), control_block];
+        elements.extend(annex.map(<[u8]>::to_vec));
+        Witness::from_slice(&elements)
+    }
+
+    #[test]
+    fn final_signature_sighash_types_p2tr_script_path() {
+        let script_pubkey = ScriptBuf::new_p2tr(SECP256K1, pubkey(4).x_only_public_key().0, None);
+        let schnorr = [0xab; 64];
+
+        // Both signatures are reported in stack order; the leaf script and
+        // control block are not.
+        assert_eq!(
+            final_signature_sighash_types(
+                script_pubkey.clone(),
+                None,
+                Some(taproot_script_path_witness(&schnorr, &schnorr, None)),
+            ),
+            Ok(vec![TapSighashType::Default.into(), TapSighashType::Default.into()]),
+        );
+
+        let mut signature = schnorr.to_vec();
+        signature.push(0x83);
+        assert_eq!(
+            final_signature_sighash_types(
+                script_pubkey,
+                None,
+                Some(taproot_script_path_witness(&signature, &schnorr, None)),
+            ),
+            Ok(vec![TapSighashType::Default.into(), TapSighashType::SinglePlusAnyoneCanPay.into()]),
+        );
+    }
+
+    #[test]
+    fn final_signature_sighash_types_p2tr_script_path_annex() {
+        let script_pubkey = ScriptBuf::new_p2tr(SECP256K1, pubkey(4).x_only_public_key().0, None);
+        let schnorr = [0xab; 64];
+
+        // A 65-byte annex would parse as a Schnorr signature with an invalid
+        // sighash byte if it were scanned, so a clean result proves that the
+        // annex is excluded.
+        let mut annex = vec![0x50; 64];
+        annex.push(0xff);
+        assert_eq!(
+            final_signature_sighash_types(
+                script_pubkey.clone(),
+                None,
+                Some(taproot_script_path_witness(&schnorr, &schnorr, Some(&annex))),
+            ),
+            Ok(vec![TapSighashType::Default.into(), TapSighashType::Default.into()]),
+        );
+
+        let mut signature = schnorr.to_vec();
+        signature.push(0x02);
+        assert_eq!(
+            final_signature_sighash_types(
+                script_pubkey,
+                None,
+                Some(taproot_script_path_witness(&schnorr, &signature, Some(&annex))),
+            ),
+            Ok(vec![TapSighashType::None.into(), TapSighashType::Default.into()]),
+        );
+    }
+
+    #[test]
+    fn final_signature_sighash_types_bare_p2sh() {
+        let redeem_script =
+            Builder::new().push_key(&pubkey(1).into()).push_opcode(OP_CHECKSIG).into_script();
+        let script_pubkey = ScriptBuf::new_p2sh(&redeem_script.script_hash());
+        let script_sig = |flag: u8| {
+            Builder::new()
+                .push_slice(push(&der_signature_with_flag(flag)))
+                .push_slice(push(redeem_script.as_bytes()))
+                .into_script()
+        };
+
+        // The redeemScript is the last push and is not reported; the signature
+        // before it is.
+        assert_eq!(
+            final_signature_sighash_types(script_pubkey.clone(), Some(script_sig(0x01)), None),
+            Ok(vec![EcdsaSighashType::All.into()]),
+        );
+        assert_eq!(
+            final_signature_sighash_types(script_pubkey, Some(script_sig(0x82)), None),
+            Ok(vec![EcdsaSighashType::NonePlusAnyoneCanPay.into()]),
+        );
+    }
+
+    #[test]
+    fn final_signature_sighash_types_unfinalized_input() {
+        let witness_script = multisig_2_of_2();
+        let script_pubkey = ScriptBuf::new_p2wsh(&witness_script.wscript_hash());
+        assert_eq!(final_signature_sighash_types(script_pubkey, None, None), Ok(vec![]));
     }
 }

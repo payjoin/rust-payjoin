@@ -499,7 +499,7 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::psbt::InternalPsbtInputError::InvalidScriptPubKey;
-    use crate::psbt::NON_WITNESS_INPUT_WEIGHT;
+    use crate::psbt::{InconsistentPsbt, PsbtInputsError, NON_WITNESS_INPUT_WEIGHT};
 
     pub(crate) fn original_from_test_vector() -> OriginalPayload {
         let params = Params::from_query_str(QUERY_PARAMS, &[Version::One])
@@ -1028,6 +1028,61 @@ pub(crate) mod tests {
             matches!(err.0, InternalPayloadError::InvalidInputUtxo(_)),
             "expected InvalidInputUtxo, got: {err:?}"
         );
+    }
+
+    #[test]
+    fn parse_payload_rejects_output_above_max_money() {
+        let mut psbt = PARSED_ORIGINAL_PSBT.clone();
+        let value = Amount::MAX_MONEY + Amount::ONE_SAT;
+        psbt.unsigned_tx.output[1].value = value;
+
+        let err = parse_payload(&psbt.to_string(), QUERY_PARAMS, &[Version::One])
+            .expect_err("must be rejected at ingestion");
+        assert!(
+            matches!(
+                err.0,
+                InternalPayloadError::InconsistentPsbt(
+                    InconsistentPsbt::OutputValueExceedsMaxMoney { vout: 1, value: v }
+                ) if v == value
+            ),
+            "expected OutputValueExceedsMaxMoney, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_payload_rejects_spent_utxo_above_max_money() {
+        let mut psbt = PARSED_ORIGINAL_PSBT.clone();
+        let value = Amount::MAX_MONEY + Amount::ONE_SAT;
+        let input = &mut psbt.inputs[0];
+        input.non_witness_utxo = None;
+        input.witness_utxo.as_mut().expect("test vector input carries a witness_utxo").value =
+            value;
+
+        let err = parse_payload(&psbt.to_string(), QUERY_PARAMS, &[Version::One])
+            .expect_err("must be rejected at ingestion");
+        assert!(
+            matches!(
+                &err.0,
+                InternalPayloadError::InvalidInputUtxo(PsbtInputsError {
+                    index: 0,
+                    error: InternalPsbtInputError::ValueExceedsMaxMoney { value: v },
+                }) if *v == value
+            ),
+            "expected ValueExceedsMaxMoney on input 0, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_payload_accepts_values_at_max_money() {
+        let mut psbt = PARSED_ORIGINAL_PSBT.clone();
+        psbt.unsigned_tx.output[1].value = Amount::MAX_MONEY;
+        let input = &mut psbt.inputs[0];
+        input.non_witness_utxo = None;
+        input.witness_utxo.as_mut().expect("test vector input carries a witness_utxo").value =
+            Amount::MAX_MONEY;
+
+        parse_payload(&psbt.to_string(), QUERY_PARAMS, &[Version::One])
+            .expect("MAX_MONEY is within the consensus bound");
     }
 
     #[test]

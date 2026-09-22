@@ -6,7 +6,7 @@ use std::fmt;
 use bitcoin::address::FromScriptError;
 use bitcoin::psbt::Psbt;
 use bitcoin::transaction::InputWeightPrediction;
-use bitcoin::{bip32, psbt, Address, AddressType, Network, TxIn, TxOut, Weight};
+use bitcoin::{bip32, psbt, Address, AddressType, Amount, Network, TxIn, TxOut, Weight};
 /// Shared non-witness weight for txid (32), index (4), and sequence (4) fields.
 /// We only need to add the weight of the txid: 32, index: 4 and sequence: 4 as rust_bitcoin
 /// already accounts for the scriptsig length when calculating InputWeightPrediction
@@ -17,6 +17,7 @@ pub(crate) const NON_WITNESS_INPUT_WEIGHT: Weight = Weight::from_non_witness_dat
 pub(crate) enum InconsistentPsbt {
     UnequalInputCounts { tx_ins: usize, psbt_ins: usize },
     UnequalOutputCounts { tx_outs: usize, psbt_outs: usize },
+    OutputValueExceedsMaxMoney { vout: usize, value: Amount },
 }
 
 impl fmt::Display for InconsistentPsbt {
@@ -24,6 +25,7 @@ impl fmt::Display for InconsistentPsbt {
         match self {
             InconsistentPsbt::UnequalInputCounts { tx_ins, psbt_ins, } => write!(f, "The number of PSBT inputs ({psbt_ins}) doesn't equal to the number of unsigned transaction inputs ({tx_ins})"),
             InconsistentPsbt::UnequalOutputCounts { tx_outs, psbt_outs, } => write!(f, "The number of PSBT outputs ({psbt_outs}) doesn't equal to the number of unsigned transaction outputs ({tx_outs})"),
+            InconsistentPsbt::OutputValueExceedsMaxMoney { vout, value } => write!(f, "Output #{vout} value ({value}) exceeds the maximum amount of bitcoin"),
         }
     }
 }
@@ -40,9 +42,11 @@ pub(crate) trait PsbtExt: Sized {
     fn proprietary_mut(&mut self) -> &mut BTreeMap<psbt::raw::ProprietaryKey, Vec<u8>>;
     fn unknown_mut(&mut self) -> &mut BTreeMap<psbt::raw::Key, Vec<u8>>;
     fn input_pairs(&self) -> Box<dyn Iterator<Item = InternalInputPair<'_>> + '_>;
-    // guarantees that length of psbt input matches that of unsigned_tx inputs and same
-    /// thing for outputs.
+    /// Guarantees that the PSBT input and output counts match those of the unsigned
+    /// transaction, and that no output value exceeds [`Amount::MAX_MONEY`].
     fn validate(self) -> Result<Self, InconsistentPsbt>;
+    /// Guarantees that every input carries UTXO data consistent with the outpoint it
+    /// spends, and that no spent value exceeds [`Amount::MAX_MONEY`].
     fn validate_input_utxos(&self) -> Result<(), PsbtInputsError>;
 }
 
@@ -80,17 +84,39 @@ impl PsbtExt for Psbt {
         let psbt_outs = self.outputs.len();
 
         if psbt_ins != tx_ins {
-            Err(InconsistentPsbt::UnequalInputCounts { tx_ins, psbt_ins })
-        } else if psbt_outs != tx_outs {
-            Err(InconsistentPsbt::UnequalOutputCounts { tx_outs, psbt_outs })
-        } else {
-            Ok(self)
+            return Err(InconsistentPsbt::UnequalInputCounts { tx_ins, psbt_ins });
         }
+        if psbt_outs != tx_outs {
+            return Err(InconsistentPsbt::UnequalOutputCounts { tx_outs, psbt_outs });
+        }
+        // Consensus caps output values at MAX_MONEY; a larger one belongs to no
+        // relayable transaction.
+        if let Some((vout, output)) = self
+            .unsigned_tx
+            .output
+            .iter()
+            .enumerate()
+            .find(|(_, output)| output.value > Amount::MAX_MONEY)
+        {
+            return Err(InconsistentPsbt::OutputValueExceedsMaxMoney { vout, value: output.value });
+        }
+        Ok(self)
     }
 
     fn validate_input_utxos(&self) -> Result<(), PsbtInputsError> {
         self.input_pairs().enumerate().try_for_each(|(index, input)| {
-            input.validate_utxo().map_err(|error| PsbtInputsError { index, error })
+            input.validate_utxo().map_err(|error| PsbtInputsError { index, error })?;
+            let value = input
+                .previous_txout()
+                .map_err(|error| PsbtInputsError { index, error: error.into() })?
+                .value;
+            if value > Amount::MAX_MONEY {
+                return Err(PsbtInputsError {
+                    index,
+                    error: InternalPsbtInputError::ValueExceedsMaxMoney { value },
+                });
+            }
+            Ok(())
         })
     }
 }
@@ -287,6 +313,10 @@ pub(crate) enum InternalPsbtInputError {
     WeightError(InputWeightError),
     /// Weight was provided but can be calculated from available information
     ProvidedUnnecessaryWeight,
+    /// The spent output's value exceeds the maximum amount of bitcoin
+    ValueExceedsMaxMoney {
+        value: Amount,
+    },
 }
 
 impl fmt::Display for InternalPsbtInputError {
@@ -299,6 +329,7 @@ impl fmt::Display for InternalPsbtInputError {
             Self::InvalidScriptPubKey(e) => write!(f, "provided script was not a valid type of {e}"),
             Self::WeightError(e) => write!(f, "{e}"),
             Self::ProvidedUnnecessaryWeight => write!(f, "weight was provided but can be calculated from available information"),
+            Self::ValueExceedsMaxMoney { value } => write!(f, "spent output value ({value}) exceeds the maximum amount of bitcoin"),
         }
     }
 }
@@ -313,6 +344,7 @@ impl std::error::Error for InternalPsbtInputError {
             Self::InvalidScriptPubKey(_) => None,
             Self::WeightError(error) => Some(error),
             Self::ProvidedUnnecessaryWeight => None,
+            Self::ValueExceedsMaxMoney { .. } => None,
         }
     }
 }
@@ -346,8 +378,8 @@ impl std::error::Error for PsbtInputError {
 
 #[derive(Debug, PartialEq)]
 pub struct PsbtInputsError {
-    index: usize,
-    error: InternalPsbtInputError,
+    pub(crate) index: usize,
+    pub(crate) error: InternalPsbtInputError,
 }
 
 impl fmt::Display for PsbtInputsError {

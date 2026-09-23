@@ -63,7 +63,16 @@
               # From unstable so it keeps pace with the rustdoc JSON format
               # emitted by rust-overlay's latest stable toolchain; the
               # release-branch nixpkgs version lags too far behind.
-              cargo-semver-checks = nixpkgs-unstable.legacyPackages.${system}.cargo-semver-checks;
+              # Its check phase needs a writable HOME for a cache dir and
+              # fails in the sandbox without one. Drop the override once
+              # the lock includes NixOS/nixpkgs#563137.
+              cargo-semver-checks =
+                nixpkgs-unstable.legacyPackages.${system}.cargo-semver-checks.overrideAttrs
+                  (old: {
+                    nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [
+                      nixpkgs-unstable.legacyPackages.${system}.writableTmpDirAsHomeHook
+                    ];
+                  });
               rustToolchains = {
                 msrv = prev.rust-bin.stable.${msrv-version}.default;
                 stable = prev.rust-bin.stable.latest.default;

@@ -1418,6 +1418,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "event-log"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "extend"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2704,6 +2712,7 @@ dependencies = [
  "bitcoin-ohttp",
  "bitcoin-units",
  "bitcoin_uri",
+ "event-log",
  "hkdf 0.12.4",
  "http",
  "http-body",

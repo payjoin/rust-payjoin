@@ -9,11 +9,13 @@ name: Release
 on:
   pull_request:
     paths:
+      - event-log/Cargo.toml
       - payjoin/Cargo.toml
       - payjoin-cli/Cargo.toml
       - payjoin-mailroom/Cargo.toml
   push:
     tags:
+      - event-log-[0-9]*
       - payjoin-[0-9]*
       - payjoin-cli-[0-9]*
       - payjoin-mailroom-[0-9]*

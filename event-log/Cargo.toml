@@ -1,0 +1,16 @@
+[package]
+name = "event-log"
+version = "1.0.0"
+description = "Append-only event logs and typestate transition results for replayable state machines"
+repository = "https://github.com/payjoin/rust-payjoin"
+keywords = ["event-sourcing", "typestate", "persistence", "state-machine"]
+categories = ["data-structures", "rust-patterns"]
+license = "MITNFA"
+edition = "2024"
+rust-version = "1.85"
+
+[dependencies]
+
+[dev-dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.52.3", features = ["macros", "rt"] }

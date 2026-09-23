@@ -4,7 +4,7 @@
 # Versions come from `cargo metadata` parsed with jq, not from grepping
 # manifests.
 
-RELEASE_CRATES="payjoin payjoin-cli payjoin-mailroom"
+RELEASE_CRATES="event-log payjoin payjoin-cli payjoin-mailroom"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 

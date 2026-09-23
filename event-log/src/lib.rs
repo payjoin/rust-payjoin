@@ -1,0 +1,1953 @@
+//! Append-only event logs for typestate machines.
+//!
+//! A state machine driven by this crate records every transition as an
+//! event. An event carries everything needed to move into the next state, so
+//! the full state can be rebuilt by replaying the log from the start. The
+//! [`Persister`] and [`AsyncPersister`] traits are the storage contract a
+//! wallet or service implements; the `Maybe*Transition` types are what a
+//! state machine returns so that the caller decides where the event goes.
+//!
+//! # Backwards and forwards compatibility
+//!
+//! If any new fields are added to events, backwards compatibility must be
+//! maintained, which means that new fields are necessarily `Option<T>`
+//! defaulting to `None`, allowing old event data to be still be processed.
+//! Forward compatibility in general is not appropriate since old state machines
+//! will not know the meaning of the new fields, and ignoring them may lead to a
+//! transition to an invalid state, inconsistent with the state machine of any
+//! later version of the code that persisted this event data.
+//!
+//! If any new event types are added, presumably extending the state machine
+//! with additional transitions and states, the same logic applies: old sessions
+//! will simply not contain this new type of event and therefore only explore
+//! the subgraph of the state machine diagram which corresponds to the older
+//! version of the state machine. New sessions which do contain this event will
+//! not be interpretable by the old code.
+//!
+//! # Transient errors and typestate linearity
+//!
+//! State transitions consume the current typestate, and exactly one live
+//! handle exists at any point: a successful transition returns the next
+//! state, a transient rejection returns ownership of the current state
+//! inside the error so the caller can retry in place, and a fatal rejection
+//! closes the log. Transient rejections persist nothing, so replaying
+//! the event log always reconstructs the same current state that the error
+//! carries.
+
+use std::fmt;
+
+/// What a state transition asks its persister to do.
+pub enum PersistActions<Event> {
+    /// Nothing happened worth recording.
+    NoOp,
+    /// Record one event.
+    Save(Event),
+    /// Record one event and then close the log.
+    ///
+    /// The save happens first. If the close fails the event is still recorded,
+    /// and if the save fails the log is not closed.
+    SaveAndClose(Event),
+}
+
+impl<Event> PersistActions<Event> {
+    pub fn execute<P>(self, persister: &P) -> Result<(), P::InternalStorageError>
+    where
+        P: Persister<SessionEvent = Event>,
+    {
+        match self {
+            Self::NoOp => {}
+            Self::Save(event) => persister.save_event(event)?,
+            Self::SaveAndClose(event) => {
+                persister.save_event(event)?;
+                persister.close()?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn execute_async<P>(self, persister: &P) -> Result<(), P::InternalStorageError>
+    where
+        P: AsyncPersister<SessionEvent = Event>,
+        Event: Send,
+    {
+        match self {
+            Self::NoOp => {}
+            Self::Save(event) => persister.save_event(event).await?,
+            Self::SaveAndClose(event) => {
+                persister.save_event(event).await?;
+                persister.close().await?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Handles cases where the transition either succeeds with a final result that ends the session, or hits a static condition and stays in the same state.
+/// State transition may also be a fatal error or transient error.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
+#[allow(clippy::type_complexity)]
+pub struct MaybeSuccessTransitionWithNoResults<Event, SuccessValue, CurrentState, Err>(
+    Result<
+        AcceptOptionalTransition<Event, SuccessValue, CurrentState>,
+        Rejection<Event, Err, (), CurrentState>,
+    >,
+);
+
+impl<Event, SuccessValue, CurrentState, Err>
+    MaybeSuccessTransitionWithNoResults<Event, SuccessValue, CurrentState, Err>
+where
+    Err: std::error::Error,
+    CurrentState: fmt::Debug,
+{
+    pub fn fatal(event: Event, error: Err) -> Self {
+        MaybeSuccessTransitionWithNoResults(Err(Rejection::fatal(event, error)))
+    }
+
+    pub fn transient(error: Err, current_state: CurrentState) -> Self {
+        MaybeSuccessTransitionWithNoResults(Err(Rejection::transient(error, current_state)))
+    }
+
+    pub fn no_results(current_state: CurrentState) -> Self {
+        MaybeSuccessTransitionWithNoResults(Ok(AcceptOptionalTransition::NoResults(current_state)))
+    }
+
+    pub fn success(success_value: SuccessValue, event: Event) -> Self {
+        MaybeSuccessTransitionWithNoResults(Ok(AcceptOptionalTransition::Success(AcceptNextState(
+            event,
+            success_value,
+        ))))
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn deconstruct(
+        self,
+    ) -> (
+        PersistActions<Event>,
+        Result<
+            OptionalTransitionOutcome<SuccessValue, CurrentState>,
+            ApiError<Err, (), CurrentState>,
+        >,
+    ) {
+        match self.0 {
+            Ok(AcceptOptionalTransition::Success(AcceptNextState(event, success_value))) => (
+                PersistActions::SaveAndClose(event),
+                Ok(OptionalTransitionOutcome::Progress(success_value)),
+            ),
+            Ok(AcceptOptionalTransition::NoResults(current_state)) =>
+                (PersistActions::NoOp, Ok(OptionalTransitionOutcome::Stasis(current_state))),
+            Err(Rejection::Fatal(RejectFatal(event, error))) =>
+                (PersistActions::SaveAndClose(event), Err(ApiError::Fatal(error))),
+            Err(Rejection::Transient(RejectTransient(error, current_state))) =>
+                (PersistActions::NoOp, Err(ApiError::Transient(error, current_state))),
+            Err(Rejection::ReplyableError(RejectReplyableError(event, _, error))) =>
+                (PersistActions::Save(event), Err(ApiError::Fatal(error))),
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn save<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        OptionalTransitionOutcome<SuccessValue, CurrentState>,
+        PersistedError<Err, P::InternalStorageError, (), CurrentState>,
+    >
+    where
+        P: Persister<SessionEvent = Event>,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        OptionalTransitionOutcome<SuccessValue, CurrentState>,
+        PersistedError<Err, P::InternalStorageError, (), CurrentState>,
+    >
+    where
+        P: AsyncPersister<SessionEvent = Event>,
+        Err: Send,
+        SuccessValue: Send,
+        CurrentState: Send,
+        Event: Send,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+}
+
+/// A transition that can result in a state transition, fatal error, or successfully have no results.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
+#[allow(clippy::type_complexity)]
+pub struct MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>(
+    Result<
+        AcceptOptionalTransition<Event, NextState, CurrentState>,
+        Rejection<Event, Err, (), CurrentState>,
+    >,
+);
+
+impl<Event, NextState, CurrentState, Err>
+    MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>
+where
+    Err: std::error::Error,
+    CurrentState: fmt::Debug,
+{
+    pub fn fatal(event: Event, error: Err) -> Self {
+        MaybeFatalTransitionWithNoResults(Err(Rejection::fatal(event, error)))
+    }
+
+    pub fn no_results(current_state: CurrentState) -> Self {
+        MaybeFatalTransitionWithNoResults(Ok(AcceptOptionalTransition::NoResults(current_state)))
+    }
+
+    pub fn transient(error: Err, current_state: CurrentState) -> Self {
+        MaybeFatalTransitionWithNoResults(Err(Rejection::transient(error, current_state)))
+    }
+
+    pub fn success(event: Event, next_state: NextState) -> Self {
+        MaybeFatalTransitionWithNoResults(Ok(AcceptOptionalTransition::Success(AcceptNextState(
+            event, next_state,
+        ))))
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn deconstruct(
+        self,
+    ) -> (
+        PersistActions<Event>,
+        Result<OptionalTransitionOutcome<NextState, CurrentState>, ApiError<Err, (), CurrentState>>,
+    ) {
+        match self.0 {
+            Ok(AcceptOptionalTransition::Success(AcceptNextState(event, next_state))) =>
+                (PersistActions::Save(event), Ok(OptionalTransitionOutcome::Progress(next_state))),
+            Ok(AcceptOptionalTransition::NoResults(current_state)) =>
+                (PersistActions::NoOp, Ok(OptionalTransitionOutcome::Stasis(current_state))),
+            Err(Rejection::Fatal(RejectFatal(event, error))) =>
+                (PersistActions::SaveAndClose(event), Err(ApiError::Fatal(error))),
+            Err(Rejection::Transient(RejectTransient(error, current_state))) =>
+                (PersistActions::NoOp, Err(ApiError::Transient(error, current_state))),
+            Err(Rejection::ReplyableError(RejectReplyableError(event, _, error))) =>
+                (PersistActions::Save(event), Err(ApiError::Fatal(error))),
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn save<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        OptionalTransitionOutcome<NextState, CurrentState>,
+        PersistedError<Err, P::InternalStorageError, (), CurrentState>,
+    >
+    where
+        P: Persister<SessionEvent = Event>,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        OptionalTransitionOutcome<NextState, CurrentState>,
+        PersistedError<Err, P::InternalStorageError, (), CurrentState>,
+    >
+    where
+        P: AsyncPersister<SessionEvent = Event>,
+        Err: Send,
+        NextState: Send,
+        CurrentState: Send,
+        Event: Send,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+}
+
+pub(crate) type FatalTransitionResult<Event, NextState, Err, ErrorState, CurrentState> =
+    Result<AcceptNextState<Event, NextState>, Rejection<Event, Err, ErrorState, CurrentState>>;
+
+/// A transition that can be either fatal, transient, or a state transition.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
+pub struct MaybeFatalTransition<Event, NextState, Err, ErrorState = (), CurrentState = ()>(
+    pub(crate) FatalTransitionResult<Event, NextState, Err, ErrorState, CurrentState>,
+);
+
+impl<Event, NextState, Err, ErrorState, CurrentState>
+    MaybeFatalTransition<Event, NextState, Err, ErrorState, CurrentState>
+where
+    Err: std::error::Error,
+    ErrorState: fmt::Debug,
+    CurrentState: fmt::Debug,
+{
+    pub fn fatal(event: Event, error: Err) -> Self {
+        MaybeFatalTransition(Err(Rejection::fatal(event, error)))
+    }
+
+    pub fn transient(error: Err, current_state: CurrentState) -> Self {
+        MaybeFatalTransition(Err(Rejection::transient(error, current_state)))
+    }
+
+    pub fn success(event: Event, next_state: NextState) -> Self {
+        MaybeFatalTransition(Ok(AcceptNextState(event, next_state)))
+    }
+
+    pub fn replyable_error(event: Event, error_state: ErrorState, error: Err) -> Self {
+        MaybeFatalTransition(Err(Rejection::replyable_error(event, error_state, error)))
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn deconstruct(
+        self,
+    ) -> (PersistActions<Event>, Result<NextState, ApiError<Err, ErrorState, CurrentState>>) {
+        match self.0 {
+            Ok(AcceptNextState(event, next_state)) => (PersistActions::Save(event), Ok(next_state)),
+            Err(Rejection::Fatal(RejectFatal(event, error))) =>
+                (PersistActions::SaveAndClose(event), Err(ApiError::Fatal(error))),
+            Err(Rejection::Transient(RejectTransient(error, current_state))) =>
+                (PersistActions::NoOp, Err(ApiError::Transient(error, current_state))),
+            Err(Rejection::ReplyableError(RejectReplyableError(event, error_state, error))) =>
+                (PersistActions::Save(event), Err(ApiError::FatalWithState(error, error_state))),
+        }
+    }
+
+    pub fn save<P>(
+        self,
+        persister: &P,
+    ) -> Result<NextState, PersistedError<Err, P::InternalStorageError, ErrorState, CurrentState>>
+    where
+        P: Persister<SessionEvent = Event>,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<NextState, PersistedError<Err, P::InternalStorageError, ErrorState, CurrentState>>
+    where
+        P: AsyncPersister<SessionEvent = Event>,
+        Err: Send,
+        ErrorState: Send,
+        CurrentState: Send,
+        NextState: Send,
+        Event: Send,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+}
+
+/// A transition that can result in a state transition or a transient error.
+/// Fatal errors cannot occur in this transition.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
+pub struct MaybeTransientTransition<Event, NextState, Err, CurrentState = ()>(
+    Result<AcceptNextState<Event, NextState>, RejectTransient<Err, CurrentState>>,
+);
+
+impl<Event, NextState, Err, CurrentState>
+    MaybeTransientTransition<Event, NextState, Err, CurrentState>
+where
+    Err: std::error::Error,
+    CurrentState: fmt::Debug,
+{
+    pub fn success(event: Event, next_state: NextState) -> Self {
+        MaybeTransientTransition(Ok(AcceptNextState(event, next_state)))
+    }
+
+    pub fn transient(error: Err, current_state: CurrentState) -> Self {
+        MaybeTransientTransition(Err(RejectTransient(error, current_state)))
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn deconstruct(
+        self,
+    ) -> (PersistActions<Event>, Result<NextState, ApiError<Err, (), CurrentState>>) {
+        match self.0 {
+            Ok(AcceptNextState(event, next_state)) => (PersistActions::Save(event), Ok(next_state)),
+            Err(RejectTransient(error, current_state)) =>
+                (PersistActions::NoOp, Err(ApiError::Transient(error, current_state))),
+        }
+    }
+
+    pub fn save<P>(
+        self,
+        persister: &P,
+    ) -> Result<NextState, PersistedError<Err, P::InternalStorageError, (), CurrentState>>
+    where
+        P: Persister<SessionEvent = Event>,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<NextState, PersistedError<Err, P::InternalStorageError, (), CurrentState>>
+    where
+        P: AsyncPersister<SessionEvent = Event>,
+        Err: Send,
+        CurrentState: Send,
+        NextState: Send,
+        Event: Send,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+}
+
+/// A transition that always results in a state transition.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
+pub struct NextStateTransition<Event, NextState>(AcceptNextState<Event, NextState>);
+
+impl<Event, NextState> NextStateTransition<Event, NextState> {
+    pub fn success(event: Event, next_state: NextState) -> Self {
+        NextStateTransition(AcceptNextState(event, next_state))
+    }
+
+    pub(crate) fn deconstruct(self) -> (PersistActions<Event>, NextState) {
+        let AcceptNextState(event, next_state) = self.0;
+        (PersistActions::Save(event), next_state)
+    }
+
+    pub fn save<P>(self, persister: &P) -> Result<NextState, P::InternalStorageError>
+    where
+        P: Persister<SessionEvent = Event>,
+    {
+        let (actions, next_state) = self.deconstruct();
+        actions.execute(persister)?;
+        Ok(next_state)
+    }
+
+    pub async fn save_async<P>(self, persister: &P) -> Result<NextState, P::InternalStorageError>
+    where
+        P: AsyncPersister<SessionEvent = Event>,
+        NextState: Send,
+        Event: Send,
+    {
+        let (actions, next_state) = self.deconstruct();
+        actions.execute_async(persister).await?;
+        Ok(next_state)
+    }
+}
+
+/// A transition that either advances to a live state or terminates the session.
+///
+/// No error path exists. Both outcomes are successful from the protocol's point
+/// of view. The choice is determined by the source typestate's internal data,
+/// not by the caller.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
+pub struct MaybeTerminalTransition<Event, NextState>(MaybeTerminalOutcome<Event, NextState>);
+
+impl<Event, NextState> MaybeTerminalTransition<Event, NextState> {
+    pub fn advance(event: Event, next_state: NextState) -> Self {
+        Self(MaybeTerminalOutcome::Advance(AcceptNextState(event, next_state)))
+    }
+
+    pub fn terminate(event: Event) -> Self { Self(MaybeTerminalOutcome::Terminate(event)) }
+
+    pub(crate) fn deconstruct(self) -> (PersistActions<Event>, Option<NextState>) {
+        match self.0 {
+            MaybeTerminalOutcome::Advance(AcceptNextState(event, next_state)) =>
+                (PersistActions::Save(event), Some(next_state)),
+            MaybeTerminalOutcome::Terminate(event) => (PersistActions::SaveAndClose(event), None),
+        }
+    }
+
+    pub fn save<P>(self, persister: &P) -> Result<Option<NextState>, P::InternalStorageError>
+    where
+        P: Persister<SessionEvent = Event>,
+    {
+        let (actions, next_state) = self.deconstruct();
+        actions.execute(persister)?;
+        Ok(next_state)
+    }
+
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<Option<NextState>, P::InternalStorageError>
+    where
+        P: AsyncPersister<SessionEvent = Event>,
+        NextState: Send,
+        Event: Send,
+    {
+        let (actions, next_state) = self.deconstruct();
+        actions.execute_async(persister).await?;
+        Ok(next_state)
+    }
+}
+
+/// A transition that can either advance, terminate, or fail transiently.
+///
+/// Fatal outcomes still persist an event. When the fatal outcome advances, the
+/// saved event keeps the session live for replay while the caller receives the
+/// fatal protocol error.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
+pub struct MaybeTerminalSuccessTransition<Event, NextState, Err, CurrentState = ()>(
+    MaybeTerminalSuccessOutcome<Event, NextState, Err, CurrentState>,
+);
+
+impl<Event, NextState, Err, CurrentState>
+    MaybeTerminalSuccessTransition<Event, NextState, Err, CurrentState>
+where
+    Err: std::error::Error,
+    NextState: fmt::Debug,
+    CurrentState: fmt::Debug,
+{
+    pub fn advance(event: Event, next_state: NextState) -> Self {
+        Self(MaybeTerminalSuccessOutcome::Advance(AcceptNextState(event, next_state)))
+    }
+
+    pub fn terminate(event: Event) -> Self { Self(MaybeTerminalSuccessOutcome::Terminate(event)) }
+
+    pub fn fatal_advance(event: Event, next_state: NextState, error: Err) -> Self {
+        Self(MaybeTerminalSuccessOutcome::FatalAdvance(event, next_state, error))
+    }
+
+    pub fn fatal_terminate(event: Event, error: Err) -> Self {
+        Self(MaybeTerminalSuccessOutcome::FatalTerminate(event, error))
+    }
+
+    pub fn transient(error: Err, current_state: CurrentState) -> Self {
+        Self(MaybeTerminalSuccessOutcome::Transient(error, current_state))
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn deconstruct(
+        self,
+    ) -> (PersistActions<Event>, Result<Option<NextState>, ApiError<Err, NextState, CurrentState>>)
+    {
+        match self.0 {
+            MaybeTerminalSuccessOutcome::Advance(AcceptNextState(event, next_state)) =>
+                (PersistActions::Save(event), Ok(Some(next_state))),
+            MaybeTerminalSuccessOutcome::Terminate(event) =>
+                (PersistActions::SaveAndClose(event), Ok(None)),
+            MaybeTerminalSuccessOutcome::FatalAdvance(event, next_state, error) =>
+                (PersistActions::Save(event), Err(ApiError::FatalWithState(error, next_state))),
+            MaybeTerminalSuccessOutcome::FatalTerminate(event, error) =>
+                (PersistActions::SaveAndClose(event), Err(ApiError::Fatal(error))),
+            MaybeTerminalSuccessOutcome::Transient(error, current_state) =>
+                (PersistActions::NoOp, Err(ApiError::Transient(error, current_state))),
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn save<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        Option<NextState>,
+        PersistedError<Err, P::InternalStorageError, NextState, CurrentState>,
+    >
+    where
+        P: Persister<SessionEvent = Event>,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        Option<NextState>,
+        PersistedError<Err, P::InternalStorageError, NextState, CurrentState>,
+    >
+    where
+        P: AsyncPersister<SessionEvent = Event>,
+        Err: Send,
+        NextState: Send,
+        CurrentState: Send,
+        Event: Send,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+}
+
+/// A transition that unconditionally terminates the session.
+///
+/// Unlike other transition types, this always succeeds at the protocol level
+/// (the only possible error is from the persister's storage layer).
+/// After saving, the session is closed and no further events can be appended.
+///
+/// The `T` parameter carries a value that is returned after saving without
+/// being persisted. This lets callers receive derived data (e.g. a fallback
+/// transaction) through the same `.save()` call pattern used by every other
+/// transition type.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
+pub struct TerminalTransition<Event, T>(Event, T);
+
+impl<Event, T> TerminalTransition<Event, T> {
+    pub fn new(event: Event, value: T) -> Self { Self(event, value) }
+
+    pub fn save<P>(self, persister: &P) -> Result<T, P::InternalStorageError>
+    where
+        P: Persister<SessionEvent = Event>,
+    {
+        PersistActions::SaveAndClose(self.0).execute(persister)?;
+        Ok(self.1)
+    }
+
+    pub async fn save_async<P>(self, persister: &P) -> Result<T, P::InternalStorageError>
+    where
+        P: AsyncPersister<SessionEvent = Event>,
+        Event: Send,
+        T: Send,
+    {
+        PersistActions::SaveAndClose(self.0).execute_async(persister).await?;
+        Ok(self.1)
+    }
+}
+
+/// A transition that can result in a succession completion, fatal error, or transient error.
+/// The transition can also result in no state change.
+#[must_use = "a transition must be persisted with .save() to advance the session"]
+pub enum MaybeFatalOrSuccessTransition<Event, CurrentState, Err> {
+    Success(Event),
+    NoResults(CurrentState),
+    Transient(RejectTransient<Err, CurrentState>),
+    Fatal(RejectFatal<Event, Err>),
+}
+
+impl<Event, CurrentState, Err> MaybeFatalOrSuccessTransition<Event, CurrentState, Err>
+where
+    Err: std::error::Error,
+    CurrentState: fmt::Debug,
+{
+    pub fn success(event: Event) -> Self { MaybeFatalOrSuccessTransition::Success(event) }
+
+    pub fn fatal(event: Event, error: Err) -> Self {
+        MaybeFatalOrSuccessTransition::Fatal(RejectFatal(event, error))
+    }
+
+    pub fn transient(error: Err, current_state: CurrentState) -> Self {
+        MaybeFatalOrSuccessTransition::Transient(RejectTransient(error, current_state))
+    }
+
+    pub fn no_results(current_state: CurrentState) -> Self {
+        MaybeFatalOrSuccessTransition::NoResults(current_state)
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn deconstruct(
+        self,
+    ) -> (
+        PersistActions<Event>,
+        Result<OptionalTransitionOutcome<(), CurrentState>, ApiError<Err, (), CurrentState>>,
+    ) {
+        match self {
+            MaybeFatalOrSuccessTransition::Success(event) =>
+                (PersistActions::SaveAndClose(event), Ok(OptionalTransitionOutcome::Progress(()))),
+            MaybeFatalOrSuccessTransition::NoResults(current_state) =>
+                (PersistActions::NoOp, Ok(OptionalTransitionOutcome::Stasis(current_state))),
+            MaybeFatalOrSuccessTransition::Transient(RejectTransient(error, current_state)) =>
+                (PersistActions::NoOp, Err(ApiError::Transient(error, current_state))),
+            MaybeFatalOrSuccessTransition::Fatal(RejectFatal(event, error)) =>
+                (PersistActions::SaveAndClose(event), Err(ApiError::Fatal(error))),
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn save<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        OptionalTransitionOutcome<(), CurrentState>,
+        PersistedError<Err, P::InternalStorageError, (), CurrentState>,
+    >
+    where
+        P: Persister<SessionEvent = Event>,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute(persister).map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub async fn save_async<P>(
+        self,
+        persister: &P,
+    ) -> Result<
+        OptionalTransitionOutcome<(), CurrentState>,
+        PersistedError<Err, P::InternalStorageError, (), CurrentState>,
+    >
+    where
+        P: AsyncPersister<SessionEvent = Event>,
+        Err: Send,
+        CurrentState: Send,
+        Event: Send,
+    {
+        let (actions, outcome) = self.deconstruct();
+        actions.execute_async(persister).await.map_err(InternalPersistedError::Storage)?;
+        Ok(outcome.map_err(InternalPersistedError::Api)?)
+    }
+}
+
+/// Wrapper that marks the progression of a state machine
+pub struct AcceptNextState<Event, NextState>(Event, NextState);
+
+enum MaybeTerminalOutcome<Event, NextState> {
+    Advance(AcceptNextState<Event, NextState>),
+    Terminate(Event),
+}
+
+enum MaybeTerminalSuccessOutcome<Event, NextState, Err, CurrentState> {
+    Advance(AcceptNextState<Event, NextState>),
+    Terminate(Event),
+    FatalAdvance(Event, NextState, Err),
+    FatalTerminate(Event, Err),
+    Transient(Err, CurrentState),
+}
+
+/// Wrapper that represents either a successful state transition or indicates no state change occurred
+pub enum AcceptOptionalTransition<Event, NextState, CurrentState> {
+    /// A state transition that was successful and returned session event to be persisted
+    Success(AcceptNextState<Event, NextState>),
+    /// A state transition returned no value. Caller should resume from the current state
+    NoResults(CurrentState),
+}
+
+/// Wrapper representing a fatal or transient rejection of a state transition.
+pub enum Rejection<Event, Err, ErrorState = (), CurrentState = ()> {
+    Fatal(RejectFatal<Event, Err>),
+    Transient(RejectTransient<Err, CurrentState>),
+    ReplyableError(RejectReplyableError<Event, ErrorState, Err>),
+}
+
+impl<Event, Err, ErrorState, CurrentState> Rejection<Event, Err, ErrorState, CurrentState> {
+    pub fn fatal(event: Event, error: Err) -> Self { Rejection::Fatal(RejectFatal(event, error)) }
+    pub fn transient(error: Err, current_state: CurrentState) -> Self {
+        Rejection::Transient(RejectTransient(error, current_state))
+    }
+    pub fn replyable_error(event: Event, error_state: ErrorState, error: Err) -> Self {
+        Rejection::ReplyableError(RejectReplyableError(event, error_state, error))
+    }
+}
+
+/// Represents a fatal rejection of a state transition.
+/// When this error occurs, the session must be closed and cannot be resumed.
+pub struct RejectFatal<Event, Err>(pub(crate) Event, pub(crate) Err);
+/// Represents a transient rejection of a state transition.
+/// When this error occurs, nothing is persisted and the session should resume
+/// from the current state, which is carried alongside the error so the caller
+/// can retry in place.
+pub struct RejectTransient<Err, CurrentState = ()>(pub(crate) Err, pub(crate) CurrentState);
+/// Represents a replyable error that transitions to an error state but keeps the session open.
+/// When this error occurs, the session transitions to the ErrorState.
+pub struct RejectReplyableError<Event, ErrorState, Err>(
+    pub(crate) Event,
+    pub(crate) ErrorState,
+    pub(crate) Err,
+);
+/// Represents a bad initial inputs to the state machine.
+/// When this error occurs, the session cannot be created.
+/// The wrapper contains the error and should be returned to the caller.
+pub struct RejectBadInitInputs<Err>(Err);
+
+impl<Err: std::error::Error, CurrentState> fmt::Display for RejectTransient<Err, CurrentState> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let RejectTransient(err, _) = self;
+        write!(f, "{err}")
+    }
+}
+
+/// Error type that represents all possible errors that can be returned when processing a state transition
+#[derive(Debug, PartialEq)]
+pub struct PersistedError<
+    ApiError: std::error::Error,
+    StorageError: std::error::Error,
+    ErrorState: fmt::Debug = (),
+    CurrentState: fmt::Debug = (),
+>(InternalPersistedError<ApiError, StorageError, ErrorState, CurrentState>);
+
+impl<ApiErr, StorageErr, ErrorState, CurrentState>
+    PersistedError<ApiErr, StorageErr, ErrorState, CurrentState>
+where
+    StorageErr: std::error::Error,
+    ApiErr: std::error::Error,
+    ErrorState: fmt::Debug,
+    CurrentState: fmt::Debug,
+{
+    #[allow(dead_code)]
+    pub fn storage_error(self) -> Option<StorageErr> {
+        match self.0 {
+            InternalPersistedError::Storage(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    /// The protocol error that rejected the transition, regardless of whether
+    /// it was transient or fatal.
+    ///
+    /// On a transient error this drops the current state carried by the
+    /// error; use [`Self::transient_state`] to recover it instead.
+    pub fn api_error(self) -> Option<ApiErr> {
+        match self.0 {
+            InternalPersistedError::Api(
+                ApiError::Fatal(e) | ApiError::Transient(e, _) | ApiError::FatalWithState(e, _),
+            ) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub fn storage_error_ref(&self) -> Option<&StorageErr> {
+        match &self.0 {
+            InternalPersistedError::Storage(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub fn api_error_ref(&self) -> Option<&ApiErr> {
+        match &self.0 {
+            InternalPersistedError::Api(
+                ApiError::Fatal(e) | ApiError::Transient(e, _) | ApiError::FatalWithState(e, _),
+            ) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub fn fatal_state(self) -> Option<ErrorState> {
+        match self.0 {
+            InternalPersistedError::Api(ApiError::FatalWithState(_, state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// The typestate to retry from after a transient rejection.
+    ///
+    /// Transient rejections persist nothing, so the returned state is exactly
+    /// the state the failed transition was called on: retry by calling the
+    /// same transition on it again. Returns `None` for fatal and storage
+    /// errors. A storage error means the transition outcome is unknown, and
+    /// recovery is replaying the event log rather than retrying in memory.
+    pub fn transient_state(self) -> Option<CurrentState> {
+        match self.0 {
+            InternalPersistedError::Api(ApiError::Transient(_, state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// True if the transition was rejected transiently: nothing was
+    /// persisted, and the session can be retried in place from the state
+    /// returned by [`Self::transient_state`].
+    pub fn is_transient(&self) -> bool {
+        matches!(self.0, InternalPersistedError::Api(ApiError::Transient(..)))
+    }
+
+    /// True if the transition failed fatally: an event was persisted, and
+    /// the session is closed or has moved to an error state (see
+    /// [`Self::fatal_state`]).
+    ///
+    /// Storage errors are neither transient nor fatal. They mean the
+    /// transition outcome is unknown, and recovery is replaying the event
+    /// log; detect them with [`Self::storage_error_ref`].
+    pub fn is_fatal(&self) -> bool {
+        matches!(
+            self.0,
+            InternalPersistedError::Api(ApiError::Fatal(_) | ApiError::FatalWithState(..))
+        )
+    }
+}
+
+impl<
+        ApiError: std::error::Error,
+        StorageError: std::error::Error,
+        ErrorState: fmt::Debug,
+        CurrentState: fmt::Debug,
+    > From<InternalPersistedError<ApiError, StorageError, ErrorState, CurrentState>>
+    for PersistedError<ApiError, StorageError, ErrorState, CurrentState>
+{
+    fn from(
+        value: InternalPersistedError<ApiError, StorageError, ErrorState, CurrentState>,
+    ) -> Self {
+        PersistedError(value)
+    }
+}
+
+impl<
+        ApiError: std::error::Error,
+        StorageError: std::error::Error,
+        ErrorState: fmt::Debug,
+        CurrentState: fmt::Debug,
+    > std::error::Error for PersistedError<ApiError, StorageError, ErrorState, CurrentState>
+{
+}
+
+impl<
+        ApiErr: std::error::Error,
+        StorageError: std::error::Error,
+        ErrorState: fmt::Debug,
+        CurrentState: fmt::Debug,
+    > fmt::Display for PersistedError<ApiErr, StorageError, ErrorState, CurrentState>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            InternalPersistedError::Api(ApiError::Transient(err, _)) =>
+                write!(f, "Transient error: {err}"),
+            InternalPersistedError::Api(
+                ApiError::Fatal(err) | ApiError::FatalWithState(err, _),
+            ) => write!(f, "Fatal error: {err}"),
+            InternalPersistedError::Storage(err) => write!(f, "Storage error: {err}"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum ApiError<Err, ErrorState = (), CurrentState = ()> {
+    /// Error indicating that the session should be retried from the same state,
+    /// which is returned alongside the error
+    Transient(Err, CurrentState),
+    /// Error indicating that the session is terminally closed
+    Fatal(Err),
+    /// Fatal error that results in a state transition to ErrorState
+    FatalWithState(Err, ErrorState),
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum InternalPersistedError<ApiErr, StorageErr, ErrorState = (), CurrentState = ()>
+where
+    ApiErr: std::error::Error,
+    StorageErr: std::error::Error,
+    ErrorState: fmt::Debug,
+    CurrentState: fmt::Debug,
+{
+    /// Error indicating that the session failed to progress to the next success state.
+    Api(ApiError<ApiErr, ErrorState, CurrentState>),
+    /// Error indicating that application failed to save the session event.
+    Storage(StorageErr),
+}
+
+impl<Err, StorageErr, ErrorState, CurrentState> From<ApiError<Err, ErrorState, CurrentState>>
+    for InternalPersistedError<Err, StorageErr, ErrorState, CurrentState>
+where
+    Err: std::error::Error,
+    StorageErr: std::error::Error,
+    ErrorState: fmt::Debug,
+    CurrentState: fmt::Debug,
+{
+    fn from(api: ApiError<Err, ErrorState, CurrentState>) -> Self {
+        InternalPersistedError::Api(api)
+    }
+}
+
+/// Represents a state transition that either progresses to a new state or maintains the current state
+#[derive(Debug, PartialEq)]
+pub enum OptionalTransitionOutcome<NextState, CurrentState> {
+    /// A successful state transition that returned a next state
+    Progress(NextState),
+    /// A state transition returned no value. Caller should resume from the current state
+    Stasis(CurrentState),
+}
+
+/// A session that can persist events to an append-only log.
+/// An append-only log of the events one state machine produced.
+///
+/// A persister value is one log. Storage that holds many logs decides how to
+/// address them; this trait only ever sees the one it was handed.
+pub trait Persister {
+    /// Whatever the storage layer underneath fails with.
+    type InternalStorageError: std::error::Error + Send + Sync + 'static;
+    /// The events this log records.
+    type SessionEvent;
+
+    /// Append one event to the log.
+    fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError>;
+
+    /// Every event in the log, in the order they were saved.
+    fn load(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError>;
+
+    /// Close the log, after which nothing more is appended.
+    ///
+    /// A state machine closes its log when it reaches a terminal state,
+    /// whether that is success or a fatal error.
+    fn close(&self) -> Result<(), Self::InternalStorageError>;
+}
+
+/// Async version of [`Persister`] for use in async contexts.
+//
+// Methods use `impl Future<...> + Send` instead of `async fn` because `async fn` in traits
+// doesn't guarantee the returned future is `Send`. This triggers the `async_fn_in_trait` lint.
+// https://doc.rust-lang.org/stable/nightly-rustc/rustc_lint/async_fn_in_trait/static.ASYNC_FN_IN_TRAIT.html
+pub trait AsyncPersister: Send + Sync {
+    /// Whatever the storage layer underneath fails with.
+    type InternalStorageError: std::error::Error + Send + Sync + 'static;
+    /// The events this log records.
+    type SessionEvent: Send;
+
+    /// Append one event to the log.
+    fn save_event(
+        &self,
+        event: Self::SessionEvent,
+    ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send;
+
+    /// Every event in the log, in the order they were saved.
+    fn load(
+        &self,
+    ) -> impl std::future::Future<
+        Output = Result<
+            Box<dyn Iterator<Item = Self::SessionEvent> + Send>,
+            Self::InternalStorageError,
+        >,
+    > + Send;
+
+    /// Close the log, after which nothing more is appended.
+    ///
+    /// A state machine closes its log when it reaches a terminal state,
+    /// whether that is success or a fatal error.
+    fn close(
+        &self,
+    ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send;
+}
+
+/// In-memory persister for replaying sessions and introspecting events.
+pub struct InMemoryPersister<V> {
+    pub(crate) inner: std::sync::Mutex<InnerStorage<V>>,
+}
+
+impl<V> Default for InMemoryPersister<V> {
+    fn default() -> Self { Self { inner: std::sync::Mutex::new(InnerStorage::default()) } }
+}
+
+impl<V: Clone> InMemoryPersister<V> {
+    /// Every event saved so far, in order.
+    pub fn events(&self) -> Vec<V> {
+        self.inner.lock().expect("Lock should not be poisoned").events.clone()
+    }
+
+    /// Whether [`Persister::close`] has been called.
+    pub fn is_closed(&self) -> bool {
+        self.inner.lock().expect("Lock should not be poisoned").is_closed
+    }
+}
+
+pub(crate) struct InnerStorage<V> {
+    pub(crate) events: Vec<V>,
+    pub(crate) is_closed: bool,
+}
+
+impl<V> Default for InnerStorage<V> {
+    fn default() -> Self { Self { events: vec![], is_closed: false } }
+}
+
+impl<V> Persister for InMemoryPersister<V>
+where
+    V: Clone + 'static,
+{
+    type InternalStorageError = std::convert::Infallible;
+    type SessionEvent = V;
+
+    fn save_event(&self, event: Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+        self.inner.lock().expect("Lock should not be poisoned").events.push(event);
+        Ok(())
+    }
+
+    fn load(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError> {
+        let events = self.inner.lock().expect("Lock should not be poisoned").events.clone();
+        Ok(Box::new(events.into_iter()))
+    }
+
+    fn close(&self) -> Result<(), Self::InternalStorageError> {
+        self.inner.lock().expect("Lock should not be poisoned").is_closed = true;
+        Ok(())
+    }
+}
+
+/// Async in-memory persister for replaying async sessions and introspecting events.
+///
+/// The lock is never held across an await, so a std mutex suffices and no async runtime is required.
+pub struct InMemoryAsyncPersister<V> {
+    pub(crate) inner: std::sync::Mutex<InnerStorage<V>>,
+}
+
+impl<V> Default for InMemoryAsyncPersister<V> {
+    fn default() -> Self { Self { inner: std::sync::Mutex::new(InnerStorage::default()) } }
+}
+
+impl<V: Clone> InMemoryAsyncPersister<V> {
+    /// Every event saved so far, in order.
+    pub fn events(&self) -> Vec<V> {
+        self.inner.lock().expect("Lock should not be poisoned").events.clone()
+    }
+
+    /// Whether [`AsyncPersister::close`] has been called.
+    pub fn is_closed(&self) -> bool {
+        self.inner.lock().expect("Lock should not be poisoned").is_closed
+    }
+}
+
+impl<V> AsyncPersister for InMemoryAsyncPersister<V>
+where
+    V: Clone + Send + Sync + 'static,
+{
+    type InternalStorageError = std::convert::Infallible;
+    type SessionEvent = V;
+
+    async fn save_event(
+        &self,
+        event: Self::SessionEvent,
+    ) -> Result<(), Self::InternalStorageError> {
+        self.inner.lock().expect("Lock should not be poisoned").events.push(event);
+        Ok(())
+    }
+
+    async fn load(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent> + Send>, Self::InternalStorageError>
+    {
+        let events = self.inner.lock().expect("Lock should not be poisoned").events.clone();
+        Ok(Box::new(events.into_iter()))
+    }
+
+    async fn close(&self) -> Result<(), Self::InternalStorageError> {
+        self.inner.lock().expect("Lock should not be poisoned").is_closed = true;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::{Deserialize, Serialize};
+
+    use super::*;
+
+    type InMemoryTestState = String;
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct InMemoryTestEvent(String);
+
+    #[derive(Debug, Clone, PartialEq)]
+    /// Dummy error type for testing
+    struct InMemoryTestError {}
+
+    impl std::error::Error for InMemoryTestError {}
+
+    impl fmt::Display for InMemoryTestError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "InMemoryTestError")
+        }
+    }
+
+    struct TestCase<Transition, SuccessState, ErrorState> {
+        make_transition: Box<dyn Fn() -> Transition>,
+        expected_result: ExpectedResult<SuccessState, ErrorState>,
+    }
+
+    struct ExpectedResult<SuccessState, ErrorState> {
+        /// Events that should be saved
+        events: Vec<InMemoryTestEvent>,
+        /// Whether the session should be closed
+        is_closed: bool,
+        /// Error that should be returned
+        error: Option<ErrorState>,
+        /// Success state if one exists for this test case
+        success: Option<SuccessState>,
+    }
+
+    fn verify_sync<
+        SuccessState: std::fmt::Debug + PartialEq,
+        ErrorState: std::error::Error + PartialEq,
+    >(
+        persister: &InMemoryPersister<InMemoryTestEvent>,
+        result: Result<SuccessState, ErrorState>,
+        expected_result: &ExpectedResult<SuccessState, ErrorState>,
+    ) {
+        let events = persister.load().expect("Persister should not fail").collect::<Vec<_>>();
+        assert_eq!(events.len(), expected_result.events.len());
+        for (event, expected_event) in events.iter().zip(expected_result.events.iter()) {
+            assert_eq!(event.0, expected_event.0);
+        }
+
+        assert_eq!(
+            persister.inner.lock().expect("Lock should not be poisoned").is_closed,
+            expected_result.is_closed
+        );
+
+        match (&result, &expected_result.error) {
+            (Ok(actual), None) => {
+                assert_eq!(Some(actual), expected_result.success.as_ref());
+            }
+            (Err(actual), Some(expected)) => {
+                assert_eq!(actual, expected);
+            }
+            _ => panic!("Unexpected result state"),
+        }
+    }
+
+    async fn verify_async<
+        SuccessState: std::fmt::Debug + PartialEq + Send,
+        ErrorState: std::error::Error + PartialEq + Send,
+    >(
+        persister: &InMemoryAsyncPersister<InMemoryTestEvent>,
+        result: Result<SuccessState, ErrorState>,
+        expected_result: &ExpectedResult<SuccessState, ErrorState>,
+    ) {
+        let events = persister.load().await.expect("Persister should not fail").collect::<Vec<_>>();
+        assert_eq!(events.len(), expected_result.events.len());
+        for (event, expected_event) in events.iter().zip(expected_result.events.iter()) {
+            assert_eq!(event.0, expected_event.0);
+        }
+
+        assert_eq!(persister.is_closed(), expected_result.is_closed);
+
+        match (&result, &expected_result.error) {
+            (Ok(actual), None) => {
+                assert_eq!(Some(actual), expected_result.success.as_ref());
+            }
+            (Err(actual), Some(exp)) => {
+                assert_eq!(actual, exp);
+            }
+            _ => panic!("Unexpected result state"),
+        }
+    }
+
+    macro_rules! run_test_cases {
+        ($test_cases:expr) => {
+            for test in &$test_cases {
+                let persister = InMemoryPersister::default();
+                let result = (test.make_transition)().save(&persister);
+                verify_sync(&persister, result, &test.expected_result);
+
+                let persister = InMemoryAsyncPersister::default();
+                let result = (test.make_transition)().save_async(&persister).await;
+                verify_async(&persister, result, &test.expected_result).await;
+            }
+        };
+    }
+
+    #[tokio::test]
+    async fn test_initial_transition() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let next_state = "Next state".to_string();
+
+        let test_cases = vec![TestCase {
+            make_transition: Box::new({
+                let event = event.clone();
+                let next_state = next_state.clone();
+                move || NextStateTransition::success(event.clone(), next_state.clone())
+            }),
+            expected_result: ExpectedResult {
+                events: vec![event.clone()],
+                is_closed: false,
+                error: None,
+                success: Some(next_state.clone()),
+            },
+        }];
+
+        run_test_cases!(test_cases);
+    }
+
+    #[tokio::test]
+    async fn test_maybe_transient_transition() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let next_state = "Next state".to_string();
+        let current_state = "Current state".to_string();
+
+        let test_cases = vec![
+            TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    let next_state = next_state.clone();
+                    move || MaybeTransientTransition::success(event.clone(), next_state.clone())
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![event.clone()],
+                    is_closed: false,
+                    error: None,
+                    success: Some(next_state.clone()),
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let current_state = current_state.clone();
+                    move || {
+                        MaybeTransientTransition::transient(
+                            InMemoryTestError {},
+                            current_state.clone(),
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Transient(
+                            InMemoryTestError {},
+                            current_state.clone(),
+                        ))
+                        .into(),
+                    ),
+                    success: None,
+                },
+            },
+        ];
+
+        run_test_cases!(test_cases);
+    }
+
+    #[tokio::test]
+    async fn test_next_state_transition() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let next_state = "Next state".to_string();
+
+        let test_cases = vec![TestCase {
+            make_transition: Box::new({
+                let event = event.clone();
+                let next_state = next_state.clone();
+                move || NextStateTransition::success(event.clone(), next_state.clone())
+            }),
+            expected_result: ExpectedResult {
+                events: vec![event.clone()],
+                is_closed: false,
+                error: None,
+                success: Some(next_state.clone()),
+            },
+        }];
+
+        run_test_cases!(test_cases);
+    }
+
+    #[tokio::test]
+    async fn test_maybe_terminal_transition() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let close_event = InMemoryTestEvent("close".to_string());
+        let next_state = "Next state".to_string();
+
+        let test_cases = vec![
+            TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    let next_state = next_state.clone();
+                    move || MaybeTerminalTransition::advance(event.clone(), next_state.clone())
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![event.clone()],
+                    is_closed: false,
+                    error: None,
+                    success: Some(Some(next_state.clone())),
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let close_event = close_event.clone();
+                    move || {
+                        MaybeTerminalTransition::<_, InMemoryTestState>::terminate(
+                            close_event.clone(),
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![close_event.clone()],
+                    is_closed: true,
+                    error: None,
+                    success: Some(None),
+                },
+            },
+        ];
+
+        run_test_cases!(test_cases);
+    }
+
+    #[tokio::test]
+    async fn test_maybe_terminal_success_transition() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let close_event = InMemoryTestEvent("close".to_string());
+        let fatal_event = InMemoryTestEvent("fatal".to_string());
+        let fatal_close_event = InMemoryTestEvent("fatal close".to_string());
+        let next_state = "Next state".to_string();
+
+        let test_cases = vec![
+            TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    let next_state = next_state.clone();
+                    move || {
+                        MaybeTerminalSuccessTransition::advance(event.clone(), next_state.clone())
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![event.clone()],
+                    is_closed: false,
+                    error: None,
+                    success: Some(Some(next_state.clone())),
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let close_event = close_event.clone();
+                    move || {
+                        MaybeTerminalSuccessTransition::<
+                            _,
+                            InMemoryTestState,
+                            InMemoryTestError,
+                            InMemoryTestState,
+                        >::terminate(close_event.clone())
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![close_event.clone()],
+                    is_closed: true,
+                    error: None,
+                    success: Some(None),
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let fatal_event = fatal_event.clone();
+                    let next_state = next_state.clone();
+                    move || {
+                        MaybeTerminalSuccessTransition::fatal_advance(
+                            fatal_event.clone(),
+                            next_state.clone(),
+                            InMemoryTestError {},
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![fatal_event.clone()],
+                    is_closed: false,
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::FatalWithState(
+                            InMemoryTestError {},
+                            next_state.clone(),
+                        ))
+                        .into(),
+                    ),
+                    success: None,
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let fatal_close_event = fatal_close_event.clone();
+                    move || {
+                        MaybeTerminalSuccessTransition::<
+                            _,
+                            InMemoryTestState,
+                            InMemoryTestError,
+                            InMemoryTestState,
+                        >::fatal_terminate(
+                            fatal_close_event.clone(), InMemoryTestError {}
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![fatal_close_event.clone()],
+                    is_closed: true,
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
+                    ),
+                    success: None,
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let current_state = "Current state".to_string();
+                    move || {
+                        MaybeTerminalSuccessTransition::<
+                            InMemoryTestEvent,
+                            InMemoryTestState,
+                            InMemoryTestError,
+                            InMemoryTestState,
+                        >::transient(
+                            InMemoryTestError {}, current_state.clone()
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Transient(
+                            InMemoryTestError {},
+                            "Current state".to_string(),
+                        ))
+                        .into(),
+                    ),
+                    success: None,
+                },
+            },
+        ];
+
+        run_test_cases!(test_cases);
+    }
+
+    #[tokio::test]
+    async fn test_maybe_fatal_transition() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let error_event = InMemoryTestEvent("error event".to_string());
+        let next_state = "Next state".to_string();
+
+        let test_cases = vec![
+            TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    let next_state = next_state.clone();
+                    move || MaybeFatalTransition::success(event.clone(), next_state.clone())
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![event.clone()],
+                    is_closed: false,
+                    error: None,
+                    success: Some(next_state.clone()),
+                },
+            },
+            TestCase {
+                make_transition: Box::new(|| {
+                    MaybeFatalTransition::transient(
+                        InMemoryTestError {},
+                        "Current state".to_string(),
+                    )
+                }),
+                expected_result: ExpectedResult::<
+                    _,
+                    PersistedError<InMemoryTestError, std::convert::Infallible, (), String>,
+                > {
+                    events: vec![],
+                    is_closed: false,
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Transient(
+                            InMemoryTestError {},
+                            "Current state".to_string(),
+                        ))
+                        .into(),
+                    ),
+                    success: None,
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let error_event = error_event.clone();
+                    move || MaybeFatalTransition::fatal(error_event.clone(), InMemoryTestError {})
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![error_event.clone()],
+                    is_closed: true,
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
+                    ),
+                    success: None,
+                },
+            },
+        ];
+
+        run_test_cases!(test_cases);
+    }
+
+    #[tokio::test]
+    async fn test_maybe_success_transition_with_no_results() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let error_event = InMemoryTestEvent("error event".to_string());
+        let current_state = "Current state".to_string();
+        let success_value = "Success value".to_string();
+
+        let test_cases = vec![
+            TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    let success_value = success_value.clone();
+                    move || {
+                        MaybeSuccessTransitionWithNoResults::success(
+                            success_value.clone(),
+                            event.clone(),
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![event.clone()],
+                    is_closed: true,
+                    error: None,
+                    success: Some(OptionalTransitionOutcome::Progress(success_value.clone())),
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let current_state = current_state.clone();
+                    move || MaybeSuccessTransitionWithNoResults::no_results(current_state.clone())
+                }),
+                expected_result: ExpectedResult::<
+                    OptionalTransitionOutcome<InMemoryTestState, InMemoryTestState>,
+                    PersistedError<
+                        InMemoryTestError,
+                        std::convert::Infallible,
+                        (),
+                        InMemoryTestState,
+                    >,
+                > {
+                    events: vec![],
+                    is_closed: false,
+                    error: None,
+                    success: Some(OptionalTransitionOutcome::Stasis(current_state.clone())),
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let current_state = current_state.clone();
+                    move || {
+                        MaybeSuccessTransitionWithNoResults::transient(
+                            InMemoryTestError {},
+                            current_state.clone(),
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Transient(
+                            InMemoryTestError {},
+                            current_state.clone(),
+                        ))
+                        .into(),
+                    ),
+                    success: None,
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let error_event = error_event.clone();
+                    move || {
+                        MaybeSuccessTransitionWithNoResults::fatal(
+                            error_event.clone(),
+                            InMemoryTestError {},
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![error_event.clone()],
+                    is_closed: true,
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
+                    ),
+                    success: None,
+                },
+            },
+        ];
+
+        run_test_cases!(test_cases);
+    }
+
+    #[tokio::test]
+    async fn test_maybe_fatal_transition_with_no_results() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let error_event = InMemoryTestEvent("error event".to_string());
+        let current_state = "Current state".to_string();
+        let next_state = "Next state".to_string();
+
+        let test_cases = vec![
+            TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    let next_state = next_state.clone();
+                    move || {
+                        MaybeFatalTransitionWithNoResults::success(
+                            event.clone(),
+                            next_state.clone(),
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![event.clone()],
+                    is_closed: false,
+                    error: None,
+                    success: Some(OptionalTransitionOutcome::Progress(next_state.clone())),
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let current_state = current_state.clone();
+                    move || MaybeFatalTransitionWithNoResults::no_results(current_state.clone())
+                }),
+                expected_result: ExpectedResult::<
+                    OptionalTransitionOutcome<InMemoryTestState, InMemoryTestState>,
+                    PersistedError<
+                        InMemoryTestError,
+                        std::convert::Infallible,
+                        (),
+                        InMemoryTestState,
+                    >,
+                > {
+                    events: vec![],
+                    is_closed: false,
+                    error: None,
+                    success: Some(OptionalTransitionOutcome::Stasis(current_state.clone())),
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let current_state = current_state.clone();
+                    move || {
+                        MaybeFatalTransitionWithNoResults::transient(
+                            InMemoryTestError {},
+                            current_state.clone(),
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Transient(
+                            InMemoryTestError {},
+                            current_state.clone(),
+                        ))
+                        .into(),
+                    ),
+                    success: None,
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let error_event = error_event.clone();
+                    move || {
+                        MaybeFatalTransitionWithNoResults::fatal(
+                            error_event.clone(),
+                            InMemoryTestError {},
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![error_event.clone()],
+                    is_closed: true,
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
+                    ),
+                    success: None,
+                },
+            },
+        ];
+
+        run_test_cases!(test_cases);
+    }
+
+    #[tokio::test]
+    async fn test_maybe_fatal_or_success_transition() {
+        let event = InMemoryTestEvent("foo".to_string());
+        let error_event = InMemoryTestEvent("error event".to_string());
+        let current_state = "Current state".to_string();
+
+        let test_cases = vec![
+            TestCase {
+                make_transition: Box::new({
+                    let event = event.clone();
+                    move || MaybeFatalOrSuccessTransition::Success(event.clone())
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![event.clone()],
+                    is_closed: true,
+                    error: None,
+                    success: Some(OptionalTransitionOutcome::Progress(())),
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let current_state = current_state.clone();
+                    move || MaybeFatalOrSuccessTransition::NoResults(current_state.clone())
+                }),
+                expected_result: ExpectedResult::<
+                    OptionalTransitionOutcome<(), InMemoryTestState>,
+                    PersistedError<
+                        InMemoryTestError,
+                        std::convert::Infallible,
+                        (),
+                        InMemoryTestState,
+                    >,
+                > {
+                    events: vec![],
+                    is_closed: false,
+                    error: None,
+                    success: Some(OptionalTransitionOutcome::Stasis(current_state.clone())),
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let error_event = error_event.clone();
+                    move || {
+                        MaybeFatalOrSuccessTransition::fatal(
+                            error_event.clone(),
+                            InMemoryTestError {},
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![error_event.clone()],
+                    is_closed: true,
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Fatal(InMemoryTestError {})).into(),
+                    ),
+                    success: None,
+                },
+            },
+            TestCase {
+                make_transition: Box::new({
+                    let current_state = current_state.clone();
+                    move || {
+                        MaybeFatalOrSuccessTransition::transient(
+                            InMemoryTestError {},
+                            current_state.clone(),
+                        )
+                    }
+                }),
+                expected_result: ExpectedResult {
+                    events: vec![],
+                    is_closed: false,
+                    error: Some(
+                        InternalPersistedError::Api(ApiError::Transient(
+                            InMemoryTestError {},
+                            current_state.clone(),
+                        ))
+                        .into(),
+                    ),
+                    success: None,
+                },
+            },
+        ];
+
+        run_test_cases!(test_cases);
+    }
+
+    #[test]
+    fn test_persisted_error_helpers() {
+        let api_err = InMemoryTestError {};
+
+        // Test Storage error case
+        let storage_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
+            InternalPersistedError::Storage(InMemoryTestError {}),
+        );
+        assert!(storage_error.storage_error_ref().is_some());
+        assert!(storage_error.api_error_ref().is_none());
+        assert!(!storage_error.is_transient());
+        assert!(!storage_error.is_fatal());
+        assert_eq!(storage_error.transient_state(), None);
+
+        // Test Internal API error cases
+        let fatal_error = PersistedError::<InMemoryTestError, InMemoryTestError>(
+            InternalPersistedError::Api(ApiError::Fatal(api_err.clone())),
+        );
+        assert!(fatal_error.storage_error_ref().is_none());
+        assert!(fatal_error.api_error_ref().is_some());
+        assert!(!fatal_error.is_transient());
+        assert!(fatal_error.is_fatal());
+        assert_eq!(fatal_error.transient_state(), None);
+
+        let fatal_with_state_error = PersistedError::<InMemoryTestError, InMemoryTestError, String>(
+            InternalPersistedError::Api(ApiError::FatalWithState(
+                api_err.clone(),
+                "Error state".to_string(),
+            )),
+        );
+        assert!(fatal_with_state_error.storage_error_ref().is_none());
+        assert!(fatal_with_state_error.api_error_ref().is_some());
+        assert!(!fatal_with_state_error.is_transient());
+        assert!(fatal_with_state_error.is_fatal());
+        assert_eq!(fatal_with_state_error.fatal_state(), Some("Error state".to_string()));
+
+        let transient_error = PersistedError::<InMemoryTestError, InMemoryTestError, (), String>(
+            InternalPersistedError::Api(ApiError::Transient(
+                api_err.clone(),
+                "Current state".to_string(),
+            )),
+        );
+        assert!(transient_error.storage_error_ref().is_none());
+        assert!(transient_error.api_error_ref().is_some());
+        assert!(transient_error.is_transient());
+        assert!(!transient_error.is_fatal());
+        assert_eq!(transient_error.transient_state(), Some("Current state".to_string()));
+    }
+
+    /// Records every call and fails the operations it is told to.
+    #[derive(Default)]
+    struct RecordingPersister {
+        calls: std::cell::RefCell<Vec<&'static str>>,
+        fail_save: bool,
+        fail_close: bool,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct OperationFailed(&'static str);
+
+    impl std::error::Error for OperationFailed {}
+
+    impl fmt::Display for OperationFailed {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{} failed", self.0) }
+    }
+
+    impl Persister for RecordingPersister {
+        type InternalStorageError = OperationFailed;
+        type SessionEvent = u8;
+
+        fn save_event(&self, _event: u8) -> Result<(), OperationFailed> {
+            self.calls.borrow_mut().push("save");
+            if self.fail_save {
+                Err(OperationFailed("save"))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn load(&self) -> Result<Box<dyn Iterator<Item = u8>>, OperationFailed> {
+            Err(OperationFailed("load"))
+        }
+
+        fn close(&self) -> Result<(), OperationFailed> {
+            self.calls.borrow_mut().push("close");
+            if self.fail_close {
+                Err(OperationFailed("close"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn save_and_close_saves_before_closing() {
+        let persister = RecordingPersister::default();
+        PersistActions::SaveAndClose(1).execute(&persister).expect("nothing fails");
+        assert_eq!(*persister.calls.borrow(), ["save", "close"]);
+    }
+
+    #[test]
+    fn a_failed_save_does_not_close_the_log() {
+        let persister = RecordingPersister { fail_save: true, ..Default::default() };
+        let err = PersistActions::SaveAndClose(1).execute(&persister).expect_err("save fails");
+        assert_eq!(err, OperationFailed("save"));
+        assert_eq!(*persister.calls.borrow(), ["save"]);
+    }
+
+    #[test]
+    fn a_failed_close_still_records_the_event() {
+        let persister = RecordingPersister { fail_close: true, ..Default::default() };
+        let err = PersistActions::SaveAndClose(1).execute(&persister).expect_err("close fails");
+        assert_eq!(err, OperationFailed("close"));
+        assert_eq!(*persister.calls.borrow(), ["save", "close"]);
+    }
+
+    #[test]
+    fn a_no_op_touches_nothing() {
+        let persister = RecordingPersister::default();
+        PersistActions::<u8>::NoOp.execute(&persister).expect("nothing to fail");
+        assert!(persister.calls.borrow().is_empty());
+    }
+}

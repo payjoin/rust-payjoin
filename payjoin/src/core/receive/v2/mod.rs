@@ -1729,9 +1729,7 @@ pub mod test {
 
     use super::*;
     use crate::output_substitution::OutputSubstitution;
-    use crate::persist::{
-        InMemoryPersister, OptionalTransitionOutcome, RejectTransient, Rejection, SessionPersister,
-    };
+    use crate::persist::{InMemoryPersister, OptionalTransitionOutcome, SessionPersister};
     use crate::receive::optional_parameters::Params;
     use crate::receive::v2;
     use crate::ImplementationError;
@@ -1794,9 +1792,8 @@ pub mod test {
         expected_events: &[SessionEvent],
         expected_closed: bool,
     ) {
-        let inner = persister.inner.lock().expect("Shouldn't be poisoned");
-        assert_eq!(&*inner.events, expected_events);
-        assert_eq!(inner.is_closed, expected_closed);
+        assert_eq!(persister.events(), expected_events);
+        assert_eq!(persister.is_closed(), expected_closed);
     }
 
     fn ohttp_response_for(req_body: &[u8], status: http::StatusCode) -> Vec<u8> {
@@ -1910,8 +1907,8 @@ pub mod test {
             .save(&persister)
             .expect("InMemoryPersister shouldn't fail");
         assert!(matches!(res, OptionalTransitionOutcome::Stasis(_)));
-        assert!(!persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
-        assert_eq!(persister.inner.lock().expect("Shouldn't be poisoned").events.len(), 0);
+        assert!(!persister.is_closed());
+        assert_eq!(persister.events().len(), 0);
 
         // Payjoin was broadcasted, should progress to success
         let persister = InMemoryPersister::default();
@@ -1922,10 +1919,10 @@ pub mod test {
             .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
-        assert!(persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
-        assert_eq!(persister.inner.lock().expect("Shouldn't be poisoned").events.len(), 1);
+        assert!(persister.is_closed());
+        assert_eq!(persister.events().len(), 1);
         assert_eq!(
-            persister.inner.lock().expect("Shouldn't be poisoned").events.last(),
+            persister.events().last(),
             Some(&SessionEvent::Closed(SessionOutcome::Success(payjoin_tx.compute_txid())))
         );
 
@@ -1944,10 +1941,10 @@ pub mod test {
             .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
-        assert!(persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
-        assert_eq!(persister.inner.lock().expect("Shouldn't be poisoned").events.len(), 1);
+        assert!(persister.is_closed());
+        assert_eq!(persister.events().len(), 1);
         assert_eq!(
-            persister.inner.lock().expect("Shouldn't be poisoned").events.last(),
+            persister.events().last(),
             Some(&SessionEvent::Closed(SessionOutcome::FallbackBroadcasted))
         );
 
@@ -1980,10 +1977,10 @@ pub mod test {
             .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
-        assert!(persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
-        assert_eq!(persister.inner.lock().expect("Shouldn't be poisoned").events.len(), 1);
+        assert!(persister.is_closed());
+        assert_eq!(persister.events().len(), 1);
         assert_eq!(
-            persister.inner.lock().expect("Shouldn't be poisoned").events.last(),
+            persister.events().last(),
             Some(&SessionEvent::Closed(SessionOutcome::PayjoinProposalSent))
         );
 
@@ -2066,9 +2063,9 @@ pub mod test {
             .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
-        assert!(persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
+        assert!(persister.is_closed());
         assert_eq!(
-            persister.inner.lock().expect("Shouldn't be poisoned").events.last(),
+            persister.events().last(),
             Some(&SessionEvent::Closed(SessionOutcome::PayjoinProposalSent))
         );
 
@@ -2120,19 +2117,22 @@ pub mod test {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
 
-        match unchecked_proposal {
-            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
-                Error::Implementation(error),
-                current_state,
-            )))) => {
-                assert_eq!(
-                    error.to_string(),
-                    Error::Implementation("mock error".into()).to_string()
-                );
-                assert_eq!(current_state, expected_state);
-            }
+        let persister = InMemoryPersister::default();
+        let err = unchecked_proposal
+            .save(&persister)
+            .expect_err("transient rejection should surface as an error");
+        assert!(err.is_transient());
+        match err.api_error_ref() {
+            Some(Error::Implementation(error)) => assert_eq!(
+                error.to_string(),
+                Error::Implementation("mock error".into()).to_string()
+            ),
             _ => panic!("Expected Implementation error"),
         }
+        let current_state =
+            err.transient_state().expect("transient error carries the current state");
+        assert_eq!(current_state, expected_state);
+        assert!(persister.events().is_empty());
 
         Ok(())
     }
@@ -2170,19 +2170,22 @@ pub mod test {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
 
-        match maybe_inputs_seen {
-            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
-                Error::Implementation(error),
-                current_state,
-            )))) => {
-                assert_eq!(
-                    error.to_string(),
-                    Error::Implementation("mock error".into()).to_string()
-                );
-                assert_eq!(current_state, expected_state);
-            }
+        let persister = InMemoryPersister::default();
+        let err = maybe_inputs_seen
+            .save(&persister)
+            .expect_err("transient rejection should surface as an error");
+        assert!(err.is_transient());
+        match err.api_error_ref() {
+            Some(Error::Implementation(error)) => assert_eq!(
+                error.to_string(),
+                Error::Implementation("mock error".into()).to_string()
+            ),
             _ => panic!("Expected Implementation error"),
         }
+        let current_state =
+            err.transient_state().expect("transient error carries the current state");
+        assert_eq!(current_state, expected_state);
+        assert!(persister.events().is_empty());
 
         Ok(())
     }
@@ -2206,19 +2209,22 @@ pub mod test {
         let outputs_unknown = maybe_inputs_seen.check_no_inputs_seen_before(&mut |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
-        match outputs_unknown {
-            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
-                Error::Implementation(error),
-                current_state,
-            )))) => {
-                assert_eq!(
-                    error.to_string(),
-                    Error::Implementation("mock error".into()).to_string()
-                );
-                assert_eq!(current_state, expected_state);
-            }
+        let persister = InMemoryPersister::default();
+        let err = outputs_unknown
+            .save(&persister)
+            .expect_err("transient rejection should surface as an error");
+        assert!(err.is_transient());
+        match err.api_error_ref() {
+            Some(Error::Implementation(error)) => assert_eq!(
+                error.to_string(),
+                Error::Implementation("mock error".into()).to_string()
+            ),
             _ => panic!("Expected Implementation error"),
         }
+        let current_state =
+            err.transient_state().expect("transient error carries the current state");
+        assert_eq!(current_state, expected_state);
+        assert!(persister.events().is_empty());
 
         Ok(())
     }
@@ -2246,19 +2252,22 @@ pub mod test {
         let wants_outputs = outputs_unknown.identify_receiver_outputs(&mut |_| {
             Err(ImplementationError::new(Error::Implementation("mock error".into())))
         });
-        match wants_outputs {
-            MaybeFatalTransition(Err(Rejection::Transient(RejectTransient(
-                Error::Implementation(error),
-                current_state,
-            )))) => {
-                assert_eq!(
-                    error.to_string(),
-                    Error::Implementation("mock error".into()).to_string()
-                );
-                assert_eq!(current_state, expected_state);
-            }
+        let persister = InMemoryPersister::default();
+        let err = wants_outputs
+            .save(&persister)
+            .expect_err("transient rejection should surface as an error");
+        assert!(err.is_transient());
+        match err.api_error_ref() {
+            Some(Error::Implementation(error)) => assert_eq!(
+                error.to_string(),
+                Error::Implementation("mock error".into()).to_string()
+            ),
             _ => panic!("Expected Implementation error"),
         }
+        let current_state =
+            err.transient_state().expect("transient error carries the current state");
+        assert_eq!(current_state, expected_state);
+        assert!(persister.events().is_empty());
 
         Ok(())
     }

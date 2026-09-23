@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "event-log",
   "fuzz",
   "payjoin",
   "payjoin-cli",
@@ -10,6 +11,7 @@ members = [
 resolver = "3"
 
 [patch.crates-io]
+event-log = { path = "event-log" }
 payjoin-fuzz = { path = "fuzz" }
 payjoin = { path = "payjoin" }
 payjoin-mailroom = { path = "payjoin-mailroom" }

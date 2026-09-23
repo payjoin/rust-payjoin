@@ -6,7 +6,7 @@ source contrib/lockfile.sh
 use_lockfile Cargo-recent.lock
 
 DEPS="recent minimal"
-CRATES="payjoin payjoin-cli payjoin-mailroom"
+CRATES="event-log payjoin payjoin-cli payjoin-mailroom"
 
 for dep in $DEPS; do
     cargo --version

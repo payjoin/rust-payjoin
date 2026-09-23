@@ -100,11 +100,16 @@ impl WantsOutputs {
     }
 
     /// Substitute the receiver output script with the provided script.
+    ///
+    /// Like [`Self::replace_receiver_outputs`], this leaves the receiver holding a single
+    /// output, carrying the drain output's value. Any further receiver outputs a prior
+    /// call added are dropped, and their value goes to fees.
     pub fn substitute_receiver_script(
         self,
         output_script: &Script,
     ) -> Result<Self, OutputSubstitutionError> {
-        let output_value = self.original.original_psbt.unsigned_tx.output[self.change_vout].value;
+        // `change_vout` indexes the payjoin PSBT's outputs, not the original's.
+        let output_value = self.payjoin_psbt.unsigned_tx.output[self.change_vout].value;
         let outputs = [TxOut { value: output_value, script_pubkey: output_script.into() }];
         self.replace_receiver_outputs(outputs, output_script)
     }
@@ -313,7 +318,13 @@ impl WantsInputs {
 
         for input_pair in candidate_inputs {
             let candidate_sats = input_pair.previous_txout().value;
-            let candidate_min_out = min(min_out_sats, prior_payment_sats + candidate_sats);
+            // The receiver output value is sender-supplied, so this sum can overflow.
+            let candidate_min_out = min(
+                min_out_sats,
+                prior_payment_sats
+                    .checked_add(candidate_sats)
+                    .ok_or(InternalCoinSelectionError::AmountOverflow)?,
+            );
             let candidate_min_in = min(min_in_sats, candidate_sats);
 
             if candidate_min_in > candidate_min_out {
@@ -374,9 +385,9 @@ impl WantsInputs {
 
         // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
-        let mut receiver_input_amount = Amount::ZERO;
+        let receiver_input_amount =
+            checked_sum(inputs.iter().map(|input_pair| input_pair.previous_txout().value))?;
         for input_pair in inputs.clone() {
-            receiver_input_amount += input_pair.previous_txout().value;
             let index = rng.gen_range(0..=self.proposal.payjoin_psbt.unsigned_tx.input.len());
             payjoin_psbt.inputs.insert(index, input_pair.psbtin);
             payjoin_psbt
@@ -386,10 +397,15 @@ impl WantsInputs {
         }
 
         // Add the receiver change amount to the receiver change output, if applicable
-        let receiver_min_input_amount = self.receiver_min_input_amount();
+        let receiver_min_input_amount = self.receiver_min_input_amount()?;
         if receiver_input_amount >= receiver_min_input_amount {
             let change_amount = receiver_input_amount - receiver_min_input_amount;
-            payjoin_psbt.unsigned_tx.output[self.proposal.change_vout].value += change_amount;
+            // The change output's starting value is sender-supplied, so this can overflow.
+            let change_output = &mut payjoin_psbt.unsigned_tx.output[self.proposal.change_vout];
+            change_output.value = change_output
+                .value
+                .checked_add(change_amount)
+                .ok_or(InternalInputContributionError::AmountOverflow)?;
         } else {
             return Err(InternalInputContributionError::ValueTooLow.into());
         }
@@ -408,22 +424,14 @@ impl WantsInputs {
     }
 
     // Compute the minimum amount that the receiver must contribute to the transaction as input.
-    fn receiver_min_input_amount(&self) -> Amount {
-        let output_amount = self
-            .proposal
-            .payjoin_psbt
-            .unsigned_tx
-            .output
-            .iter()
-            .fold(Amount::ZERO, |acc, output| acc + output.value);
-        let original_output_amount = self
-            .original
-            .original_psbt
-            .unsigned_tx
-            .output
-            .iter()
-            .fold(Amount::ZERO, |acc, output| acc + output.value);
-        output_amount.checked_sub(original_output_amount).unwrap_or(Amount::ZERO)
+    //
+    // Output values are sender-supplied, so either sum can overflow.
+    fn receiver_min_input_amount(&self) -> Result<Amount, InputContributionError> {
+        let output_amount =
+            checked_sum(self.proposal.payjoin_psbt.unsigned_tx.output.iter().map(|o| o.value))?;
+        let original_output_amount =
+            checked_sum(self.original.original_psbt.unsigned_tx.output.iter().map(|o| o.value))?;
+        Ok(output_amount.checked_sub(original_output_amount).unwrap_or(Amount::ZERO))
     }
 
     /// Commits the inputs as final, and moves on to the next typestate.
@@ -432,6 +440,15 @@ impl WantsInputs {
     pub fn commit_inputs(self) -> WantsFeeRange {
         WantsFeeRange { original: self.original, proposal: self.proposal }
     }
+}
+
+fn checked_sum(
+    amounts: impl IntoIterator<Item = Amount>,
+) -> Result<Amount, InputContributionError> {
+    amounts
+        .into_iter()
+        .try_fold(Amount::ZERO, |acc, amount| acc.checked_add(amount))
+        .ok_or(InternalInputContributionError::AmountOverflow.into())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1486,5 +1503,98 @@ mod tests {
             .calculate_psbt_with_fee_range(None, None)
             .expect("shrinking substitution must not underflow output weight");
         assert!(psbt.unsigned_tx.output[0].script_pubkey.is_empty());
+    }
+
+    // The seeds cover both placements of the drain: beyond the original output count,
+    // and in range at a moved position.
+    #[test]
+    fn substitute_after_replace_keeps_drain_value() {
+        let original = original_from_test_vector();
+        let orig_len = original.psbt.unsigned_tx.output.len();
+        let wants_outputs = WantsOutputs::new(original, vec![0]);
+        let drain = ScriptBuf::from_bytes(vec![0x51, 0x53]);
+        let drain_value = Amount::from_sat(10_000);
+        let replacements = vec![
+            TxOut { value: drain_value, script_pubkey: drain.clone() },
+            TxOut {
+                value: Amount::from_sat(20_000),
+                script_pubkey: ScriptBuf::from_bytes(vec![0x51, 0x54]),
+            },
+            TxOut {
+                value: Amount::from_sat(30_000),
+                script_pubkey: ScriptBuf::from_bytes(vec![0x51, 0x55]),
+            },
+        ];
+        let new_script = ScriptBuf::from_bytes(vec![0x51, 0x56]);
+        let mut saw_beyond_original = false;
+        let mut saw_moved_in_range = false;
+        for seed in 0..64u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let replaced = wants_outputs
+                .clone()
+                .replace_receiver_outputs_with_rng(replacements.clone(), &drain, &mut rng)
+                .expect("substitution succeeds");
+            let change_vout = replaced.change_vout;
+            saw_beyond_original |= change_vout >= orig_len;
+            saw_moved_in_range |= change_vout != 0 && change_vout < orig_len;
+            let next = replaced
+                .substitute_receiver_script(new_script.as_script())
+                .expect("script substitution succeeds");
+            let substituted = &next.payjoin_psbt.unsigned_tx.output[next.change_vout];
+            assert_eq!(substituted.script_pubkey, new_script, "seed {seed}");
+            assert_eq!(substituted.value, drain_value, "seed {seed}");
+        }
+        assert!(saw_beyond_original, "no seed placed the drain beyond the original output count");
+        assert!(saw_moved_in_range, "no seed moved the drain within the original output range");
+    }
+
+    // The overflow is in the output sums, before any change is credited.
+    #[test]
+    fn contribute_inputs_errors_on_overflowing_original_outputs() {
+        let mut original = original_from_test_vector();
+        original.psbt.unsigned_tx.output[0].value = Amount::from_sat(u64::MAX);
+        original.psbt.unsigned_tx.output[1].value = Amount::from_sat(u64::MAX);
+
+        let wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        let candidate = candidate_input_from_test_vector(Amount::from_sat(3_000_000));
+
+        assert_eq!(
+            wants_inputs.contribute_inputs([candidate]).unwrap_err(),
+            InputContributionError::from(InternalInputContributionError::AmountOverflow)
+        );
+    }
+
+    // The output sums stay within u64, so the overflow is the change credit.
+    #[test]
+    fn contribute_inputs_errors_crediting_change_to_inflated_output() {
+        let mut original = original_from_test_vector();
+        original.psbt.unsigned_tx.output[0].value = Amount::from_sat(u64::MAX - 10);
+        original.psbt.unsigned_tx.output[1].value = Amount::from_sat(5);
+
+        let wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        let candidate = candidate_input_from_test_vector(Amount::from_sat(3_000_000));
+
+        assert_eq!(
+            wants_inputs.contribute_inputs([candidate]).unwrap_err(),
+            InputContributionError::from(InternalInputContributionError::AmountOverflow)
+        );
+    }
+
+    #[test]
+    fn avoid_uih_errors_on_overflowing_receiver_output() {
+        let mut original = original_from_test_vector();
+        original.psbt.unsigned_tx.output[0].value = Amount::from_sat(u64::MAX);
+
+        let wants_inputs = WantsOutputs::new(original, vec![0]).commit_outputs();
+        let candidate = candidate_input_from_test_vector(Amount::from_sat(3_000_000));
+
+        assert_eq!(
+            wants_inputs.avoid_uih(std::slice::from_ref(&candidate)).unwrap_err(),
+            CoinSelectionError::from(InternalCoinSelectionError::AmountOverflow)
+        );
+        let selected = wants_inputs
+            .try_preserving_privacy([candidate.clone()])
+            .expect("falls back to the first candidate");
+        assert_eq!(selected, candidate);
     }
 }

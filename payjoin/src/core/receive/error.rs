@@ -369,6 +369,8 @@ pub(crate) enum InternalCoinSelectionError {
     UnsupportedOutputLength,
     /// No selection candidates improve privacy
     NotFound,
+    /// Adding a candidate to the receiver output value overflowed
+    AmountOverflow,
 }
 
 impl fmt::Display for CoinSelectionError {
@@ -381,6 +383,8 @@ impl fmt::Display for CoinSelectionError {
             ),
             InternalCoinSelectionError::NotFound =>
                 write!(f, "No selection candidates improve privacy"),
+            InternalCoinSelectionError::AmountOverflow =>
+                write!(f, "Adding a candidate to the receiver output value overflowed"),
         }
     }
 }
@@ -393,6 +397,7 @@ impl error::Error for CoinSelectionError {
             Empty => None,
             UnsupportedOutputLength => None,
             NotFound => None,
+            AmountOverflow => None,
         }
     }
 }
@@ -413,6 +418,8 @@ pub(crate) enum InternalInputContributionError {
     ValueTooLow,
     /// Duplicate input detected. The same outpoint is already present in the transaction
     DuplicateInput(bitcoin::OutPoint),
+    /// Summing input or output values overflowed
+    AmountOverflow,
 }
 
 impl fmt::Display for InputContributionError {
@@ -422,6 +429,8 @@ impl fmt::Display for InputContributionError {
                 write!(f, "Total input value is not enough to cover additional output value"),
             InternalInputContributionError::DuplicateInput(outpoint) =>
                 write!(f, "Duplicate input detected: {outpoint}"),
+            InternalInputContributionError::AmountOverflow =>
+                write!(f, "Summing input or output values overflowed"),
         }
     }
 }
@@ -431,6 +440,7 @@ impl error::Error for InputContributionError {
         match &self.0 {
             InternalInputContributionError::ValueTooLow => None,
             InternalInputContributionError::DuplicateInput(_) => None,
+            InternalInputContributionError::AmountOverflow => None,
         }
     }
 }

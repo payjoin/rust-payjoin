@@ -755,7 +755,7 @@ mod tests {
         persister
             .save_event(SessionEvent::CheckedBroadcastSuitability())
             .expect("in memory persister save should not fail");
-        assert!(!persister.inner.lock().expect("session read should succeed").is_closed);
+        assert!(!persister.is_closed());
         let err = replay_event_log(&persister).expect_err("session replay should be fail");
         let expected_err: ReplayError<ReceiveSession, SessionEvent> =
             InternalReplayError::InvalidEvent(
@@ -764,14 +764,14 @@ mod tests {
             )
             .into();
         assert_eq!(err.to_string(), expected_err.to_string());
-        assert!(persister.inner.lock().expect("lock should not be poisoned").is_closed);
+        assert!(persister.is_closed());
 
         let persister = InMemoryAsyncPersister::<SessionEvent>::default();
         persister
             .save_event(SessionEvent::CheckedBroadcastSuitability())
             .await
             .expect("in memory async persister save should not fail");
-        assert!(!persister.inner.lock().await.is_closed);
+        assert!(!persister.is_closed());
         let err =
             replay_event_log_async(&persister).await.expect_err("session replay should be fail");
         let expected_err: ReplayError<ReceiveSession, SessionEvent> =
@@ -781,7 +781,7 @@ mod tests {
             )
             .into();
         assert_eq!(err.to_string(), expected_err.to_string());
-        assert!(persister.inner.lock().await.is_closed);
+        assert!(persister.is_closed());
     }
 
     #[tokio::test]

@@ -1794,9 +1794,8 @@ pub mod test {
         expected_events: &[SessionEvent],
         expected_closed: bool,
     ) {
-        let inner = persister.inner.lock().expect("Shouldn't be poisoned");
-        assert_eq!(&*inner.events, expected_events);
-        assert_eq!(inner.is_closed, expected_closed);
+        assert_eq!(persister.events(), expected_events);
+        assert_eq!(persister.is_closed(), expected_closed);
     }
 
     fn ohttp_response_for(req_body: &[u8], status: http::StatusCode) -> Vec<u8> {
@@ -1910,8 +1909,8 @@ pub mod test {
             .save(&persister)
             .expect("InMemoryPersister shouldn't fail");
         assert!(matches!(res, OptionalTransitionOutcome::Stasis(_)));
-        assert!(!persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
-        assert_eq!(persister.inner.lock().expect("Shouldn't be poisoned").events.len(), 0);
+        assert!(!persister.is_closed());
+        assert_eq!(persister.events().len(), 0);
 
         // Payjoin was broadcasted, should progress to success
         let persister = InMemoryPersister::default();
@@ -1922,10 +1921,10 @@ pub mod test {
             .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
-        assert!(persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
-        assert_eq!(persister.inner.lock().expect("Shouldn't be poisoned").events.len(), 1);
+        assert!(persister.is_closed());
+        assert_eq!(persister.events().len(), 1);
         assert_eq!(
-            persister.inner.lock().expect("Shouldn't be poisoned").events.last(),
+            persister.events().last(),
             Some(&SessionEvent::Closed(SessionOutcome::Success(payjoin_tx.compute_txid())))
         );
 
@@ -1944,10 +1943,10 @@ pub mod test {
             .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
-        assert!(persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
-        assert_eq!(persister.inner.lock().expect("Shouldn't be poisoned").events.len(), 1);
+        assert!(persister.is_closed());
+        assert_eq!(persister.events().len(), 1);
         assert_eq!(
-            persister.inner.lock().expect("Shouldn't be poisoned").events.last(),
+            persister.events().last(),
             Some(&SessionEvent::Closed(SessionOutcome::FallbackBroadcasted))
         );
 
@@ -1980,10 +1979,10 @@ pub mod test {
             .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
-        assert!(persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
-        assert_eq!(persister.inner.lock().expect("Shouldn't be poisoned").events.len(), 1);
+        assert!(persister.is_closed());
+        assert_eq!(persister.events().len(), 1);
         assert_eq!(
-            persister.inner.lock().expect("Shouldn't be poisoned").events.last(),
+            persister.events().last(),
             Some(&SessionEvent::Closed(SessionOutcome::PayjoinProposalSent))
         );
 
@@ -2066,9 +2065,9 @@ pub mod test {
             .expect("InMemoryPersister shouldn't fail");
 
         assert!(matches!(res, OptionalTransitionOutcome::Progress(_)));
-        assert!(persister.inner.lock().expect("Shouldn't be poisoned").is_closed);
+        assert!(persister.is_closed());
         assert_eq!(
-            persister.inner.lock().expect("Shouldn't be poisoned").events.last(),
+            persister.events().last(),
             Some(&SessionEvent::Closed(SessionOutcome::PayjoinProposalSent))
         );
 

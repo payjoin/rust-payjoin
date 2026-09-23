@@ -45,6 +45,10 @@ A combined [Oblivious HTTP (OHTTP)](https://en.wikipedia.org/wiki/Oblivious_HTTP
 
 The test utilities library which provides commonly used testing fixtures such as a local OHTTP relay and Payjoin directory, bitcoind node and wallets, and official test vectors.
 
+### [`event-log`](https://github.com/payjoin/rust-payjoin/tree/master/event-log)
+
+Append-only event logs and typestate transition results for replayable state machines. This is the persistence design `payjoin` uses for its sessions, published on its own so other protocols can use it without depending on `payjoin`.
+
 ### [`payjoin-ffi`](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-ffi)
 
 The language bindings which expose the Rust-based Payjoin implementation to [various programming languages](https://github.com/payjoin/rust-payjoin/tree/master/payjoin-ffi#supported-target-languages-and-platforms).

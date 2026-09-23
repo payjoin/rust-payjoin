@@ -200,20 +200,45 @@ impl BitcoindWallet {
     ///
     /// `consolidate` takes that many of the smallest UTXOs: every input costs
     /// the same to spend regardless of value, which makes small ones the most
-    /// expensive to keep.
+    /// expensive to keep. `min_total` is the value the selection must reach,
+    /// non-zero when the receiver adds an output of their own, since the
+    /// payjoin library requires contributed inputs to fund it. Any shortfall is
+    /// topped up from the largest UTXOs remaining, keeping the input count and
+    /// so the proposal size down.
     ///
-    /// Returns an empty selection when `consolidate` is `None`. Callers wanting
-    /// the default single privacy-preserving input should not call this.
+    /// Returns an empty selection when neither constraint applies. Callers
+    /// wanting the default single privacy-preserving input should not call this.
     pub fn select_receiver_utxos(
         &self,
         consolidate: Option<usize>,
+        min_total: Amount,
     ) -> Result<(Vec<InputPair>, usize)> {
+        let value_of =
+            |utxo: &ListUnspentItem| Amount::from_btc(utxo.amount.to_btc()).expect("Valid amount");
         let mut unspent = self.list_unspent_raw()?;
-        unspent.sort_by_key(|utxo| Amount::from_btc(utxo.amount.to_btc()).expect("Valid amount"));
+        unspent.sort_by_key(|utxo| value_of(utxo));
         let available = unspent.len();
 
+        let mut selected = Vec::new();
+        let mut total = Amount::ZERO;
+
         let smallest = consolidate.unwrap_or(0).min(available);
-        let selected = unspent.drain(..smallest).map(input_pair_from_corepc).collect();
+        for utxo in unspent.drain(..smallest) {
+            total += value_of(&utxo);
+            selected.push(input_pair_from_corepc(utxo));
+        }
+
+        while total < min_total {
+            // Sorted ascending, so popping takes the largest remaining.
+            let Some(utxo) = unspent.pop() else {
+                return Err(anyhow!(
+                    "wallet holds {total}, but this payjoin needs at least {min_total}"
+                ));
+            };
+            total += value_of(&utxo);
+            selected.push(input_pair_from_corepc(utxo));
+        }
+
         Ok((selected, available))
     }
 

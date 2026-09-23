@@ -7,7 +7,7 @@ use payjoin::bitcoin::FeeRate;
 use payjoin::{Url, Version};
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{Cli, Commands};
+use crate::cli::{Cli, Commands, CutThrough};
 use crate::db;
 
 const CONFIG_DIR: &str = "payjoin-cli";
@@ -57,6 +57,8 @@ pub enum VersionConfig {
 pub struct ReceiveOptions {
     #[serde(default)]
     pub consolidate: Option<usize>,
+    #[serde(default)]
+    pub cut_through: Option<CutThrough>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -267,8 +269,9 @@ impl Config {
             config.expire_in_secs = *expire_in;
         }
 
-        if let Commands::Receive { consolidate, .. } = &cli.command {
+        if let Commands::Receive { consolidate, cut_through, .. } = &cli.command {
             config.receive_options.consolidate = *consolidate;
+            config.receive_options.cut_through = cut_through.clone();
         }
 
         tracing::trace!("App config: {config:?}");

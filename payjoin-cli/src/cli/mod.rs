@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
 use clap::{value_parser, Parser, Subcommand, ValueEnum};
+use payjoin::bitcoin::address::NetworkUnchecked;
 use payjoin::bitcoin::amount::ParseAmountError;
-use payjoin::bitcoin::{Amount, FeeRate};
+use payjoin::bitcoin::{Address, Amount, FeeRate};
 use payjoin::Url;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
 pub struct Flags {
@@ -113,6 +115,11 @@ pub enum Commands {
         #[arg(long = "consolidate", num_args = 0..=1, default_missing_value = "10")]
         consolidate: Option<usize>,
 
+        /// Forward part of the incoming payment to a third party, funded by the
+        /// receiver's own contributed inputs. address:sats
+        #[arg(long = "cut-through", value_parser = parse_cut_through)]
+        cut_through: Option<CutThrough>,
+
         #[cfg(feature = "v1")]
         /// The local port to listen on
         #[arg(short, long = "port")]
@@ -169,6 +176,34 @@ pub enum Commands {
 pub enum Role {
     Sender,
     Receiver,
+}
+
+/// A `--cut-through` destination: where to forward, and how much.
+///
+/// The address is kept as the string the user typed and checked against the
+/// wallet's network at the point of use, since the network is not known while
+/// parsing arguments.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CutThrough {
+    pub address: String,
+    pub amount_sat: u64,
+}
+
+/// Parse `<address>:<sats>`.
+///
+/// No bitcoin address contains a colon, so splitting on the first one is
+/// unambiguous.
+pub fn parse_cut_through(s: &str) -> Result<CutThrough, String> {
+    let (address, amount) =
+        s.split_once(':').ok_or_else(|| format!("expected <address>:<sats>, got {s:?}"))?;
+    let amount_sat: u64 = amount.parse().map_err(|e| format!("invalid amount {amount:?}: {e}"))?;
+    if amount_sat == 0 {
+        return Err("cut-through amount must be greater than zero".to_string());
+    }
+    address
+        .parse::<Address<NetworkUnchecked>>()
+        .map_err(|e| format!("invalid address {address:?}: {e}"))?;
+    Ok(CutThrough { address: address.to_string(), amount_sat })
 }
 
 pub fn parse_amount_in_sat(s: &str) -> Result<Amount, ParseAmountError> {

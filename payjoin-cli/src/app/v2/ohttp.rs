@@ -4,8 +4,8 @@
 //! excluding them from future selections for the lifetime of the [`MailroomManager`].
 //!
 //! `unwrap_ohttp_keys_or_else_fetch_from_directory` returns user-supplied keys
-//! when present, otherwise selects a relay at random from the configured list
-//! (excluding failed relays) to fetch OHTTP keys from the given directory.
+//! when present, otherwise returns cached OHTTP keys for the directory when the
+//! cache entry is still valid (within three months of being stored).
 //!
 //! `fetch_ohttp_keys_from_directory` retries on relay failures (e.g. connection
 //! errors) by selecting another relay. Once a directory is chosen for a session
@@ -17,6 +17,7 @@ use anyhow::{anyhow, Result};
 use payjoin::Url;
 
 use super::Config;
+use crate::db::Database;
 
 #[derive(Debug, Clone)]
 pub struct MailroomManager {
@@ -84,14 +85,43 @@ impl MailroomManager {
     pub(crate) async fn unwrap_ohttp_keys_or_else_fetch_from_directory(
         &self,
         directory: &Url,
+        db: Arc<Database>,
     ) -> Result<ValidatedOhttpKeys> {
         if let Some(ohttp_keys) = self.config.v2()?.ohttp_keys.clone() {
             return Ok(ValidatedOhttpKeys { ohttp_keys });
         }
-        self.fetch_ohttp_keys_from_directory(directory).await
+        self.fetch_ohttp_keys_from_directory(directory, db, false).await
     }
 
-    async fn fetch_ohttp_keys_from_directory(&self, directory: &Url) -> Result<ValidatedOhttpKeys> {
+    async fn fetch_ohttp_keys_from_directory(
+        &self,
+        directory: &Url,
+        db: Arc<Database>,
+        force_refresh: bool,
+    ) -> Result<ValidatedOhttpKeys> {
+        let cached = db.get_cached_ohttp_keys(directory.as_str())?;
+
+        if force_refresh {
+            db.invalidate_ohttp_key_cache(directory.as_str())?;
+        }
+
+        if !force_refresh {
+            if let Some(cached) = cached.as_ref().filter(|c| !c.is_expired()) {
+                return Ok(ValidatedOhttpKeys { ohttp_keys: cached.keys.clone() });
+            }
+        }
+
+        let keys = self.fetch_ohttp_keys(directory).await?;
+        if let Some(cached) = cached.as_ref() {
+            if keys != cached.keys {
+                tracing::debug!("OHTTP keys rotated for directory {directory}");
+            }
+        }
+        db.store_ohttp_keys(directory.as_str(), &keys)?;
+        Ok(ValidatedOhttpKeys { ohttp_keys: keys })
+    }
+
+    async fn fetch_ohttp_keys(&self, directory: &Url) -> Result<payjoin::OhttpKeys> {
         loop {
             let selected_relay = self.choose_relay()?;
 
@@ -116,7 +146,7 @@ impl MailroomManager {
             };
 
             match ohttp_keys {
-                Ok(keys) => return Ok(ValidatedOhttpKeys { ohttp_keys: keys }),
+                Ok(keys) => return Ok(keys),
                 Err(payjoin::io::Error::UnexpectedStatusCode(e)) => {
                     tracing::debug!(
                         "Directory {directory} returned unexpected status via relay {selected_relay}: {e:?}"

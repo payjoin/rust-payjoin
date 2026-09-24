@@ -417,6 +417,37 @@
           BITCOIND_SKIP_DOWNLOAD = 1;
         };
 
+        # Two things generated Java needs that the kotlin shell above doesn't:
+        #
+        # - jdk25, not jdk21: generated bindings use the Foreign Function & Memory API, finalized
+        #   (no longer preview) only from JDK 22 onward - see payjoin-ffi/java/README.md.
+        # - rustVersions.stable, not rustVersions.msrv: payjoin-ffi/java/scripts/generate_bindings.sh
+        #   builds a pinned uniffi-bindgen-java commit whose own rust-toolchain.toml/README declare
+        #   a newer MSRV (1.87.0) than this workspace's (1.85.0). A `rust-toolchain.toml` file only
+        #   redirects rustup-wrapped `cargo`; inside this shell `cargo` is the nixpkgs derivation
+        #   directly; there is no rustup here for a toolchain file (or RUSTUP_TOOLCHAIN) to
+        #   redirect. rustVersions.stable ("latest stable" - see its definition above) covers both
+        #   MSRVs at once, so this shell deliberately uses one Rust toolchain for both payjoin-ffi
+        #   and the generator rather than juggling two on the same PATH.
+        javaDevShell = pkgs.mkShell {
+          name = "java-dev";
+          packages =
+            with pkgs;
+            [
+              rustVersions.stable
+              jdk25
+              python3
+              bzip2
+            ]
+            ++ lib.optionals pkgs.stdenv.isLinux [
+              pkg-config
+              openssl
+              clang
+            ];
+          BITCOIND_EXE = pkgs.lib.getExe' pkgs.bitcoind "bitcoind";
+          BITCOIND_SKIP_DOWNLOAD = 1;
+        };
+
         # Rust toolchain for the python dev shell: msrv pinned to match
         # payjoin-ffi/python build requirements, with per-arch targets added
         # so cargo can build artifacts under nix for payjoin-ffi/python/scripts/generate_bindings.sh
@@ -531,6 +562,7 @@
           csharp = csharpDevShell;
           dart = dartDevShell;
           kotlin = kotlinDevShell;
+          java = javaDevShell;
         };
         formatter = treefmtEval.config.build.wrapper;
         checks =

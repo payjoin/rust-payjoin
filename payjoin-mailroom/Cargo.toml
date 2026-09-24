@@ -60,14 +60,14 @@ hyper-util = { version = "0.1.18", features = [
 hyperloglogplus = "0.4.1"
 ipnet = { version = "2.9", optional = true }
 maxminddb = { version = "0.27", optional = true }
-ohttp = { package = "bitcoin-ohttp", version = "0.6.0" }
+ohttp = { package = "bitcoin-ohttp", version = "0.7.0" }
 opentelemetry = "0.32"
 opentelemetry-http = { version = "0.32", features = ["hyper"], optional = true }
 opentelemetry-otlp = { version = "0.32", optional = true, default-features = false, features = [
   "http-proto",
 ] }
 opentelemetry_sdk = "0.32"
-payjoin = { version = "1.0.0", features = [
+payjoin = { version = "1.1.0", features = [
   "directory",
 ], default-features = false }
 rand = "0.8"

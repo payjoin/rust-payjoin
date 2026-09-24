@@ -19,9 +19,9 @@ pub(crate) fn ohttp_encapsulate(
     body: Option<&[u8]>,
 ) -> Result<([u8; ENCAPSULATED_MESSAGE_BYTES], ohttp::ClientResponse), OhttpEncapsulationError> {
     use std::fmt::Write;
-    let mut ohttp_keys = ohttp_keys.0.clone();
+    let ohttp_keys = ohttp_keys.0.clone();
 
-    let ctx = ohttp::ClientRequest::from_config(&mut ohttp_keys)?;
+    let ctx = ohttp::ClientRequest::from_config(&ohttp_keys)?;
     let url = crate::core::Url::parse(target_resource)?;
     let authority_bytes = {
         let mut authority = url.host_str();

@@ -1,0 +1,184 @@
+# Fuzz every target seeded from its corpus stored in payjoin/qa-assets.
+# Output gets minimized and pushed back to the origin repository.
+
+name: Fuzz (corpus)
+
+on:
+  schedule:
+    # 5am every Monday UTC
+    - cron: "00 05 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  CARGO_FUZZ_VERSION: 0.13.2
+
+# Prevents race on the final push
+concurrency:
+  group: update-corpora
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+      source_sha: ${{ steps.list.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-fuzz
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+          key: cargo-fuzz-${{ env.CARGO_FUZZ_VERSION }}
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install --locked --version "$CARGO_FUZZ_VERSION" cargo-fuzz
+
+      - name: List fuzz targets
+        id: list
+        run: |
+          echo "targets=$(cd fuzz && cargo fuzz list | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  fuzz:
+    needs: setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzz_target: ${{ fromJSON(needs.setup.outputs.targets) }}
+    env:
+      TARGET: ${{ matrix.fuzz_target }}
+    steps:
+      - name: Checkout qa-assets
+        uses: actions/checkout@v6
+        with:
+          repository: payjoin/qa-assets
+          persist-credentials: false
+
+      - name: Checkout rust-payjoin
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.source_sha }}
+          path: rust-payjoin
+          persist-credentials: false
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            rust-payjoin/fuzz/target
+            rust-payjoin/target
+          key: fuzz-${{ hashFiles('rust-payjoin/**/Cargo.toml') }}
+          restore-keys: fuzz-
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install --locked --version "$CARGO_FUZZ_VERSION" cargo-fuzz
+
+      - name: Seed corpus
+        working-directory: rust-payjoin
+        run: fuzz/corpora.sh seed "$GITHUB_WORKSPACE" "$TARGET"
+
+      - name: Fuzz
+        working-directory: rust-payjoin/fuzz
+        run: cargo fuzz run "$TARGET" -- -max_total_time=300 -fork=$(nproc)
+
+      - name: Upload corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-${{ matrix.fuzz_target }}
+          path: rust-payjoin/fuzz/corpus/${{ matrix.fuzz_target }}
+          if-no-files-found: warn
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-${{ matrix.fuzz_target }}
+          path: rust-payjoin/fuzz/artifacts/${{ matrix.fuzz_target }}
+          if-no-files-found: ignore
+
+      - name: Report crashes
+        if: failure()
+        run: |
+          echo "Crash found in $TARGET"
+          ls rust-payjoin/fuzz/artifacts/"$TARGET"/ 2>/dev/null || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  merge:
+    needs: [setup, fuzz]
+    if: ${{ always() && needs.setup.result == 'success' && needs.fuzz.result != 'cancelled' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout qa-assets
+        uses: actions/checkout@v6
+        with:
+          repository: payjoin/qa-assets
+          token: ${{ secrets.QA_ASSETS_PUSH_TOKEN }}
+          persist-credentials: true
+
+      - name: Checkout rust-payjoin
+        uses: actions/checkout@v6
+        with:
+          path: rust-payjoin
+          persist-credentials: false
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            rust-payjoin/fuzz/target
+            rust-payjoin/target
+          key: fuzz-${{ hashFiles('rust-payjoin/**/Cargo.toml') }}
+          restore-keys: fuzz-
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install --locked --version "$CARGO_FUZZ_VERSION" cargo-fuzz
+
+      - name: Download corpus artifacts
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: corpus-*
+          path: incoming
+
+      - name: Refresh corpora
+        env:
+          TARGETS: ${{ needs.setup.outputs.targets }}
+        run: |
+          echo "$TARGETS" | jq -r '.[]' > "$RUNNER_TEMP/targets.txt"
+          rust-payjoin/fuzz/corpora.sh refresh incoming "$RUNNER_TEMP/targets.txt"
+
+      - name: Open PR
+        env:
+          SOURCE: ${{ github.repository }}@${{ needs.setup.outputs.source_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ secrets.QA_ASSETS_PUSH_TOKEN }}
+        run: rust-payjoin/fuzz/corpora.sh push

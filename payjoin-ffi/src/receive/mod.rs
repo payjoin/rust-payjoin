@@ -21,7 +21,7 @@ use crate::validation::{
     validate_fee_rate_sat_per_vb_opt, validate_optional_script, validate_script_bytes,
     validate_script_vec, validate_weight_units, validate_witness_stack,
 };
-use crate::{ClientResponse, OutputSubstitution, Request};
+use crate::{ClientResponse, ClientResponseError, OutputSubstitution, Request};
 
 pub mod error;
 
@@ -714,10 +714,17 @@ impl Initialized {
     /// Returns an [`InitializedTransition`] that, once persisted, yields either
     /// an [`UncheckedOriginalPayload`] if the sender's Original PSBT is available,
     /// or [`Initialized`] if no proposal has arrived yet.
-    pub fn process_response(&self, body: &[u8], ctx: &ClientResponse) -> InitializedTransition {
-        InitializedTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().process_response(body, ctx.into()),
-        ))))
+    ///
+    /// Returns [`ClientResponseError::AlreadyUsed`] if `ctx` was already used
+    /// to process a response.
+    pub fn process_response(
+        &self,
+        body: &[u8],
+        ctx: &ClientResponse,
+    ) -> Result<InitializedTransition, ClientResponseError> {
+        Ok(InitializedTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().process_response(body, ctx.try_into()?),
+        )))))
     }
 
     /// Build a V2 Payjoin URI from the receiver's context
@@ -1408,14 +1415,17 @@ impl PayjoinProposal {
     /// This function decapsulates the response using the provided OHTTP context. If the response status is successful, it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
     ///
     /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or choose to broadcast the original PSBT.
+    ///
+    /// Returns [`ClientResponseError::AlreadyUsed`] if `ohttp_context` was
+    /// already used to process a response.
     pub fn process_response(
         &self,
         body: &[u8],
         ohttp_context: &ClientResponse,
-    ) -> PayjoinProposalTransition {
-        PayjoinProposalTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().process_response(body, ohttp_context.into()),
-        ))))
+    ) -> Result<PayjoinProposalTransition, ClientResponseError> {
+        Ok(PayjoinProposalTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().process_response(body, ohttp_context.try_into()?),
+        )))))
     }
 }
 
@@ -1508,14 +1518,17 @@ impl HasReplyableError {
     /// completes the error reporting and either yields a
     /// [`ReceiverPendingFallback`] if current session has validated fallback tx,
     /// or otherwise closes the session.
+    ///
+    /// Returns [`ClientResponseError::AlreadyUsed`] if `ohttp_context` was
+    /// already used to process a response.
     pub fn process_error_response(
         &self,
         body: &[u8],
         ohttp_context: &ClientResponse,
-    ) -> HasReplyableErrorTransition {
-        HasReplyableErrorTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().process_error_response(body, ohttp_context.into()),
-        ))))
+    ) -> Result<HasReplyableErrorTransition, ClientResponseError> {
+        Ok(HasReplyableErrorTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().process_error_response(body, ohttp_context.try_into()?),
+        )))))
     }
 }
 
@@ -1831,5 +1844,39 @@ impl payjoin::persist::AsyncSessionPersister for AsyncCallbackPersisterAdapter {
     ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send {
         let persister = self.callback_persister.clone();
         async move { persister.close().await }
+    }
+}
+
+#[cfg(all(test, feature = "_test-utils"))]
+mod tests {
+    use payjoin::persist::InMemoryPersister;
+    use payjoin::receive::v2::ReceiverBuilder;
+    use payjoin_test_utils::EXAMPLE_URL;
+
+    use super::*;
+
+    #[test]
+    fn reusing_ohttp_context_returns_error() {
+        let address =
+            payjoin::bitcoin::Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")
+                .expect("valid address")
+                .assume_checked();
+        let ohttp_keys = payjoin::OhttpKeys::decode(&payjoin_test_utils::ohttp_key_config_bytes())
+            .expect("valid ohttp keys");
+        let receiver: Initialized = ReceiverBuilder::new(address, EXAMPLE_URL, ohttp_keys)
+            .expect("valid receiver builder")
+            .build()
+            .save(&InMemoryPersister::default())
+            .expect("in-memory persister is infallible")
+            .into();
+
+        let ctx = receiver.create_poll_request(EXAMPLE_URL.to_string()).expect("valid request");
+        // An undersized body is a transient failure, so a caller may retry.
+        // Retrying with the same, now consumed, context must return an error.
+        receiver
+            .process_response(&[0u8; 1], &ctx.client_response)
+            .expect("first use of the context");
+        let reused = receiver.process_response(&[0u8; 1], &ctx.client_response);
+        assert!(matches!(reused, Err(ClientResponseError::AlreadyUsed)));
     }
 }

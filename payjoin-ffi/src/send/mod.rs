@@ -8,7 +8,7 @@ pub use error::{
 
 use crate::error::ForeignError;
 pub use crate::error::{ImplementationError, SerdeJsonError};
-use crate::ohttp::ClientResponse;
+use crate::ohttp::{ClientResponse, ClientResponseError};
 use crate::request::Request;
 use crate::send::error::{SenderPersistedError, SenderReplayError};
 use crate::uri::PjUri;
@@ -539,14 +539,17 @@ impl WithReplyKey {
     /// A successful response can either be `None` if the relay has no response yet,
     /// or `Some(Psbt)`.
     /// If the response is a valid PSBT you should sign and broadcast it.
+    ///
+    /// Returns [`ClientResponseError::AlreadyUsed`] if `post_ctx` was already
+    /// used to process a response.
     pub fn process_response(
         &self,
         response: &[u8],
         post_ctx: &ClientResponse,
-    ) -> WithReplyKeyTransition {
-        WithReplyKeyTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().process_response(response, post_ctx.into()),
-        ))))
+    ) -> Result<WithReplyKeyTransition, ClientResponseError> {
+        Ok(WithReplyKeyTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().process_response(response, post_ctx.try_into()?),
+        )))))
     }
 }
 
@@ -659,14 +662,17 @@ impl PollingForProposal {
     /// A successful response can either be `None` if the relay has no response yet,
     /// or `Some(Psbt)`.
     /// If the response is a valid PSBT you should sign and broadcast it.
+    ///
+    /// Returns [`ClientResponseError::AlreadyUsed`] if `ohttp_ctx` was already
+    /// used to process a response.
     pub fn process_response(
         &self,
         response: &[u8],
         ohttp_ctx: &ClientResponse,
-    ) -> PollingForProposalTransition {
-        PollingForProposalTransition(Arc::new(RwLock::new(Some(
-            self.0.clone().process_response(response, ohttp_ctx.into()),
-        ))))
+    ) -> Result<PollingForProposalTransition, ClientResponseError> {
+        Ok(PollingForProposalTransition(Arc::new(RwLock::new(Some(
+            self.0.clone().process_response(response, ohttp_ctx.try_into()?),
+        )))))
     }
 }
 
@@ -881,5 +887,45 @@ mod tests {
     fn v2_uri_is_accepted() {
         SenderBuilder::new(ORIGINAL_PSBT.to_string(), pj_uri(V2_PJ_URI))
             .expect("v2 URI must be accepted");
+    }
+
+    #[test]
+    fn reusing_ohttp_context_returns_error() {
+        use payjoin::persist::InMemoryPersister;
+        use payjoin::receive::v2::ReceiverBuilder;
+        use payjoin_test_utils::{EXAMPLE_URL, PARSED_ORIGINAL_PSBT};
+
+        let address = payjoin::bitcoin::Address::from_str("2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7")
+            .expect("valid address")
+            .assume_checked();
+        let ohttp_keys = payjoin::OhttpKeys::decode(&payjoin_test_utils::ohttp_key_config_bytes())
+            .expect("valid ohttp keys");
+        let pj_uri = ReceiverBuilder::new(address, EXAMPLE_URL, ohttp_keys)
+            .expect("valid receiver builder")
+            .build()
+            .save(&InMemoryPersister::default())
+            .expect("in-memory persister is infallible")
+            .pj_uri();
+        let payjoin::PjParam::V2(pj_param) = pj_uri.extras().pj_param() else {
+            panic!("receiver URI must carry a v2 pj param");
+        };
+        let sender: WithReplyKey = payjoin::send::v2::SenderBuilder::from_parts(
+            PARSED_ORIGINAL_PSBT.clone(),
+            pj_param,
+            pj_uri.address(),
+            pj_uri.amount(),
+        )
+        .build_recommended(payjoin::bitcoin::FeeRate::BROADCAST_MIN)
+        .expect("valid sender builder")
+        .save(&InMemoryPersister::default())
+        .expect("in-memory persister is infallible")
+        .into();
+
+        let ctx = sender.create_v2_post_request(EXAMPLE_URL.to_string()).expect("valid request");
+        // An undersized body is a transient failure, so a caller may retry.
+        // Retrying with the same, now consumed, context must return an error.
+        sender.process_response(&[0u8; 1], &ctx.ohttp_ctx).expect("first use of the context");
+        let reused = sender.process_response(&[0u8; 1], &ctx.ohttp_ctx);
+        assert!(matches!(reused, Err(ClientResponseError::AlreadyUsed)));
     }
 }

@@ -1,10 +1,6 @@
 name: Build and Test JavaScript
 on:
-  workflow_run:
-    workflows: ["Flake maintenance"]
-    types: [requested]
-    branches:
-      - "update_flake_lock_action"
+  workflow_call:
   pull_request:
     paths:
       - payjoin-ffi/**
@@ -15,6 +11,9 @@ on:
   push:
     tags:
       - "payjoin-javascript-[0-9]*"
+
+permissions:
+  contents: read
 
 jobs:
   build-js-and-test:
@@ -27,15 +26,18 @@ jobs:
       RUSTUP_TOOLCHAIN: 1.85.0
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
-      - name: "Install Rust 1.85.0"
-        uses: dtolnay/rust-toolchain@1.85.0
-      - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
+      - name: "Install Rust 1.85.0"
+        uses: dtolnay/rust-toolchain@3230091d7ef9483f601620abacc570c22cf44d22 # 1.85.0
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
           shared-key: msrv-workspace
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: "Build and test"
         run: nix develop .#javascript -c ./payjoin-ffi/javascript/contrib/test.sh
 
@@ -46,15 +48,19 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: Build and pack
         run: nix develop .#javascript -c ./payjoin-ffi/javascript/contrib/pack.sh
       - name: Upload npm package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: payjoin-javascript-npm-package
           path: payjoin-ffi/javascript/artifacts/*.tgz
@@ -69,21 +75,22 @@ jobs:
         os: [ubuntu-26.04, macos-latest]
     steps:
       - name: Download npm package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: payjoin-javascript-npm-package
           path: pkg
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
+          package-manager-cache: false
       - name: Install and exercise the packed package
         shell: bash
         run: |
           set -euo pipefail
-          mkdir smoke && cd smoke
-          npm init -y >/dev/null
-          npm install ../pkg/payjoin-*.tgz
+          mkdir -p smoke/node_modules/payjoin
+          tar -xzf pkg/payjoin-*.tgz --strip-components=1 -C smoke/node_modules/payjoin
+          cd smoke
           node --input-type=module -e '
             import { payjoin, uniffiInitAsync } from "payjoin";
             await uniffiInitAsync();
@@ -96,7 +103,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/payjoin-javascript-')
     permissions:
       contents: read
-    uses: ./.github/workflows/verify-tag-hygiene.yml
+    uses: $/.github/workflows/verify-tag-hygiene.yml
 
   publish-npm:
     name: "Publish to npmjs.com (trusted publishing / OIDC)"
@@ -110,24 +117,22 @@ jobs:
       contents: read # needed only to check out the in-repo verify-tag-version action
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: Download npm package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: payjoin-javascript-npm-package
           path: dist
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
-
-      - name: Update npm
-        run: |
-          npm install -g npm@11
-          npm --version
+          package-manager-cache: false
 
       - name: Locate packed artifact
         id: locate
@@ -146,19 +151,21 @@ jobs:
           echo "version=${name#payjoin-}" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag matches packed artifact version
-        uses: ./.github/actions/verify-tag-version
+        uses: $/.github/actions/verify-tag-version
         with:
           tag-prefix: payjoin-javascript-
           version: ${{ steps.locate.outputs.version }}
 
       - name: Attest build provenance (tarball)
         # A consumer runs: gh attestation verify <file>.tgz -R payjoin/rust-payjoin
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ steps.locate.outputs.tarball }}
 
       - name: Publish to npmjs.com
-        run: npm publish "./${{ steps.locate.outputs.tarball }}"
+        env:
+          TARBALL: ${{ steps.locate.outputs.tarball }}
+        run: npm publish "./${TARBALL}"
 
   github-release:
     name: "Attach tarball + SHA256SUMS to the GitHub release"
@@ -166,7 +173,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/payjoin-javascript-')
     permissions:
       contents: write # create/update the Release for this tag and upload assets
-    uses: ./.github/workflows/release-assets.yml
+    uses: $/.github/workflows/release-assets.yml
     with:
       artifact-pattern: payjoin-javascript-npm-package
       tag-prefix: payjoin-javascript-

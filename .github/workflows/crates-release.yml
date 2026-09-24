@@ -28,11 +28,12 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
           fetch-depth: 0
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: Check the bump is consistent and publishable
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -48,13 +49,14 @@ jobs:
       prerelease: ${{ steps.meta.outputs.prerelease }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
           fetch-depth: 0
       - name: Fetch master
         run: git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: Compute tag metadata
         id: meta
         env:
@@ -85,7 +87,7 @@ jobs:
       # tagged commit. Scoping by regexp avoids waiting on this workflow's
       # own downstream publish jobs, which would deadlock.
       - name: Wait for test, lint, and format checks
-        uses: lewagon/wait-on-check-action@v1.9.0
+        uses: lewagon/wait-on-check-action@fa4138d3af36e4cf9d254075350fa0cc29fa56cb # v1.9.0
         with:
           ref: ${{ github.sha }}
           check-regexp: ^(Test|Lint|Format)
@@ -108,28 +110,32 @@ jobs:
       VERSION: ${{ needs.verify-tag.outputs.version }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - name: Use cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: Prepare lockfile
         run: cp Cargo-recent.lock Cargo.lock
       - name: Package the crate
         run: cargo package --locked -p "$CRATE"
       - name: Attest build provenance
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: target/package/${{ needs.verify-tag.outputs.crate }}-${{ needs.verify-tag.outputs.version }}.crate
       - name: Authenticate to crates.io
         id: auth
-        uses: rust-lang/crates-io-auth-action@v1
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: cargo publish --locked -p "$CRATE"
       - name: Upload packaged crate
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: crate
           path: target/package/${{ needs.verify-tag.outputs.crate }}-${{ needs.verify-tag.outputs.version }}.crate
@@ -146,11 +152,13 @@ jobs:
       VERSION: ${{ needs.verify-tag.outputs.version }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: Download packaged crate
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: crate
           path: dist
@@ -166,16 +174,15 @@ jobs:
             echo "CHANGELOG_EOF"
           } >>"$GITHUB_OUTPUT"
       - name: Create release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          body: ${{ steps.changelog.outputs.body }}
-          generate_release_notes: true
-          prerelease: ${{ needs.verify-tag.outputs.prerelease }}
-          files: |
-            dist/*.crate
-            dist/SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.verify-tag.outputs.prerelease }}
+        run: |
+          args=(dist/*.crate dist/SHA256SUMS --title "Release ${GITHUB_REF_NAME}" --generate-notes)
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${GITHUB_REF_NAME}" "${args[@]}"
 
   verify-published:
     name: Verify publication
@@ -187,11 +194,13 @@ jobs:
       VERSION: ${{ needs.verify-tag.outputs.version }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: Download packaged crate
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: crate
           path: dist

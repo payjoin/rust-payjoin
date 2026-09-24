@@ -1,10 +1,6 @@
 name: Build and Test Kotlin
 on:
-  workflow_run:
-    workflows: ["Flake maintenance"]
-    types: [requested]
-    branches:
-      - "update_flake_lock_action"
+  workflow_call:
   pull_request:
     paths:
       - payjoin-ffi/**
@@ -13,6 +9,9 @@ on:
       - flake.nix
       - flake.lock
       - .github/workflows/kotlin.yml
+
+permissions:
+  contents: read
 
 jobs:
   build-kotlin-and-test:
@@ -25,15 +24,18 @@ jobs:
       RUSTUP_TOOLCHAIN: 1.85.0
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
-      - name: "Install Rust 1.85.0"
-        uses: dtolnay/rust-toolchain@1.85.0
-      - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
+      - name: "Install Rust 1.85.0"
+        uses: dtolnay/rust-toolchain@3230091d7ef9483f601620abacc570c22cf44d22 # 1.85.0
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
           shared-key: msrv-workspace
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: "Build and test"
         run: nix develop .#kotlin -c bash ./payjoin-ffi/kotlin/contrib/test.sh
       - name: "Compile production bindings"

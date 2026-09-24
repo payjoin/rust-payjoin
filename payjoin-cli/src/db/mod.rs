@@ -51,10 +51,19 @@ impl Database {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS receive_sessions (
                 session_id TEXT PRIMARY KEY,
-                completed_at INTEGER
+                completed_at INTEGER,
+                receive_options TEXT
             )",
             [],
         )?;
+
+        // `CREAT TABLE IF NOT EXIST`, leaves a pre-existing table untouched,
+        // so databases created before `receive_options` existed need the
+        // column added explicitly. SQLite has no `ADD COLUMN IF NOT EXIST`.
+        let has_receive_options = conn.prepare("SELECT 1 FROM pragma_table_info('receive_sessions') WHERE name = 'receive_options'")?.exists([])?;
+        if !has_receive_options {
+            conn.execute("ALTER TABLE receive_sessions ADD COLUMN receive_options TEXT", [])?;
+        }
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS send_session_events (

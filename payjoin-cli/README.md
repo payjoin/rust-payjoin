@@ -116,6 +116,10 @@ bitcoin:tb1qfttmt4z68cfyn2z25t3dusp03rq6gxrucfxs5a?amount=0.0001&pj=HTTPS://PAYJ
 
 Note that the session can be paused by pressing `Ctrl+C`. The receiver can come back online and resume the session by running `payjoin-cli resume` again, and the sender may do a `send` against it while the receiver is offline.
 
+The receiver can also pass `--consolidate` to contribute several of their own UTXOs to the payjoin, merging them into the output that receives the payment instead of paying for a separate consolidation transaction later. Run `payjoin-cli receive --help` for the details.
+
+Similarly, `--cut-through <address>:<sats>` forwards part of the incoming payment on to a third party, funded by the receiver's own contributed inputs, so a bill can be paid inside a payment the receiver was already receiving rather than in a transaction of its own.
+
 ### Send a Payjoin
 
 Now, let's send the payjoin. Here is an example format:

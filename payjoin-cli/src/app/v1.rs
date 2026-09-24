@@ -22,7 +22,7 @@ use tokio::sync::watch;
 use super::config::Config;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
-use crate::app::{handle_interrupt, http_agent};
+use crate::app::{find_receiver_output, forward_output, handle_interrupt, http_agent};
 use crate::db::Database;
 
 struct Headers<'a>(&'a hyper::HeaderMap);
@@ -355,8 +355,11 @@ impl App {
         })?;
         tracing::trace!("check1");
 
-        // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-        let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
+        // In a payment processor where the sender could go offline, this is where you
+        // schedule to broadcast the original tx. It is also the only place the receiver's
+        // own output is visible: `WantsOutputs` does not expose its outputs, and by the
+        // time we reach it this typestate has been consumed.
+        let original_tx = proposal.extract_tx_to_schedule_broadcast();
 
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal.check_inputs_not_owned(&mut |outpoint| {
@@ -378,21 +381,52 @@ impl App {
                 .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
         })?;
 
-        let payjoin = payjoin
-            .substitute_receiver_script(
-                &self
-                    .wallet
-                    .get_new_address()
-                    .map_err(|e| {
+        let payjoin = match &self.config.receive_options.cut_through {
+            None => payjoin
+                .substitute_receiver_script(
+                    &self
+                        .wallet
+                        .get_new_address()
+                        .map_err(|e| {
+                            Error::Implementation(ImplementationError::from(
+                                e.into_boxed_dyn_error(),
+                            ))
+                        })?
+                        .script_pubkey(),
+                )
+                .map_err(|e| Error::Implementation(ImplementationError::new(e)))?,
+            // Keep the receiver's own output as it is and add the forwarded one
+            // beside it. The receiver's output stays the drain, so contributed
+            // input value lands there and fees come off it.
+            Some(cut_through) => {
+                let receiver_output =
+                    find_receiver_output(&self.wallet(), &original_tx).map_err(|e| {
                         Error::Implementation(ImplementationError::from(e.into_boxed_dyn_error()))
-                    })?
-                    .script_pubkey(),
-            )
-            .map_err(|e| Error::Implementation(ImplementationError::new(e)))?
-            .commit_outputs();
+                    })?;
+                let drain_script = receiver_output.script_pubkey.clone();
+                let forward = forward_output(&self.wallet(), cut_through).map_err(|e| {
+                    Error::Implementation(ImplementationError::from(e.into_boxed_dyn_error()))
+                })?;
+                payjoin
+                    .replace_receiver_outputs(vec![receiver_output, forward], &drain_script)
+                    .map_err(|e| Error::Implementation(ImplementationError::new(e)))?
+            }
+        }
+        .commit_outputs();
 
-        let wants_fee_range = try_contributing_inputs(payjoin.clone(), &self.wallet)
-            .map_err(Error::Implementation)?;
+        let min_contribution = self
+            .config
+            .receive_options
+            .cut_through
+            .as_ref()
+            .map_or(Amount::ZERO, |c| Amount::from_sat(c.amount_sat));
+        let wants_fee_range = try_contributing_inputs(
+            payjoin.clone(),
+            &self.wallet,
+            self.config.receive_options.consolidate,
+            min_contribution,
+        )
+        .map_err(Error::Implementation)?;
         let provisional_payjoin =
             wants_fee_range.apply_fee_range(None, self.config.max_fee_rate)?;
 
@@ -408,26 +442,42 @@ impl App {
 fn try_contributing_inputs(
     payjoin: payjoin::receive::v1::WantsInputs,
     wallet: &BitcoindWallet,
+    consolidate: Option<usize>,
+    min_total: Amount,
 ) -> Result<payjoin::receive::v1::WantsFeeRange, ImplementationError> {
-    let candidate_inputs =
-        wallet.list_unspent().map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+    let inputs = if consolidate.is_some() || min_total > Amount::ZERO {
+        // Consolidation deliberately forgoes the UIH-avoiding selection: the point
+        // is to sweep the receiver's UTXO set into the payjoin output instead of
+        // paying for a separate consolidation tx. Forwarding needs value-aware
+        // selection for a different reason - the receiver must fund the output it
+        // adds - and neither is served by the privacy heuristic.
+        let (selected, available) = wallet
+            .select_receiver_utxos(consolidate, min_total)
+            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+        if selected.is_empty() {
+            return Err(no_spendable_utxos());
+        }
+        println!("Contributing {} of {available} UTXOs", selected.len());
+        selected
+    } else {
+        let candidate_inputs = wallet
+            .list_unspent()
+            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+        if candidate_inputs.is_empty() {
+            return Err(no_spendable_utxos());
+        }
+        vec![payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::new)?]
+    };
+    Ok(payjoin.contribute_inputs(inputs).map_err(ImplementationError::new)?.commit_inputs())
+}
 
-    if candidate_inputs.is_empty() {
-        return Err(ImplementationError::from(
-            anyhow::anyhow!(
-                "No spendable UTXOs available in wallet. Please fund your wallet before resuming this session"
-            )
-            .into_boxed_dyn_error(),
-        ));
-    }
-
-    let selected_input =
-        payjoin.try_preserving_privacy(candidate_inputs).map_err(ImplementationError::new)?;
-
-    Ok(payjoin
-        .contribute_inputs(vec![selected_input])
-        .map_err(ImplementationError::new)?
-        .commit_inputs())
+fn no_spendable_utxos() -> ImplementationError {
+    ImplementationError::from(
+        anyhow!(
+            "No spendable UTXOs available in wallet. Please fund your wallet before resuming this session"
+        )
+        .into_boxed_dyn_error(),
+    )
 }
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {

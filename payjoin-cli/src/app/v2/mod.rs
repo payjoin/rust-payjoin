@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
-use payjoin::bitcoin::{Amount, FeeRate, Transaction};
+use payjoin::bitcoin::{Amount, FeeRate, Transaction, TxOut, Weight};
 use payjoin::persist::{OptionalTransitionOutcome, SessionPersister};
 use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
@@ -24,10 +24,15 @@ use super::config::Config;
 use super::wallet::BitcoindWallet;
 use super::App as AppTrait;
 use crate::app::v2::ohttp::MailroomManager;
-use crate::app::{handle_interrupt, http_agent};
+use crate::app::{find_receiver_output, forward_output, handle_interrupt, http_agent};
 use crate::cli::Role as CliRole;
 use crate::db::v2::{ReceiverPersister, SenderPersister, SessionId};
 use crate::db::Database;
+
+/// Headroom above the forwarded amount so the receiver's output can absorb its
+/// share of the fee without dropping below what the sender paid, which a
+/// `pjos=0` sender rejects. Surplus returns to the receiver's own output.
+const FEE_HEADROOM_VB: u64 = 250;
 
 mod ohttp;
 
@@ -164,6 +169,15 @@ impl SessionPrint for ReceiverPersister {
     fn print(&self, msg: impl fmt::Display) {
         print_session(Role::Receiver, &self.session_id(), msg);
     }
+}
+
+/// The error raised when the receiver has nothing to contribute, naming the
+/// session so the user can act on it.
+fn no_spendable_utxos(persister: &ReceiverPersister) -> anyhow::Error {
+    let id = persister.session_id();
+    anyhow::anyhow!(
+        "No spendable UTXOs available in wallet. Please fund your wallet before resuming this session, or run `payjoin-cli cancel {id}` to cancel and broadcast the original transaction."
+    )
 }
 
 struct SessionHistoryRow<Status> {
@@ -325,7 +339,7 @@ impl AppTrait for App {
 
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
-        let persister = ReceiverPersister::new(self.db.clone())?;
+        let persister = ReceiverPersister::new(self.db.clone(), &self.config.receive_options)?;
         let (directory, ohttp_keys) = loop {
             let directory = self.mailroom_manager.choose_directory()?;
             match self
@@ -939,12 +953,15 @@ impl App {
         mut session: ReceiveSession,
         persister: &ReceiverPersister,
     ) -> Result<()> {
+        // Captured at `check_proposal`, where the original transaction is still
+        // reachable, and used at `commit_outputs` three transitions later.
+        let mut receiver_output: Option<TxOut> = None;
         loop {
             session = match session {
                 ReceiveSession::Initialized(proposal) =>
                     self.read_from_directory(proposal, persister).await?,
                 ReceiveSession::UncheckedOriginalPayload(proposal) =>
-                    self.check_proposal(proposal, persister)?,
+                    self.check_proposal(proposal, persister, &mut receiver_output)?,
                 ReceiveSession::MaybeInputsOwned(proposal) =>
                     self.check_inputs_not_owned(proposal, persister)?,
                 ReceiveSession::MaybeInputsSeen(proposal) =>
@@ -952,7 +969,7 @@ impl App {
                 ReceiveSession::OutputsUnknown(proposal) =>
                     self.identify_receiver_outputs(proposal, persister)?,
                 ReceiveSession::WantsOutputs(proposal) =>
-                    self.commit_outputs(proposal, persister)?,
+                    self.commit_outputs(proposal, persister, receiver_output.as_ref())?,
                 ReceiveSession::WantsInputs(proposal) =>
                     self.contribute_inputs(proposal, persister)?,
                 ReceiveSession::WantsFeeRange(proposal) =>
@@ -1019,6 +1036,7 @@ impl App {
         &self,
         proposal: Receiver<UncheckedOriginalPayload>,
         persister: &ReceiverPersister,
+        receiver_output: &mut Option<TxOut>,
     ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
         let proposal = proposal
@@ -1032,7 +1050,12 @@ impl App {
         persister.print(
             "Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:",
         );
-        println!("{}", serialize_hex(&proposal.extract_tx_to_schedule_broadcast()));
+        let original_tx = proposal.extract_tx_to_schedule_broadcast();
+        println!("{}", serialize_hex(&original_tx));
+        if persister.receive_options()?.cut_through.is_some() {
+            // Only needed for forwarding, and it costs an RPC call per output.
+            *receiver_output = Some(find_receiver_output(&wallet, &original_tx)?);
+        }
         Ok(ReceiveSession::MaybeInputsOwned(proposal))
     }
 
@@ -1085,7 +1108,29 @@ impl App {
         &self,
         proposal: Receiver<WantsOutputs>,
         persister: &ReceiverPersister,
+        receiver_output: Option<&TxOut>,
     ) -> Result<ReceiveSession> {
+        let options = persister.receive_options()?;
+        let proposal = match &options.cut_through {
+            None => proposal,
+            // Keep the receiver's own output as it is and add the forwarded one
+            // beside it. v2 sessions advertise `pjos=0`, so the existing output
+            // must keep its script and value; adding outputs is still allowed.
+            Some(cut_through) => {
+                let id = persister.session_id();
+                let receiver_output = receiver_output.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Cannot forward: this session resumed past the point where the original transaction was available. Run `payjoin-cli cancel {id}` to fall back to the original transaction."
+                    )
+                })?;
+                let forward = forward_output(&self.wallet(), cut_through)?;
+                let drain_script = receiver_output.script_pubkey.clone();
+                proposal.replace_receiver_outputs(
+                    vec![receiver_output.clone(), forward],
+                    &drain_script,
+                )?
+            }
+        };
         let proposal = proposal.commit_outputs().save(persister)?;
         Ok(ReceiveSession::WantsInputs(proposal))
     }
@@ -1096,18 +1141,42 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
-        let candidate_inputs = wallet.list_unspent()?;
+        let options = persister.receive_options()?;
+        let consolidate = options.consolidate;
+        // The receiver funds any output it adds, and its share of the fee comes
+        // off its own output afterwards. On a `pjos=0` session the sender rejects
+        // that output if it ends up below what they paid, so ask for headroom on
+        // top. Anything unused returns to the same output.
+        let min_total = match &options.cut_through {
+            None => Amount::ZERO,
+            Some(cut_through) => {
+                let headroom = self.config.max_fee_rate.unwrap_or(FeeRate::BROADCAST_MIN)
+                    * Weight::from_vb(FEE_HEADROOM_VB).unwrap_or(Weight::ZERO);
+                Amount::from_sat(cut_through.amount_sat) + headroom
+            }
+        };
+        let inputs = if consolidate.is_some() || min_total > Amount::ZERO {
+            // Consolidation deliberately forgoes the UIH-avoiding selection:
+            // the point is to sweep the receiver's UTXO set into the payjoin
+            // output instead of paying for a separate consolidation tx. The
+            // count is capped because BIP77 pads every message to a fixed
+            // size, so an oversized proposal cannot be sent at all.
+            let (selected, available) = wallet.select_receiver_utxos(consolidate, min_total)?;
+            if selected.is_empty() {
+                return Err(no_spendable_utxos(persister));
+            }
+            let contributed = selected.len();
+            persister.print(format_args!("Contributing {contributed} of {available} UTXOs"));
+            selected
+        } else {
+            let candidate_inputs = wallet.list_unspent()?;
+            if candidate_inputs.is_empty() {
+                return Err(no_spendable_utxos(persister));
+            }
+            vec![proposal.try_preserving_privacy(candidate_inputs)?]
+        };
 
-        if candidate_inputs.is_empty() {
-            let id = persister.session_id();
-            return Err(anyhow::anyhow!(
-                "No spendable UTXOs available in wallet. Please fund your wallet before resuming this session, or run `payjoin-cli cancel {id}` to cancel and broadcast the original transaction."
-            ));
-        }
-
-        let selected_input = proposal.try_preserving_privacy(candidate_inputs)?;
-        let proposal =
-            proposal.contribute_inputs(vec![selected_input])?.commit_inputs().save(persister)?;
+        let proposal = proposal.contribute_inputs(inputs)?.commit_inputs().save(persister)?;
         Ok(ReceiveSession::WantsFeeRange(proposal))
     }
 

@@ -1,6 +1,7 @@
 #[cfg(feature = "access-control")]
 use axum::extract::connect_info::Connected;
 use axum::extract::State;
+use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use axum::http::Method;
 use axum::response::{IntoResponse, Response};
 #[cfg(feature = "access-control")]
@@ -11,6 +12,7 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use rand::Rng;
 use tokio_listener::{Listener, SystemOptions, UserOptions};
 use tower::{Service, ServiceBuilder};
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -380,6 +382,11 @@ fn build_app(services: Services) -> Router {
     #[cfg(feature = "access-control")]
     let geoip = services.geoip.clone();
 
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::CONNECT, Method::GET, Method::OPTIONS, Method::POST])
+        .allow_headers([CONTENT_TYPE, CONTENT_LENGTH]);
+
     #[allow(unused_mut)]
     let mut router = Router::new()
         .fallback(route_request)
@@ -387,7 +394,8 @@ fn build_app(services: Services) -> Router {
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
                 .layer(axum::middleware::from_fn_with_state(metrics.clone(), track_metrics))
-                .layer(axum::middleware::from_fn_with_state(metrics, track_connections)),
+                .layer(axum::middleware::from_fn_with_state(metrics, track_connections))
+                .layer(cors),
         )
         .with_state(services);
 
@@ -423,17 +431,17 @@ async fn route_request(
 /// Determines if a request should be routed to the OHTTP relay service.
 ///
 /// Routing rules:
-/// - `(OPTIONS, _)` => CORS preflight handling
 /// - `(CONNECT, _)` => OHTTP bootstrap tunneling
 /// - `(POST, "/")` => relay to default gateway (needed for backwards-compatibility only)
 /// - `(POST, /http(s)://...)` => RFC 9540 opt-in gateway specified in path
 /// - `(GET, /http(s)://...)` => OHTTP bootstrap via WebSocket with opt-in gateway
+/// - `(OPTIONS, _)` => CORS preflight handling (handled by `tower_http::cors::CorsLayer`)
 fn is_relay_request(req: &axum::extract::Request) -> bool {
     let method = req.method();
     let path = req.uri().path();
 
     match (method, path) {
-        (&Method::OPTIONS, _) | (&Method::CONNECT, _) | (&Method::POST, "/") => true,
+        (&Method::CONNECT, _) | (&Method::POST, "/") => true,
         (&Method::POST, p) | (&Method::GET, p)
             if p.starts_with("/http://") || p.starts_with("/https://") =>
             true,

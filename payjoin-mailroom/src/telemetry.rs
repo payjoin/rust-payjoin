@@ -10,8 +10,34 @@ use opentelemetry::KeyValue;
 use opentelemetry_http::hyper::HyperClient;
 use opentelemetry_http::{Bytes, HttpClient, HttpError, Request, Response};
 use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
-use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::Resource;
+
+use crate::config::OperatorDomain;
+
+/// How often the exporter pushes to the collection endpoint.
+///
+/// Exported values cover one completed UTC reporting week, so every push in
+/// a week carries the same frozen value. Pushing hourly is about delivery,
+/// not resolution: a restarted node reports within the hour, and a value
+/// that misses one push has many more chances to land. The interval is not
+/// configurable, so an operator cannot narrow it into a live feed.
+const EXPORT_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
+/// Resource attributes attached to every exported metric.
+///
+/// Built from an empty resource rather than the SDK default so nothing about
+/// the host environment leaks into the export: the default builder includes
+/// an environment detector (`OTEL_RESOURCE_ATTRIBUTES`) through which
+/// hostnames or other identifying attributes could silently join the stream.
+/// The export carries exactly the service name and the operator-chosen
+/// `operator.domain` label.
+pub(crate) fn export_resource(operator_domain: &OperatorDomain) -> Resource {
+    Resource::builder_empty()
+        .with_service_name("payjoin-mailroom")
+        .with_attribute(KeyValue::new("operator.domain", operator_domain.as_str().to_string()))
+        .build()
+}
 
 /// Build an OTLP/HTTP `SdkMeterProvider` pinned to the mailroom's `ring`
 /// crypto provider.
@@ -35,12 +61,9 @@ use opentelemetry_sdk::Resource;
 pub fn build_otlp_meter_provider(
     endpoint: &str,
     auth_token: &str,
-    operator_domain: &str,
+    operator_domain: &OperatorDomain,
 ) -> SdkMeterProvider {
-    let resource = Resource::builder()
-        .with_service_name("payjoin-mailroom")
-        .with_attribute(KeyValue::new("operator.domain", operator_domain.to_string()))
-        .build();
+    let resource = export_resource(operator_domain);
 
     let headers: std::collections::HashMap<String, String> =
         [("Authorization".to_string(), format!("Basic {auth_token}"))].into();
@@ -71,10 +94,9 @@ pub fn build_otlp_meter_provider(
         .build()
         .expect("Failed to build OTLP metric exporter");
 
-    SdkMeterProvider::builder()
-        .with_periodic_exporter(metric_exporter)
-        .with_resource(resource)
-        .build()
+    let reader = PeriodicReader::builder(metric_exporter).with_interval(EXPORT_INTERVAL).build();
+
+    SdkMeterProvider::builder().with_reader(reader).with_resource(resource).build()
 }
 
 /// `HttpClient` adapter that runs the inner client on a captured Tokio handle.
@@ -119,6 +141,28 @@ mod tests {
     use super::*;
     use crate::metrics::MetricsService;
 
+    fn operator_domain() -> OperatorDomain {
+        OperatorDomain::try_from("test.example.com".to_string()).expect("non-blank")
+    }
+
+    #[test]
+    fn exporter_retries_frozen_weekly_values_hourly() {
+        assert_eq!(EXPORT_INTERVAL, Duration::from_secs(60 * 60));
+    }
+
+    /// The exported resource must carry exactly the service name and the
+    /// operator-chosen domain label. Anything else (hostname, IP, instance
+    /// id, env-injected attributes) could identify the operator's
+    /// infrastructure beyond what they chose to publish, so this pins the
+    /// exact key set rather than a subset.
+    #[test]
+    fn export_resource_carries_only_allowlisted_attributes() {
+        let resource = export_resource(&operator_domain());
+        let mut keys: Vec<&str> = resource.iter().map(|(key, _)| key.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["operator.domain", "service.name"]);
+    }
+
     /// Regression test for the OTLP transport swap (opentelemetry 0.32).
     ///
     /// Replaces the manual `mock_otlp.py` + `curl` + 65s-wait smoke test.
@@ -148,7 +192,7 @@ mod tests {
             .create_async()
             .await;
 
-        let provider = build_otlp_meter_provider(&server.url(), "dXNlcjpwYXNz", "test.example.com");
+        let provider = build_otlp_meter_provider(&server.url(), "dXNlcjpwYXNz", &operator_domain());
 
         // Drive a real meter through the same MetricsService the app uses so
         // the export batch is non-empty.

@@ -34,7 +34,7 @@ tokio = { version = "1.52.3", features = ["full"], optional = true }
 uniffi = { version = "0.31.2", features = ["cli"] }
 uniffi-bindgen-cs = { git = "https://github.com/NordSecurity/uniffi-bindgen-cs", tag = "v0.11.0+v0.31.0", optional = true }
 uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", tag = "v0.2.1+v0.31.2", optional = true }
-url = "2.5.4"
+# url = "2.5.4"
 yoke-derive = "=0.8.2"
 
 # Pinned transitive dependencies that appear unused to cargo-machete

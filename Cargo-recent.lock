@@ -2573,7 +2573,6 @@ dependencies = [
  "uniffi",
  "uniffi-bindgen-cs",
  "uniffi-dart",
- "url",
  "yoke-derive",
 ]
 

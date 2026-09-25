@@ -107,7 +107,7 @@ jobs:
           python -m pip install --only-binary payjoin --find-links dist "payjoin==$version"
           python -c '
           import payjoin
-          payjoin.Url.parse("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com")
+          payjoin.Uri.parse("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com")
           print("smoke ok")
           '
 

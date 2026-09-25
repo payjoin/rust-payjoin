@@ -6,10 +6,18 @@ namespace Payjoin.Tests;
 public class UriTests
 {
     [Fact]
+    public void UrlUserInfoRejectedPayjoinParameter()
+    {
+        var uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example@evil.com?ciao";
+        var ex = Assert.ThrowsAny<Exception>(() => Uri.Parse(uri));
+        Assert.Contains("UserinfoNotSupported", ex.ToString());
+    }
+
+    [Fact]
     public void UrlEncodedPayjoinParameter()
     {
-        var uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao";
-        var result = Url.Parse(uri);
+        var uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https%3A%2F%2Fexample.com%3Fciao";
+        var result = Uri.Parse(uri);
         Assert.NotNull(result);
     }
 
@@ -17,7 +25,7 @@ public class UriTests
     public void ValidUrl()
     {
         var uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao";
-        var result = Url.Parse(uri);
+        var result = Uri.Parse(uri);
         Assert.NotNull(result);
     }
 
@@ -25,7 +33,7 @@ public class UriTests
     public void MissingAmountShouldBeOk()
     {
         var uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://testnet.demo.btcpayserver.org/BTC/pj";
-        var result = Url.Parse(uri);
+        var result = Uri.Parse(uri);
         Assert.NotNull(result);
     }
 
@@ -37,7 +45,7 @@ public class UriTests
     public void ValidUrisWithDifferentAddressesAndEndpoints(string address, string pj)
     {
         var uri = $"{address}?amount=1&pj={pj}";
-        var result = Url.Parse(uri);
+        var result = Uri.Parse(uri);
         Assert.NotNull(result);
     }
 }

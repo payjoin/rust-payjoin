@@ -19,7 +19,7 @@ impl PjNotSupported {
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display)]
 #[error(transparent)]
-pub struct UrlParseError(#[from] url::ParseError);
+pub struct UrlParseError(#[from] payjoin::UrlParseError);
 
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display)]

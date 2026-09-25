@@ -67,7 +67,7 @@ dotnet add "PayjoinSmoke/PayjoinSmoke.csproj" package Payjoin \
     --no-restore
 
 cat >"PayjoinSmoke/Program.cs" <<'EOF'
-var uri = Payjoin.Url.Parse("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao");
+var uri = Payjoin.Uri.Parse("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao");
 Console.WriteLine(uri.AsString());
 EOF
 

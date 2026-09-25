@@ -10,17 +10,22 @@ from .utils import (
 
 
 class TestURIs(unittest.TestCase):
-    def test_todo_url_encoded(self):
-        uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao"
-        self.assertTrue(payjoin.Url.parse(uri), "pj url should be url encoded")
+    def test_url_userinfo_rejection(self):
+        uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example@evil.com?ciao"
+        with self.assertRaisesRegex(payjoin.UriParseError, "UserinfoNotSupported"):
+            payjoin.Uri.parse(uri)
+
+    def test_url_encoded(self):
+        uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https%3A%2F%2Fexample.com%3Fciao"
+        self.assertTrue(payjoin.Uri.parse(uri), "pj url encoded is not valid")
 
     def test_valid_url(self):
         uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao"
-        self.assertTrue(payjoin.Url.parse(uri), "pj is not a valid url")
+        self.assertTrue(payjoin.Uri.parse(uri), "pj is not a valid uri")
 
     def test_missing_amount(self):
         uri = "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://testnet.demo.btcpayserver.org/BTC/pj"
-        self.assertTrue(payjoin.Url.parse(uri), "missing amount should be ok")
+        self.assertTrue(payjoin.Uri.parse(uri), "missing amount should be ok")
 
     def test_valid_uris(self):
         https = str(payjoin.example_url())
@@ -34,7 +39,7 @@ class TestURIs(unittest.TestCase):
             for pj in [https, onion]:
                 uri = f"{address}?amount=1&pj={pj}"
                 try:
-                    payjoin.Url.parse(uri)
+                    payjoin.Uri.parse(uri)
                 except Exception as e:
                     self.fail(f"Failed to create a valid Uri for {uri}. Error: {e}")
 

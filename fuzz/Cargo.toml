@@ -21,37 +21,37 @@ payjoin = { path = "../payjoin", default-features = false, features = [
 ] }
 
 [[bin]]
-name = "uri_deserialize_pjuri"
+name = "uri-deserialize-pjuri"
 path = "fuzz_targets/uri/deserialize_pjuri.rs"
 doc = false
 bench = false
 
 [[bin]]
-name = "url_decode_url"
+name = "url-decode-url"
 path = "fuzz_targets/url/decode_url.rs"
 doc = false
 bench = false
 
 [[bin]]
-name = "directory_short_id"
+name = "directory-short-id"
 path = "fuzz_targets/directory/short_id.rs"
 doc = false
 bench = false
 
 [[bin]]
-name = "url_arbitrary_url"
+name = "url-arbitrary-url"
 path = "fuzz_targets/url/arbitrary_url.rs"
 doc = false
 bench = false
 
 [[bin]]
-name = "uri_deserialize_pjuri_v2"
+name = "uri-deserialize-pjuri-v2"
 path = "fuzz_targets/uri/deserialize_pjuri_v2.rs"
 doc = false
 bench = false
 
 [[bin]]
-name = "roundtrip_v1"
+name = "roundtrip-v1"
 path = "fuzz_targets/roundtrip/v1.rs"
 doc = false
 bench = false

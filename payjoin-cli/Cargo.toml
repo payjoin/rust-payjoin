@@ -4,7 +4,6 @@ version = "1.0.0-rc.2"
 authors = ["Dan Gould <d@ngould.dev>"]
 description = "A command-line Payjoin client for Bitcoin Core"
 repository = "https://github.com/payjoin/rust-payjoin"
-readme = "README.md"
 keywords = ["bip78", "payjoin", "bitcoin"]
 categories = ["cryptography::cryptocurrencies", "network-programming"]
 license = "MITNFA"

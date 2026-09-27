@@ -983,6 +983,35 @@ mod test {
     }
 
     #[test]
+    fn test_fee_contribution_dust_clamp_and_zero_fee() -> Result<(), BoxError> {
+        let payee_script = ScriptBuf::from_hex("0014b60943f60c3ee848828bdace7474a92e81f3fcdd")?;
+        let mut psbt = PARSED_ORIGINAL_PSBT.clone();
+        let dust_threshold = psbt.unsigned_tx.output[0].script_pubkey.minimal_non_dust();
+        psbt.unsigned_tx.output[0].value = dust_threshold + Amount::from_sat(100);
+
+        // With clamping, the contribution is decreased to leave exactly the
+        // dust threshold behind instead of erroring.
+        let fee_contribution = determine_fee_contribution(
+            &psbt,
+            &payee_script,
+            Some((Amount::from_sat(101), None)),
+            true,
+        );
+        assert_eq!(
+            fee_contribution,
+            Ok(Some(AdditionalFeeContribution { max_amount: Amount::from_sat(100), vout: 0 }))
+        );
+
+        // A zero contribution leaves the output untouched, so pre-existing
+        // dust change with no contribution requested keeps prior behavior.
+        psbt.unsigned_tx.output[0].value = dust_threshold - Amount::ONE_SAT;
+        let fee_contribution =
+            determine_fee_contribution(&psbt, &payee_script, Some((Amount::ZERO, None)), false);
+        assert_eq!(fee_contribution, Ok(None));
+        Ok(())
+    }
+
+    #[test]
     fn test_self_pay_change_index() -> Result<(), BoxError> {
         let script_bytes =
             <Vec<u8> as FromHex>::from_hex("a914774096dbcf486743c22f4347e9b469febe8b677a87")?;

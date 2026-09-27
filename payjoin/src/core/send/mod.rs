@@ -162,6 +162,11 @@ impl PsbtContextBuilder {
     /// If this option is true and a transaction with change amount lower than fee
     /// contribution is provided then instead of returning error the fee contribution will
     /// be just lowered in the request to match the change amount.
+    ///
+    /// The contribution never leaves a dust remainder behind: what remains after
+    /// deducting it must consume the output entirely or stay above the output's
+    /// dust threshold. Otherwise building fails, or — with clamping — the
+    /// contribution is lowered to leave exactly the dust threshold.
     pub fn build_with_additional_fee(
         mut self,
         max_fee_contribution: bitcoin::Amount,

@@ -607,13 +607,30 @@ fn clear_unneeded_fields(psbt: &mut Psbt) {
 }
 
 /// Ensure that an additional fee output is sufficient to pay for the specified additional fee
+/// without leaving a dust remainder behind: what remains after deducting the fee must
+/// either consume the output entirely or stay above the output's dust threshold, so the
+/// sender is never left with an unbroadcastable change output.
 fn check_fee_output_amount(
     output: &TxOut,
     fee: bitcoin::Amount,
     clamp_fee_contribution: bool,
 ) -> Result<bitcoin::Amount, InternalBuildSenderError> {
+    // A zero contribution leaves the output untouched.
+    if fee == bitcoin::Amount::ZERO {
+        return Ok(fee);
+    }
+    let dust_threshold = output.script_pubkey.minimal_non_dust();
     match output.value.checked_sub(fee) {
-        Some(_) => Ok(fee),
+        Some(remainder) if remainder == bitcoin::Amount::ZERO || remainder >= dust_threshold =>
+            Ok(fee),
+        // Decrease the contribution so the remaining change stays broadcastable
+        // instead of erroring. An output that is dust itself cannot contribute
+        // anything, which callers filter out downstream.
+        Some(_) if clamp_fee_contribution =>
+            Ok(output.value.checked_sub(dust_threshold).unwrap_or(bitcoin::Amount::ZERO)),
+        Some(_) => Err(InternalBuildSenderError::FeeContributionLeavesDustChange),
+        // The output cannot cover the fee at all: take it all when clamping,
+        // leaving nothing behind, otherwise reject.
         None if clamp_fee_contribution => Ok(output.value),
         None => Err(InternalBuildSenderError::FeeOutputValueLowerThanFeeContribution),
     }

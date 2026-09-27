@@ -1756,7 +1756,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.9",
+ "socket2 0.6.3",
  "tokio",
  "tower-service",
  "tracing",
@@ -2723,7 +2723,7 @@ checksum = "cb7ad7bc932e4968523fa7d9c320ee135ff779de720e9350fee8728838551764"
 dependencies = [
  "libc",
  "once_cell",
- "socket2 0.5.9",
+ "socket2 0.5.3",
  "tracing",
  "windows-sys 0.52.0",
 ]
@@ -3410,12 +3410,12 @@ checksum = "f67ad224767faa3c7d8b6d91985b78e70a1324408abcb1cfcc2be4c06bc06043"
 
 [[package]]
 name = "socket2"
-version = "0.5.9"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f5fd57c80058a56cf5c777ab8a126398ece8e442983605d280a44ce79d0edef"
+checksum = "2538b18701741680e0322a2302176d3253a35388e2e62f172f64f4f16605f877"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3726,7 +3726,7 @@ dependencies = [
  "pin-project",
  "serde",
  "serde_with",
- "socket2 0.5.9",
+ "socket2 0.5.3",
  "tokio",
  "tokio-util",
  "tracing",

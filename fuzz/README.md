@@ -22,7 +22,7 @@ This script accepts an optional fuzz target. It runs all available targets when 
 
 `./fuzz.sh [fuzz-target]`
 
-For example, `./fuzz.sh uri_deserialize_pjuri` runs only the `uri_deserialize_pjuri` target for 30 seconds.
+For example, `./fuzz.sh uri-deserialize-pjuri` runs only the `uri-deserialize-pjuri` target for 30 seconds.
 
 #### Using `cycle.sh`
 

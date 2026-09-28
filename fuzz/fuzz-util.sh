@@ -16,6 +16,6 @@ targetFileToName() {
     echo "$1" |
         sed 's/^fuzz_targets\///' |
         sed 's/\.rs$//' |
-        sed 's/\//_/g' |
-        sed 's/^_//g'
+        sed 's/[\/_]/-/g' |
+        sed 's/^-//g'
 }

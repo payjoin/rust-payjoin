@@ -30,6 +30,12 @@ pub fn init_tracing() {
     });
 }
 
+/// generate or get a DER encoded localhost cert and key.
+pub fn local_cert_key() -> rcgen::CertifiedKey<rcgen::KeyPair> {
+    rcgen::generate_simple_self_signed(vec!["0.0.0.0".to_string(), "localhost".to_string()])
+        .expect("Failed to generate cert")
+}
+
 pub fn init_bitcoind() -> Result<corepc_node::Node, BoxError> {
     let bitcoind_exe = corepc_node::exe_path()?;
     let mut conf = corepc_node::Conf::default();

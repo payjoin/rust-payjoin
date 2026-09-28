@@ -238,6 +238,15 @@ impl DbTrait for FilesDb {
         Ok(guard.post_v2(id, payload).await?)
     }
 
+    async fn peek_v2_payload(
+        &self,
+        id: &ShortId,
+    ) -> Result<Option<Arc<Vec<u8>>>, DbError<Self::OperationalError>> {
+        let mut guard = self.mailboxes.lock().await;
+        Ok(guard.read(id).await?)
+    }
+
+    // Unused by GET after the non-blocking switch; v2 waitmap removal is a follow-up.
     async fn wait_for_v2_payload(
         &self,
         id: &ShortId,
@@ -1069,5 +1078,38 @@ mod tests {
         assert_all_paths_over_capacity(&db).await;
 
         Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn peek_returns_immediately_on_empty_mailbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = FilesDb::init(
+            Duration::from_secs(30),
+            dir.path().to_owned(),
+            Duration::from_secs(60 * 60 * 24 * 7),
+        )
+        .await
+        .unwrap();
+        let id = ShortId([0u8; 8]);
+        let start = tokio::time::Instant::now();
+        let got = db.peek_v2_payload(&id).await.expect("peek");
+        assert!(got.is_none());
+        assert_eq!(start.elapsed(), Duration::ZERO, "peek must not block");
+    }
+
+    #[tokio::test]
+    async fn peek_returns_present_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = FilesDb::init(
+            Duration::from_millis(10),
+            dir.path().to_owned(),
+            Duration::from_secs(60 * 60 * 24 * 7),
+        )
+        .await
+        .unwrap();
+        let id = ShortId([0u8; 8]);
+        db.post_v2_payload(&id, b"hi".to_vec()).await.unwrap().unwrap();
+        let got = db.peek_v2_payload(&id).await.expect("peek").expect("present");
+        assert_eq!(&got[..], b"hi");
     }
 }

@@ -263,7 +263,7 @@ async fn init_directory(
     } else {
         None
     };
-    Ok(crate::directory::Service::new(db, ohttp_config.into(), sentinel_tag, v1))
+    Ok(crate::directory::Service::new(db, ohttp_config.into(), sentinel_tag, v1, metrics.clone()))
 }
 
 #[cfg(feature = "access-control")]

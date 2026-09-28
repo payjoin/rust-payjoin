@@ -12,6 +12,7 @@ use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
 use tracing::{error, warn};
 
 use crate::db::{Db, Error as DbError, SendableError};
+use crate::metrics::MetricsService;
 use crate::ohttp_relay::SentinelTag;
 
 const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
@@ -94,6 +95,7 @@ pub struct Service<D: Db> {
     ohttp: ohttp::Server,
     sentinel_tag: SentinelTag,
     v1: Option<V1>,
+    metrics: MetricsService,
 }
 
 impl<D: Db, B> tower::Service<Request<B>> for Service<D>
@@ -117,8 +119,14 @@ where
 }
 
 impl<D: Db> Service<D> {
-    pub fn new(db: D, ohttp: ohttp::Server, sentinel_tag: SentinelTag, v1: Option<V1>) -> Self {
-        Self { db, ohttp, sentinel_tag, v1 }
+    pub fn new(
+        db: D,
+        ohttp: ohttp::Server,
+        sentinel_tag: SentinelTag,
+        v1: Option<V1>,
+        metrics: MetricsService,
+    ) -> Self {
+        Self { db, ohttp, sentinel_tag, v1, metrics }
     }
 
     async fn serve_request<B>(&self, req: Request<B>) -> Result<Response<Body>>
@@ -250,19 +258,39 @@ impl<D: Db> Service<D> {
         Ok(Response::new(full(ohttp_res)))
     }
 
+    /// Dispatch a decapsulated V2 request to its handler, then record the
+    /// logical operation against `http_requests_total`.
+    ///
+    /// The outer `track_metrics` middleware only sees the wire path
+    /// (`/.well-known/ohttp-gateway` or `/`), so without this inner record
+    /// V2 mailbox traffic is invisible to the per-endpoint counter. The
+    /// inner path is collapsed by the same `endpoint_label` used at the
+    /// outer layer, so the bech32 mailbox id never reaches a metric label.
     async fn handle_decapsulated_request(
         &self,
         req: Request<Body>,
     ) -> Result<Response<Body>, HandlerError> {
         let path = req.uri().path().to_string();
         let (parts, body) = req.into_parts();
+        let method = parts.method.clone();
         let path_segments: Vec<&str> = path.split('/').collect();
-        match (parts.method, path_segments.as_slice()) {
+        let result = match (parts.method, path_segments.as_slice()) {
             (Method::POST, &["", id]) => self.post_mailbox(id, body).await,
             (Method::GET, &["", id]) => self.get_mailbox(id).await,
             (Method::PUT, &["", id]) if self.v1.is_some() => self.put_payjoin_v1(id, body).await,
             _ => Ok(not_found()),
-        }
+        };
+        let status = match &result {
+            Ok(response) => response.status().as_u16(),
+            Err(err) => err.status_code().as_u16(),
+        };
+        self.metrics.record_http_request(
+            crate::middleware::endpoint_label(&path),
+            crate::middleware::method_label(&method),
+            status,
+            crate::metrics::RequestLayer::V2,
+        );
+        result
     }
 
     async fn post_mailbox(&self, id: &str, body: Body) -> Result<Response<Body>, HandlerError> {
@@ -461,43 +489,48 @@ enum HandlerError {
 }
 
 impl HandlerError {
+    /// HTTP status this error maps to, without running the logging/body
+    /// side effects of [`to_response`](Self::to_response).
+    ///
+    /// Used by callers (e.g. `handle_decapsulated_request`) that need the
+    /// status for a metric label but still return the error to the outer
+    /// layer for response rendering, so `to_response` runs exactly once.
+    fn status_code(&self) -> StatusCode {
+        match self {
+            HandlerError::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            HandlerError::InternalServerError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            HandlerError::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            HandlerError::SenderGone(_) => StatusCode::GONE,
+            HandlerError::OhttpKeyRejection(_) => StatusCode::BAD_REQUEST,
+            HandlerError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            HandlerError::V1PsbtRejected(_) => StatusCode::BAD_REQUEST,
+            HandlerError::Forbidden(_) => StatusCode::FORBIDDEN,
+        }
+    }
+
     fn to_response(&self) -> Response<Body> {
         let mut res = Response::new(empty());
+        *res.status_mut() = self.status_code();
         match self {
-            HandlerError::PayloadTooLarge => *res.status_mut() = StatusCode::PAYLOAD_TOO_LARGE,
-            HandlerError::InternalServerError(e) => {
-                error!("Internal server error: {}", e);
-                *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR
-            }
+            HandlerError::PayloadTooLarge => {}
+            HandlerError::InternalServerError(e) => error!("Internal server error: {}", e),
             HandlerError::ServiceUnavailable(e) => {
                 error!("Service temporarily unavailable: {}", e);
-                *res.status_mut() = StatusCode::SERVICE_UNAVAILABLE
             }
-            HandlerError::SenderGone(e) => {
-                error!("Sender gone: {}", e);
-                *res.status_mut() = StatusCode::GONE
-            }
+            HandlerError::SenderGone(e) => error!("Sender gone: {}", e),
             HandlerError::OhttpKeyRejection(e) => {
                 const OHTTP_KEY_REJECTION_RES_JSON: &str = r#"{"type":"https://iana.org/assignments/http-problem-types#ohttp-key", "title": "key identifier unknown"}"#;
                 warn!("Bad request: Key configuration rejected: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST;
                 res.headers_mut()
                     .insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
                 *res.body_mut() = full(OHTTP_KEY_REJECTION_RES_JSON);
             }
-            HandlerError::BadRequest(e) => {
-                warn!("Bad request: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST
-            }
+            HandlerError::BadRequest(e) => warn!("Bad request: {}", e),
             HandlerError::V1PsbtRejected(e) => {
                 warn!("PSBT rejected: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST;
                 *res.body_mut() = full(V1_REJECT_RES_JSON);
             }
-            HandlerError::Forbidden(e) => {
-                warn!("Forbidden: {}", e);
-                *res.status_mut() = StatusCode::FORBIDDEN
-            }
+            HandlerError::Forbidden(e) => warn!("Forbidden: {}", e),
         }
         res
     }
@@ -581,9 +614,19 @@ mod tests {
 
     use super::*;
     use crate::db::FilesDb;
+    use crate::metrics::HTTP_REQUESTS_TOTAL;
     use crate::ohttp_relay::SentinelTag;
 
     async fn test_service(v1: Option<V1>) -> Service<FilesDb> {
+        test_service_with_metrics(v1, MetricsService::new(None)).await
+    }
+
+    /// Like [`test_service`] but injects a caller-owned [`MetricsService`] so
+    /// tests can assert on recorded labels via its `SdkMeterProvider`.
+    async fn test_service_with_metrics(
+        v1: Option<V1>,
+        metrics: MetricsService,
+    ) -> Service<FilesDb> {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = FilesDb::init(
             Duration::from_millis(100),
@@ -594,7 +637,7 @@ mod tests {
         .expect("db init");
         let ohttp: ohttp::Server =
             crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        Service::new(db, ohttp, SentinelTag::new([0u8; 32]), v1)
+        Service::new(db, ohttp, SentinelTag::new([0u8; 32]), v1, metrics)
     }
 
     /// A valid ShortId encoded as bech32 for use in URL paths.
@@ -831,10 +874,10 @@ mod tests {
         )
         .await
         .expect("db init");
-        let db = MetricsDb::new(db, metrics);
+        let db = MetricsDb::new(db, metrics.clone());
         let ohttp: ohttp::Server =
             crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None);
+        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None, metrics);
 
         let id = valid_short_id_path();
         let res = svc
@@ -894,10 +937,10 @@ mod tests {
         )
         .await
         .expect("db init");
-        let db = MetricsDb::new(db, metrics);
+        let db = MetricsDb::new(db, metrics.clone());
         let ohttp: ohttp::Server =
             crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None);
+        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None, metrics);
 
         let id = valid_short_id_path();
         let res = svc
@@ -930,5 +973,202 @@ mod tests {
             }
             other => panic!("expected U64 Gauge, got {other:?}"),
         }
+    }
+
+    // V2 metrics: handle_decapsulated_request records http_requests_total
+
+    /// Finds an `http_requests_total` data point whose labels exactly match the
+    /// given `layer`, `endpoint`, `method`, and `status_code`. Returns its
+    /// counter value (0 if no matching data point exists).
+    fn count_http_request_record(
+        exporter: &opentelemetry_sdk::metrics::InMemoryMetricExporter,
+        layer: &str,
+        endpoint: &str,
+        method: &str,
+        status_code: u16,
+    ) -> u64 {
+        use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+
+        let finished = exporter.get_finished_metrics().expect("metrics");
+        finished
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == HTTP_REQUESTS_TOTAL)
+            .flat_map(|m| match m.data() {
+                AggregatedMetrics::U64(MetricData::Sum(sum)) =>
+                    sum.data_points().collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .filter(|dp| {
+                let mut attrs = dp.attributes();
+                let layer_matches =
+                    attrs.any(|kv| kv.key.as_str() == "layer" && kv.value.to_string() == layer);
+                if !layer_matches {
+                    return false;
+                }
+                let mut attrs = dp.attributes();
+                let endpoint_matches = attrs
+                    .any(|kv| kv.key.as_str() == "endpoint" && kv.value.to_string() == endpoint);
+                if !endpoint_matches {
+                    return false;
+                }
+                let mut attrs = dp.attributes();
+                let method_matches =
+                    attrs.any(|kv| kv.key.as_str() == "method" && kv.value.to_string() == method);
+                if !method_matches {
+                    return false;
+                }
+                let mut attrs = dp.attributes();
+                attrs.any(|kv| {
+                    kv.key.as_str() == "status_code"
+                        && kv.value.to_string() == status_code.to_string()
+                })
+            })
+            .map(|dp| dp.value())
+            .sum()
+    }
+
+    /// Collects every `endpoint` label value recorded under `http_requests_total`
+    /// (any layer), so tests can assert the actual short-id value never leaks.
+    fn recorded_endpoints(
+        exporter: &opentelemetry_sdk::metrics::InMemoryMetricExporter,
+    ) -> Vec<String> {
+        use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+
+        let finished = exporter.get_finished_metrics().expect("metrics");
+        finished
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == HTTP_REQUESTS_TOTAL)
+            .flat_map(|m| match m.data() {
+                AggregatedMetrics::U64(MetricData::Sum(sum)) =>
+                    sum.data_points().collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .flat_map(|dp| {
+                dp.attributes()
+                    .filter_map(|kv| {
+                        if kv.key.as_str() == "endpoint" {
+                            Some(kv.value.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    fn metrics_exporter() -> (
+        opentelemetry_sdk::metrics::InMemoryMetricExporter,
+        opentelemetry_sdk::metrics::SdkMeterProvider,
+    ) {
+        use opentelemetry_sdk::metrics::{
+            InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
+        };
+
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone()).build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+        (exporter, provider)
+    }
+
+    /// A V2 POST to `/{mailbox}` decapsulated by the directory records
+    /// `http_requests_total{layer="v2", endpoint="/{mailbox}", method="POST",
+    /// status_code="200"}` exactly once, and the actual mailbox id never
+    /// reaches any label.
+    #[tokio::test]
+    async fn v2_decapsulated_post_records_mailbox_metric() {
+        let (exporter, provider) = metrics_exporter();
+        let metrics = MetricsService::new(Some(provider.clone()));
+        let svc = test_service_with_metrics(None, metrics).await;
+
+        let id = valid_short_id_path();
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(format!("http://localhost/{id}"))
+            .body(Body::from(b"small payload under 65k".to_vec()))
+            .unwrap();
+
+        let res = svc.handle_decapsulated_request(req).await.expect("decap ok");
+        assert_eq!(res.status(), StatusCode::OK);
+
+        provider.force_flush().expect("flush failed");
+
+        assert_eq!(
+            count_http_request_record(&exporter, "v2", "/{mailbox}", "POST", 200),
+            1,
+            "V2 POST must record exactly one http_requests_total under layer=v2 /{{mailbox}} POST 200"
+        );
+        assert_eq!(
+            count_http_request_record(&exporter, "gateway", "/{mailbox}", "POST", 200),
+            0,
+            "outer gateway layer must not be recorded when only the inner path runs"
+        );
+        let endpoints = recorded_endpoints(&exporter);
+        assert!(
+            endpoints.iter().all(|ep| !ep.contains(&id)),
+            "actual mailbox id {id} leaked into endpoint labels: {endpoints:?}"
+        );
+    }
+
+    /// A V2 GET to `/{mailbox}` that times out at the db returns 202 ACCEPTED
+    /// and is recorded as `layer="v2", endpoint="/{mailbox}", method="GET",
+    /// status_code="202"`.
+    #[tokio::test]
+    async fn v2_decapsulated_get_records_mailbox_metric() {
+        let (exporter, provider) = metrics_exporter();
+        let metrics = MetricsService::new(Some(provider.clone()));
+        let svc = test_service_with_metrics(None, metrics).await;
+
+        let id = valid_short_id_path();
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri(format!("http://localhost/{id}"))
+            .body(Body::empty())
+            .unwrap();
+
+        let res = svc.handle_decapsulated_request(req).await.expect("decap ok");
+        assert_eq!(res.status(), StatusCode::ACCEPTED);
+
+        provider.force_flush().expect("flush failed");
+
+        assert_eq!(
+            count_http_request_record(&exporter, "v2", "/{mailbox}", "GET", 202),
+            1,
+            "V2 GET timeout must record exactly one http_requests_total under layer=v2 /{{mailbox}} GET 202"
+        );
+    }
+
+    /// An inner request whose path doesn't match any handler arm collapses to
+    /// `endpoint="other"` and is still recorded once under layer=v2 with the
+    /// catch-all 404 status.
+    #[tokio::test]
+    async fn v2_decapsulated_unknown_path_records_other_endpoint() {
+        let (exporter, provider) = metrics_exporter();
+        let metrics = MetricsService::new(Some(provider.clone()));
+        let svc = test_service_with_metrics(None, metrics).await;
+
+        // A multi-segment path does not match `(POST, &["", id])`, so it falls
+        // through to the `_ => not_found()` arm instead of attempting a
+        // ShortId parse that would surface as a 400.
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("http://localhost/unknown/path")
+            .body(Body::empty())
+            .unwrap();
+
+        let res = svc.handle_decapsulated_request(req).await.expect("decap ok");
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+        provider.force_flush().expect("flush failed");
+
+        assert_eq!(
+            count_http_request_record(&exporter, "v2", "other", "POST", 404),
+            1,
+            "unknown inner path must collapse to endpoint=other and record 404"
+        );
     }
 }

@@ -3,8 +3,13 @@ package org.payjoindevkit
 import java.util.HexFormat
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.boolean
@@ -27,7 +32,54 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 class IntegrationTests {
     @Test
-    fun v2ToV2Payjoin() {
+    fun receiverPendingFallbackCloseSync() = runScenario { proposal, persister ->
+        proposal.cancel().use { transition ->
+            assertNotNull(transition.save(persister)).use { pending ->
+                assertTrue(pending.fallbackTx().isNotEmpty())
+                replayReceiverEventLog(persister).use {
+                    assertIs<ReceiveSession.ReceiverPendingFallback>(it.state())
+                }
+                assertFalse(persister.closed)
+                pending.closeSession().use { it.save(persister) }
+                assertTrue(persister.closed)
+                replayReceiverEventLog(persister).use { assertIs<ReceiveSession.Closed>(it.state()) }
+            }
+        }
+    }
+
+    @Test
+    fun receiverPendingFallbackCloseAsync() = runScenario { proposal, persister ->
+        runBlocking {
+            withTimeout(15_000) {
+                // Use the same persisted proposal history through the async interface.
+                val asyncPersister = ControlledAsyncPersister()
+                asyncPersister.events.addAll(persister.load())
+                proposal.cancel().use { transition ->
+                    assertNotNull(transition.saveAsync(asyncPersister)).use { pending ->
+                        assertTrue(pending.fallbackTx().isNotEmpty())
+                        replayReceiverEventLogAsync(asyncPersister).use {
+                            assertIs<ReceiveSession.ReceiverPendingFallback>(it.state())
+                        }
+                        assertFalse(asyncPersister.closed)
+                        pending.closeSession().use { transition ->
+                            asyncPersister.gated("close") { transition.saveAsync(asyncPersister) }
+                        }
+                        assertTrue(asyncPersister.closed)
+                        replayReceiverEventLogAsync(asyncPersister).use {
+                            assertIs<ReceiveSession.Closed>(it.state())
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun v2ToV2Payjoin() = runScenario()
+
+    private fun runScenario(
+        cancelReceiver: ((PayjoinProposal, InMemoryReceiverPersister) -> Unit)? = null,
+    ) {
         initTracing()
         TestServices.initialize().use { services ->
             services.waitForServicesReady()
@@ -45,6 +97,7 @@ class IntegrationTests {
                                     ohttpKeys,
                                     senderRpc,
                                     receiverRpc,
+                                    cancelReceiver,
                                 )
                             }
                         }
@@ -61,6 +114,7 @@ class IntegrationTests {
         ohttpKeys: OhttpKeys,
         senderRpc: RpcClient,
         receiverRpc: RpcClient,
+        cancelReceiver: ((PayjoinProposal, InMemoryReceiverPersister) -> Unit)?,
     ) {
         val receiverAddress = Json.parseToJsonElement(rpc(receiverRpc, "getnewaddress")).jsonPrimitive.content
         val senderOutpoints = listOutpoints(senderRpc)
@@ -95,6 +149,10 @@ class IntegrationTests {
                         // Inside the Receiver:
                         val payjoinProposal = waitForReceiverProposal(session, recvPersister, http, relay, receiverRpc)
                         payjoinProposal.use {
+                            if (cancelReceiver != null) {
+                                cancelReceiver(payjoinProposal, recvPersister)
+                                return
+                            }
                             payjoinProposal.createPostRequest(relay).useDisposable { posted ->
                                 val body = http.post(posted.request)
                                 payjoinProposal.processResponse(body, posted.clientResponse).use { transition ->

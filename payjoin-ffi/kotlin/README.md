@@ -22,7 +22,7 @@ Or `bash ./contrib/test.sh` from this directory (uses `Cargo-recent.lock`).
 `bitcoind` and `BITCOIND_SKIP_DOWNLOAD=1` is set, so no download happens. Outside the nix shell,
 Bitcoin Core is downloaded by corepc-node (`29_0`) on first run instead.
 
-Without nix: Rust (see repo `rust-toolchain.toml` / MSRV 1.85), JDK 21+, and the Gradle wrapper in this directory. Network access is required the first time bitcoind is fetched.
+Without nix: Rust (see repo `rust-toolchain.toml` / MSRV 1.85), JDK 21+, Python 3, and the Gradle wrapper in this directory. Python parses Cargo's native library output during generation. Network access is required the first time bitcoind is fetched.
 
 ## Stability
 

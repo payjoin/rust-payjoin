@@ -25,5 +25,5 @@ Protocol `close` is renamed to `closeSession` only in `[bindings.kotlin.rename]`
 
 With nix, `nix develop .#kotlin` provides the pinned MSRV Rust toolchain, JDK 21, and
 `BITCOIND_EXE` (via `nixpkgs`, with `BITCOIND_SKIP_DOWNLOAD=1`), and is what CI uses. Without
-nix, use a local JDK 21+ and the Gradle wrapper; `corepc-node` will download `bitcoind` on
-first test run.
+nix, install Python 3 for binding generation and use a local JDK 21+ and the Gradle wrapper;
+`corepc-node` will download `bitcoind` on first test run.

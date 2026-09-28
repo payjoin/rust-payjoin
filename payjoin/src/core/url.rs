@@ -798,6 +798,14 @@ mod tests {
     }
 
     #[test]
+    fn test_hyphenated_domain_and_invalid_chars() {
+        let url = Url::parse("https://my-host.example.com/").unwrap();
+        assert_eq!(url.domain(), Some("my-host.example.com"));
+
+        assert!(matches!(Url::parse("https://ex_ample.com/"), Err(ParseError::InvalidHost)));
+    }
+
+    #[test]
     fn test_userinfo_rejected_in_authority() {
         // One input per way the authority can end (`/`, `?`, `#`, end of
         // input), plus the `host:port@host` shape that reads as a plain host

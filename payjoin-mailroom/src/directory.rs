@@ -6,18 +6,14 @@ use std::task::{Context, Poll};
 use anyhow::Result;
 use axum::body::{Body, Bytes};
 use axum::http::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
-use axum::http::{Method, Request, Response, StatusCode, Uri};
+use axum::http::{Method, Request, Response, StatusCode};
 use http_body_util::BodyExt;
-use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
+use payjoin::directory::{ShortId, ShortIdError};
 use tracing::{error, warn};
 
 use crate::db::{Db, Error as DbError, SendableError};
-use crate::ohttp_relay::SentinelTag;
+use crate::ohttp_gateway::Decapsulated;
 
-const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
-const POLY1305_TAG_SIZE: usize = 16;
-pub const BHTTP_REQ_BYTES: usize =
-    ENCAPSULATED_MESSAGE_BYTES - (CHACHA20_POLY1305_NONCE_LEN + POLY1305_TAG_SIZE);
 const V1_MAX_BUFFER_SIZE: usize = 65536;
 
 const V1_REJECT_RES_JSON: &str =
@@ -25,8 +21,6 @@ const V1_REJECT_RES_JSON: &str =
 const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message": "V2 receiver offline. V1 sends require synchronous communications."}}"#;
 const V1_VERSION_UNSUPPORTED_RES_JSON: &str =
     r#"{"errorCode": "version-unsupported", "supported": [2], "message": "V1 is not supported"}"#;
-
-pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Opaque blocklist of Bitcoin addresses stored as script pubkeys.
 ///
@@ -91,16 +85,10 @@ fn parse_address_lines(text: &str) -> std::collections::HashSet<bitcoin::ScriptB
 #[derive(Clone)]
 pub struct Service<D: Db> {
     db: D,
-    ohttp: ohttp::Server,
-    sentinel_tag: SentinelTag,
     v1: Option<V1>,
 }
 
-impl<D: Db, B> tower::Service<Request<B>> for Service<D>
-where
-    B: axum::body::HttpBody<Data = Bytes> + Send + 'static,
-    B::Error: Into<BoxError>,
-{
+impl<D: Db> tower::Service<Request<Body>> for Service<D> {
     type Response = Response<Body>;
     type Error = anyhow::Error;
     type Future =
@@ -110,53 +98,38 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Request<B>) -> Self::Future {
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
         let this = self.clone();
         Box::pin(async move { this.serve_request(req).await })
     }
 }
 
 impl<D: Db> Service<D> {
-    pub fn new(db: D, ohttp: ohttp::Server, sentinel_tag: SentinelTag, v1: Option<V1>) -> Self {
-        Self { db, ohttp, sentinel_tag, v1 }
-    }
+    pub fn new(db: D, v1: Option<V1>) -> Self { Self { db, v1 } }
 
-    async fn serve_request<B>(&self, req: Request<B>) -> Result<Response<Body>>
-    where
-        B: axum::body::HttpBody<Data = Bytes> + Send + 'static,
-        B::Error: Into<BoxError>,
-    {
+    async fn serve_request(&self, req: Request<Body>) -> Result<Response<Body>> {
         let path = req.uri().path().to_string();
         let query = req.uri().query().unwrap_or_default().to_string();
+        // Requests delivered by the OHTTP gateway layer carry this marker,
+        // distinguishing encapsulated (v2) traffic from plaintext transport
+        // requests that share the same method and path.
+        let decapsulated = req.extensions().get::<Decapsulated>().is_some();
         let (parts, body) = req.into_parts();
         let path_segments: Vec<&str> = path.split('/').collect();
 
-        // Best-effort validation that the relay and gateway aren't on the same
-        // payjoin-mailroom instance
-        if let Some(header_value) = parts
-            .headers
-            .get(crate::ohttp_relay::sentinel::HEADER_NAME)
-            .and_then(|v| v.to_str().ok())
-        {
-            if crate::ohttp_relay::sentinel::is_self_loop(&self.sentinel_tag, header_value) {
-                warn!("Rejected OHTTP request from same-instance relay");
-                return Ok(HandlerError::Forbidden(anyhow::anyhow!(
-                    "Relay and gateway must be operated by different entities"
-                ))
-                .to_response());
-            }
-        }
-
-        let mut response = match (parts.method, path_segments.as_slice()) {
-            (Method::POST, ["", ".well-known", "ohttp-gateway"]) =>
-                self.handle_ohttp_gateway(body).await,
-            (Method::GET, ["", ".well-known", "ohttp-gateway"]) =>
+        let mut response = match (decapsulated, parts.method, path_segments.as_slice()) {
+            // Encapsulated (v2) requests, decapsulated by the gateway layer.
+            (true, Method::POST, ["", id]) => self.post_mailbox(id, body).await,
+            (true, Method::GET, ["", id]) => self.get_mailbox(id).await,
+            (true, Method::PUT, ["", id]) if self.v1.is_some() =>
+                self.put_payjoin_v1(id, body).await,
+            (true, _, _) => Ok(not_found()),
+            // Plaintext transport requests.
+            (false, Method::GET, ["", ".well-known", "ohttp-gateway"]) =>
                 self.handle_ohttp_gateway_get(&query).await,
-            (Method::POST, ["", ""]) => self.handle_ohttp_gateway(body).await,
-            (Method::GET, ["", "ohttp-keys"]) => self.get_ohttp_keys().await,
-            (Method::POST, ["", id]) => self.handle_post_v1(id, query, body).await,
-            (Method::GET, ["", "health"]) => self.health_check().await,
-            (Method::GET, ["", ""]) => handle_directory_home_path().await,
+            (false, Method::POST, ["", id]) => self.handle_post_v1(id, query, body).await,
+            (false, Method::GET, ["", "health"]) => self.health_check().await,
+            (false, Method::GET, ["", ""]) => handle_directory_home_path().await,
             _ => Ok(not_found()),
         }
         .unwrap_or_else(|e| e.to_response());
@@ -167,16 +140,12 @@ impl<D: Db> Service<D> {
     }
 
     /// Route POST /{id}: forward to V1 fallback when enabled, otherwise reject.
-    async fn handle_post_v1<B>(
+    async fn handle_post_v1(
         &self,
         id: &str,
         query: String,
-        body: B,
-    ) -> Result<Response<Body>, HandlerError>
-    where
-        B: axum::body::HttpBody<Data = Bytes> + Send + 'static,
-        B::Error: Into<BoxError>,
-    {
+        body: Body,
+    ) -> Result<Response<Body>, HandlerError> {
         if self.v1.is_some() {
             self.post_fallback_v1(id, query, body).await
         } else {
@@ -184,84 +153,6 @@ impl<D: Db> Service<D> {
                 .status(StatusCode::BAD_REQUEST)
                 .header(CONTENT_TYPE, "application/json")
                 .body(full(V1_VERSION_UNSUPPORTED_RES_JSON))?)
-        }
-    }
-
-    /// Handle an encapsulated OHTTP request and return an encapsulated response
-    async fn handle_ohttp_gateway<B>(&self, body: B) -> Result<Response<Body>, HandlerError>
-    where
-        B: axum::body::HttpBody<Data = Bytes> + Send + 'static,
-        B::Error: Into<BoxError>,
-    {
-        let ohttp_body = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::BadRequest(anyhow::anyhow!(e.into())))?
-            .to_bytes();
-
-        // Decapsulate OHTTP request
-        let (bhttp_req, res_ctx) = self
-            .ohttp
-            .decapsulate(&ohttp_body)
-            .map_err(|e| HandlerError::OhttpKeyRejection(e.into()))?;
-        let mut cursor = std::io::Cursor::new(bhttp_req);
-        let req = bhttp::Message::read_bhttp(&mut cursor)
-            .map_err(|e| HandlerError::BadRequest(e.into()))?;
-        let uri = Uri::builder()
-            .scheme(req.control().scheme().unwrap_or_default())
-            .authority(req.control().authority().unwrap_or_default())
-            .path_and_query(req.control().path().unwrap_or_default())
-            .build()?;
-        let body = req.content().to_vec();
-        let mut http_req =
-            Request::builder().uri(uri).method(req.control().method().unwrap_or_default());
-        for header in req.header().fields() {
-            http_req = http_req.header(header.name(), header.value())
-        }
-        let request = http_req.body(full(body))?;
-
-        // Handle decapsulated request
-        let response = self.handle_decapsulated_request(request).await?;
-
-        // Encapsulate OHTTP response
-        let (parts, body) = response.into_parts();
-        let mut bhttp_res = bhttp::Message::response(
-            bhttp::StatusCode::try_from(parts.status.as_u16())
-                .map_err(|e| HandlerError::InternalServerError(e.into()))?,
-        );
-        for (name, value) in parts.headers.iter() {
-            bhttp_res.put_header(name.as_str(), value.to_str().unwrap_or_default());
-        }
-        let full_body = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?
-            .to_bytes();
-        bhttp_res.write_content(&full_body);
-        let mut bhttp_bytes = Vec::new();
-        bhttp_res
-            .write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_bytes)
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?;
-        bhttp_bytes.resize(BHTTP_REQ_BYTES, 0);
-        let ohttp_res = res_ctx
-            .encapsulate(&bhttp_bytes)
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?;
-        assert!(ohttp_res.len() == ENCAPSULATED_MESSAGE_BYTES, "Unexpected OHTTP response size");
-        Ok(Response::new(full(ohttp_res)))
-    }
-
-    async fn handle_decapsulated_request(
-        &self,
-        req: Request<Body>,
-    ) -> Result<Response<Body>, HandlerError> {
-        let path = req.uri().path().to_string();
-        let (parts, body) = req.into_parts();
-        let path_segments: Vec<&str> = path.split('/').collect();
-        match (parts.method, path_segments.as_slice()) {
-            (Method::POST, &["", id]) => self.post_mailbox(id, body).await,
-            (Method::GET, &["", id]) => self.get_mailbox(id).await,
-            (Method::PUT, &["", id]) if self.v1.is_some() => self.put_payjoin_v1(id, body).await,
-            _ => Ok(not_found()),
         }
     }
 
@@ -330,16 +221,12 @@ impl<D: Db> Service<D> {
         }
     }
 
-    async fn post_fallback_v1<B>(
+    async fn post_fallback_v1(
         &self,
         id: &str,
         query: String,
-        body: B,
-    ) -> Result<Response<Body>, HandlerError>
-    where
-        B: axum::body::HttpBody<Data = Bytes> + Send + 'static,
-        B::Error: Into<BoxError>,
-    {
+        body: Body,
+    ) -> Result<Response<Body>, HandlerError> {
         let none_response = Response::builder()
             .status(StatusCode::SERVICE_UNAVAILABLE)
             .body(full(V1_UNAVAILABLE_RES_JSON))?;
@@ -364,22 +251,14 @@ impl<D: Db> Service<D> {
         )
     }
 
+    /// Handle `GET /.well-known/ohttp-gateway`. The encoded key configuration is
+    /// served by the [`crate::ohttp_gateway`] layer; only the `allowed_purposes`
+    /// policy probe reaches the directory.
     async fn handle_ohttp_gateway_get(&self, query: &str) -> Result<Response<Body>, HandlerError> {
         match query {
             "allowed_purposes" => Ok(self.get_ohttp_allowed_purposes().await),
-            _ => self.get_ohttp_keys().await,
+            _ => Ok(not_found()),
         }
-    }
-
-    async fn get_ohttp_keys(&self) -> Result<Response<Body>, HandlerError> {
-        let ohttp_keys = self
-            .ohttp
-            .config()
-            .encode()
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?;
-        let mut res = Response::new(full(ohttp_keys));
-        res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/ohttp-keys"));
-        Ok(res)
     }
 
     async fn get_ohttp_allowed_purposes(&self) -> Response<Body> {
@@ -453,11 +332,9 @@ enum HandlerError {
     InternalServerError(anyhow::Error),
     ServiceUnavailable(anyhow::Error),
     SenderGone(anyhow::Error),
-    OhttpKeyRejection(anyhow::Error),
     BadRequest(anyhow::Error),
     /// V1 PSBT rejected — returns the BIP78 `original-psbt-rejected` error.
     V1PsbtRejected(anyhow::Error),
-    Forbidden(anyhow::Error),
 }
 
 impl HandlerError {
@@ -477,14 +354,6 @@ impl HandlerError {
                 error!("Sender gone: {}", e);
                 *res.status_mut() = StatusCode::GONE
             }
-            HandlerError::OhttpKeyRejection(e) => {
-                const OHTTP_KEY_REJECTION_RES_JSON: &str = r#"{"type":"https://iana.org/assignments/http-problem-types#ohttp-key", "title": "key identifier unknown"}"#;
-                warn!("Bad request: Key configuration rejected: {}", e);
-                *res.status_mut() = StatusCode::BAD_REQUEST;
-                res.headers_mut()
-                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/problem+json"));
-                *res.body_mut() = full(OHTTP_KEY_REJECTION_RES_JSON);
-            }
             HandlerError::BadRequest(e) => {
                 warn!("Bad request: {}", e);
                 *res.status_mut() = StatusCode::BAD_REQUEST
@@ -493,10 +362,6 @@ impl HandlerError {
                 warn!("PSBT rejected: {}", e);
                 *res.status_mut() = StatusCode::BAD_REQUEST;
                 *res.body_mut() = full(V1_REJECT_RES_JSON);
-            }
-            HandlerError::Forbidden(e) => {
-                warn!("Forbidden: {}", e);
-                *res.status_mut() = StatusCode::FORBIDDEN
             }
         }
         res
@@ -581,7 +446,6 @@ mod tests {
 
     use super::*;
     use crate::db::FilesDb;
-    use crate::ohttp_relay::SentinelTag;
 
     async fn test_service(v1: Option<V1>) -> Service<FilesDb> {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -592,9 +456,7 @@ mod tests {
         )
         .await
         .expect("db init");
-        let ohttp: ohttp::Server =
-            crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        Service::new(db, ohttp, SentinelTag::new([0u8; 32]), v1)
+        Service::new(db, v1)
     }
 
     /// A valid ShortId encoded as bech32 for use in URL paths.
@@ -832,9 +694,7 @@ mod tests {
         .await
         .expect("db init");
         let db = MetricsDb::new(db, metrics);
-        let ohttp: ohttp::Server =
-            crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None);
+        let svc = Service::new(db, None);
 
         let id = valid_short_id_path();
         let res = svc
@@ -895,9 +755,7 @@ mod tests {
         .await
         .expect("db init");
         let db = MetricsDb::new(db, metrics);
-        let ohttp: ohttp::Server =
-            crate::key_config::gen_ohttp_server_config().expect("ohttp config").into();
-        let svc = Service::new(db, ohttp, SentinelTag::new([0u8; 32]), None);
+        let svc = Service::new(db, None);
 
         let id = valid_short_id_path();
         let res = svc

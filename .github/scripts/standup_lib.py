@@ -212,8 +212,8 @@ def gather_activity(user, since_date):
             seen_ids.add(pr["id"])
             reviewed_prs.append(pr)
 
-    # Issues opened
-    issues_opened = search_issues(f"author:{user} type:issue created:>{since}")
+    # Issues opened. is:issue excludes pull requests from GraphQL search results.
+    issues_opened = search_issues(f"author:{user} is:issue created:>{since}")
 
     return merged_prs, reviewed_prs, issues_opened
 

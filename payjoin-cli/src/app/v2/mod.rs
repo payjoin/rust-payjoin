@@ -5,6 +5,7 @@ use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::{Amount, FeeRate, Transaction};
 use payjoin::persist::{OptionalTransitionOutcome, SessionPersister};
+use payjoin::receive::mark_checklist;
 use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
     MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
@@ -1021,13 +1022,11 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
-        let proposal = proposal
-            .check_broadcast_suitability(None, |tx| {
-                wallet
-                    .can_broadcast(tx)
-                    .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-            })
-            .save(persister)?;
+        let is_broadcast_suitable = wallet
+            .can_broadcast(&proposal.extract_tx_to_check_broadcast_suitability())
+            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+        let proposal =
+            proposal.apply_broadcast_suitability(None, is_broadcast_suitable).save(persister)?;
 
         persister.print(
             "Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:",
@@ -1042,13 +1041,13 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
-        let proposal = proposal
-            .check_inputs_not_owned(&mut |outpoint| {
-                wallet
-                    .is_my_outpoint(outpoint)
-                    .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-            })
-            .save(persister)?;
+        let checklist = proposal.inputs_owned_checklist();
+        let marked_checklist = mark_checklist(checklist, &mut |outpoint| {
+            wallet
+                .is_my_outpoint(outpoint)
+                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+        })?;
+        let proposal = proposal.apply_inputs_owned_checklist(marked_checklist).save(persister)?;
         Ok(ReceiveSession::MaybeInputsSeen(proposal))
     }
 
@@ -1057,11 +1056,11 @@ impl App {
         proposal: Receiver<MaybeInputsSeen>,
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
-        let proposal = proposal
-            .check_no_inputs_seen_before(&mut |input| {
-                Ok(self.db.insert_input_seen_before(*input)?)
-            })
-            .save(persister)?;
+        let checklist = proposal.inputs_seen_checklist();
+        let marked_checklist = mark_checklist(checklist, &mut |input| {
+            Ok(self.db.insert_input_seen_before(*input)?)
+        })?;
+        let proposal = proposal.apply_inputs_seen_checklist(marked_checklist).save(persister)?;
         Ok(ReceiveSession::OutputsUnknown(proposal))
     }
 
@@ -1071,13 +1070,13 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
-        let proposal = proposal
-            .identify_receiver_outputs(&mut |output_script| {
-                wallet
-                    .is_mine(output_script)
-                    .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-            })
-            .save(persister)?;
+        let checklist = proposal.outputs_owned_checklist();
+        let marked_checklist = mark_checklist(checklist, &mut |output_script| {
+            wallet
+                .is_mine(output_script)
+                .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
+        })?;
+        let proposal = proposal.apply_outputs_owned_checklist(marked_checklist).save(persister)?;
         Ok(ReceiveSession::WantsOutputs(proposal))
     }
 
@@ -1126,13 +1125,11 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
         let wallet = self.wallet();
-        let proposal = proposal
-            .finalize_proposal(|psbt| {
-                wallet
-                    .process_psbt(psbt)
-                    .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-            })
-            .save(persister)?;
+        let psbt = proposal.psbt_to_sign();
+        let signed_psbt = wallet
+            .process_psbt(&psbt)
+            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))?;
+        let proposal = proposal.finalize_signed_proposal(&signed_psbt).save(persister)?;
         Ok(ReceiveSession::PayjoinProposal(proposal))
     }
 

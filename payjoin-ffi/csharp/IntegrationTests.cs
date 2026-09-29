@@ -5,6 +5,12 @@ using Xunit;
 
 namespace Payjoin.Tests
 {
+    public enum TransitionMode
+    {
+        Callback,
+        Nonblocking,
+    }
+
     /// <summary>
     /// End-to-end walkthrough of the BIP 77 (asynchronous payjoin) flow, and the
     /// usage reference the package README points at. <see cref="TestIntegrationV2ToV2"/>
@@ -280,6 +286,7 @@ namespace Payjoin.Tests
             RpcClient receiverRpc,
             InMemoryReceiverPersister recvPersister,
             string ohttpRelay,
+            TransitionMode mode,
             CancellationToken cancellationToken)
         {
             var request = receiver.CreatePollRequest(ohttpRelay);
@@ -304,7 +311,7 @@ namespace Payjoin.Tests
             if (outcome is InitializedTransitionOutcome.Progress progress)
             {
                 using var proposal = progress.Inner;
-                return await ProcessUncheckedProposal(proposal, receiverRpc, recvPersister);
+                return await ProcessUncheckedProposal(proposal, receiverRpc, recvPersister, mode);
             }
 
             throw new InvalidOperationException("Unknown initialized transition outcome");
@@ -322,12 +329,24 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessUncheckedProposal(
             UncheckedOriginalPayload proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            InMemoryReceiverPersister recvPersister,
+            TransitionMode mode)
         {
-            using var checkedTransition = proposal.CheckBroadcastSuitability(null, new MempoolAcceptanceCallback(receiverRpc));
-            using var maybeInputsOwned = checkedTransition.Save(recvPersister);
+            MaybeInputsOwned maybeInputsOwned;
 
-            return ProcessMaybeInputsOwned(maybeInputsOwned, receiverRpc, recvPersister);
+            if (mode == TransitionMode.Callback)
+            {
+                using var checkedTransition = proposal.CheckBroadcastSuitability(null, new MempoolAcceptanceCallback(receiverRpc));
+                maybeInputsOwned = checkedTransition.Save(recvPersister);
+            }
+            else
+            {
+                var canBroadcast = new MempoolAcceptanceCallback(receiverRpc).Callback(proposal.ExtractTxToCheckBroadcastSuitability());
+                using var checkedTransition = proposal.ApplyBroadcastSuitability(null, canBroadcast);
+                maybeInputsOwned = checkedTransition.Save(recvPersister);
+            }
+
+            return ProcessMaybeInputsOwned(maybeInputsOwned, receiverRpc, recvPersister, mode);
         }
 
         /// <summary>
@@ -339,12 +358,26 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessMaybeInputsOwned(
             MaybeInputsOwned proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            InMemoryReceiverPersister recvPersister,
+            TransitionMode mode)
         {
-            using var transition = proposal.CheckInputsNotOwned(new IsInputOwnedCallback(receiverRpc));
-            using var maybeInputsSeen = transition.Save(recvPersister);
+            MaybeInputsSeen maybeInputsSeen;
 
-            return ProcessMaybeInputsSeen(maybeInputsSeen, receiverRpc, recvPersister);
+            if (mode == TransitionMode.Callback)
+            {
+                using var transition = proposal.CheckInputsNotOwned(new IsInputOwnedCallback(receiverRpc));
+                maybeInputsSeen = transition.Save(recvPersister);
+            }
+            else
+            {
+                var markedChecklist = proposal.InputsOwnedChecklist()
+                    .Select(item => item.Mark(new IsInputOwnedCallback(receiverRpc).Callback(item.Value())))
+                    .ToArray();
+                using var transition = proposal.ApplyInputsOwnedChecklist(markedChecklist);
+                maybeInputsSeen = transition.Save(recvPersister);
+            }
+
+            return ProcessMaybeInputsSeen(maybeInputsSeen, receiverRpc, recvPersister, mode);
         }
 
         /// <summary>
@@ -354,12 +387,26 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessMaybeInputsSeen(
             MaybeInputsSeen proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            InMemoryReceiverPersister recvPersister,
+            TransitionMode mode)
         {
-            using var transition = proposal.CheckNoInputsSeenBefore(new CheckInputsNotSeenCallback());
-            using var outputsUnknown = transition.Save(recvPersister);
+            OutputsUnknown outputsUnknown;
 
-            return ProcessOutputsUnknown(outputsUnknown, receiverRpc, recvPersister);
+            if (mode == TransitionMode.Callback)
+            {
+                using var transition = proposal.CheckNoInputsSeenBefore(new CheckInputsNotSeenCallback());
+                outputsUnknown = transition.Save(recvPersister);
+            }
+            else
+            {
+                var markedChecklist = proposal.InputsSeenChecklist()
+                    .Select(item => item.Mark(new CheckInputsNotSeenCallback().Callback(item.Value())))
+                    .ToArray();
+                using var transition = proposal.ApplyInputsSeenChecklist(markedChecklist);
+                outputsUnknown = transition.Save(recvPersister);
+            }
+
+            return ProcessOutputsUnknown(outputsUnknown, receiverRpc, recvPersister, mode);
         }
 
         /// <summary>
@@ -371,12 +418,26 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessOutputsUnknown(
             OutputsUnknown proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            InMemoryReceiverPersister recvPersister,
+            TransitionMode mode)
         {
-            using var transition = proposal.IdentifyReceiverOutputs(new IsScriptOwnedCallback(receiverRpc));
-            using var wantsOutputs = transition.Save(recvPersister);
+            WantsOutputs wantsOutputs;
 
-            return ProcessWantsOutputs(wantsOutputs, receiverRpc, recvPersister);
+            if (mode == TransitionMode.Callback)
+            {
+                using var transition = proposal.IdentifyReceiverOutputs(new IsScriptOwnedCallback(receiverRpc));
+                wantsOutputs = transition.Save(recvPersister);
+            }
+            else
+            {
+                var markedChecklist = proposal.OutputsOwnedChecklist()
+                    .Select(item => item.Mark(new IsScriptOwnedCallback(receiverRpc).Callback(item.Value())))
+                    .ToArray();
+                using var transition = proposal.ApplyOutputsOwnedChecklist(markedChecklist);
+                wantsOutputs = transition.Save(recvPersister);
+            }
+
+            return ProcessWantsOutputs(wantsOutputs, receiverRpc, recvPersister, mode);
         }
 
         /// <summary>
@@ -387,12 +448,13 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessWantsOutputs(
             WantsOutputs proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            InMemoryReceiverPersister recvPersister,
+            TransitionMode mode)
         {
             using var transition = proposal.CommitOutputs();
             using var wantsInputs = transition.Save(recvPersister);
 
-            return ProcessWantsInputs(wantsInputs, receiverRpc, recvPersister);
+            return ProcessWantsInputs(wantsInputs, receiverRpc, recvPersister, mode);
         }
 
         /// <summary>
@@ -404,13 +466,14 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessWantsInputs(
             WantsInputs proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            InMemoryReceiverPersister recvPersister,
+            TransitionMode mode)
         {
             using var contributed = proposal.ContributeInputs(GetInputs(receiverRpc));
             using var transition = contributed.CommitInputs();
             using var wantsFeeRange = transition.Save(recvPersister);
 
-            return ProcessWantsFeeRange(wantsFeeRange, receiverRpc, recvPersister);
+            return ProcessWantsFeeRange(wantsFeeRange, receiverRpc, recvPersister, mode);
         }
 
         /// <summary>
@@ -423,12 +486,13 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessWantsFeeRange(
             WantsFeeRange proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            InMemoryReceiverPersister recvPersister,
+            TransitionMode mode)
         {
             using var transition = proposal.ApplyFeeRange(1, 10);
             using var provisional = transition.Save(recvPersister);
 
-            return ProcessProvisionalProposal(provisional, receiverRpc, recvPersister);
+            return ProcessProvisionalProposal(provisional, receiverRpc, recvPersister, mode);
         }
 
         /// <summary>
@@ -439,10 +503,22 @@ namespace Payjoin.Tests
         private Task<PayjoinProposal> ProcessProvisionalProposal(
             ProvisionalProposal proposal,
             RpcClient receiverRpc,
-            InMemoryReceiverPersister recvPersister)
+            InMemoryReceiverPersister recvPersister,
+            TransitionMode mode)
         {
-            using var transition = proposal.FinalizeProposal(new ProcessPsbtCallback(receiverRpc));
-            var payjoinProposal = transition.Save(recvPersister);
+            PayjoinProposal payjoinProposal;
+
+            if (mode == TransitionMode.Callback)
+            {
+                using var transition = proposal.FinalizeProposal(new ProcessPsbtCallback(receiverRpc));
+                payjoinProposal = transition.Save(recvPersister);
+            }
+            else
+            {
+                var signedPsbt = new ProcessPsbtCallback(receiverRpc).Callback(proposal.PsbtToSign());
+                using var transition = proposal.FinalizeSignedProposal(signedPsbt);
+                payjoinProposal = transition.Save(recvPersister);
+            }
 
             return Task.FromResult(payjoinProposal);
         }
@@ -610,8 +686,10 @@ namespace Payjoin.Tests
         /// directory carries every message between them, and both sides survive a
         /// restart because every state transition is saved to a persister first.
         /// </summary>
-        [Fact]
-        public async Task TestIntegrationV2ToV2()
+        [Theory]
+        [InlineData(TransitionMode.Callback)]
+        [InlineData(TransitionMode.Nonblocking)]
+        public async Task TestIntegrationV2ToV2(TransitionMode mode)
         {
             var cancellationToken = TestContext.Current.CancellationToken;
 
@@ -651,7 +729,7 @@ namespace Payjoin.Tests
             // First poll: the sender has not posted anything yet, so the outcome
             // is Stasis and the helper returns null. A production receiver polls
             // on a timer.
-            var initial = await RetrieveReceiverProposal(session, receiver, recvPersister, ohttpRelay, cancellationToken);
+            var initial = await RetrieveReceiverProposal(session, receiver, recvPersister, ohttpRelay, mode, cancellationToken);
             Assert.Null(initial);
 
             // *****************************
@@ -699,7 +777,7 @@ namespace Payjoin.Tests
             // whole receiver pipeline (checks 1 through 4, output commit, input
             // contribution, fee range, signing; see the Process* methods above).
             // The result is the receiver-signed payjoin proposal.
-            using var payjoinProposal = await RetrieveReceiverProposal(session, receiver, recvPersister, ohttpRelay, cancellationToken);
+            using var payjoinProposal = await RetrieveReceiverProposal(session, receiver, recvPersister, ohttpRelay, mode, cancellationToken);
             Assert.NotNull(payjoinProposal);
             Assert.IsType<PayjoinProposal>(payjoinProposal);
 

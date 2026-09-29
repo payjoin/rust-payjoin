@@ -289,7 +289,6 @@ impl OutputsUnknown {
     /// is cleared so the receiver does not accidentally subtract fees from their own output.
     ///
     /// Returns a [`WantsOutputs`] to continue the proposal.
-    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn identify_receiver_outputs(
         self,
         is_receiver_output: &mut impl FnMut(&Script) -> Result<bool, ImplementationError>,
@@ -307,7 +306,6 @@ impl OutputsUnknown {
     ///
     /// Each [`ChecklistItem`] must be marked with its result to obtain a [`MarkedChecklistItem`],
     /// which can then be collected and submitted to [`Self::apply_outputs_owned_checklist`].
-    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn outputs_owned_checklist(
         &self,
     ) -> impl Iterator<Item = ChecklistItem<OutputOwnership>> + use<> {
@@ -322,7 +320,6 @@ impl OutputsUnknown {
     /// is cleared so the receiver does not accidentally subtract fees from their own output.
     ///
     /// Returns a [`WantsOutputs`] to continue the proposal.
-    #[cfg_attr(not(feature = "v1"), allow(dead_code))]
     pub fn apply_outputs_owned_checklist(
         self,
         marked_checklist: impl IntoIterator<Item = MarkedChecklistItem<OutputOwnership>>,

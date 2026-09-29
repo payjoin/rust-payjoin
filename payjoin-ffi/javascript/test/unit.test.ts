@@ -44,24 +44,30 @@ const ORIGINAL_PSBT =
 
 function runUnitTests(name: string, payjoin: typeof nodejsPayjoin) {
     describe(`[${name}] URI tests`, () => {
-        test("URL encoded payjoin parameter", () => {
+        test("Reject userinfo URL", () => {
             const uri =
-                "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao";
-            const result = payjoin.Url.parse(uri);
-            assert.ok(result, "pj url should be url encoded");
+                "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example@evil.com?ciao";
+            assert.throws(() => payjoin.Uri.parse(uri), /UserinfoNotSupported/);
         });
 
-        test("valid URL", () => {
+        test("URL encoded payjoin parameter", () => {
+            const uri =
+                "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https%3A%2F%2Fexample.com%3Fciao";
+            const result = payjoin.Uri.parse(uri);
+            assert.ok(result, "pj url encoded is not valid");
+        });
+
+        test("valid URI", () => {
             const uri =
                 "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com?ciao";
-            const result = payjoin.Url.parse(uri);
+            const result = payjoin.Uri.parse(uri);
             assert.ok(result, "pj is not a valid url");
         });
 
         test("missing amount should be ok", () => {
             const uri =
                 "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pj=https://testnet.demo.btcpayserver.org/BTC/pj";
-            const result = payjoin.Url.parse(uri);
+            const result = payjoin.Uri.parse(uri);
             assert.ok(result, "missing amount should be ok");
         });
 
@@ -83,7 +89,7 @@ function runUnitTests(name: string, payjoin: typeof nodejsPayjoin) {
                 for (const pj of pjs) {
                     const uri = `${address}?amount=1&pj=${pj}`;
                     assert.doesNotThrow(
-                        () => payjoin.Url.parse(uri),
+                        () => payjoin.Uri.parse(uri),
                         `Failed to create a valid Uri for ${uri}`,
                     );
                 }

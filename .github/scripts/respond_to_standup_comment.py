@@ -113,13 +113,14 @@ def main():
     since_date = parse_github_datetime(discussion_created_at) - timedelta(days=7)
 
     try:
-        merged_prs, reviewed_prs, issues_opened = gather_activity(
+        merged_prs, opened_prs, reviewed_prs, issues_opened = gather_activity(
             comment_author, since_date
         )
         bottlenecks = gather_potential_bottlenecks(comment_author, since_date)
         body = format_contributor_comment(
             comment_author,
             merged_prs,
+            opened_prs,
             reviewed_prs,
             issues_opened,
             bottlenecks,

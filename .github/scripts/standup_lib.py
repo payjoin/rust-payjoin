@@ -197,6 +197,9 @@ def gather_activity(user, since_date):
     # PRs merged (authored)
     merged_prs = search_issues(f"author:{user} type:pr merged:>{since}")
 
+    # PRs opened
+    opened_prs = search_issues(f"author:{user} is:pr created:>{since}")
+
     # PRs reviewed use search  to find candidate PRs then confirm
     # the reviewer actually submitted a review during the standup window.
     review_candidates = search_issues(
@@ -215,7 +218,7 @@ def gather_activity(user, since_date):
     # Issues opened. is:issue excludes pull requests from GraphQL search results.
     issues_opened = search_issues(f"author:{user} is:issue created:>{since}")
 
-    return merged_prs, reviewed_prs, issues_opened
+    return merged_prs, opened_prs, reviewed_prs, issues_opened
 
 
 def gather_potential_bottlenecks(user, since_date):
@@ -245,6 +248,7 @@ def gather_potential_bottlenecks(user, since_date):
 def format_contributor_comment(
     user,
     merged_prs,
+    opened_prs,
     reviewed_prs,
     issues_opened,
     bottlenecks,
@@ -265,11 +269,17 @@ def format_contributor_comment(
 
     # SHIPPED section
     lines.append("### Shipped")
-    if merged_prs or reviewed_prs or issues_opened:
+    if merged_prs or opened_prs or reviewed_prs or issues_opened:
         if merged_prs:
             lines.append("")
             lines.append("**PRs merged:**")
             for pr in merged_prs:
+                lines.append(f"- [{pr['title']}]({pr['html_url']})")
+
+        if opened_prs:
+            lines.append("")
+            lines.append("**PRs opened:**")
+            for pr in opened_prs:
                 lines.append(f"- [{pr['title']}]({pr['html_url']})")
 
         if reviewed_prs:

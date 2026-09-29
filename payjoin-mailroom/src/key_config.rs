@@ -31,7 +31,7 @@ impl From<ServerKeyConfig> for ohttp::Server {
 /// Generate a new OHTTP server key configuration
 pub fn gen_ohttp_server_config() -> Result<ServerKeyConfig> {
     let ikm = bitcoin::key::rand::random::<[u8; 32]>();
-    let config = ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC))?;
+    let config = ohttp::KeyConfig::derive(KEY_ID, KEM, Vec::from(SYMMETRIC), &ikm)?;
     Ok(ServerKeyConfig { ikm, server: ohttp::Server::new(config)? })
 }
 
@@ -87,5 +87,9 @@ mod tests {
         let ohttp_config_again =
             read_server_config(temp_dir.path()).expect("Failed to read server config");
         assert_eq!(ohttp_config.ikm, ohttp_config_again.ikm);
+        assert_eq!(
+            ohttp_config.server.config().encode().expect("Failed to encode server config"),
+            ohttp_config_again.server.config().encode().expect("Failed to encode server config"),
+        );
     }
 }

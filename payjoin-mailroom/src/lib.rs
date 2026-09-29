@@ -46,7 +46,8 @@ struct Services {
 
 pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> anyhow::Result<()> {
     let sentinel_tag = generate_sentinel_tag();
-    let metrics = build_metrics(meter_provider);
+    let metrics = build_metrics(&config, meter_provider);
+    let flush_on_exit = metrics.clone();
 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
@@ -76,7 +77,11 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
     let listener =
         Listener::bind(&config.listener, &system_options, &UserOptions::default()).await?;
     info!("Payjoin service listening on {:?}", listener.local_addr());
-    axum::serve(listener, app).await?;
+    tokio::select! {
+        served = axum::serve(listener, app) => served?,
+        () = shutdown_signal() => info!("Shutdown signal received"),
+    }
+    flush_on_exit.flush_windows();
 
     Ok(())
 }
@@ -169,7 +174,8 @@ pub async fn serve_acme(
         .ok_or_else(|| anyhow::anyhow!("ACME configuration is required for serve_acme"))?;
 
     let sentinel_tag = generate_sentinel_tag();
-    let metrics = build_metrics(meter_provider);
+    let metrics = build_metrics(&config, meter_provider);
+    let flush_on_exit = metrics.clone();
 
     #[cfg(feature = "access-control")]
     let geoip = init_geoip(&config).await?;
@@ -217,10 +223,14 @@ pub async fn serve_acme(
     });
 
     info!("Payjoin service listening on {} with ACME TLS", addr);
-    axum_server::bind(addr)
+    let server = axum_server::bind(addr)
         .acceptor(acceptor)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-        .await?;
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>());
+    tokio::select! {
+        served = server => served?,
+        () = shutdown_signal() => info!("Shutdown signal received"),
+    }
+    flush_on_exit.flush_windows();
     Ok(())
 }
 
@@ -235,10 +245,37 @@ fn generate_sentinel_tag() -> SentinelTag { SentinelTag::new(rand::thread_rng().
 /// present, the only instruments registered on it are the coarse
 /// settled-window gauges: nothing precise or live leaves the operator
 /// boundary.
-fn build_metrics(export_provider: Option<SdkMeterProvider>) -> MetricsService {
+fn build_metrics(config: &Config, export_provider: Option<SdkMeterProvider>) -> MetricsService {
     match export_provider {
-        Some(provider) => MetricsService::with_export(&provider),
+        Some(provider) =>
+            MetricsService::with_export(&provider).with_persisted_windows(&config.storage_dir),
         None => MetricsService::new(None),
+    }
+}
+
+/// Resolves on SIGINT or SIGTERM, the signals a terminal and systemd use to
+/// stop the service. Returning from the serve loop instead of dying in the
+/// default handler gives the weekly buckets a chance to reach disk.
+async fn shutdown_signal() {
+    let interrupt = tokio::signal::ctrl_c();
+    #[cfg(unix)]
+    let terminate = async {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                terminate.recv().await;
+            }
+            Err(err) => {
+                tracing::warn!(%err, "SIGTERM handler unavailable");
+                std::future::pending::<()>().await
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = interrupt => {}
+        () = terminate => {}
     }
 }
 

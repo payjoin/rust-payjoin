@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
-use std::fmt;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{fmt, io};
 
 use opentelemetry::metrics::{Counter, MeterProvider, ObservableGauge, UpDownCounter};
 use opentelemetry::KeyValue;
@@ -101,6 +103,141 @@ struct ExportWindows {
     tunnel_sheds: WeeklyBuckets,
 }
 
+/// Name of the bucket file under the storage directory.
+pub const WEEKLY_COUNTS_FILE: &str = "weekly_counts.txt";
+
+/// First line of the bucket file. A file with any other first line is
+/// treated as unreadable.
+const WEEKLY_COUNTS_HEADER: &str = "weekly_counts v1";
+
+impl ExportWindows {
+    fn buckets(&self) -> [(&'static str, &WeeklyBuckets); 4] {
+        [
+            ("http_requests", &self.http_requests),
+            ("http_requests_started", &self.http_requests_started),
+            ("db_entries", &self.db_entries),
+            ("tunnel_sheds", &self.tunnel_sheds),
+        ]
+    }
+
+    fn buckets_mut(&mut self) -> [(&'static str, &mut WeeklyBuckets); 4] {
+        [
+            ("http_requests", &mut self.http_requests),
+            ("http_requests_started", &mut self.http_requests_started),
+            ("db_entries", &mut self.db_entries),
+            ("tunnel_sheds", &mut self.tunnel_sheds),
+        ]
+    }
+
+    /// One line per bucket: the bucket name followed by `week=count` pairs.
+    fn encode(&self) -> String {
+        let mut out = format!("{WEEKLY_COUNTS_HEADER}\n");
+        for (name, bucket) in self.buckets() {
+            out.push_str(name);
+            for (week, count) in &bucket.weeks {
+                out.push_str(&format!(" {week}={count}"));
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// Parses the output of [`ExportWindows::encode`]. Every bucket line is
+    /// optional; unknown or malformed lines make the whole file unreadable
+    /// rather than silently loading a partial state.
+    fn decode(text: &str) -> Result<Self, String> {
+        let mut lines = text.lines();
+        if lines.next() != Some(WEEKLY_COUNTS_HEADER) {
+            return Err(format!("expected header {WEEKLY_COUNTS_HEADER:?}"));
+        }
+        let mut windows = Self::default();
+        for line in lines.filter(|line| !line.trim().is_empty()) {
+            let mut fields = line.split_whitespace();
+            let name = fields.next().unwrap_or_default();
+            let bucket = windows
+                .buckets_mut()
+                .into_iter()
+                .find_map(|(n, b)| (n == name).then_some(b))
+                .ok_or_else(|| format!("unknown bucket {name:?}"))?;
+            for pair in fields {
+                let (week, count) =
+                    pair.split_once('=').ok_or_else(|| format!("malformed entry {pair:?}"))?;
+                let week = week.parse().map_err(|_| format!("malformed week in {pair:?}"))?;
+                let count = count.parse().map_err(|_| format!("malformed count in {pair:?}"))?;
+                bucket.weeks.insert(week, count);
+            }
+        }
+        Ok(windows)
+    }
+
+    /// Loads the bucket file under `storage_dir` if it exists and parses.
+    ///
+    /// A missing file is a fresh install. An unreadable one is logged and
+    /// then treated the same way: losing at most two weeks of counters is
+    /// preferable to a mailroom that refuses to start.
+    fn load(storage_dir: &Path) -> Self {
+        let mut windows = Self::default();
+        let file = storage_dir.join(WEEKLY_COUNTS_FILE);
+        if let Some(bytes) = read_state_file(&file) {
+            match std::str::from_utf8(&bytes).map_err(|err| err.to_string()).and_then(Self::decode)
+            {
+                Ok(loaded) => windows = loaded,
+                Err(err) =>
+                    tracing::warn!(path = %file.display(), err, "ignoring unreadable weekly counts"),
+            }
+        }
+        windows
+    }
+}
+
+/// Writes the weekly buckets to the bucket file, if there is one.
+///
+/// The storage lock serializes writers, so an older snapshot never replaces
+/// a newer one. The windows lock is held only while encoding: every request
+/// takes it to count itself, so it must never wait on the disk.
+fn persist(windows: &Mutex<ExportWindows>, storage: &Mutex<Option<PathBuf>>) {
+    let storage = storage.lock().expect("storage lock poisoned");
+    let Some(dir) = storage.as_ref() else { return };
+    let text = windows.lock().expect("windows lock poisoned").encode();
+    let file = dir.join(WEEKLY_COUNTS_FILE);
+    if let Err(err) = write_atomically(&file, text.as_bytes()) {
+        tracing::warn!(path = %file.display(), %err, "failed to write weekly counts");
+    }
+}
+
+/// Reads a state file whole. A missing file is `None`; any other read
+/// error is logged and also `None`, so the caller starts fresh.
+fn read_state_file(path: &Path) -> Option<Vec<u8>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+        Err(err) => {
+            tracing::warn!(path = %path.display(), %err, "ignoring unreadable state file");
+            None
+        }
+    }
+}
+
+/// Writes `contents` to a process-specific temporary file next to `path`
+/// and renames it into place, so a reader (or a second process sharing the
+/// directory) only ever sees a complete file.
+fn write_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("state");
+    let tmp = dir.join(format!("{name}.{}.tmp", std::process::id()));
+    let written = (|| {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(contents)?;
+        file.sync_data()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
+}
+
 #[derive(Clone)]
 pub struct MetricsService {
     /// Total number of HTTP requests that ran to completion, by endpoint
@@ -123,6 +260,9 @@ pub struct MetricsService {
     db_entries_total: Counter<u64>,
     /// Weekly buckets feeding the settled-window export gauges.
     windows: Arc<Mutex<ExportWindows>>,
+    /// Directory the weekly buckets are written to, when they outlive the
+    /// process. Held while writing, and never by the request path.
+    storage: Arc<Mutex<Option<PathBuf>>>,
     _export_gauges: Vec<Arc<ObservableGauge<u64>>>,
     /// Keeps the export pipeline alive for as long as the service exists.
     _export_provider: Option<SdkMeterProvider>,
@@ -190,6 +330,7 @@ impl MetricsService {
             tunnel_sheds_total,
             db_entries_total,
             windows: Arc::new(Mutex::new(ExportWindows::default())),
+            storage: Arc::new(Mutex::new(None)),
             _export_gauges: Vec::new(),
             _export_provider: None,
         }
@@ -209,17 +350,43 @@ impl MetricsService {
         service
     }
 
+    /// Backs the weekly buckets with a file under `storage_dir`, loading
+    /// whatever a previous process left there.
+    ///
+    /// The file is written on every export collection and on orderly shutdown
+    /// via [`MetricsService::flush_windows`], so a restart costs at most
+    /// what was recorded since the last hourly export.
+    pub fn with_persisted_windows(self, storage_dir: &Path) -> Self {
+        {
+            let mut storage = self.storage.lock().expect("storage lock poisoned");
+            *self.windows.lock().expect("windows lock poisoned") = ExportWindows::load(storage_dir);
+            *storage = Some(storage_dir.to_path_buf());
+        }
+        self
+    }
+
+    /// Writes the weekly buckets to disk if they are file-backed.
+    pub fn flush_windows(&self) { persist(&self.windows, &self.storage); }
+
     fn register_export_gauges(&mut self, provider: &SdkMeterProvider) {
         let meter = provider.meter("payjoin-mailroom");
 
         let windows = self.windows.clone();
+        let storage = self.storage.clone();
         let http_requests_weekly = meter
             .u64_observable_gauge(HTTP_REQUESTS_WEEKLY)
             .with_description("Completed HTTP requests in the last settled UTC reporting week")
             .with_callback(move |observer| {
                 let today = SystemTime::now().days_since_epoch();
-                let windows = windows.lock().expect("windows lock poisoned");
-                observer.observe(windows.http_requests.settled_window_count(today), &[]);
+                let count = windows
+                    .lock()
+                    .expect("windows lock poisoned")
+                    .http_requests
+                    .settled_window_count(today);
+                observer.observe(count, &[]);
+                // Every collection runs every gauge callback, so writing
+                // from this one persists the buckets once per export.
+                persist(&windows, &storage);
             })
             .build();
 
@@ -600,6 +767,126 @@ mod tests {
         }
         provider.force_flush().expect("flush failed");
         assert_eq!(sum_u64(&exporter, HTTP_REQUESTS_TOTAL), 3);
+    }
+
+    #[test]
+    fn weekly_counts_round_trip_through_the_file_format() {
+        let mut windows = ExportWindows::default();
+        let settled = reporting_week_start(100);
+        let active = reporting_week_start(101);
+        windows.http_requests.add(settled);
+        windows.http_requests.add(active);
+        windows.db_entries.add(settled);
+        windows.db_entries.add(settled);
+
+        let text = windows.encode();
+        assert!(text.starts_with(WEEKLY_COUNTS_HEADER), "{text}");
+        let reloaded = ExportWindows::decode(&text).expect("valid encoding");
+        assert_eq!(reloaded.http_requests.weeks, windows.http_requests.weeks);
+        assert_eq!(reloaded.db_entries.weeks, windows.db_entries.weeks);
+        assert!(reloaded.http_requests_started.weeks.is_empty());
+        assert!(reloaded.tunnel_sheds.weeks.is_empty());
+        assert_eq!(reloaded.db_entries.settled_window_count(active), 2);
+    }
+
+    #[test]
+    fn weekly_counts_reject_unreadable_files() {
+        assert!(ExportWindows::decode("").is_err(), "empty file has no header");
+        assert!(ExportWindows::decode("weekly_counts v2\n").is_err(), "unknown version");
+        let unknown = format!("{WEEKLY_COUNTS_HEADER}\nsomething_else 1=2\n");
+        assert!(ExportWindows::decode(&unknown).is_err(), "unknown bucket");
+        let malformed = format!("{WEEKLY_COUNTS_HEADER}\ndb_entries 1:2\n");
+        assert!(ExportWindows::decode(&malformed).is_err(), "malformed pair");
+        let negative = format!("{WEEKLY_COUNTS_HEADER}\ndb_entries 1=-2\n");
+        assert!(ExportWindows::decode(&negative).is_err(), "counts are unsigned");
+    }
+
+    /// The reason the buckets are on disk: a settled week recorded by one
+    /// process is exported by the next one over the same storage directory.
+    #[test]
+    fn settled_week_survives_restart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let counts = 15;
+
+        {
+            let (exporter, provider) = in_memory_provider();
+            let metrics = MetricsService::with_export(&provider).with_persisted_windows(dir.path());
+            metrics.seed_settled_week(counts);
+            // An export collection is what writes the buckets.
+            provider.force_flush().expect("flush failed");
+            assert_eq!(gauge_value(&exporter, DB_ENTRIES_WEEKLY), Some(counts));
+        }
+        assert!(dir.path().join(WEEKLY_COUNTS_FILE).exists(), "buckets were written on export");
+
+        let (exporter, provider) = in_memory_provider();
+        let metrics = MetricsService::with_export(&provider).with_persisted_windows(dir.path());
+        provider.force_flush().expect("flush failed");
+        assert_eq!(gauge_value(&exporter, DB_ENTRIES_WEEKLY), Some(counts));
+        assert_eq!(gauge_value(&exporter, HTTP_REQUESTS_WEEKLY), Some(counts));
+        drop(metrics);
+    }
+
+    /// Orderly shutdown writes the in-progress week too, so a restart within
+    /// a week loses nothing recorded before the signal.
+    #[test]
+    fn flush_windows_writes_the_in_progress_week() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (_, provider) = in_memory_provider();
+        let metrics = MetricsService::with_export(&provider).with_persisted_windows(dir.path());
+        metrics.record_db_entry(PayjoinVersion::Two);
+        metrics.flush_windows();
+
+        let reloaded = ExportWindows::load(dir.path());
+        let this_week = reporting_week(SystemTime::now().days_since_epoch());
+        assert_eq!(reloaded.db_entries.weeks.get(&this_week), Some(&1));
+        assert!(!dir.path().read_dir().expect("dir").any(|entry| {
+            entry.expect("entry").file_name().to_string_lossy().ends_with(".tmp")
+        }));
+    }
+
+    /// Requests count themselves under the windows lock, so a write stuck on
+    /// a slow disk must not hold it.
+    #[test]
+    fn pending_write_does_not_block_recording() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (_, provider) = in_memory_provider();
+        let metrics = MetricsService::with_export(&provider).with_persisted_windows(dir.path());
+
+        // Holding the storage lock parks the writer where a slow write would.
+        let storage = metrics.storage.lock().expect("storage lock poisoned");
+        let writer = {
+            let metrics = metrics.clone();
+            std::thread::spawn(move || metrics.flush_windows())
+        };
+        let (done, recorded) = std::sync::mpsc::channel();
+        let recorder = {
+            let metrics = metrics.clone();
+            std::thread::spawn(move || {
+                metrics.record_http_request("/health", "GET", 200);
+                done.send(()).expect("send");
+            })
+        };
+        recorded.recv_timeout(Duration::from_secs(5)).expect("recording blocked on the writer");
+        drop(storage);
+        writer.join().expect("writer");
+        recorder.join().expect("recorder");
+    }
+
+    #[test]
+    fn unreadable_bucket_file_starts_fresh_and_is_replaced() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join(WEEKLY_COUNTS_FILE);
+        std::fs::write(&file, "not a bucket file").expect("write");
+
+        let (exporter, provider) = in_memory_provider();
+        let metrics = MetricsService::with_export(&provider).with_persisted_windows(dir.path());
+        provider.force_flush().expect("flush failed");
+        assert_eq!(gauge_value(&exporter, HTTP_REQUESTS_WEEKLY), Some(0), "fresh state");
+
+        metrics.record_http_request("/health", "GET", 200);
+        metrics.flush_windows();
+        let text = std::fs::read_to_string(&file).expect("read");
+        assert!(ExportWindows::decode(&text).is_ok(), "the next write replaces the bad file");
     }
 
     /// Small counts are neither rounded nor withheld: hiding them would keep

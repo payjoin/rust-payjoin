@@ -2293,4 +2293,292 @@ mod tests {
             psbt_to_sign.extract_tx_unchecked_fee_rate().compute_txid()
         );
     }
+
+    #[test]
+    fn poll_request_and_garbage_response() {
+        let persister = Arc::new(InMemoryReceiverPersister::default());
+        let initialized = saved_initialized(persister.clone());
+        let poll = initialized
+            .create_poll_request("https://relay.example.com".to_string())
+            .expect("poll request should be created");
+        assert!(poll.request.url.starts_with("https://relay.example.com"));
+        assert!(!poll.request.body.is_empty());
+        let err = initialized
+            .process_response(&vec![0u8; 8192], &poll.client_response)
+            .save(persister.clone())
+            .map(|_| ())
+            .expect_err("undecapsulable poll response should fail");
+        assert!(matches!(err, ReceiverPersistedError::Fatal(_)), "{err:?}");
+        assert!(matches!(
+            replay_receiver_event_log(persister).expect("replay should succeed").state(),
+            ReceiveSession::Closed { .. }
+        ));
+    }
+
+    #[test]
+    fn session_advances_to_payjoin_proposal() {
+        let persister = Arc::new(InMemoryReceiverPersister::default());
+        let _ = saved_initialized(persister.clone());
+        persister.push_event(retrieved_original_payload_event());
+        let unchecked = match replay_receiver_event_log(persister.clone())
+            .expect("replay should succeed")
+            .state()
+        {
+            ReceiveSession::UncheckedOriginalPayload { inner } => inner,
+            _ => panic!("expected UncheckedOriginalPayload"),
+        };
+        let maybe_inputs_owned = unchecked
+            .assume_interactive_receiver()
+            .save(persister.clone())
+            .expect("receiver should be assumed interactive");
+        assert!(matches!(maybe_inputs_owned, MaybeInputsOwned { .. }));
+        assert!(!maybe_inputs_owned.proposal_txid_is_stable());
+        assert!(!maybe_inputs_owned.extract_tx_to_schedule_broadcast().is_empty());
+        let maybe_inputs_seen = maybe_inputs_owned
+            .check_inputs_not_owned(Arc::new(NotOwnedInput))
+            .save(persister.clone())
+            .expect("inputs should not be owned");
+        let outputs_unknown = maybe_inputs_seen
+            .check_no_inputs_seen_before(Arc::new(NotSeenOutput))
+            .save(persister.clone())
+            .expect("inputs should not be seen before");
+        let wants_outputs = outputs_unknown
+            .identify_receiver_outputs(Arc::new(OwnsEveryScript))
+            .save(persister.clone())
+            .expect("outputs should be identified");
+        let wants_inputs =
+            wants_outputs.commit_outputs().save(persister.clone()).expect("outputs should commit");
+        let wants_inputs = wants_inputs
+            .contribute_inputs(vec![contributed_p2wsh_input()])
+            .expect("inputs should contribute");
+        let wants_fee_range =
+            wants_inputs.commit_inputs().save(persister.clone()).expect("inputs should commit");
+        assert!(matches!(
+            wants_fee_range.apply_fee_range(Some(u64::MAX), None),
+            Err(FfiValidationError::FeeRateOutOfRange { .. })
+        ));
+        let proposal = wants_fee_range
+            .apply_fee_range(None, None)
+            .expect("fee range should apply")
+            .save(persister.clone())
+            .expect("proposal should save")
+            .finalize_proposal(Arc::new(IdentitySigner))
+            .save(persister.clone())
+            .expect("proposal should finalize");
+        assert!(!proposal.psbt().is_empty());
+        let post = proposal
+            .create_post_request("https://relay.example.com".to_string())
+            .expect("proposal request should be created");
+        assert!(!post.request.body.is_empty());
+        let err = proposal
+            .process_response(&vec![0u8; 8192], &post.client_response)
+            .save(persister.clone())
+            .map(|_| ())
+            .expect_err("undecapsulable proposal response should fail");
+        assert!(matches!(err, ReceiverPersistedError::Storage(_)), "{err:?}");
+    }
+    #[test]
+    fn cancel_yields_pending_fallback_tx() {
+        let persister = Arc::new(InMemoryReceiverPersister::default());
+        let _ = saved_initialized(persister.clone());
+        persister.push_event(retrieved_original_payload_event());
+        persister.push_event(r#"{"CheckedBroadcastSuitability":[]}"#.to_string());
+        let psbt = Psbt::from_str(ORIGINAL_PSBT).expect("valid psbt");
+        let expected_fallback =
+            payjoin::bitcoin::consensus::encode::serialize(&psbt.extract_tx_unchecked_fee_rate());
+
+        let maybe_inputs_seen = match replay_receiver_event_log(persister.clone())
+            .expect("replay should succeed")
+            .state()
+        {
+            ReceiveSession::MaybeInputsOwned { inner } => inner
+                .check_inputs_not_owned(Arc::new(NotOwnedInput))
+                .save(persister.clone())
+                .expect("inputs should not be owned")
+                .check_no_inputs_seen_before(Arc::new(NotSeenOutput))
+                .save(persister.clone())
+                .expect("inputs should not be seen before"),
+            _ => panic!("expected MaybeInputsOwned"),
+        };
+        let pending = maybe_inputs_seen
+            .cancel()
+            .save(persister.clone())
+            .expect("cancel should save")
+            .expect("pending fallback");
+        assert_eq!(pending.fallback_tx(), expected_fallback);
+        pending.close().save(persister.clone()).expect("close should save");
+        let result = replay_receiver_event_log(persister).expect("replay should succeed");
+        assert!(matches!(result.state(), ReceiveSession::Closed { .. }));
+        assert_eq!(result.session_history().fallback_tx(), Some(expected_fallback));
+    }
+
+    #[test]
+    fn replyable_error_is_posted_and_falls_back() {
+        let persister = Arc::new(InMemoryReceiverPersister::default());
+        let _ = saved_initialized(persister.clone());
+        persister.push_event(retrieved_original_payload_event());
+        persister.push_event(r#"{"CheckedBroadcastSuitability":[]}"#.to_string());
+        let psbt = Psbt::from_str(ORIGINAL_PSBT).expect("valid psbt");
+        let fallback_tx =
+            payjoin::bitcoin::consensus::encode::serialize(&psbt.extract_tx_unchecked_fee_rate());
+        persister.push_event(
+            serde_json::json!({
+                "GotReplyableError": {
+                    "error_code": "Unavailable",
+                    "message": "no",
+                    "extra": {}
+                }
+            })
+            .to_string(),
+        );
+
+        let replyable = match replay_receiver_event_log(persister.clone())
+            .expect("replay should succeed")
+            .state()
+        {
+            ReceiveSession::HasReplyableError { inner } => inner,
+            _ => panic!("expected HasReplyableError"),
+        };
+        let error_request = replyable
+            .create_error_request("https://relay.example.com".to_string())
+            .expect("error request should be created");
+        assert!(!error_request.request.body.is_empty());
+        let err = replyable
+            .process_error_response(&vec![0u8; 8192], &error_request.client_response)
+            .save(persister.clone())
+            .map(|_| ())
+            .expect_err("undecapsulable error response should fail");
+        assert!(
+            matches!(err, ReceiverPersistedError::Fatal(ReceiverError::Protocol(_))),
+            "{err:?}"
+        );
+        match replay_receiver_event_log(persister).expect("replay should succeed").state() {
+            ReceiveSession::ReceiverPendingFallback { inner } => {
+                assert_eq!(inner.fallback_tx(), fallback_tx)
+            }
+            _ => panic!("expected ReceiverPendingFallback"),
+        }
+    }
+
+    #[test]
+    fn replay_rejects_empty_and_corrupt_event_logs() {
+        let empty = Arc::new(InMemoryReceiverPersister::default());
+        assert!(replay_receiver_event_log(empty).is_err());
+
+        let garbage = Arc::new(InMemoryReceiverPersister::default());
+        garbage.push_event("not json".to_string());
+        assert!(replay_receiver_event_log(garbage).is_err());
+
+        let duplicated = Arc::new(InMemoryReceiverPersister::default());
+        let _ = saved_initialized(duplicated.clone());
+        duplicated.push_event(retrieved_original_payload_event());
+        duplicated.push_event(r#""Initialized""#.to_string());
+        assert!(replay_receiver_event_log(duplicated).is_err());
+    }
+
+    #[test]
+    fn receiver_builder_validates_its_inputs() {
+        let ohttp_keys =
+            Arc::new(OhttpKeys::decode(decode_hex(OHTTP_KEYS_HEX)).expect("valid ohttp keys"));
+        let err = ReceiverBuilder::new(
+            "not an address".to_string(),
+            "https://example.com".to_string(),
+            ohttp_keys.clone(),
+        )
+        .map(|_| ())
+        .expect_err("invalid address should fail");
+        assert!(matches!(err, ReceiverBuilderError::InvalidAddress(_)));
+
+        let err =
+            ReceiverBuilder::new(ADDRESS.to_string(), "not a url".to_string(), ohttp_keys.clone())
+                .map(|_| ())
+                .expect_err("invalid directory should fail");
+        assert!(matches!(err, ReceiverBuilderError::IntoUrl(_)));
+
+        let builder = ReceiverBuilder::new(
+            ADDRESS.to_string(),
+            "https://example.com".to_string(),
+            ohttp_keys,
+        )
+        .expect("valid receiver builder");
+        assert!(matches!(
+            builder.with_amount(u64::MAX).map(|_| ()).expect_err("amount should fail"),
+            FfiValidationError::AmountOutOfRange { .. }
+        ));
+        assert!(matches!(
+            builder.with_expiration(u64::MAX).map(|_| ()).expect_err("expiration should fail"),
+            FfiValidationError::ExpirationOutOfRange { .. }
+        ));
+        assert!(builder
+            .with_max_fee_rate(u64::MAX)
+            .map(|_| ())
+            .expect_err("fee rate should fail")
+            .to_string()
+            .contains("exceeds the supported range"));
+        assert!(builder.with_max_fee_rate(250).is_ok());
+    }
+
+    #[test]
+    fn receiver_output_modification_methods() {
+        let persister = Arc::new(InMemoryReceiverPersister::default());
+        let _ = saved_initialized(persister.clone());
+        persister.push_event(retrieved_original_payload_event());
+        persister.push_event(r#"{"CheckedBroadcastSuitability":[]}"#.to_string());
+        let wants_outputs = match replay_receiver_event_log(persister.clone())
+            .expect("replay should succeed")
+            .state()
+        {
+            ReceiveSession::MaybeInputsOwned { inner } => inner
+                .check_inputs_not_owned(Arc::new(NotOwnedInput))
+                .save(persister.clone())
+                .expect("inputs should not be owned")
+                .check_no_inputs_seen_before(Arc::new(NotSeenOutput))
+                .save(persister.clone())
+                .expect("inputs should not be seen before")
+                .identify_receiver_outputs(Arc::new(OwnsEveryScript))
+                .save(persister.clone())
+                .expect("outputs should be identified"),
+            _ => panic!("expected MaybeInputsOwned"),
+        };
+        assert!(matches!(wants_outputs.output_substitution(), OutputSubstitution::Enabled));
+
+        assert!(wants_outputs
+            .substitute_receiver_script(Vec::new())
+            .map(|_| ())
+            .expect_err("empty script should be rejected")
+            .to_string()
+            .contains("output_script_pubkey"));
+    }
+
+    #[test]
+    fn receiver_session_event_round_trips_through_json() {
+        let event = retrieved_original_payload_event();
+        let parsed = ReceiverSessionEvent::from_json(event.clone()).expect("event should parse");
+        let serialized = parsed.to_json().expect("event should serialize");
+        assert_eq!(
+            ReceiverSessionEvent::from_json(serialized.clone())
+                .expect("event should parse")
+                .to_json()
+                .expect("event should serialize"),
+            serialized
+        );
+    }
+
+    #[test]
+    fn receiver_history_reports_status_and_pj_uri() {
+        let persister = Arc::new(InMemoryReceiverPersister::default());
+        let _ = saved_initialized(persister.clone());
+        persister.push_event(retrieved_original_payload_event());
+        persister.push_event(r#"{"CheckedBroadcastSuitability":[]}"#.to_string());
+        persister.push_event(r#""Cancelled""#.to_string());
+        let result = replay_receiver_event_log(persister).expect("replay should succeed");
+        assert!(matches!(result.state(), ReceiveSession::ReceiverPendingFallback { .. }));
+        assert!(matches!(
+            payjoin::receive::v2::SessionStatus::from(result.session_history().status()),
+            payjoin::receive::v2::SessionStatus::PendingFallback
+        ));
+        let pj_uri = result.session_history().pj_uri();
+        assert_eq!(pj_uri.address(), ADDRESS);
+        assert!(pj_uri.as_string().starts_with("bitcoin:"));
+    }
 }

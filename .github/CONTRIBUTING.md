@@ -176,9 +176,25 @@ We use [`clippy`](https://github.com/rust-lang/rust-clippy) for linting. Please 
 
 ## Review and Merging
 
-Pull requests are reviewed on technical merit by the repository
-maintainers listed in [CODEOWNERS](CODEOWNERS). Protocol wire behavior
-follows the BIP process
+Pull requests are reviewed on technical merit. The maintainers are
+[@benalleng](https://github.com/benalleng),
+[@DanGould](https://github.com/DanGould), and
+[@spacebear21](https://github.com/spacebear21), and only a maintainer
+merges. Trusted contributors
+[@chavic](https://github.com/chavic) and
+[@xstoicunicornx](https://github.com/xstoicunicornx) also review and may
+approve.
+
+No one is assigned to review your pull request automatically. Choosing a
+reviewer is part of preparing the change. Think about who is best placed
+to judge it, usually the person who agreed to the approach on its issue
+or who knows the code it touches.
+`git shortlog -sn --no-merges -- <paths>` lists who has worked on the
+files you changed. Name your chosen reviewer in the pull request
+description. If they can't take it, they will point you to someone who
+can.
+
+Protocol wire behavior follows the BIP process
 ([BIP 78](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki),
 [BIP 77](https://github.com/bitcoin/bips/blob/master/bip-0077.md)).
 Observable behavior not yet pinned down by a BIP may merge, but is not

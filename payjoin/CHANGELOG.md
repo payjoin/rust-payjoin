@@ -1,5 +1,45 @@
 # Payjoin Changelog
 
+## 1.2.0
+
+This release adds a non-blocking interface to the receiver state machine.
+Every step that previously required a synchronous validation closure is
+now split in two: a method that extracts the data to be checked, and a
+method that submits the results and advances the typestate. Wallets whose
+signing, broadcast checks, or ownership lookups are asynchronous, or that
+live in a separate process from the code driving the session, can now
+drive both the v1 and v2 receiver flows without blocking. The existing
+callback methods remain as convenience wrappers, so this release is
+backward compatible.
+
+Selected Improvements:
+
+### API Additions
+
+- Split every callback-based receiver transition into an extract/apply
+  pair, available on both the v1 and v2 receiver flows:
+  `extract_tx_to_check_broadcast_suitability` and
+  `apply_broadcast_suitability`, `inputs_owned_checklist` and
+  `apply_inputs_owned_checklist`, `inputs_seen_checklist` and
+  `apply_inputs_seen_checklist`, `outputs_owned_checklist` and
+  `apply_outputs_owned_checklist`, and `psbt_to_sign` and
+  `finalize_signed_proposal` (#1446)
+- Add `ChecklistItem`, `MarkedChecklistItem`, and the sealed
+  `ChecklistKind` trait with the `InputOwnership`, `InputSeenBefore`, and
+  `OutputOwnership` kinds, plus a `mark_checklist` helper for integrators
+  that prefer a closure. A submitted checklist must match the inputs or
+  outputs of the receiver's own original PSBT (#1446)
+
+### Bug Fixes
+
+- Reject proposals that drop or reorder the sender's original inputs
+  before classifying any input as sender or receiver contributed. Input
+  classification treated any proposed input whose outpoint did not match
+  an original one as receiver-contributed, so a receiver that altered a
+  sender outpoint was validated as though the receiver had contributed
+  it. Dropped and reordered inputs are now both rejected up front with
+  `MissingOrShuffledInputs` (#1836)
+
 ## 1.1.0
 
 This release hardens how both sides of a payjoin validate what the

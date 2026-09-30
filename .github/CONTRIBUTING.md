@@ -131,6 +131,10 @@ If you are adding a new feature please add tests for it.
 
 If your change requires a dependency to be upgraded you must please run `contrib/update-lock-files.sh` before submitting any changes.
 
+### Conventions
+
+Follow the idiomatic conventions of the language you are writing in. For Rust, public APIs should follow the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/).
+
 ### Code Formatting
 
 We use the nightly Rust formatter for this project. Please run [`rustfmt`](https://github.com/rust-lang/rustfmt) using the nightly toolchain before submitting any changes.

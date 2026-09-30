@@ -31,7 +31,7 @@ class ValidationTests {
     @Test
     fun receiverBuilderRejectsBadAddress() {
         val ohttpKeys = OhttpKeys.decode(ohttpKeysData)
-        assertFailsWith<ReceiverBuilderException> {
+        assertFailsWith<BuildReceiverException> {
             ReceiverBuilder("not-an-address", "https://example.com", ohttpKeys)
         }
     }

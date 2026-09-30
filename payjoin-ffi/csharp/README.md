@@ -38,7 +38,7 @@ Sessions persist each step to an event log through a persister you implement ove
 
 ## Stability
 
-The package is pre-1.0 while the C# API stabilizes; expect breaking changes between 0.x releases. The version's build metadata names the wrapped payjoin core release, so `0.1.0+payjoin-1.0.0` packages payjoin 1.0.0, the first stable payjoin release.
+The package is pre-1.0 while the C# API stabilizes; expect breaking changes between 0.x releases. The version's build metadata names the wrapped payjoin core release, so `0.2.0+payjoin-1.2.0` packages payjoin 1.2.0.
 
 ## Documentation and help
 

@@ -5,6 +5,22 @@ Triggered by `.github/workflows/standup-on-comment.yml` on
 `discussion_comment` events. The workflow's `if:` block already filters
 to the Check-ins category and `Weekly Check-in:` titles; this script does
 the precise regex match and the per-week cap.
+
+Local dry run:
+
+    DRY_RUN=1 \
+      COMMENT_ID=dry-run \
+      COMMENT_BODY=/check-in \
+      COMMENT_AUTHOR="$(uv run --no-project python -c \
+        'import sys; sys.stderr.write("GitHub username: "); print(input())')" \
+      DISCUSSION_CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      DISCUSSION_ID=dry-run \
+      GITHUB_REPOSITORY=payjoin/rust-payjoin \
+      BOT_LOGIN=payjoin-robot \
+      STANDUP_TOKEN="$(uv run --no-project python -c \
+        'from getpass import getpass; print(getpass("GitHub token: "))')" \
+      uv run --with requests \
+      python .github/scripts/respond_to_standup_comment.py
 """
 
 import os
@@ -24,6 +40,7 @@ from standup_lib import (
 TRIGGER_RE = re.compile(r"(?im)(^|\s)/check-in\b")
 SUCCESS_MARKER = "### Shipped"
 ERROR_BODY = "_Bot couldn't gather activity right now. Try again in a few minutes._"
+DRY_RUN = os.environ.get("DRY_RUN")
 
 
 def has_prior_success(discussion_id, author):
@@ -66,6 +83,9 @@ def has_prior_success(discussion_id, author):
 
 def post_reply(discussion_id, reply_to_id, body):
     """Post a threaded reply via GraphQL ``addDiscussionComment``."""
+    if DRY_RUN:
+        print(body)
+        return
     graphql(
         """
         mutation($discussionId: ID!, $replyToId: ID!, $body: String!) {
@@ -103,7 +123,7 @@ def main():
         print("Loop guard: comment author is the bot; exiting.")
         return
 
-    if has_prior_success(discussion_id, comment_author):
+    if not DRY_RUN and has_prior_success(discussion_id, comment_author):
         print(
             f"Per-week cap: {comment_author} already received a successful "
             "summary in this Discussion; exiting."

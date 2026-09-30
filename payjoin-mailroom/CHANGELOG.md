@@ -1,5 +1,15 @@
 # Payjoin Mailroom Changelog
 
+## 0.1.3
+
+- Derive the first-boot OHTTP key from the persisted ikm so the served key no longer changes on the first restart (#1930)
+- Export only four settled-week counts with no attributes; drop the unique short ID count; persist the weekly buckets; push hourly. Precise per-request metrics are no longer exported (#1754)
+- Add a top-level `log_format` key; a `[telemetry]` section no longer switches logs to JSON (#1754)
+- Log a heartbeat line with connection pressure: in-flight requests, open bootstrap tunnels, and on Linux the file-descriptor count and soft limit (#1754)
+- Bump payjoin dependency to 1.2.0 (from 1.0.0-rc.3)
+- Give the telemetry feature an http-client via `opentelemetry-http` and `hyper` instead of `reqwest-rustls`, avoiding a crypto provider mismatch with `ring`
+- Update Cargo.toml edition to 2024 (#1874)
+
 ## 0.1.2
 
 - Add db entry metrics (#1412)
@@ -14,8 +24,6 @@
 - Enable HTTP/2 multiplexing on relay-directory hop (#1655)
 - Bound OHTTP bootstrap tunnel resource usage and export its metrics (#1610)
 - Add per-request metrics middleware (#1674)
-- Add a top-level `log_format` key; a `[telemetry]` section no longer switches logs to JSON (#1754)
-- Export only four settled-week counts with no attributes; drop the unique short ID count; persist the weekly buckets; push hourly. Precise per-request metrics are no longer exported (#1754)
 
 ## 0.1.1
 

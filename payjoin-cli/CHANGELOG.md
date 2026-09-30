@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.0.0
+
+The first stable payjoin-cli release, tracking payjoin 1.2.0. The CLI adopts
+payjoin's non-blocking receive interface in place of synchronous callbacks,
+driving the receiver state machine from session events replayed from SQLite so
+a resumed session picks up where it left off. OHTTP key fetches now cap the
+response body size so a malicious directory cannot return unbounded data.
+
+Selected Improvements:
+
+- Update payjoin-cli to non-blocking receive interface by @xstoicunicornx in [#1446](https://github.com/payjoin/rust-payjoin/pull/1446)
+- Cap the ohttp key body size by @benalleng in [#1846](https://github.com/payjoin/rust-payjoin/pull/1846)
+- Bump payjoin to version 1.2.0 by @DanGould
+- Update payjoin-cli cargo toml edition 2024 by @benalleng in [#1874](https://github.com/payjoin/rust-payjoin/pull/1874)
+
 ## 1.0.0-rc.2
 
 Track payjoin 1.0.0-rc.8, whose `check_inputs_not_owned` callback now

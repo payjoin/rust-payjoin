@@ -55,6 +55,8 @@ If you're looking for somewhere to start contributing code changes, see the [goo
 
 If you find a perceived issue like a bug or existing `// TODO` comment, please open an issue first to ensure that the behavior you wish to change can be agreed upon before you sit down to write the fix in earnest.
 
+Before you open a pull request, get sign-off on the change from a maintainer or trusted contributor (see [Review and Merging](#review-and-merging)). Sign-off is a comment on the issue agreeing that the change is worth making and that the proposed approach is sound. Link to the issue in the pull request description. Pull requests opened without sign-off will be closed.
+
 To contribute a code change:
 
 1. [Fork the repository](https://github.com/payjoin/rust-payjoin/fork).

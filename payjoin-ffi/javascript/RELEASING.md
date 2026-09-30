@@ -40,8 +40,8 @@ TypeScript), which is platform-independent.
    `verify-tag` refuses to publish otherwise.
 
     ```shell
-    git tag -s payjoin-javascript-0.2.0+payjoin-1.0.0 -m payjoin-javascript-0.2.0+payjoin-1.0.0
-    git push upstream payjoin-javascript-0.2.0+payjoin-1.0.0
+    git tag -s payjoin-javascript-0.3.0+payjoin-1.2.0 -m payjoin-javascript-0.3.0+payjoin-1.2.0
+    git push upstream payjoin-javascript-0.3.0+payjoin-1.2.0
     ```
 
     The tag reruns the full build/pack/smoke graph at the tagged commit,

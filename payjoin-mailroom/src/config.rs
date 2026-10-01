@@ -10,6 +10,7 @@ use tokio_listener::ListenerAddress;
 pub struct Config {
     pub listener: ListenerAddress,
     pub storage_dir: PathBuf,
+    pub log_format: LogFormat,
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub timeout: Duration,
     #[serde(deserialize_with = "deserialize_duration_secs")]
@@ -21,6 +22,17 @@ pub struct Config {
     pub acme: Option<AcmeConfig>,
     #[cfg(feature = "access-control")]
     pub access_control: Option<AccessControlConfig>,
+}
+
+/// Format of the log lines the mailroom writes to stdout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+    /// One human-readable line per event.
+    #[default]
+    Text,
+    /// One JSON object per event, for log collectors.
+    Json,
 }
 
 /// V1 protocol configuration.
@@ -43,7 +55,38 @@ pub struct V1Config {
 pub struct TelemetryConfig {
     pub endpoint: String,
     pub auth_token: String,
-    pub operator_domain: String,
+    /// Operator-chosen label attached to every exported metric as the
+    /// `operator.domain` resource attribute. Using your public domain is
+    /// expected: it is the label the Foundation's dashboards group by, and it
+    /// is the only attribute besides the service name that leaves the process.
+    /// Run one mailroom process per value; two processes sharing a value each
+    /// report their own share of the week to the same series.
+    pub operator_domain: OperatorDomain,
+}
+
+/// A non-blank `operator_domain`. Every exported series is keyed by it, so a
+/// blank one would collapse this operator into an unlabelled series shared
+/// with anyone else who left it blank; the type makes that unrepresentable.
+#[cfg(feature = "telemetry")]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct OperatorDomain(String);
+
+#[cfg(feature = "telemetry")]
+impl TryFrom<String> for OperatorDomain {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.trim().is_empty() {
+            return Err("telemetry.operator_domain must be set".into());
+        }
+        Ok(Self(value))
+    }
+}
+
+#[cfg(feature = "telemetry")]
+impl OperatorDomain {
+    pub fn as_str(&self) -> &str { &self.0 }
 }
 
 #[cfg(feature = "acme")]
@@ -86,6 +129,7 @@ impl Default for Config {
         Self {
             listener: "[::]:8080".parse().expect("valid default listener address"),
             storage_dir: PathBuf::from("./data"),
+            log_format: LogFormat::default(),
             timeout: Duration::from_secs(30),
             mailbox_ttl: Duration::from_secs(60 * 60 * 24 * 7), // 1 week
             v1: None,
@@ -117,6 +161,7 @@ impl Config {
         Self {
             listener,
             storage_dir,
+            log_format: LogFormat::default(),
             timeout,
             mailbox_ttl: Duration::from_secs(60 * 60 * 24 * 7), // 1 week
             v1,
@@ -149,5 +194,36 @@ impl Config {
             )
             .build()?
             .try_deserialize()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use config::FileFormat;
+
+    use super::*;
+
+    fn parse(toml: &str) -> Config {
+        config::Config::builder()
+            .add_source(File::from_str(toml, FileFormat::Toml))
+            .build()
+            .expect("builds")
+            .try_deserialize()
+            .expect("deserializes")
+    }
+
+    #[test]
+    fn log_format_defaults_to_text_and_accepts_json() {
+        assert_eq!(parse("").log_format, LogFormat::Text);
+        assert_eq!(parse("log_format = \"text\"").log_format, LogFormat::Text);
+        assert_eq!(parse("log_format = \"json\"").log_format, LogFormat::Json);
+    }
+
+    #[cfg(feature = "telemetry")]
+    #[test]
+    fn operator_domain_rejects_blank() {
+        assert!(OperatorDomain::try_from(String::new()).is_err());
+        assert!(OperatorDomain::try_from("   ".to_string()).is_err());
+        assert_eq!(OperatorDomain::try_from("payjo.in".to_string()).unwrap().as_str(), "payjo.in");
     }
 }

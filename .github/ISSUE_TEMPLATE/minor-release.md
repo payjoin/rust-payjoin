@@ -22,11 +22,14 @@ landed since the last release, so there is nothing to compile here.
 #### Bump
 
 - [ ] Branch `bump-CRATE-MAJOR-MINOR+1` from `master`.
-- [ ] Set `version` in `CRATE/Cargo.toml` to `MAJOR.MINOR+1.0` and update every workspace
-      member's version requirement on it to match.
-- [ ] Rename `## Unreleased` in `CRATE/CHANGELOG.md` to `## MAJOR.MINOR+1.0` and add a fresh
-      empty `## Unreleased` above it. Read the section once; fix wording, do not add history.
-- [ ] Run `contrib/update-lock-files.sh`.
+- [ ] Run `contrib/release/bump.sh CRATE MAJOR.MINOR+1.0`. It sets the version, rewrites
+      every workspace member's requirement on the crate, renames `## Unreleased` to
+      `## MAJOR.MINOR+1.0` with a fresh empty `## Unreleased` above it, regenerates both
+      lock files and runs check-invariants. It needs jq, and the lock file step calls
+      `cargo +nightly`, so run it where rustup has a nightly toolchain. `nix develop .#release`
+      has jq but no rustup; there, pass `--no-lock`, then run `contrib/update-lock-files.sh`
+      from a rustup shell and `contrib/release/check-invariants.sh CRATE` again.
+- [ ] Read the new changelog section once; fix wording, do not add history.
 - [ ] One commit, "Bump CRATE version to MAJOR.MINOR+1.0". Open the PR against `master`.
       The `Check release version bump` job runs check-invariants, a publish dry run and,
       for `payjoin`, cargo-semver-checks.

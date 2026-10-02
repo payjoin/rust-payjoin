@@ -90,7 +90,7 @@ tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
 [dev-dependencies]
 mockito = "1.7.0"
 opentelemetry_sdk = { version = "0.32", features = ["testing"] }
-payjoin-test-utils = { version = "0.0.1" }
+payjoin-test-utils = { path = "../payjoin-test-utils" }
 rcgen = "0.12"
 reqwest = { version = "0.12.23", default-features = false, features = [
   "rustls-tls",

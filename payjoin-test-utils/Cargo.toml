@@ -1,6 +1,6 @@
 [package]
 name = "payjoin-test-utils"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 authors = ["Dan Gould <d@ngould.dev>"]
 description = "Payjoin test utilities"

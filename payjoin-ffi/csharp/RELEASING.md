@@ -116,17 +116,18 @@ is ever stored. The workflow is
 
 1. Work through the release readiness checklist above on the release commit in
    `master`; confirm every `Build and Test CSharp` job is green.
-2. Tag that commit `payjoin-csharp-<version>`, where `<version>` is the
-   `Payjoin.csproj` `<Version>` exactly, build metadata included. NuGet
-   strips the metadata from the `Payjoin.<version>.nupkg` filename, so
-   the publish job strips it from the tag as well before comparing. The
-   tag must be annotated and signed by a maintainer key in
-   `contrib/release/keys/`, and the tagged commit must be on `master`;
-   `verify-tag` refuses to publish otherwise.
+2. Tag that commit with `contrib/release/tag.sh` and push the tag it
+   names. The tag is `payjoin-csharp-<version>`, where `<version>` is the
+   `Payjoin.csproj` `<Version>` exactly, build metadata included, as
+   [`contrib/release-version.sh`](contrib/release-version.sh) prints it.
+   NuGet strips the metadata from the `Payjoin.<version>.nupkg` filename,
+   so the publish job strips it from the tag as well before comparing.
+   tag.sh signs it with your key, which must be in `contrib/release/keys/` for
+   `verify-tag` to accept it, refuses a commit that is not on `master`,
+   and prints the push command.
 
    ```shell
-   git tag -s payjoin-csharp-0.1.0+payjoin-1.0.0 -m payjoin-csharp-0.1.0+payjoin-1.0.0
-   git push upstream payjoin-csharp-0.1.0+payjoin-1.0.0
+   nix develop .#release -c contrib/release/tag.sh csharp
    ```
 
    The tag reruns the full build/pack/smoke graph at the tagged commit, then

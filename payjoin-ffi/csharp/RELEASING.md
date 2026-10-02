@@ -10,8 +10,8 @@ package readme.
 - It is the package's own semantic version, independent of the
   `payjoin-ffi` crate version. The language bindings follow a
   `{version}+payjoin-{version}` convention: the [SemVer] build metadata
-  names the wrapped payjoin core release, so `0.1.0+payjoin-1.0.0`
-  packages payjoin 1.0.0. NuGet accepts build metadata per its
+  names the wrapped payjoin core release, so `0.2.0+payjoin-1.2.0`
+  packages payjoin 1.2.0. NuGet accepts build metadata per its
   [package versioning] guidance but ignores it for version comparison
   and strips it from the `.nupkg` filename, so the package identity is
   the bare version.
@@ -125,8 +125,8 @@ is ever stored. The workflow is
    `verify-tag` refuses to publish otherwise.
 
    ```shell
-   git tag -s payjoin-csharp-0.1.0+payjoin-1.0.0 -m payjoin-csharp-0.1.0+payjoin-1.0.0
-   git push upstream payjoin-csharp-0.1.0+payjoin-1.0.0
+   git tag -s payjoin-csharp-0.2.0+payjoin-1.2.0 -m payjoin-csharp-0.2.0+payjoin-1.2.0
+   git push upstream payjoin-csharp-0.2.0+payjoin-1.2.0
    ```
 
    The tag reruns the full build/pack/smoke graph at the tagged commit, then

@@ -2336,7 +2336,7 @@ dependencies = [
 
 [[package]]
 name = "payjoin-cli"
-version = "1.0.0-rc.2"
+version = "1.0.0"
 dependencies = [
  "ahash 0.7.8",
  "anyhow",

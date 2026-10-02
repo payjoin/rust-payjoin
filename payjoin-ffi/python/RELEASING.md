@@ -43,17 +43,18 @@ CPython satisfying `requires-python` can install them.
 
 1. Confirm every `Build and Test Python` job is green on the release
    commit in `master`, including the per-platform smoke tests.
-2. Tag that commit `payjoin-python-<version>`, where `<version>` is the
+2. Tag that commit with `contrib/release/tag.sh` and push the tag it
+   names. The tag is `payjoin-python-<version>`, where `<version>` is the
    `pyproject.toml` version plus `+payjoin-<version>` build metadata
-   naming the wrapped payjoin core release; the publish job strips the
-   metadata before comparing the tag against the built wheels. The tag
-   must be annotated and signed by a maintainer key in
-   `contrib/release/keys/`, and the tagged commit must be on `master`;
-   `verify-tag` refuses to publish otherwise.
+   naming the wrapped payjoin core release, as
+   [`contrib/release-version.sh`](contrib/release-version.sh) prints it;
+   the publish job strips the metadata before comparing the tag against
+   the built wheels. tag.sh signs it with your key, which must be in `contrib/release/keys/` for
+   `verify-tag` to accept it, refuses a commit that is not on `master`,
+   and prints the push command.
 
    ```shell
-   git tag -s payjoin-python-0.2.0+payjoin-1.0.0 -m payjoin-python-0.2.0+payjoin-1.0.0
-   git push upstream payjoin-python-0.2.0+payjoin-1.0.0
+   nix develop .#release -c contrib/release/tag.sh python
    ```
 
    The tag reruns the full build/wheel/smoke graph at the tagged commit,

@@ -1,5 +1,7 @@
 # Payjoin Changelog
 
+## Unreleased
+
 ## 1.2.0
 
 This release adds a non-blocking interface to the receiver state machine.

@@ -1,5 +1,7 @@
 # payjoin-cli Changelog
 
+## Unreleased
+
 ## 1.0.0-rc.2
 
 Track payjoin 1.0.0-rc.8, whose `check_inputs_not_owned` callback now

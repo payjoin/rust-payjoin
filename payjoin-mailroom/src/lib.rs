@@ -514,25 +514,83 @@ mod tests {
     use super::*;
     use crate::metrics::{HTTP_REQUESTS_IN_FLIGHT, HTTP_REQUESTS_STARTED, HTTP_REQUESTS_TOTAL};
 
+    fn test_config(storage_dir: &std::path::Path) -> Config {
+        Config::new(
+            "[::]:0".parse().expect("valid listener address"),
+            storage_dir.to_path_buf(),
+            Duration::from_secs(2),
+            None,
+        )
+    }
+
     async fn start_service(
         cert_der: Vec<u8>,
         key_der: Vec<u8>,
     ) -> (u16, tokio::task::JoinHandle<anyhow::Result<()>>, tempfile::TempDir) {
         let tempdir = tempdir().unwrap();
-        let config = Config::new(
-            "[::]:0".parse().expect("valid listener address"),
-            tempdir.path().to_path_buf(),
-            Duration::from_secs(2),
-            None,
-        );
-
         let mut root_store = RootCertStore::empty();
         root_store.add(CertificateDer::from(cert_der.clone())).unwrap();
         let tls_config = RustlsConfig::from_der(vec![cert_der], key_der).await.unwrap();
 
         let (port, handle) =
-            serve_manual_tls(config, Some(tls_config), root_store, None).await.unwrap();
+            serve_manual_tls(test_config(tempdir.path()), Some(tls_config), root_store, None)
+                .await
+                .unwrap();
         (port, handle, tempdir)
+    }
+
+    /// Serves one request to `/health` from a fresh instance whose
+    /// access-control policy blocks `blocked_ips`, over TLS or in the clear,
+    /// and reports the status it answered with.
+    #[cfg(feature = "access-control")]
+    async fn health_status(tls: bool, blocked_ips: &[&str]) -> axum::http::StatusCode {
+        let tempdir = tempdir().unwrap();
+        let mut config = test_config(tempdir.path());
+        config.access_control = Some(crate::config::AccessControlConfig {
+            blocked_ips: blocked_ips.iter().map(|ip| ip.to_string()).collect(),
+            ..Default::default()
+        });
+
+        let cert = local_cert_key();
+        let cert_der = cert.cert.der().to_vec();
+        let key_der = cert.signing_key.serialize_der();
+        let tls_config = match tls {
+            true => Some(RustlsConfig::from_der(vec![cert_der.clone()], key_der).await.unwrap()),
+            false => None,
+        };
+        let mut root_store = RootCertStore::empty();
+        root_store.add(CertificateDer::from(cert_der.clone())).unwrap();
+
+        let (port, _handle) = serve_manual_tls(config, tls_config, root_store, None).await.unwrap();
+
+        let scheme = if tls { "https" } else { "http" };
+        http_agent(cert_der)
+            .unwrap()
+            .get(format!("{scheme}://localhost:{port}/health"))
+            .send()
+            .await
+            .expect("request should complete")
+            .status()
+    }
+
+    #[cfg(feature = "access-control")]
+    #[tokio::test]
+    async fn geoip_policy_is_enforced_on_the_manual_serve_paths() {
+        use axum::http::StatusCode;
+
+        for tls in [true, false] {
+            // 192.0.2.0/24 is TEST-NET-1, which no loopback client falls in.
+            assert_eq!(
+                health_status(tls, &["192.0.2.0/24"]).await,
+                StatusCode::OK,
+                "a peer outside the blocked range must be served (tls: {tls})"
+            );
+            assert_eq!(
+                health_status(tls, &["0.0.0.0/0", "::/0"]).await,
+                StatusCode::FORBIDDEN,
+                "a blocked source address must be refused (tls: {tls})"
+            );
+        }
     }
 
     #[tokio::test]

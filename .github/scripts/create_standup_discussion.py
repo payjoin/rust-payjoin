@@ -161,11 +161,14 @@ def main():
     # Gather all comments first
     comments = []
     for user in CONTRIBUTORS:
-        merged_prs, reviewed_prs, issues_opened = gather_activity(user, since_date)
+        merged_prs, opened_prs, reviewed_prs, issues_opened = gather_activity(
+            user, since_date
+        )
         bottlenecks = gather_potential_bottlenecks(user, since_date)
         comment_body = format_contributor_comment(
             user,
             merged_prs,
+            opened_prs,
             reviewed_prs,
             issues_opened,
             bottlenecks,

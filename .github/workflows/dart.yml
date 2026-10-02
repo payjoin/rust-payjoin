@@ -1,10 +1,6 @@
 name: Build and Test Dart
 on:
-  workflow_run:
-    workflows: ["Flake maintenance"]
-    types: [requested]
-    branches:
-      - "update_flake_lock_action"
+  workflow_call:
   pull_request:
     paths:
       - payjoin-ffi/**
@@ -15,6 +11,9 @@ on:
   push:
     tags:
       - "payjoin-dart-[0-9]*"
+
+permissions:
+  contents: read
 
 jobs:
   build-dart-and-test:
@@ -27,15 +26,18 @@ jobs:
       RUSTUP_TOOLCHAIN: 1.85.0
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
-      - name: "Install Rust 1.85.0"
-        uses: dtolnay/rust-toolchain@1.85.0
-      - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
+      - name: "Install Rust 1.85.0"
+        uses: dtolnay/rust-toolchain@3230091d7ef9483f601620abacc570c22cf44d22 # 1.85.0
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
           shared-key: msrv-workspace
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: "Build and test"
         run: nix develop .#dart -c bash ./payjoin-ffi/dart/contrib/test.sh
 
@@ -44,11 +46,15 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: Generate production bindings and dry-run publish
         run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh
 
@@ -57,7 +63,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/payjoin-dart-')
     permissions:
       contents: read
-    uses: ./.github/workflows/verify-tag-hygiene.yml
+    uses: $/.github/workflows/verify-tag-hygiene.yml
 
   publish-pub:
     name: "Publish to pub.dev (automated publishing / OIDC)"
@@ -70,12 +76,16 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
 
       - name: Read pubspec version
         id: pubspec
@@ -90,7 +100,7 @@ jobs:
           echo "version=$version" >>"$GITHUB_OUTPUT"
 
       - name: Verify tag matches pubspec version
-        uses: ./.github/actions/verify-tag-version
+        uses: $/.github/actions/verify-tag-version
         with:
           tag-prefix: payjoin-dart-
           version: ${{ steps.pubspec.outputs.version }}

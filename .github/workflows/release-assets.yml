@@ -45,10 +45,12 @@ jobs:
       contents: write # create/update the Release for this tag and upload assets
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: ${{ inputs.artifact-pattern }}
           merge-multiple: true
@@ -83,9 +85,20 @@ jobs:
           fi
 
       - name: Create / update GitHub release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: dist/*
-          fail_on_unmatched_files: true
-          draft: false
-          prerelease: ${{ steps.meta.outputs.prerelease }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+            gh release edit "${GITHUB_REF_NAME}" --draft=false
+            if [[ "${PRERELEASE}" == "true" ]]; then
+              gh release edit "${GITHUB_REF_NAME}" --prerelease
+            fi
+          else
+            args=(--title "Release ${GITHUB_REF_NAME}" --draft=false)
+            if [[ "${PRERELEASE}" == "true" ]]; then
+              args+=(--prerelease)
+            fi
+            gh release create "${GITHUB_REF_NAME}" dist/* "${args[@]}"
+          fi

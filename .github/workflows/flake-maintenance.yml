@@ -5,6 +5,9 @@ on:
     - cron: "0 11 * * 1" # weekly at 14:00 UTC
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   validate-lock-file:
     runs-on: ubuntu-26.04
@@ -16,10 +19,12 @@ jobs:
           - nightly
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # main
 
       - name: Validate recreated lockfile
         run: nix build .#checks.x86_64-linux.${{ matrix.checks }} -L --recreate-lock-file --no-write-lock-file
@@ -32,22 +37,50 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # main
 
       - name: Mint bot token
         id: bot-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         with:
           app-id: ${{ vars.BOT_APP_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Update flake.lock
-        uses: DeterminateSystems/update-flake-lock@main
+        uses: DeterminateSystems/update-flake-lock@da03c0f078bc4b2c37ee4f7e072d34bf8f188bb3 # main
         with:
           pr-title: "chore: update flake.lock"
           commit-msg: "chore: update flake.lock"
           token: ${{ steps.bot-token.outputs.token }}
           nix-options: --offline
+
+  #
+  # The FFI workflows used to be triggered here via `workflow_run`. They are
+  # now `workflow_call`-able, so the maintenance run re-runs them directly.
+  #
+  test-csharp:
+    needs: validate-lock-file
+    uses: $/.github/workflows/csharp.yml
+
+  test-dart:
+    needs: validate-lock-file
+    uses: $/.github/workflows/dart.yml
+
+  test-javascript:
+    needs: validate-lock-file
+    uses: $/.github/workflows/javascript.yml
+
+  test-kotlin:
+    needs: validate-lock-file
+    uses: $/.github/workflows/kotlin.yml
+
+  test-python:
+    needs: validate-lock-file
+    uses: $/.github/workflows/python.yml

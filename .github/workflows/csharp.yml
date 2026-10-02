@@ -1,10 +1,6 @@
 name: Build and Test CSharp
 on:
-  workflow_run:
-    workflows: ["Flake maintenance"]
-    types: [requested]
-    branches:
-      - "update_flake_lock_action"
+  workflow_call:
   pull_request:
     paths:
       - payjoin-ffi/**
@@ -15,6 +11,9 @@ on:
   push:
     tags:
       - "payjoin-csharp-[0-9]*"
+
+permissions:
+  contents: read
 
 jobs:
   build-csharp-and-test-unix:
@@ -27,15 +26,18 @@ jobs:
       RUSTUP_TOOLCHAIN: 1.85.0
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
-      - name: "Install Rust 1.85.0"
-        uses: dtolnay/rust-toolchain@1.85.0
-      - name: "Use cache"
-        uses: Swatinem/rust-cache@v2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
+      - name: "Install Rust 1.85.0"
+        uses: dtolnay/rust-toolchain@3230091d7ef9483f601620abacc570c22cf44d22 # 1.85.0
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
           shared-key: msrv-workspace
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: "Build and test"
         run: nix develop .#csharp -c ./payjoin-ffi/csharp/contrib/test.sh
 
@@ -49,15 +51,19 @@ jobs:
         working-directory: payjoin-ffi/csharp
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: Install Rust 1.85.0
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@3230091d7ef9483f601620abacc570c22cf44d22 # 1.85.0
 
       - name: Use cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
 
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: "10.0.x"
 
@@ -109,15 +115,19 @@ jobs:
             target: x86_64-pc-windows-msvc
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: Install Rust 1.85.0
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@3230091d7ef9483f601620abacc570c22cf44d22 # 1.85.0
         with:
           targets: ${{ matrix.target }}
 
       - name: Use cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
 
       - name: Install cross toolchain
         # Version- and hash-pinned: these tools produce the shipped binaries.
@@ -152,7 +162,7 @@ jobs:
           PAYJOIN_FFI_CROSS=1 PAYJOIN_FFI_RID=${{ matrix.rid }} bash ./scripts/build_nuget_native.sh
 
       - name: Upload NuGet native asset
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.rid }}
           path: payjoin-ffi/csharp/artifacts/runtimes/${{ matrix.rid }}/native/*
@@ -171,21 +181,25 @@ jobs:
         working-directory: payjoin-ffi/csharp
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: Install Rust 1.85.0
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@3230091d7ef9483f601620abacc570c22cf44d22 # 1.85.0
 
       - name: Use cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
 
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: "10.0.x"
 
       - name: Download native assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: payjoin-ffi/csharp/artifacts/downloaded
 
@@ -204,7 +218,7 @@ jobs:
         run: dotnet pack Payjoin.csproj --configuration Release --output artifacts/packages
 
       - name: Upload NuGet package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: payjoin-csharp-nuget-package
           path: payjoin-ffi/csharp/artifacts/packages/*.nupkg
@@ -234,15 +248,17 @@ jobs:
             rid: win-x64
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: "10.0.x"
 
       - name: Download NuGet package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: payjoin-csharp-nuget-package
           path: payjoin-ffi/csharp/artifacts/packages
@@ -258,7 +274,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/payjoin-csharp-')
     permissions:
       contents: read
-    uses: ./.github/workflows/verify-tag-hygiene.yml
+    uses: $/.github/workflows/verify-tag-hygiene.yml
 
   publish-nuget:
     name: "Publish to nuget.org (trusted publishing / OIDC)"
@@ -272,16 +288,18 @@ jobs:
       contents: read # needed only to check out the in-repo verify-tag-version action
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
 
       - name: Download packed NuGet package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: payjoin-csharp-nuget-package
           path: dist
 
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: "10.0.x"
 
@@ -303,7 +321,7 @@ jobs:
 
       - name: Verify tag matches packed artifact version
         id: verify
-        uses: ./.github/actions/verify-tag-version
+        uses: $/.github/actions/verify-tag-version
         with:
           tag-prefix: payjoin-csharp-
           version: ${{ steps.locate.outputs.version }}
@@ -311,20 +329,23 @@ jobs:
       - name: Attest build provenance (nupkg)
         # Attesting the .nupkg covers every RID native lib inside it; a consumer
         # runs: gh attestation verify <file>.nupkg -R payjoin/rust-payjoin
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ steps.locate.outputs.nupkg }}
 
       - name: NuGet login (OIDC -> short-lived API key)
         id: login
-        uses: NuGet/login@v1
+        uses: NuGet/login@ebc737b6fc418a6ca0073cf116ec8dc156d8b81e # v1
         with:
           user: ${{ secrets.NUGET_USER }}
 
       - name: Push to nuget.org
+        env:
+          NUPKG: ${{ steps.locate.outputs.nupkg }}
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         run: |
-          dotnet nuget push "${{ steps.locate.outputs.nupkg }}" \
-            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+          dotnet nuget push "$NUPKG" \
+            --api-key "$NUGET_API_KEY" \
             --source https://api.nuget.org/v3/index.json \
             --no-symbols \
             --skip-duplicate
@@ -335,7 +356,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/payjoin-csharp-')
     permissions:
       contents: write # create/update the Release for this tag and upload assets
-    uses: ./.github/workflows/release-assets.yml
+    uses: $/.github/workflows/release-assets.yml
     with:
       artifact-pattern: payjoin-csharp-nuget-package
       tag-prefix: payjoin-csharp-

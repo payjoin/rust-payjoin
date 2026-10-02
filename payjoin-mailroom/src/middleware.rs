@@ -11,22 +11,24 @@ pub struct MaybePeerIp(pub Option<std::net::IpAddr>);
 
 #[cfg(feature = "access-control")]
 pub async fn check_geoip(req: Request, next: Next) -> Response {
+    use axum::extract::ConnectInfo;
     use axum::http::StatusCode;
 
-    let geoip = req.extensions().get::<Option<std::sync::Arc<crate::access_control::IpFilter>>>();
+    let extensions = req.extensions();
+    let geoip = extensions.get::<Option<std::sync::Arc<crate::access_control::IpFilter>>>();
 
     if let Some(Some(geoip)) = geoip {
-        if let Some(connect_info) =
-            req.extensions().get::<axum::extract::ConnectInfo<MaybePeerIp>>()
-        {
-            if let Some(ip) = connect_info.0 .0 {
-                if !geoip.check_ip(ip) {
-                    tracing::warn!("Blocked request from {ip} due to GeoIP policy");
-                    return Response::builder()
-                        .status(StatusCode::FORBIDDEN)
-                        .body(axum::body::Body::empty())
-                        .expect("valid response");
-                }
+        let peer_ip = match extensions.get::<ConnectInfo<MaybePeerIp>>() {
+            Some(ConnectInfo(MaybePeerIp(ip))) => *ip,
+            None => extensions.get::<ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip()),
+        };
+        if let Some(ip) = peer_ip {
+            if !geoip.check_ip(ip) {
+                tracing::warn!("Blocked request from {ip} due to GeoIP policy");
+                return Response::builder()
+                    .status(StatusCode::FORBIDDEN)
+                    .body(axum::body::Body::empty())
+                    .expect("valid response");
             }
         }
     }

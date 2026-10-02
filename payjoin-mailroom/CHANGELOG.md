@@ -1,5 +1,9 @@
 # Payjoin Mailroom Changelog
 
+## Unreleased
+
+- Enforce `blocked_regions` and `blocked_ips` on the ACME and manual TLS serve paths (#1941)
+
 ## 0.1.2
 
 - Add db entry metrics (#1412)

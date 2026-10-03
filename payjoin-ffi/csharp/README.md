@@ -2,7 +2,27 @@
 
 Welcome to the C# language bindings for the [Payjoin Dev Kit](https://payjoindevkit.org/)!
 
-Payjoin lets the receiver of a Bitcoin transfer contribute inputs to the sender's transaction. The result looks like any other transaction, which preserves privacy by poisoning the common-input-ownership heuristic that chain surveillance depends on, and it lets the receiver batch its own operations into the same transaction. These bindings implement both [BIP 78](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) (synchronous payjoin) and [BIP 77](https://github.com/bitcoin/bips/blob/master/bip-0077.md) (asynchronous payjoin, where sender and receiver exchange the transaction through an untrusted directory and never need to be online at the same time), and ship with native libraries for every supported platform, so no Rust toolchain is required.
+<!-- concept:begin (synced from payjoin-ffi/CONCEPT.md; edit there and run payjoin-ffi/contrib/sync-concept.sh) -->
+
+Payjoin lets Bitcoin senders and receivers interact to make batched
+transactions. The cooperating peers choose the inputs and outputs of the
+transfer together, so the result looks like any other transaction — which
+preserves privacy by poisoning the common-input-ownership heuristic that
+chain surveillance depends on — and the receiver can batch its own
+operations into the same transaction.
+
+These bindings implement both
+[BIP 78 Simple Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki)
+and
+[BIP 77 Async Payjoin](https://github.com/bitcoin/bips/blob/master/bip-0077.md),
+in which sender and receiver exchange the transaction through an
+untrusted directory and never need to be online at the same time.
+
+Learn more at [payjoindevkit.org](https://payjoindevkit.org/).
+
+<!-- concept:end -->
+
+The package ships with native libraries for every supported platform, so no Rust toolchain is required.
 
 ## Install
 

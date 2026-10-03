@@ -12,6 +12,22 @@ cdylib_name = "payjoin_ffi"
 "JsonSenderSessionPersister.close" = "closeSession"
 "JsonSenderSessionPersisterAsync.close" = "closeSession"
 
+[bindings.java]
+package_name = "org.payjoindevkit"
+cdylib_name = "payjoin_ffi"
+
+# Same reasoning as [bindings.kotlin.rename] above: AutoCloseable.close() drops the native
+# handle, Payjoin also exports protocol close() on these types, so only the protocol methods
+# are renamed to avoid a collision. Same package name, so keeping this identical to
+# [bindings.kotlin.rename] also keeps the two bindings' API shapes consistent.
+[bindings.java.rename]
+"ReceiverPendingFallback.close" = "closeSession"
+"SenderPendingFallback.close" = "closeSession"
+"JsonReceiverSessionPersister.close" = "closeSession"
+"JsonReceiverSessionPersisterAsync.close" = "closeSession"
+"JsonSenderSessionPersister.close" = "closeSession"
+"JsonSenderSessionPersisterAsync.close" = "closeSession"
+
 [bindings.python]
 cdylib_name = "payjoin_ffi"
 

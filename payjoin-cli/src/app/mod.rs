@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
+use payjoin::bitcoin::address::NetworkUnchecked;
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::{self, Address, Amount, FeeRate};
+use payjoin::bitcoin::{self, Address, Amount, FeeRate, Transaction, TxOut};
 use tokio::signal;
 use tokio::sync::watch;
 
@@ -10,6 +11,7 @@ pub mod config;
 pub mod wallet;
 use crate::app::config::Config;
 use crate::app::wallet::BitcoindWallet;
+use crate::cli::CutThrough;
 #[cfg(feature = "v2")]
 use crate::cli::Role;
 #[cfg(feature = "v2")]
@@ -69,6 +71,36 @@ pub trait App: Send + Sync {
         let txid = self.wallet().broadcast_tx(&tx)?;
         Ok(txid)
     }
+}
+
+/// The receiver's own output in the sender's original transaction.
+///
+/// `WantsOutputs` does not expose the outputs it is about to replace, so
+/// callers capture this earlier, while the original transaction is still
+/// reachable, using the same ownership predicate the library uses.
+pub(crate) fn find_receiver_output(
+    wallet: &BitcoindWallet,
+    original_tx: &Transaction,
+) -> Result<TxOut> {
+    for txout in &original_tx.output {
+        if wallet.is_mine(&txout.script_pubkey)? {
+            return Ok(txout.clone());
+        }
+    }
+    Err(anyhow::anyhow!("no receiver output found in the original transaction"))
+}
+
+/// The output forwarding part of the payment onward, with its address checked
+/// against the wallet's network.
+pub(crate) fn forward_output(wallet: &BitcoindWallet, cut_through: &CutThrough) -> Result<TxOut> {
+    let address = cut_through
+        .address
+        .parse::<Address<NetworkUnchecked>>()?
+        .require_network(wallet.network()?)?;
+    Ok(TxOut {
+        value: Amount::from_sat(cut_through.amount_sat),
+        script_pubkey: address.script_pubkey(),
+    })
 }
 
 #[cfg(feature = "_manual-tls")]

@@ -5,9 +5,9 @@ use config::builder::DefaultState;
 use config::{ConfigError, File, FileFormat};
 use payjoin::bitcoin::FeeRate;
 use payjoin::{Url, Version};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::cli::{Cli, Commands};
+use crate::cli::{Cli, Commands, CutThrough};
 use crate::db;
 
 const CONFIG_DIR: &str = "payjoin-cli";
@@ -50,6 +50,17 @@ pub enum VersionConfig {
     V2(V2Config),
 }
 
+/// Receiver behaviour chosen on the command line.
+/// persisted by session so that a resumed v2 session behaves the same way as
+/// the run that started it
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct ReceiveOptions {
+    #[serde(default)]
+    pub consolidate: Option<usize>,
+    #[serde(default)]
+    pub cut_through: Option<CutThrough>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub db_path: PathBuf,
@@ -57,6 +68,8 @@ pub struct Config {
     pub bitcoind: BitcoindConfig,
     #[serde(skip)]
     pub version: Option<VersionConfig>,
+    #[serde(skip)]
+    pub receive_options: ReceiveOptions,
     #[cfg(feature = "_manual-tls")]
     pub root_certificate: Option<PathBuf>,
     #[cfg(feature = "_manual-tls")]
@@ -160,6 +173,7 @@ impl Config {
             max_fee_rate: built_config.get("max_fee_rate").ok(),
             bitcoind: built_config.get("bitcoind")?,
             version: None,
+            receive_options: ReceiveOptions::default(),
             #[cfg(feature = "v2")]
             expire_in_secs: None,
             #[cfg(feature = "_manual-tls")]
@@ -253,6 +267,11 @@ impl Config {
         #[cfg(feature = "v2")]
         if let Commands::Receive { expire_in, .. } = &cli.command {
             config.expire_in_secs = *expire_in;
+        }
+
+        if let Commands::Receive { consolidate, cut_through, .. } = &cli.command {
+            config.receive_options.consolidate = *consolidate;
+            config.receive_options.cut_through = cut_through.clone();
         }
 
         tracing::trace!("App config: {config:?}");

@@ -109,6 +109,12 @@ fi
 echo "✓  Pre-commit hook passed"
 ```
 
+### Changelog
+
+Each release crate (`payjoin`, `payjoin-cli`, `payjoin-mailroom`) keeps a `CHANGELOG.md` with an `## Unreleased` section at the top. If your pull request changes what a user of that crate sees, add a line there in the same commit. Write it for the person reading the release notes, not for the reviewer. The release PR renames the heading to the version number and nothing else.
+
+If the change has no user-visible effect (refactoring, tests, CI, comments), say so in the pull request description and a maintainer will apply the `changelog: none` label. CI fails a pull request that touches a release crate's `src/` without either a changelog line or that label.
+
 ## AI Assistance Notice
 
 > [!IMPORTANT]

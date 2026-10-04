@@ -58,15 +58,16 @@ validates the archive with a publish dry run
    changes under a matching heading in `CHANGELOG.md`.
 3. Confirm every `Build and Test Dart` job is green on the release commit
    in `master`.
-4. Tag that commit `payjoin-dart-<version>`, where `<version>` is the
-   `pubspec.yaml` version exactly (including the `+` build metadata). The
-   tag must be annotated and signed by a maintainer key in
-   `contrib/release/keys/`, and the tagged commit must be on `master`;
-   `verify-tag` refuses to publish otherwise.
+4. Tag that commit with `contrib/release/tag.sh` and push the tag it
+   names. The tag is `payjoin-dart-<version>`, where `<version>` is the
+   `pubspec.yaml` version exactly (including the `+` build metadata), as
+   [`contrib/release-version.sh`](contrib/release-version.sh) prints it.
+   tag.sh signs it with your key, which must be in `contrib/release/keys/` for
+   `verify-tag` to accept it, refuses a commit that is not on `master`,
+   and prints the push command.
 
    ```shell
-   git tag -s 'payjoin-dart-0.2.1+payjoin-1.0.0-rc.8' -m 'payjoin-dart-0.2.1+payjoin-1.0.0-rc.8'
-   git push upstream 'payjoin-dart-0.2.1+payjoin-1.0.0-rc.8'
+   nix develop .#release -c contrib/release/tag.sh dart
    ```
 
    The tag reruns the tests and the archive verification at the tagged

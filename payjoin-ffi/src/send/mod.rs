@@ -916,6 +916,56 @@ mod tests {
         fn close(&self) -> Result<(), ForeignError> { Ok(()) }
     }
 
+    #[derive(Default)]
+    struct InMemorySenderPersisterAsync {
+        events: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl InMemorySenderPersisterAsync {
+        fn push_event(&self, event: String) {
+            self.events.lock().expect("lock not poisoned").push(event);
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl JsonSenderSessionPersisterAsync for InMemorySenderPersisterAsync {
+        async fn save(&self, event: String) -> Result<(), ForeignError> {
+            self.push_event(event);
+            Ok(())
+        }
+
+        async fn load(&self) -> Result<Vec<String>, ForeignError> {
+            Ok(self.events.lock().expect("lock not poisoned").clone())
+        }
+
+        async fn close(&self) -> Result<(), ForeignError> { Ok(()) }
+    }
+
+    #[derive(Default)]
+    struct FailingSenderPersister;
+    impl JsonSenderSessionPersister for FailingSenderPersister {
+        fn save(&self, _event: String) -> Result<(), ForeignError> {
+            Err(ForeignError::InternalError("storage failure".to_string()))
+        }
+
+        fn load(&self) -> Result<Vec<String>, ForeignError> { Ok(Vec::new()) }
+
+        fn close(&self) -> Result<(), ForeignError> { Ok(()) }
+    }
+
+    #[derive(Default)]
+    struct FailingSenderPersisterAsync;
+    #[async_trait::async_trait]
+    impl JsonSenderSessionPersisterAsync for FailingSenderPersisterAsync {
+        async fn save(&self, _event: String) -> Result<(), ForeignError> {
+            Err(ForeignError::InternalError("storage failure".to_string()))
+        }
+
+        async fn load(&self) -> Result<Vec<String>, ForeignError> { Ok(Vec::new()) }
+
+        async fn close(&self) -> Result<(), ForeignError> { Ok(()) }
+    }
+
     fn receiver_pj_uri() -> Arc<PjUri> {
         #[derive(Default)]
         struct InMemoryReceiverPersister {
@@ -1021,5 +1071,347 @@ mod tests {
             }
             _ => panic!("expected Closed"),
         }
+    }
+
+    #[test]
+    fn sender_posts_request_and_rejects_garbage_response() {
+        let persister = Arc::new(InMemorySenderPersister::default());
+        let with_reply_key = saved_sender(persister.clone());
+        let request = with_reply_key
+            .create_v2_post_request("https://relay.example.com".to_string())
+            .expect("post request should be created");
+        assert!(request.request.url.starts_with("https://relay.example.com"));
+        assert_eq!(request.request.content_type, "message/ohttp-req");
+        assert!(!request.request.body.is_empty());
+
+        let err = with_reply_key
+            .process_response(b"garbage", &request.ohttp_ctx)
+            .save(persister.clone())
+            .map(|_| ())
+            .expect_err("garbage response should fail");
+        assert!(matches!(err, SenderPersistedError::Transient(_)), "{err:?}");
+        assert!(matches!(
+            replay_sender_event_log(persister.clone()).expect("replay should succeed").state(),
+            SendSession::WithReplyKey { .. }
+        ));
+    }
+
+    #[test]
+    fn sender_polls_for_proposal_and_rejects_garbage_response() {
+        let persister = Arc::new(InMemorySenderPersister::default());
+        let _ = saved_sender(persister.clone());
+        persister.push_event(r#"{"PostedOriginalPsbt":[]}"#.to_string());
+        let polling = match replay_sender_event_log(persister.clone())
+            .expect("replay should succeed")
+            .state()
+        {
+            SendSession::PollingForProposal { inner } => inner,
+            _ => panic!("expected PollingForProposal"),
+        };
+        let request = polling
+            .create_poll_request("https://relay.example.com".to_string())
+            .expect("poll request should be created");
+        assert!(!request.request.body.is_empty());
+        let err = polling
+            .process_response(b"garbage", &request.ohttp_ctx)
+            .save(persister.clone())
+            .map(|_| ())
+            .expect_err("garbage response should fail");
+        assert!(matches!(err, SenderPersistedError::Transient(_)), "{err:?}");
+        assert!(matches!(
+            replay_sender_event_log(persister).expect("replay should succeed").state(),
+            SendSession::PollingForProposal { .. }
+        ));
+    }
+
+    #[test]
+    fn sender_cancel_yields_pending_fallback_tx() {
+        let persister = Arc::new(InMemorySenderPersister::default());
+        let with_reply_key = saved_sender(persister.clone());
+        let pending = with_reply_key.cancel().save(persister.clone()).expect("cancel should save");
+        assert_eq!(pending.fallback_tx(), expected_fallback_tx());
+        assert!(matches!(
+            replay_sender_event_log(persister).expect("replay should succeed").state(),
+            SendSession::SenderPendingFallback { .. }
+        ));
+    }
+
+    #[test]
+    fn sender_builder_validates_its_inputs() {
+        let err = SenderBuilder::new("not a psbt".to_string(), pj_uri(V2_PJ_URI))
+            .map(|_| ())
+            .expect_err("invalid psbt should fail");
+        assert!(matches!(err, SenderInputError::Psbt(_)), "{err:?}");
+
+        let persister = Arc::new(InMemorySenderPersister::default());
+        SenderBuilder::new(ORIGINAL_PSBT.to_string(), receiver_pj_uri())
+            .expect("valid sender builder")
+            .always_disable_output_substitution()
+            .build_recommended(1000)
+            .expect("buildable sender")
+            .save(persister.clone())
+            .expect("sender session should save");
+        assert!(matches!(
+            replay_sender_event_log(persister.clone()).expect("replay should succeed").state(),
+            SendSession::WithReplyKey { .. }
+        ));
+
+        let err = SenderBuilder::new(ORIGINAL_PSBT.to_string(), receiver_pj_uri())
+            .expect("valid sender builder")
+            .build_recommended(u64::MAX)
+            .map(|_| ())
+            .expect_err("out-of-range fee rate should fail");
+        assert!(matches!(err, SenderInputError::FfiValidation(_)), "{err:?}");
+
+        let persister = Arc::new(InMemorySenderPersister::default());
+        SenderBuilder::new(ORIGINAL_PSBT.to_string(), receiver_pj_uri())
+            .expect("valid sender builder")
+            .build_non_incentivizing(1000)
+            .expect("buildable sender")
+            .save(persister.clone())
+            .expect("sender session should save");
+        assert!(matches!(
+            payjoin::send::v2::SessionStatus::from(
+                replay_sender_event_log(persister)
+                    .expect("replay should succeed")
+                    .session_history()
+                    .status()
+            ),
+            payjoin::send::v2::SessionStatus::Active
+        ));
+    }
+
+    #[test]
+    fn sender_replay_rejects_empty_and_corrupt_event_logs() {
+        let empty = Arc::new(InMemorySenderPersister::default());
+        assert!(replay_sender_event_log(empty).is_err());
+
+        let garbage = Arc::new(InMemorySenderPersister::default());
+        garbage.push_event("not json".to_string());
+        assert!(replay_sender_event_log(garbage).is_err());
+
+        let duplicated = Arc::new(InMemorySenderPersister::default());
+        let _ = saved_sender(duplicated.clone());
+        duplicated.push_event(r#""Initialized""#.to_string());
+        assert!(replay_sender_event_log(duplicated).is_err());
+    }
+
+    #[test]
+    fn sender_session_event_round_trips_through_json() {
+        let persister = Arc::new(InMemorySenderPersister::default());
+        let _ = saved_sender(persister.clone());
+        persister.push_event(r#"{"PostedOriginalPsbt":[]}"#.to_string());
+        let history = replay_sender_event_log(persister).expect("replay should succeed");
+        assert_eq!(history.session_history().pj_param().receiver_pubkey().len(), 33);
+
+        let event = SenderSessionEvent::from_json(r#"{"PostedOriginalPsbt":[]}"#.to_string())
+            .expect("event should parse");
+        let serialized = event.to_json().expect("event should serialize");
+        assert_eq!(
+            SenderSessionEvent::from_json(serialized.clone())
+                .expect("event should parse")
+                .to_json()
+                .expect("event should serialize"),
+            serialized
+        );
+    }
+
+    #[test]
+    fn sender_history_reports_outcomes() {
+        let persister = Arc::new(InMemorySenderPersister::default());
+        let _ = saved_sender(persister.clone());
+        let active = replay_sender_event_log(persister).expect("replay should succeed");
+        assert!(matches!(
+            payjoin::send::v2::SessionStatus::from(active.session_history().status()),
+            payjoin::send::v2::SessionStatus::Active
+        ));
+        assert!(!active.session_history().fallback_tx().is_empty());
+
+        let persister = Arc::new(InMemorySenderPersister::default());
+        let _ = saved_sender(persister.clone()).cancel().save(persister.clone()).expect("cancel");
+        let cancelled = replay_sender_event_log(persister).expect("replay should succeed");
+        assert!(matches!(
+            payjoin::send::v2::SessionStatus::from(cancelled.session_history().status()),
+            payjoin::send::v2::SessionStatus::Active
+        ));
+    }
+
+    #[test]
+    fn build_with_additional_fee_builds_and_validates() {
+        let persister = Arc::new(InMemorySenderPersister::default());
+        SenderBuilder::new(ORIGINAL_PSBT.to_string(), receiver_pj_uri())
+            .expect("valid sender builder")
+            .build_with_additional_fee(1000, Some(1), 1000, true)
+            .expect("buildable sender")
+            .save(persister.clone())
+            .expect("sender session should save");
+        assert!(matches!(
+            replay_sender_event_log(persister).expect("replay should succeed").state(),
+            SendSession::WithReplyKey { .. }
+        ));
+
+        let builder = SenderBuilder::new(ORIGINAL_PSBT.to_string(), receiver_pj_uri())
+            .expect("valid sender builder");
+        assert!(matches!(
+            builder
+                .clone()
+                .build_with_additional_fee(u64::MAX, None, 1000, false)
+                .map(|_| ())
+                .expect_err("out-of-range contribution should fail"),
+            SenderInputError::FfiValidation(_)
+        ));
+        assert!(matches!(
+            builder
+                .clone()
+                .build_with_additional_fee(1000, None, u64::MAX, false)
+                .map(|_| ())
+                .expect_err("out-of-range fee rate should fail"),
+            SenderInputError::FfiValidation(_)
+        ));
+        assert!(matches!(
+            builder
+                .build_with_additional_fee(1000, Some(200), 1000, false)
+                .map(|_| ())
+                .expect_err("invalid change index should fail"),
+            SenderInputError::Build(_)
+        ));
+    }
+
+    #[test]
+    fn sender_session_round_trips_via_async_persisters() {
+        let persister = Arc::new(InMemorySenderPersisterAsync::default());
+        let runtime = tokio::runtime::Runtime::new().expect("runtime should construct");
+        runtime.block_on(async {
+            let with_reply_key = SenderBuilder::new(ORIGINAL_PSBT.to_string(), receiver_pj_uri())
+                .expect("valid sender builder")
+                .build_recommended(1000)
+                .expect("buildable sender")
+                .save_async(persister.clone())
+                .await
+                .expect("sender session should save");
+
+            let request = with_reply_key
+                .create_v2_post_request("https://relay.example.com".to_string())
+                .expect("post request should be created");
+            let err = with_reply_key
+                .process_response(b"garbage", &request.ohttp_ctx)
+                .save_async(persister.clone())
+                .await
+                .map(|_| ())
+                .expect_err("garbage post response should fail");
+            assert!(matches!(err, SenderPersistedError::Transient(_)), "{err:?}");
+
+            persister.push_event(r#"{"PostedOriginalPsbt":[]}"#.to_string());
+            let polling = match replay_sender_event_log_async(persister.clone())
+                .await
+                .expect("replay should succeed")
+                .state()
+            {
+                SendSession::PollingForProposal { inner } => inner,
+                _ => panic!("expected PollingForProposal"),
+            };
+            let request = polling
+                .create_poll_request("https://relay.example.com".to_string())
+                .expect("poll request should be created");
+            let err = polling
+                .process_response(b"garbage", &request.ohttp_ctx)
+                .save_async(persister.clone())
+                .await
+                .map(|_| ())
+                .expect_err("garbage poll response should fail");
+            assert!(matches!(err, SenderPersistedError::Transient(_)), "{err:?}");
+
+            let pending =
+                polling.cancel().save_async(persister.clone()).await.expect("cancel should save");
+            assert_eq!(pending.fallback_tx(), expected_fallback_tx());
+            pending.close().save_async(persister.clone()).await.expect("close should save");
+            assert!(matches!(
+                replay_sender_event_log_async(persister.clone())
+                    .await
+                    .expect("replay should succeed")
+                    .state(),
+                SendSession::Closed { .. }
+            ));
+
+            for event in persister.events.lock().expect("lock not poisoned").clone() {
+                SenderSessionEvent::from_json(event).expect("event should parse");
+            }
+        });
+    }
+
+    #[test]
+    fn sender_storage_failures_surface_as_errors() {
+        let err = SenderBuilder::new(ORIGINAL_PSBT.to_string(), receiver_pj_uri())
+            .expect("valid sender builder")
+            .build_recommended(1000)
+            .expect("buildable sender")
+            .save(Arc::new(FailingSenderPersister))
+            .map(|_| ())
+            .expect_err("storage failure should fail");
+        assert!(err.to_string().contains("storage failure"), "{err}");
+
+        let working = Arc::new(InMemorySenderPersister::default());
+        let pending = saved_sender(working.clone())
+            .cancel()
+            .save(Arc::new(FailingSenderPersister))
+            .map(|_| ())
+            .expect_err("storage failure should fail");
+        assert!(pending.to_string().contains("storage failure"), "{pending}");
+
+        let pending = saved_sender(working.clone())
+            .cancel()
+            .save(working.clone())
+            .expect("cancel should save");
+        let err = pending
+            .close()
+            .save(Arc::new(FailingSenderPersister))
+            .expect_err("storage failure should fail");
+        assert!(err.to_string().contains("storage failure"), "{err}");
+
+        let runtime = tokio::runtime::Runtime::new().expect("runtime should construct");
+        runtime.block_on(async {
+            let err = SenderBuilder::new(ORIGINAL_PSBT.to_string(), receiver_pj_uri())
+                .expect("valid sender builder")
+                .build_recommended(1000)
+                .expect("buildable sender")
+                .save_async(Arc::new(FailingSenderPersisterAsync))
+                .await
+                .map(|_| ())
+                .expect_err("storage failure should fail");
+            assert!(err.to_string().contains("storage failure"), "{err}");
+
+            let working = Arc::new(InMemorySenderPersisterAsync::default());
+            let pending = SenderBuilder::new(ORIGINAL_PSBT.to_string(), receiver_pj_uri())
+                .expect("valid sender builder")
+                .build_recommended(1000)
+                .expect("buildable sender")
+                .save_async(working.clone())
+                .await
+                .expect("sender session should save")
+                .cancel()
+                .save_async(Arc::new(FailingSenderPersisterAsync))
+                .await
+                .map(|_| ())
+                .expect_err("storage failure should fail");
+            assert!(pending.to_string().contains("storage failure"), "{pending}");
+
+            let pending = SenderBuilder::new(ORIGINAL_PSBT.to_string(), receiver_pj_uri())
+                .expect("valid sender builder")
+                .build_recommended(1000)
+                .expect("buildable sender")
+                .save_async(working)
+                .await
+                .expect("sender session should save")
+                .cancel()
+                .save_async(Arc::new(InMemorySenderPersisterAsync::default()))
+                .await
+                .expect("cancel should save");
+            let err = pending
+                .close()
+                .save_async(Arc::new(FailingSenderPersisterAsync))
+                .await
+                .expect_err("storage failure should fail");
+            assert!(err.to_string().contains("storage failure"), "{err}");
+        });
     }
 }

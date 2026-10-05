@@ -57,8 +57,17 @@ dependency change:
 bash contrib/update-lock-files.sh
 ```
 
+## Code Review
+
+When reviewing changes, compare the branch against `master` commit by
+commit. Check for adherence to the guidelines in
+`.github/CONTRIBUTING.md`, relevant test coverage, consistency with the
+overall codebase, bugs, missed edge cases, unintended side effects, poor
+implementation choices, new panics or unwraps in library code,
+unintended public API changes, and other general concerns.
+
 ## AI Disclosure
 
-Add to PR body: `Disclosure: co-authored by <agent-name>`
+Follow the [AI communication policy](.github/CONTRIBUTING.md#ai-communication).
 
 Do **not** add `Co-Authored-By` in commits.

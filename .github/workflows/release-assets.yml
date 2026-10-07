@@ -9,6 +9,11 @@ name: Attach release assets
 on:
   workflow_call:
     inputs:
+      artifact-run-id:
+        description: Optional original run ID for recovery with the same tested artifacts
+        required: false
+        type: string
+        default: ""
       artifact-pattern:
         description: Name (or glob) of the artifact(s) holding the files to attach
         required: true
@@ -42,6 +47,7 @@ jobs:
     name: Create GitHub release
     runs-on: ubuntu-26.04
     permissions:
+      actions: read # download artifacts from the original run during recovery
       contents: write # create/update the Release for this tag and upload assets
     steps:
       - name: Checkout repo
@@ -50,9 +56,24 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
+          run-id: ${{ inputs.artifact-run-id || github.run_id }}
+          github-token: ${{ github.token }}
           pattern: ${{ inputs.artifact-pattern }}
           merge-multiple: true
           path: dist
+
+      - name: Check the complete binding asset set
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          npm=(dist/*.tgz)
+          nuget=(dist/*.nupkg)
+          if [[ ${#wheels[@]} != 2 || ${#npm[@]} != 1 || ${#nuget[@]} != 1 || ! -f dist/payjoin-dart.tar.gz ]]; then
+            echo "::error::expected two Python wheels and one npm, NuGet, and Dart archive"
+            exit 1
+          fi
 
       - name: Generate SHA256SUMS
         shell: bash

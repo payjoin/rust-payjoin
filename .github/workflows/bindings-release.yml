@@ -1,0 +1,330 @@
+name: Release language bindings
+on:
+  push:
+    tags:
+      - "payjoin-ffi-[0-9]*"
+  workflow_dispatch:
+    inputs:
+      artifact-run-id:
+        description: Recovery only, original release run whose tested artifacts to publish
+        type: string
+        default: ""
+      skip-python:
+        description: Recovery only, skip an already verified python publication
+        type: boolean
+        default: false
+      skip-javascript:
+        description: Recovery only, skip an already verified javascript publication
+        type: boolean
+        default: false
+      skip-csharp:
+        description: Recovery only, skip an already verified csharp publication
+        type: boolean
+        default: false
+      skip-dart:
+        description: Recovery only, skip an already verified dart publication
+        type: boolean
+        default: false
+
+# Keep two attempts at the same tag from publishing concurrently.
+concurrency:
+  group: bindings-release-${{ github.ref }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  verify-tag:
+    uses: ./.github/workflows/verify-tag-hygiene.yml
+  python:
+    needs: verify-tag
+    uses: ./.github/workflows/python.yml
+  javascript:
+    needs: verify-tag
+    uses: ./.github/workflows/javascript.yml
+  csharp:
+    needs: verify-tag
+    uses: ./.github/workflows/csharp.yml
+  dart:
+    needs: verify-tag
+    uses: ./.github/workflows/dart.yml
+  kotlin:
+    needs: verify-tag
+    uses: ./.github/workflows/kotlin.yml
+  publish:
+    name: Publish all language bindings
+    needs: [python, javascript, csharp, dart, kotlin]
+    runs-on: ubuntu-26.04
+    environment: release
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Verify recovery artifact source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_RUN: ${{ inputs.artifact-run-id }}
+          SKIPPING: ${{ inputs.skip-python || inputs.skip-javascript || inputs.skip-csharp || inputs.skip-dart }}
+        run: |
+          set -euo pipefail
+          if [[ "$SKIPPING" == true && -z "$SOURCE_RUN" ]]; then
+            echo "::error::recovery switches require the original release artifact-run-id"
+            exit 1
+          fi
+          if [[ -n "$SOURCE_RUN" ]]; then
+            if [[ ! "$SOURCE_RUN" =~ ^[0-9]+$ ]]; then
+              echo "::error::artifact-run-id must be a numeric release run ID"
+              exit 1
+            fi
+            revision=$(git rev-parse HEAD)
+            gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" |
+              jq -e --arg revision "$revision" \
+                '.head_sha == $revision and .path == ".github/workflows/bindings-release.yml"' >/dev/null || {
+                  echo "::error::recovery artifacts must come from this release workflow at the tagged commit"
+                  exit 1
+                }
+          fi
+
+      - name: Download wheels
+        if: ${{ !inputs.skip-python }}
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.artifact-run-id || github.run_id }}
+          github-token: ${{ github.token }}
+          pattern: payjoin-python-wheel-*
+          merge-multiple: true
+          path: dist/python
+
+      - name: Locate packed artifacts
+        if: ${{ !inputs.skip-python }}
+        id: python-locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(dist/python/payjoin-*.whl)
+          if [ "${#pkgs[@]}" -ne 2 ]; then
+            echo "::error::expected exactly two wheels in dist/python/, found ${#pkgs[@]}: ${pkgs[*]:-none}"
+            exit 1
+          fi
+          # payjoin-0.24.0-py3-none-<platform>.whl -> 0.24.0
+          versions="$(for pkg in "${pkgs[@]}"; do basename "$pkg" | cut -d- -f2; done | sort -u)"
+          if [ "$(echo "$versions" | wc -l)" -ne 1 ]; then
+            echo "::error::wheels disagree on version: $versions; refusing to publish"
+            exit 1
+          fi
+          echo "version=$versions" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches packed artifact version
+        if: ${{ !inputs.skip-python }}
+        uses: ./.github/actions/verify-tag-version
+        with:
+          tag-prefix: payjoin-ffi-
+          version: ${{ steps.python-locate.outputs.version }}
+          version-format: python
+
+      - name: Attest build provenance (wheels)
+        if: ${{ !inputs.skip-python }}
+        # A consumer runs: gh attestation verify <file>.whl -R payjoin/rust-payjoin
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/python/*.whl
+
+      - name: Download npm package
+        if: ${{ !inputs.skip-javascript }}
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.artifact-run-id || github.run_id }}
+          github-token: ${{ github.token }}
+          name: payjoin-javascript-npm-package
+          path: dist/javascript
+
+      - name: Install Node
+        if: ${{ !inputs.skip-javascript }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Update npm
+        if: ${{ !inputs.skip-javascript }}
+        run: |
+          npm install -g npm@11
+          npm --version
+
+      - name: Locate packed artifact
+        if: ${{ !inputs.skip-javascript }}
+        id: javascript-locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(dist/javascript/payjoin-*.tgz)
+          if [ "${#pkgs[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one .tgz in dist/javascript/, found ${#pkgs[@]}: ${pkgs[*]:-none}"
+            exit 1
+          fi
+          # payjoin-0.1.1.tgz -> 0.1.1
+          name="$(basename "${pkgs[0]}" .tgz)"
+          echo "tarball=${pkgs[0]}" >> "$GITHUB_OUTPUT"
+          echo "version=${name#payjoin-}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches packed artifact version
+        if: ${{ !inputs.skip-javascript }}
+        uses: ./.github/actions/verify-tag-version
+        with:
+          tag-prefix: payjoin-ffi-
+          version: ${{ steps.javascript-locate.outputs.version }}
+
+      - name: Attest build provenance (tarball)
+        if: ${{ !inputs.skip-javascript }}
+        # A consumer runs: gh attestation verify <file>.tgz -R payjoin/rust-payjoin
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.javascript-locate.outputs.tarball }}
+
+      - name: Download packed NuGet package
+        if: ${{ !inputs.skip-csharp }}
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.artifact-run-id || github.run_id }}
+          github-token: ${{ github.token }}
+          name: payjoin-csharp-nuget-package
+          path: dist/csharp
+
+      - name: Install .NET 10 SDK
+        if: ${{ !inputs.skip-csharp }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Locate packed artifact
+        if: ${{ !inputs.skip-csharp }}
+        id: csharp-locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(dist/csharp/*.nupkg)
+          if [ "${#pkgs[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one .nupkg in dist/csharp/, found ${#pkgs[@]}: ${pkgs[*]:-none}"
+            exit 1
+          fi
+          # Payjoin.0.24.0-preview.1.nupkg -> 0.24.0-preview.1
+          name="$(basename "${pkgs[0]}" .nupkg)"
+          echo "nupkg=${pkgs[0]}" >> "$GITHUB_OUTPUT"
+          echo "version=${name#Payjoin.}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches packed artifact version
+        if: ${{ !inputs.skip-csharp }}
+        uses: ./.github/actions/verify-tag-version
+        with:
+          tag-prefix: payjoin-ffi-
+          version: ${{ steps.csharp-locate.outputs.version }}
+
+      - name: Attest build provenance (nupkg)
+        if: ${{ !inputs.skip-csharp }}
+        # Attesting the .nupkg covers every RID native lib inside it; a consumer
+        # runs: gh attestation verify <file>.nupkg -R payjoin/rust-payjoin
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.csharp-locate.outputs.nupkg }}
+
+      - name: "Use cache"
+        if: ${{ !inputs.skip-dart }}
+        uses: Swatinem/rust-cache@v2
+      - name: Set up nix
+        if: ${{ !inputs.skip-dart }}
+        uses: ./.github/actions/setup-nix
+
+      - name: Read pubspec version
+        if: ${{ !inputs.skip-dart }}
+        id: dart-pubspec
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version: *//p' payjoin-ffi/dart/pubspec.yaml)"
+          if [ -z "$version" ]; then
+            echo "::error::could not read version from pubspec.yaml"
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Verify tag matches pubspec version
+        if: ${{ !inputs.skip-dart }}
+        uses: ./.github/actions/verify-tag-version
+        with:
+          tag-prefix: payjoin-ffi-
+          version: ${{ steps.dart-pubspec.outputs.version }}
+
+      - name: Download staged Dart package
+        if: ${{ !inputs.skip-dart }}
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.artifact-run-id || github.run_id }}
+          github-token: ${{ github.token }}
+          name: payjoin-dart-pub-package
+          path: dart-package
+
+      - name: Extract staged Dart package
+        if: ${{ !inputs.skip-dart }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/payjoin-pub"
+          tar -xzf dart-package/payjoin-dart.tar.gz -C "$RUNNER_TEMP/payjoin-pub"
+
+      - name: Publish to PyPI
+        if: ${{ !inputs.skip-python }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/python
+
+      - name: Publish to npmjs.com
+        if: ${{ !inputs.skip-javascript }}
+        env:
+          VERSION: ${{ steps.javascript-locate.outputs.version }}
+          TARBALL: ${{ steps.javascript-locate.outputs.tarball }}
+        run: |
+          set -euo pipefail
+          channel=latest
+          if [[ $VERSION == *-* ]]; then
+            channel=next
+          fi
+          npm publish "./$TARBALL" --tag "$channel"
+
+      - name: NuGet login (OIDC -> short-lived API key)
+        if: ${{ !inputs.skip-csharp }}
+        id: csharp-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to nuget.org
+        if: ${{ !inputs.skip-csharp }}
+        run: |
+          dotnet nuget push "${{ steps.csharp-locate.outputs.nupkg }}" \
+            --api-key "${{ steps.csharp-login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --no-symbols \
+            --skip-duplicate
+
+      - name: Publish to pub.dev
+        if: ${{ !inputs.skip-dart }}
+        run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/publish.sh "$RUNNER_TEMP/payjoin-pub"
+
+  github-release:
+    needs: publish
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/release-assets.yml
+    with:
+      artifact-run-id: ${{ inputs.artifact-run-id || github.run_id }}
+      artifact-pattern: payjoin-*
+      tag-prefix: payjoin-ffi-
+      archive-globs: "*.nupkg"
+      archive-member-globs: runtimes/*/native/*

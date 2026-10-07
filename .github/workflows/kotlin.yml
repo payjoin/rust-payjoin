@@ -12,7 +12,13 @@ on:
       # the flake change this workflow's environment.
       - flake.nix
       - flake.lock
+      - Cargo-minimal.lock
+      - Cargo-recent.lock
+      - contrib/release/**
+      - .github/actions/**
       - .github/workflows/kotlin.yml
+      - .github/workflows/bindings-release.yml
+  workflow_call:
 
 jobs:
   build-kotlin-and-test:

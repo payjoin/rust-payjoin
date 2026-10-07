@@ -1,10 +1,10 @@
 name: Attach release assets
 
-# Reusable tail of every binding publish workflow: download the packed
-# artifact(s), generate SHA256SUMS, and attach everything to the GitHub
+# Reusable asset collector for the binding release workflow: download the packed
+# artifacts, generate SHA256SUMS, and attach everything to the GitHub
 # release for the pushed tag. A maintainer's GPG detached signature over
-# SHA256SUMS is added out-of-band (locally, then uploaded as
-# SHA256SUMS.asc), so no signing key ever reaches a runner.
+# the checksum file is added locally, then uploaded with an .asc suffix.
+# No signing key reaches a runner.
 
 on:
   workflow_call:
@@ -15,7 +15,7 @@ on:
         type: string
       tag-prefix:
         description: >
-          Tag prefix before the version, e.g. payjoin-csharp-. Used to
+          Tag prefix before the version, e.g. payjoin-ffi-. Used to
           derive the version for pre-release detection.
         required: true
         type: string
@@ -61,7 +61,6 @@ jobs:
           MEMBER_GLOBS: ${{ inputs.archive-member-globs }}
         run: |
           ./contrib/release/generate-sha256sums.sh dist
-          echo "----- SHA256SUMS -----"
           cat dist/SHA256SUMS
 
       - name: Derive pre-release status from the tag
@@ -82,10 +81,10 @@ jobs:
             echo "prerelease=false" >>"$GITHUB_OUTPUT"
           fi
 
-      - name: Create / update GitHub release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: dist/*
-          fail_on_unmatched_files: true
-          draft: false
-          prerelease: ${{ steps.meta.outputs.prerelease }}
+      - name: Attach assets to the shared release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: ./contrib/release/attach-assets.sh "$TAG" "$PRERELEASE" dist

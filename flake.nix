@@ -500,6 +500,8 @@
             gnupg
             curl
             git
+            gh
+            unzip
             gnugrep
             gnused
             gawk

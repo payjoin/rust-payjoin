@@ -1,3 +1,11 @@
+## [0.25.0]
+
+- Publish the Python, JavaScript, C#, and Dart packages from one signed
+  `payjoin-ffi` tag at this common version. Each package jumps from its
+  own sequence (Python and JavaScript 0.3.0, C# 0.2.0, Dart
+  0.3.0+payjoin-1.2.0) with no API changes.
+- Wraps payjoin 1.2.0, unchanged.
+
 ## [0.24.0]
 
 ### Session Persister

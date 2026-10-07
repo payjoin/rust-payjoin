@@ -52,6 +52,10 @@ if [[ $status -ne 0 && $status -ne 65 ]]; then
     exit "$status"
 fi
 unexpected="$(grep '^\* ' <<<"$report" | grep -v "^\* \`dart analyze\` found" || true)"
+# Skipping ahead of the last published version is a release decision made
+# when the shared binding version is bumped, so pub's reminder of the
+# previous version is not a finding.
+unexpected="$(grep -v '^\* The previous version is ' <<<"$unexpected" || true)"
 if [[ -n $unexpected ]]; then
     echo "Unexpected validation findings; fix them before publishing:" >&2
     printf '%s\n' "$unexpected" >&2

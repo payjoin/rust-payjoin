@@ -50,7 +50,7 @@ jobs:
       - name: Set up nix
         uses: ./.github/actions/setup-nix
       - name: Generate production bindings and dry-run publish
-        run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh
+        run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh "$RUNNER_TEMP/payjoin-pub"
 
   verify-tag:
     name: "Verify release tag"
@@ -96,7 +96,7 @@ jobs:
           version: ${{ steps.pubspec.outputs.version }}
 
       - name: Prepare the package
-        run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh
+        run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh "$RUNNER_TEMP/payjoin-pub"
 
       - name: Publish to pub.dev
-        run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/publish.sh
+        run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/publish.sh "$RUNNER_TEMP/payjoin-pub"

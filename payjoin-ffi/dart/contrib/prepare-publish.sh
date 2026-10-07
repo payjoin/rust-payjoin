@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+[ "$#" -eq 1 ] || {
+    echo "usage: prepare-publish.sh <new-package-dir>" >&2
+    exit 1
+}
+# Resolve before changing directories; the destination must not exist.
+stage="$(realpath -m "$1")"
 
 # Prepare the package for publishing to pub.dev and verify the archive with
 # a dry run. The archive ships Dart source plus the native/ wrapper crate;
@@ -20,10 +26,17 @@ cd "$REPO_ROOT/payjoin-ffi/dart"
 echo "==> Generating production FFI bindings..."
 PAYJOIN_FFI_FEATURES="" bash ./scripts/generate_bindings.sh
 
-# A Cargo.lock resolved against the .cargo/config.toml path overlay would
-# hand consumers a dependency graph they cannot reproduce.
-echo "==> Cleaning nested Cargo.lock..."
-rm -f native/Cargo.lock
+revision="$(git rev-parse HEAD)"
+mkdir "$stage"
+# Include generated bindings while excluding development Cargo overlays and
+# lockfiles, then pin the native crate to the checkout that generated them.
+rsync -a --exclude=.git --exclude-from=.pubignore ./ "$stage/"
+sed -i "s/rev = \"[0-9a-f]*\"/rev = \"$revision\"/" "$stage/native/Cargo.toml"
+grep -Fq "rev = \"$revision\"" "$stage/native/Cargo.toml" || {
+    echo "Could not pin the staged native crate to $revision" >&2
+    exit 1
+}
+cd "$stage"
 
 echo "==> Verifying the publish archive..."
 # The dry run exits 65 whenever validation reports anything, and one

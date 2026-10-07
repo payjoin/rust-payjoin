@@ -52,6 +52,11 @@ if [[ $status -ne 0 && $status -ne 65 ]]; then
     exit "$status"
 fi
 unexpected="$(grep '^\* ' <<<"$report" | grep -v "^\* \`dart analyze\` found" || true)"
+# This one intentional jump aligns the independent Dart sequence with FFI.
+# Keep other validation findings fatal, including future unplanned skips.
+if grep -Fxq 'version: 0.25.0+payjoin-1.2.0' pubspec.yaml; then
+    unexpected="$(grep -Fvx '* The previous version is 0.3.0+payjoin-1.2.0.' <<<"$unexpected" || true)"
+fi
 if [[ -n $unexpected ]]; then
     echo "Unexpected validation findings; fix them before publishing:" >&2
     printf '%s\n' "$unexpected" >&2

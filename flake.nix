@@ -498,6 +498,7 @@
             rustToolchains.stable
             cargo-semver-checks
             jq
+            python3
             gnupg
             curl
             git

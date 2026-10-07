@@ -50,10 +50,16 @@ the `Build and Test Dart` workflow regenerates the production bindings and
 validates the archive with a publish dry run
 ([`contrib/prepare-publish.sh`](contrib/prepare-publish.sh)).
 
-1. Point the `payjoin-ffi` dependency in `native/Cargo.toml` at the commit
-   tagged for the `payjoin` release being wrapped. Consumers build from that
-   revision. `.cargo/config.toml` redirects it to the local workspace for
-   development only, and `.pubignore` withholds that file from the archive.
+1. The preparation script stages a separate package and pins its Rust
+   dependency to the checkout used to generate production bindings. The
+   development pin in `native/Cargo.toml` is replaced only in that staging
+   directory. Cargo overlays and local lockfiles are excluded. Both the
+   publish dry run and publication use the staged package. For local checks:
+
+   ```shell
+   nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh /tmp/payjoin-pub
+   ```
+
 2. Set the version in `pubspec.yaml` and describe the consumer-visible
    changes under a matching heading in `CHANGELOG.md`.
 3. Confirm every `Build and Test Dart` job is green on the release commit

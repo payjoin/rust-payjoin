@@ -225,16 +225,35 @@ pub async fn serve_acme(
         }
     });
 
+    // Bitcoin Core and other clients that can't speak TLS don't need it here:
+    // OHTTP and the key bootstrap already authenticate and encrypt the
+    // payload. Serve them plain HTTP on the TLS listener's port 80 peer so
+    // operators don't have to drop ACME and reverse-proxy around it.
+    let plain_addr = plain_http_addr(addr);
+    let plain_listener = tokio::net::TcpListener::bind(plain_addr).await?;
+    info!("Payjoin service listening on {} with plain HTTP (no TLS)", plain_addr);
+    let plain_server = axum::serve(
+        plain_listener,
+        app.clone().into_make_service_with_connect_info::<SocketAddr>(),
+    );
+
     info!("Payjoin service listening on {} with ACME TLS", addr);
-    let server = axum_server::bind(addr)
+    let tls_server = axum_server::bind(addr)
         .acceptor(acceptor)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>());
     tokio::select! {
-        served = server => served?,
+        served = tls_server => served?,
+        served = plain_server => served?,
         () = shutdown_signal() => info!("Shutdown signal received"),
     }
     flush_on_exit.flush_windows();
     Ok(())
+}
+
+/// The plain-HTTP peer of an ACME TLS listen address: same host, port 80.
+#[cfg(feature = "acme")]
+fn plain_http_addr(tls_addr: std::net::SocketAddr) -> std::net::SocketAddr {
+    std::net::SocketAddr::new(tls_addr.ip(), 80)
 }
 
 /// Generate random sentinel tag at startup.
@@ -806,6 +825,19 @@ mod tests {
         assert!(
             endpoint_attrs.iter().all(|ep| !ep.contains(&short_id)),
             "actual short ID value must not appear in metrics"
+        );
+    }
+
+    /// #1953: `serve_acme` must also serve plain HTTP (for clients like
+    /// Bitcoin Core that don't speak TLS) on the same host as its TLS
+    /// listener, port 80.
+    #[cfg(feature = "acme")]
+    #[test]
+    fn plain_http_addr_keeps_host_and_sets_port_80() {
+        assert_eq!(plain_http_addr("[::]:443".parse().unwrap()), "[::]:80".parse().unwrap());
+        assert_eq!(
+            plain_http_addr("127.0.0.1:8443".parse().unwrap()),
+            "127.0.0.1:80".parse().unwrap()
         );
     }
 }

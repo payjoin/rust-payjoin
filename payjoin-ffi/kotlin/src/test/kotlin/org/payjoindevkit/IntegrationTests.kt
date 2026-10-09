@@ -77,7 +77,11 @@ class IntegrationTests {
     @Test
     fun v2ToV2Payjoin() = runScenario()
 
+    @Test
+    fun v2ToV2TaprootPayjoin() = runScenario(initEnv = ::initBitcoindSenderReceiverTaproot)
+
     private fun runScenario(
+        initEnv: () -> BitcoindEnv = ::initBitcoindSenderReceiver,
         cancelReceiver: ((PayjoinProposal, InMemoryReceiverPersister) -> Unit)? = null,
     ) {
         initTracing()
@@ -87,7 +91,7 @@ class IntegrationTests {
             val relay = services.ohttpRelayUrl()
             services.fetchOhttpKeys().use { ohttpKeys ->
                 TestHttp(services).use { http ->
-                    initBitcoindSenderReceiver().use { env ->
+                    initEnv().use { env ->
                         env.getSender().use { senderRpc ->
                             env.getReceiver().use { receiverRpc ->
                                 runV2ToV2(
@@ -416,18 +420,13 @@ private fun getInputs(rpcConnection: RpcClient): List<InputPair> {
         val vout = obj.getValue("vout").jsonPrimitive.double.toInt().toUInt()
         val scriptPubkey = HexFormat.of().parseHex(obj.getValue("scriptPubKey").jsonPrimitive.content)
         val amountSat = kotlin.math.round(obj.getValue("amount").jsonPrimitive.double * 100_000_000.0).toULong()
-        val txin = TxIn(
-            previousOutput = OutPoint(txid, vout),
-            scriptSig = ByteArray(0),
-            sequence = 0u,
-            witness = emptyList(),
-        )
-        val psbtIn = PsbtInput(
-            witnessUtxo = TxOut(amountSat, scriptPubkey),
-            redeemScript = null,
-            witnessScript = null,
-        )
-        InputPair(txin, psbtIn, null)
+        val txout = TxOut(amountSat, scriptPubkey)
+        // OP_1 OP_PUSHBYTES_32 <key> is a P2TR output
+        if (obj.getValue("scriptPubKey").jsonPrimitive.content.startsWith("5120")) {
+            InputPair.newP2trKeyspend(txout, OutPoint(txid, vout))
+        } else {
+            InputPair.newP2wpkh(txout, OutPoint(txid, vout))
+        }
     }
 }
 

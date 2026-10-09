@@ -5,6 +5,7 @@
 ### URL Selection
 
 - Add `payjoin::selector::UrlSelector` with `RelaySelector` and `DirectorySelector` aliases, reusable OHTTP relay and payjoin directory selection primitives (uniform-random over non-failed URLs; callers mark failures to fail over), so integrators share one selection policy instead of each diverging
+- Add `payjoin::mailroom::Mailroom`, which owns relay and directory selection, tracks failed endpoints, and — with the `io` feature — fetches OHTTP keys with automatic failover (relay failures retry over another relay, directory failures move on to another directory), absorbing the failover loops integrators previously hand-rolled. Selection stays in-memory per `Mailroom`.
 
 ## 1.2.0
 

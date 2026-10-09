@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### URL Selection
+
+- Add `payjoin::selector::UrlSelector` with `RelaySelector` and `DirectorySelector` aliases, reusable OHTTP relay and payjoin directory selection primitives (uniform-random over non-failed URLs; callers mark failures to fail over), so integrators share one selection policy instead of each diverging. Routing all selection through this one path leaves room for topology-aware ordering (for example AS-aware relay selection) to be added later without forking the API
+- Add `payjoin::mailroom::Mailroom`, which owns relay and directory selection, tracks failed endpoints, and — with the `io` feature — fetches OHTTP keys with automatic failover (relay failures retry over another relay, directory failures move on to another directory), absorbing the failover loops integrators previously hand-rolled. Selection stays in-memory per `Mailroom`. The `io` feature is opt-in: integrators with their own transport can use selection and failure tracking without it, while those that enable it get key fetching and failover for free
+- Add `Mailroom::post_via_relay` (behind the `io` feature), which builds a request per relay URL and posts it through a caller-supplied transport closure, failing over to another relay on transport error and reporting session expiry (`RequestExpiry` / `RelayPost::Expired`) so the caller can react with its own typestate. Integrators keep their own HTTP client, proxy, and TLS configuration while the loop owns relay selection and failover
+
 ## 1.2.0
 
 This release adds a non-blocking interface to the receiver state machine.
@@ -286,6 +292,10 @@ Selected Improvements:
 - Fix unused results in session unit tests (#1512)
 - Document BIP77 v1 fallback behavior in `create_post_request` (#1593)
 - Remove redundant language from `finalize_proposal` rustdocs (#1567)
+
+### Relay Selection
+
+- Add `payjoin::relay::RelaySelector`, a reusable OHTTP relay-selection primitive (uniform-random over non-failed relays; callers mark failures to fail over), so integrators share one selection policy instead of each diverging
 
 ## 0.25.0
 

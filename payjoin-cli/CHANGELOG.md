@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Use `payjoin::RelaySelector` to select OHTTP relays, sharing the library's
+  selection policy instead of hand-rolling one
+- Replace the internal `MailroomManager` with `payjoin::mailroom::Mailroom`,
+  which tracks failed directories and fetches OHTTP keys with automatic
+  failover
+- Retry transport failures over other relays through
+  `payjoin::mailroom::Mailroom::post_via_relay` rather than the CLI's own
+  relay post loop
+
 ## 1.0.0
 
 The first stable payjoin-cli release, tracking payjoin 1.2.0. The CLI adopts

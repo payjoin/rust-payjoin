@@ -1,0 +1,45 @@
+name: Build and Test Java
+on:
+  workflow_run:
+    workflows: ["Flake maintenance"]
+    types: [requested]
+    branches:
+      - "update_flake_lock_action"
+  pull_request:
+    paths:
+      - payjoin-ffi/**
+      # The jobs run inside the flake's java dev shell, so changes to
+      # the flake change this workflow's environment.
+      - flake.nix
+      - flake.lock
+      - .github/workflows/java.yml
+
+jobs:
+  build-java-and-test:
+    name: "Build and test java"
+    # This matrix targets Linux and macOS; Windows is not covered here. That's a target, not a
+    # verification claim by itself - see payjoin-ffi/java/README.md's "Platforms" section for
+    # what has and hasn't actually been run where.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-26.04, macos-latest]
+    env:
+      RUSTUP_TOOLCHAIN: 1.85.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: "Install Rust 1.85.0"
+        uses: dtolnay/rust-toolchain@1.85.0
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: msrv-workspace
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
+      - name: "Build and test"
+        run: nix develop .#java -c bash ./payjoin-ffi/java/contrib/test.sh
+      - name: "Compile production bindings"
+        run: |
+          nix develop .#java -c env PAYJOIN_FFI_FEATURES= bash ./payjoin-ffi/java/scripts/generate_bindings.sh
+          nix develop .#java -c bash -c 'cd payjoin-ffi/java && ./gradlew --no-daemon compileJava'

@@ -251,16 +251,8 @@ namespace Payjoin.Tests
                 var amountBtc = utxo.GetProperty("amount").GetDouble();
                 var valueSat = (ulong)Math.Round(amountBtc * 100_000_000.0);
 
-                var txin = new TxIn(
-                    new OutPoint(txid, vout),
-                    Array.Empty<byte>(),
-                    0,
-                    Array.Empty<byte[]>());
-
                 var txout = new TxOut(valueSat, Convert.FromHexString(scriptPubKeyHex));
-                var psbtIn = new PsbtInput(txout, null, null);
-
-                inputs.Add(new InputPair(txin, psbtIn, null));
+                inputs.Add(InputPair.NewP2wpkh(txout, new OutPoint(txid, vout)));
             }
 
             return inputs.ToArray();

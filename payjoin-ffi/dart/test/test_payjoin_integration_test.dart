@@ -209,24 +209,12 @@ List<payjoin.InputPair> get_inputs(payjoin.RpcClient rpc_connection) {
     final amountBtc = utxo["amount"] as num;
     final amountSat = (amountBtc * 100000000).round();
 
-    final txin = payjoin.TxIn(
-      previousOutput: payjoin.OutPoint(txid: txid, vout: vout),
-      scriptSig: Uint8List(0),
-      sequence: 0,
-      witness: <Uint8List>[],
-    );
-    final witnessUtxo = payjoin.TxOut(
+    final txout = payjoin.TxOut(
       valueSat: amountSat,
       scriptPubkey: scriptPubKey,
     );
-    final psbt_in = payjoin.PsbtInput(
-      witnessUtxo: witnessUtxo,
-      redeemScript: null,
-      witnessScript: null,
-    );
-    inputs.add(
-      payjoin.InputPair(txin: txin, psbtin: psbt_in, expectedWeight: null),
-    );
+    final outpoint = payjoin.OutPoint(txid: txid, vout: vout);
+    inputs.add(payjoin.InputPair.newP2wpkh(txout: txout, outpoint: outpoint));
   }
 
   return inputs;

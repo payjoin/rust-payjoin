@@ -226,26 +226,16 @@ function getInputs(
     const utxos: Utxo[] = JSON.parse(rpcConnection.call("listunspent", []));
     const inputs: PJ<"InputPair">[] = [];
     for (const utxo of utxos) {
-        const txin = payjoin.TxIn.create({
-            previousOutput: payjoin.OutPoint.create({
-                txid: utxo.txid,
-                vout: utxo.vout,
-            }),
-            scriptSig: new Uint8Array([]).buffer,
-            sequence: 0,
-            witness: [],
-        });
         const txOut = payjoin.TxOut.create({
             valueSat: BigInt(Math.round(utxo.amount * 100_000_000)),
             // @ts-ignore
             scriptPubkey: Buffer.from(utxo.scriptPubKey, "hex"),
         });
-        const psbtIn = payjoin.PsbtInput.create({
-            witnessUtxo: txOut,
-            redeemScript: undefined,
-            witnessScript: undefined,
+        const outpoint = payjoin.OutPoint.create({
+            txid: utxo.txid,
+            vout: utxo.vout,
         });
-        inputs.push(new payjoin.InputPair(txin, psbtIn, undefined));
+        inputs.push(payjoin.InputPair.newP2wpkh(txOut, outpoint));
     }
     return inputs;
 }

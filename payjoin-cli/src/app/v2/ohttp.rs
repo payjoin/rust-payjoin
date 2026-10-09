@@ -36,17 +36,23 @@ impl MailroomManager {
         Ok(Self(Arc::new(tokio::sync::Mutex::new(mailroom))))
     }
 
-    pub async fn choose_relay(&self) -> Result<Url> {
-        self.0.lock().await.select_relay(&mut OsRng).map_err(Into::into)
-    }
-
-    pub async fn add_failed_relay(&self, relay: Url) {
-        self.0.lock().await.mark_relay_failed(&relay);
-    }
-
     pub async fn fetch_ohttp_keys(&self) -> Result<(Url, payjoin::OhttpKeys)> {
         // OsRng rather than thread_rng: ThreadRng is !Send and must not be
         // held across the fetch's await points.
         self.0.lock().await.fetch_ohttp_keys(&mut OsRng).await.map_err(Into::into)
+    }
+
+    pub async fn post_via_relay<F, T, E, P, TransportError, Fut>(
+        &self,
+        build: F,
+        post: impl Fn(payjoin::Request) -> Fut,
+    ) -> std::result::Result<payjoin::mailroom::RelayPost<P, T>, payjoin::mailroom::PostError<E>>
+    where
+        F: FnMut(&str) -> std::result::Result<(payjoin::Request, T), E>,
+        E: payjoin::mailroom::RequestExpiry,
+        TransportError: std::fmt::Debug,
+        Fut: std::future::Future<Output = std::result::Result<P, TransportError>>,
+    {
+        self.0.lock().await.post_via_relay(&mut OsRng, build, post).await
     }
 }

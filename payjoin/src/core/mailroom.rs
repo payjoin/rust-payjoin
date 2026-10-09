@@ -10,6 +10,16 @@
 //! BIP21 URI at session creation and recovered from the session event log
 //! on resume. [`Mailroom`] selects a directory only when a new session is
 //! created; resumption does not consult it.
+//!
+//! All selection goes through one path, [`crate::selector::UrlSelector`], so
+//! policy stays uniform across integrators and topology-aware ordering (for
+//! example AS-aware relay selection) can be introduced later in that one place
+//! rather than forked per implementation.
+//!
+//! The `io` feature gates only the network-touching key fetch; it is opt-in.
+//! Integrators that already have a transport can use the selection and
+//! failure-tracking API without `io`, while those that want it get the OHTTP
+//! key fetch with automatic failover for free.
 use bitcoin::secp256k1::rand::Rng;
 
 use crate::selector::{DirectorySelector, RelaySelector};
@@ -124,51 +134,81 @@ impl Mailroom {
         directory: &Url,
         rng: &mut R,
     ) -> Result<crate::OhttpKeys, DirectoryAttemptFailure> {
-        loop {
-            let relay = match self.relays.select(rng) {
-                Some(relay) => relay,
-                None => {
-                    // A directory that exhausted every relay is marked
-                    // failed so selection moves on instead of retrying it
-                    // forever.
-                    self.mark_directory_failed(directory);
-                    return Err(DirectoryAttemptFailure::RelaysExhausted);
-                }
-            };
-            let result = self.fetch_via_relay(&relay, directory).await;
-            match result {
-                Ok(keys) => return Ok(keys),
-                Err(e) if is_directory_fatal(&e) => {
-                    tracing::debug!("Directory {directory} failed via relay {relay}: {e}");
-                    self.mark_directory_failed(directory);
-                    return Err(DirectoryAttemptFailure::Directory);
-                }
-                Err(e) => {
-                    tracing::debug!("Relay {relay} failed: {e}");
-                    self.mark_relay_failed(&relay);
-                }
+        #[cfg(feature = "_manual-tls")]
+        let cert_der = self.cert_der.clone();
+        #[cfg(not(feature = "_manual-tls"))]
+        let cert_der: Option<Vec<u8>> = None;
+        fetch_keys_via_relay_with(
+            &mut self.relays,
+            &mut self.directories,
+            directory,
+            rng,
+            move |relay, directory| {
+                let cert_der = cert_der.clone();
+                async move { fetch_via_relay_impl(cert_der.as_deref(), &relay, &directory).await }
+            },
+        )
+        .await
+    }
+}
+
+/// Relay failover loop behind [`Mailroom::fetch_keys_via_relay`], factored out
+/// so tests can drive it with a synthetic `fetch` without touching the network.
+///
+/// On return the directory has been marked failed: either the directory itself
+/// misbehaved, or every relay failed to reach it.
+#[cfg(feature = "io")]
+async fn fetch_keys_via_relay_with<R, F, Fut>(
+    relays: &mut RelaySelector,
+    directories: &mut DirectorySelector,
+    directory: &Url,
+    rng: &mut R,
+    fetch: F,
+) -> Result<crate::OhttpKeys, DirectoryAttemptFailure>
+where
+    R: Rng,
+    F: Fn(Url, Url) -> Fut,
+    Fut: std::future::Future<Output = Result<crate::OhttpKeys, crate::io::Error>>,
+{
+    loop {
+        let relay = match relays.select(rng) {
+            Some(relay) => relay,
+            None => {
+                // A directory that exhausted every relay is marked failed so
+                // selection moves on instead of retrying it forever.
+                directories.mark_failed(directory);
+                return Err(DirectoryAttemptFailure::RelaysExhausted);
+            }
+        };
+        match fetch(relay.clone(), directory.clone()).await {
+            Ok(keys) => return Ok(keys),
+            Err(e) if is_directory_fatal(&e) => {
+                tracing::debug!("Directory {directory} failed via relay {relay}: {e}");
+                directories.mark_failed(directory);
+                return Err(DirectoryAttemptFailure::Directory);
+            }
+            Err(e) => {
+                tracing::debug!("Relay {relay} failed: {e}");
+                relays.mark_failed(&relay);
             }
         }
     }
+}
 
-    #[cfg(feature = "io")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "io")))]
-    async fn fetch_via_relay(
-        &self,
-        relay: &Url,
-        directory: &Url,
-    ) -> Result<crate::OhttpKeys, crate::io::Error> {
-        #[cfg(feature = "_manual-tls")]
-        if let Some(cert_der) = self.cert_der.as_ref() {
-            return crate::io::fetch_ohttp_keys_with_cert(
-                relay.as_str(),
-                directory.as_str(),
-                cert_der,
-            )
+#[cfg(feature = "io")]
+async fn fetch_via_relay_impl(
+    cert_der: Option<&[u8]>,
+    relay: &Url,
+    directory: &Url,
+) -> Result<crate::OhttpKeys, crate::io::Error> {
+    #[cfg(feature = "_manual-tls")]
+    if let Some(cert_der) = cert_der {
+        return crate::io::fetch_ohttp_keys_with_cert(relay.as_str(), directory.as_str(), cert_der)
             .await;
-        }
-        crate::io::fetch_ohttp_keys(relay.as_str(), directory.as_str()).await
     }
+    #[cfg(not(feature = "_manual-tls"))]
+    let _ = cert_der;
+    crate::io::fetch_ohttp_keys(relay.as_str(), directory.as_str()).await
 }
 
 /// Errors returned by [`Mailroom`] relay and directory selection.
@@ -192,6 +232,111 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// Whether a request-construction error was caused by session expiry.
+///
+/// Implemented for the send and receive v2 `CreateRequestError` types so
+/// [`Mailroom::post_via_relay`] can hand expiry back to the caller (which owns
+/// the typestate needed to react) instead of flattening it into this loop.
+#[cfg(feature = "io")]
+#[cfg_attr(docsrs, doc(cfg(feature = "io")))]
+pub trait RequestExpiry {
+    /// Returns `true` when the request failed because the session expired.
+    fn expired(&self) -> bool;
+}
+
+#[cfg(feature = "io")]
+impl RequestExpiry for crate::send::v2::CreateRequestError {
+    fn expired(&self) -> bool { self.is_expired() }
+}
+
+#[cfg(feature = "io")]
+impl RequestExpiry for crate::receive::v2::CreateRequestError {
+    fn expired(&self) -> bool { self.is_expired() }
+}
+
+/// Outcome of [`Mailroom::post_via_relay`].
+#[cfg(feature = "io")]
+#[cfg_attr(docsrs, doc(cfg(feature = "io")))]
+pub enum RelayPost<P, T> {
+    /// The request was posted; carries the transport response and the caller
+    /// context returned by the request builder.
+    Posted(P, T),
+    /// The request could not be built because the session had expired.
+    Expired,
+}
+
+/// Errors from [`Mailroom::post_via_relay`].
+#[cfg(feature = "io")]
+#[cfg_attr(docsrs, doc(cfg(feature = "io")))]
+#[derive(Debug)]
+pub enum PostError<E> {
+    /// Every configured relay has been marked failed.
+    NoRelaysAvailable,
+    /// The request could not be built for a reason other than expiry.
+    Build(E),
+}
+
+#[cfg(feature = "io")]
+impl<E: std::fmt::Display> std::fmt::Display for PostError<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PostError::NoRelaysAvailable => write!(f, "No valid relays available"),
+            PostError::Build(e) => write!(f, "Could not build request: {e}"),
+        }
+    }
+}
+
+#[cfg(feature = "io")]
+impl<E: std::fmt::Debug + std::fmt::Display> std::error::Error for PostError<E> {}
+
+#[cfg(feature = "io")]
+#[cfg_attr(docsrs, doc(cfg(feature = "io")))]
+impl Mailroom {
+    /// Build and POST a request over a relay, failing over to another relay on
+    /// transport error.
+    ///
+    /// `build` receives the relay URL and returns the request to send plus a
+    /// caller context `T`, which is threaded back on success. When `build`
+    /// reports [`RequestExpiry::expired`], the loop stops and returns
+    /// [`RelayPost::Expired`] so the caller can react with its own typestate.
+    ///
+    /// `post` performs the actual HTTP transport, letting callers keep their
+    /// own proxy and TLS client configuration while this loop owns relay
+    /// selection and failover. A transport error marks the relay failed and
+    /// retries over another relay.
+    ///
+    /// Returns [`PostError::NoRelaysAvailable`] once every configured relay has
+    /// been marked failed.
+    pub async fn post_via_relay<R, F, T, E, P, TransportError, Fut>(
+        &mut self,
+        rng: &mut R,
+        mut build: F,
+        post: impl Fn(crate::Request) -> Fut,
+    ) -> Result<RelayPost<P, T>, PostError<E>>
+    where
+        R: Rng,
+        F: FnMut(&str) -> Result<(crate::Request, T), E>,
+        E: RequestExpiry,
+        TransportError: std::fmt::Debug,
+        Fut: std::future::Future<Output = Result<P, TransportError>>,
+    {
+        loop {
+            let relay = self.select_relay(rng).map_err(|_| PostError::NoRelaysAvailable)?;
+            let (req, ctx) = match build(relay.as_str()) {
+                Ok(r) => r,
+                Err(e) if e.expired() => return Ok(RelayPost::Expired),
+                Err(e) => return Err(PostError::Build(e)),
+            };
+            match post(req).await {
+                Ok(resp) => return Ok(RelayPost::Posted(resp, ctx)),
+                Err(e) => {
+                    tracing::debug!("Request to relay {relay} failed: {e:?}");
+                    self.mark_relay_failed(&relay);
+                }
+            }
+        }
+    }
+}
 
 /// Why an attempt against one directory ended in failure. The underlying
 /// error is logged where the failure is observed, before this is returned.
@@ -321,5 +466,179 @@ mod tests {
         let parse_err = Url::parse("invalid url").unwrap_err();
         let err = crate::io::Error::from(parse_err);
         assert!(!is_directory_fatal(&err));
+    }
+
+    #[cfg(feature = "io")]
+    #[tokio::test]
+    async fn directory_fatal_error_marks_directory_not_relay() {
+        let mut relays = RelaySelector::new(urls());
+        let mut directories = DirectorySelector::new(urls());
+        let directory = urls()[0].clone();
+        let mut rng = StdRng::seed_from_u64(20);
+        let calls = std::cell::Cell::new(0u32);
+        let result = fetch_keys_via_relay_with(
+            &mut relays,
+            &mut directories,
+            &directory,
+            &mut rng,
+            |_relay, _directory| {
+                calls.set(calls.get() + 1);
+                let n = calls.get();
+                async move {
+                    assert!(n <= 3, "a directory-fatal error must not be retried per relay");
+                    Err::<crate::OhttpKeys, _>(crate::io::Error::UnexpectedStatusCode(
+                        http::StatusCode::NOT_FOUND,
+                    ))
+                }
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(DirectoryAttemptFailure::Directory)));
+        // The directory is retired immediately; no relay is blamed for it.
+        for _ in 0..50 {
+            assert_ne!(directories.select(&mut rng), Some(directory.clone()));
+        }
+        assert!(relays.select(&mut rng).is_some());
+    }
+
+    #[cfg(feature = "io")]
+    #[tokio::test]
+    async fn transport_error_marks_relay_not_directory() {
+        let mut relays = RelaySelector::new(urls());
+        let mut directories = DirectorySelector::new(urls());
+        let directory = urls()[0].clone();
+        let mut rng = StdRng::seed_from_u64(21);
+        let calls = std::cell::Cell::new(0u32);
+        let result = fetch_keys_via_relay_with(
+            &mut relays,
+            &mut directories,
+            &directory,
+            &mut rng,
+            |_relay, _directory| {
+                calls.set(calls.get() + 1);
+                let n = calls.get();
+                async move {
+                    assert!(n <= 3, "failover must retire a relay on every transport error");
+                    Err::<crate::OhttpKeys, _>(crate::io::Error::from(
+                        Url::parse("invalid url").unwrap_err(),
+                    ))
+                }
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(DirectoryAttemptFailure::RelaysExhausted)));
+        // Every relay is retired; the directory itself is left selectable.
+        assert!(directories.select(&mut rng).is_some());
+        assert!(relays.select(&mut rng).is_none());
+    }
+
+    #[derive(Debug)]
+    struct TestExpiry(bool);
+
+    impl RequestExpiry for TestExpiry {
+        fn expired(&self) -> bool { self.0 }
+    }
+
+    fn req() -> crate::Request {
+        crate::Request {
+            url: "https://relay.example".to_string(),
+            content_type: "message/ohttp-req",
+            body: Vec::new(),
+        }
+    }
+
+    #[cfg(feature = "io")]
+    #[tokio::test]
+    async fn post_via_relay_returns_response_and_context() {
+        let mut mailroom = Mailroom::new(urls(), Vec::new());
+        let mut rng = StdRng::seed_from_u64(11);
+        let result = mailroom
+            .post_via_relay(
+                &mut rng,
+                |_relay| Ok::<_, TestExpiry>((req(), 42u8)),
+                |_req| async { Ok::<_, TestExpiry>("response") },
+            )
+            .await;
+        match result {
+            Ok(RelayPost::Posted(resp, ctx)) => {
+                assert_eq!(resp, "response");
+                assert_eq!(ctx, 42);
+            }
+            _ => panic!("expected a posted response"),
+        }
+    }
+
+    #[cfg(feature = "io")]
+    #[tokio::test]
+    async fn post_via_relay_reports_expiry() {
+        let mut mailroom = Mailroom::new(urls(), Vec::new());
+        let mut rng = StdRng::seed_from_u64(12);
+        let result = mailroom
+            .post_via_relay(
+                &mut rng,
+                |_relay| Err::<(crate::Request, u8), _>(TestExpiry(true)),
+                |_req| async { Ok::<_, TestExpiry>("response") },
+            )
+            .await;
+        assert!(matches!(result, Ok(RelayPost::Expired)));
+    }
+
+    #[cfg(feature = "io")]
+    #[tokio::test]
+    async fn post_via_relay_surfaces_build_error() {
+        let mut mailroom = Mailroom::new(urls(), Vec::new());
+        let mut rng = StdRng::seed_from_u64(13);
+        let result = mailroom
+            .post_via_relay(
+                &mut rng,
+                |_relay| Err::<(crate::Request, u8), _>(TestExpiry(false)),
+                |_req| async { Ok::<_, TestExpiry>("response") },
+            )
+            .await;
+        assert!(matches!(result, Err(PostError::Build(TestExpiry(false)))));
+    }
+
+    #[cfg(feature = "io")]
+    #[tokio::test]
+    async fn post_via_relay_fails_over_then_succeeds() {
+        let mut mailroom = Mailroom::new(urls(), Vec::new());
+        let mut rng = StdRng::seed_from_u64(14);
+        let attempts = std::cell::Cell::new(0u32);
+        let post = |_req: crate::Request| {
+            let attempt = attempts.get();
+            attempts.set(attempt + 1);
+            async move {
+                if attempt == 0 {
+                    Err("transport down")
+                } else {
+                    Ok("response")
+                }
+            }
+        };
+        let result = mailroom
+            .post_via_relay(&mut rng, |_relay| Ok::<_, TestExpiry>((req(), ())), post)
+            .await;
+        assert!(matches!(result, Ok(RelayPost::Posted("response", ()))));
+        assert_eq!(attempts.get(), 2);
+    }
+
+    #[cfg(feature = "io")]
+    #[tokio::test]
+    async fn post_via_relay_exhausts_relays() {
+        let mut mailroom = Mailroom::new(urls(), Vec::new());
+        let mut rng = StdRng::seed_from_u64(15);
+        let attempts = std::cell::Cell::new(0u32);
+        // Bail out if a no-op `mark_relay_failed` lets the failover loop spin
+        // forever: failing the test beats hanging the suite.
+        let post = |_req: crate::Request| {
+            attempts.set(attempts.get() + 1);
+            assert!(attempts.get() <= 4, "failover must stop once every relay is marked failed");
+            async { Err::<&str, &str>("transport down") }
+        };
+        let result = mailroom
+            .post_via_relay(&mut rng, |_relay| Ok::<_, TestExpiry>((req(), ())), post)
+            .await;
+        assert_eq!(attempts.get(), 3);
+        assert!(matches!(result, Err(PostError::NoRelaysAvailable)));
     }
 }

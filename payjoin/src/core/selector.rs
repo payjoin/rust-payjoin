@@ -5,6 +5,10 @@ use crate::Url;
 
 /// Picks a URL, excluding any marked failed, so clients share one
 /// selection policy instead of each diverging.
+///
+/// Kept as the single selection path so a future topology-aware ordering (for
+/// example AS-aware relay selection) lands here once, without forking into a
+/// separate API that integrators would have to opt into individually.
 #[derive(Clone, Debug)]
 pub struct UrlSelector {
     urls: Vec<Url>,

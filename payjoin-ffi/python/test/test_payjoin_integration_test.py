@@ -526,17 +526,9 @@ def get_inputs(rpc_connection: RpcClient) -> list[InputPair]:
         script_pubkey = bytes.fromhex(utxo["scriptPubKey"])
         amount_sat = round(utxo["amount"] * 100_000_000)
 
-        txin = TxIn(
-            previous_output=OutPoint(txid=txid, vout=vout),
-            script_sig=bytes(),
-            sequence=0,
-            witness=[],
-        )
-        witness_utxo = TxOut(value_sat=amount_sat, script_pubkey=script_pubkey)
-        psbt_in = PsbtInput(
-            witness_utxo=witness_utxo, redeem_script=None, witness_script=None
-        )
-        inputs.append(InputPair(txin=txin, psbtin=psbt_in, expected_weight=None))
+        txout = TxOut(value_sat=amount_sat, script_pubkey=script_pubkey)
+        outpoint = OutPoint(txid=txid, vout=vout)
+        inputs.append(InputPair.new_p2wpkh(txout=txout, outpoint=outpoint))
 
     return inputs
 

@@ -416,18 +416,7 @@ private fun getInputs(rpcConnection: RpcClient): List<InputPair> {
         val vout = obj.getValue("vout").jsonPrimitive.double.toInt().toUInt()
         val scriptPubkey = HexFormat.of().parseHex(obj.getValue("scriptPubKey").jsonPrimitive.content)
         val amountSat = kotlin.math.round(obj.getValue("amount").jsonPrimitive.double * 100_000_000.0).toULong()
-        val txin = TxIn(
-            previousOutput = OutPoint(txid, vout),
-            scriptSig = ByteArray(0),
-            sequence = 0u,
-            witness = emptyList(),
-        )
-        val psbtIn = PsbtInput(
-            witnessUtxo = TxOut(amountSat, scriptPubkey),
-            redeemScript = null,
-            witnessScript = null,
-        )
-        InputPair(txin, psbtIn, null)
+        InputPair.newP2wpkh(TxOut(amountSat, scriptPubkey), OutPoint(txid, vout))
     }
 }
 

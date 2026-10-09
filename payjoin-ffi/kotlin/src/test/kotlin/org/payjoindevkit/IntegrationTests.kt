@@ -23,9 +23,10 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * Full BIP 77 v2↔v2 round trip against the in-process directory, OHTTP relay,
  * and bitcoind. Mirrors `payjoin-ffi/python/test/test_payjoin_integration_test.py`
- * (`test_integration_v2_to_v2`): same RPC sequence, same receiver checklist,
+ * (`test_integration_v2_to_v2_*`): same RPC sequence, same receiver checklist,
  * same final assertions, plus an explicit check that the broadcast transaction
- * spends coins from both wallets.
+ * spends coins from both wallets. The round trip runs once with validation
+ * callbacks and once with the nonblocking extract/apply checklist API.
  *
  * Every [TestServices] call takes a global runtime mutex and blocks, so sender
  * and receiver are driven strictly in sequence.
@@ -75,9 +76,13 @@ class IntegrationTests {
     }
 
     @Test
-    fun v2ToV2Payjoin() = runScenario()
+    fun v2ToV2PayjoinCallback() = runScenario(mode = TransitionMode.Callback)
+
+    @Test
+    fun v2ToV2PayjoinNonblocking() = runScenario(mode = TransitionMode.Nonblocking)
 
     private fun runScenario(
+        mode: TransitionMode = TransitionMode.Callback,
         cancelReceiver: ((PayjoinProposal, InMemoryReceiverPersister) -> Unit)? = null,
     ) {
         initTracing()
@@ -98,6 +103,7 @@ class IntegrationTests {
                                     senderRpc,
                                     receiverRpc,
                                     cancelReceiver,
+                                    mode,
                                 )
                             }
                         }
@@ -115,6 +121,7 @@ class IntegrationTests {
         senderRpc: RpcClient,
         receiverRpc: RpcClient,
         cancelReceiver: ((PayjoinProposal, InMemoryReceiverPersister) -> Unit)?,
+        mode: TransitionMode,
     ) {
         val receiverAddress = Json.parseToJsonElement(rpc(receiverRpc, "getnewaddress")).jsonPrimitive.content
         val senderOutpoints = listOutpoints(senderRpc)
@@ -147,7 +154,7 @@ class IntegrationTests {
                     pollingForProposal.use {
                         // **********************
                         // Inside the Receiver:
-                        val payjoinProposal = waitForReceiverProposal(session, recvPersister, http, relay, receiverRpc)
+                        val payjoinProposal = waitForReceiverProposal(session, recvPersister, http, relay, receiverRpc, mode)
                         payjoinProposal.use {
                             if (cancelReceiver != null) {
                                 cancelReceiver(payjoinProposal, recvPersister)
@@ -207,6 +214,7 @@ class IntegrationTests {
         http: TestHttp,
         relay: String,
         receiverRpc: RpcClient,
+        mode: TransitionMode,
     ): PayjoinProposal {
         val deadline = System.nanoTime() + POLL_TIMEOUT_NS
         var attempts = 0
@@ -214,7 +222,7 @@ class IntegrationTests {
             attempts += 1
             val original = pollReceiver(session, recvPersister, http, relay)
             if (original != null) {
-                return original.use { processUncheckedProposal(it, recvPersister, receiverRpc) }
+                return original.use { processUncheckedProposal(it, recvPersister, receiverRpc, mode) }
             }
             Thread.sleep(POLL_SLEEP_MS)
         }
@@ -225,55 +233,86 @@ class IntegrationTests {
         proposal: UncheckedOriginalPayload,
         recvPersister: InMemoryReceiverPersister,
         receiverRpc: RpcClient,
+        mode: TransitionMode,
     ): PayjoinProposal {
-        val maybeInputsOwned = proposal.checkBroadcastSuitability(null, MempoolAcceptanceCallback(receiverRpc))
-            .use { it.save(recvPersister) }
-        return maybeInputsOwned.use { processMaybeInputsOwned(it, recvPersister, receiverRpc) }
+        val transition = when (mode) {
+            TransitionMode.Callback -> proposal.checkBroadcastSuitability(null, MempoolAcceptanceCallback(receiverRpc))
+            TransitionMode.Nonblocking -> {
+                val canBroadcast = MempoolAcceptanceCallback(receiverRpc)
+                    .callback(proposal.extractTxToCheckBroadcastSuitability())
+                proposal.applyBroadcastSuitability(null, canBroadcast)
+            }
+        }
+        val maybeInputsOwned = transition.use { it.save(recvPersister) }
+        return maybeInputsOwned.use { processMaybeInputsOwned(it, recvPersister, receiverRpc, mode) }
     }
 
     private fun processMaybeInputsOwned(
         proposal: MaybeInputsOwned,
         recvPersister: InMemoryReceiverPersister,
         receiverRpc: RpcClient,
+        mode: TransitionMode,
     ): PayjoinProposal {
-        val maybeInputsSeen = proposal.checkInputsNotOwned(IsInputOwnedCallback(receiverRpc))
-            .use { it.save(recvPersister) }
-        return maybeInputsSeen.use { processMaybeInputsSeen(it, recvPersister, receiverRpc) }
+        val transition = when (mode) {
+            TransitionMode.Callback -> proposal.checkInputsNotOwned(IsInputOwnedCallback(receiverRpc))
+            TransitionMode.Nonblocking -> proposal.inputsOwnedChecklist().useAll { checklist ->
+                checklist.map { it.mark(IsInputOwnedCallback(receiverRpc).callback(it.value())) }
+                    .useAll { proposal.applyInputsOwnedChecklist(it) }
+            }
+        }
+        val maybeInputsSeen = transition.use { it.save(recvPersister) }
+        return maybeInputsSeen.use { processMaybeInputsSeen(it, recvPersister, receiverRpc, mode) }
     }
 
     private fun processMaybeInputsSeen(
         proposal: MaybeInputsSeen,
         recvPersister: InMemoryReceiverPersister,
         receiverRpc: RpcClient,
+        mode: TransitionMode,
     ): PayjoinProposal {
-        val outputsUnknown = proposal.checkNoInputsSeenBefore(CheckInputsNotSeenCallback())
-            .use { it.save(recvPersister) }
-        return outputsUnknown.use { processOutputsUnknown(it, recvPersister, receiverRpc) }
+        val transition = when (mode) {
+            TransitionMode.Callback -> proposal.checkNoInputsSeenBefore(CheckInputsNotSeenCallback())
+            TransitionMode.Nonblocking -> proposal.inputsSeenChecklist().useAll { checklist ->
+                checklist.map { it.mark(CheckInputsNotSeenCallback().callback(it.value())) }
+                    .useAll { proposal.applyInputsSeenChecklist(it) }
+            }
+        }
+        val outputsUnknown = transition.use { it.save(recvPersister) }
+        return outputsUnknown.use { processOutputsUnknown(it, recvPersister, receiverRpc, mode) }
     }
 
     private fun processOutputsUnknown(
         proposal: OutputsUnknown,
         recvPersister: InMemoryReceiverPersister,
         receiverRpc: RpcClient,
+        mode: TransitionMode,
     ): PayjoinProposal {
-        val wantsOutputs = proposal.identifyReceiverOutputs(IsScriptOwnedCallback(receiverRpc))
-            .use { it.save(recvPersister) }
-        return wantsOutputs.use { processWantsOutputs(it, recvPersister, receiverRpc) }
+        val transition = when (mode) {
+            TransitionMode.Callback -> proposal.identifyReceiverOutputs(IsScriptOwnedCallback(receiverRpc))
+            TransitionMode.Nonblocking -> proposal.outputsOwnedChecklist().useAll { checklist ->
+                checklist.map { it.mark(IsScriptOwnedCallback(receiverRpc).callback(it.value())) }
+                    .useAll { proposal.applyOutputsOwnedChecklist(it) }
+            }
+        }
+        val wantsOutputs = transition.use { it.save(recvPersister) }
+        return wantsOutputs.use { processWantsOutputs(it, recvPersister, receiverRpc, mode) }
     }
 
     private fun processWantsOutputs(
         proposal: WantsOutputs,
         recvPersister: InMemoryReceiverPersister,
         receiverRpc: RpcClient,
+        mode: TransitionMode,
     ): PayjoinProposal {
         val wantsInputs = proposal.commitOutputs().use { it.save(recvPersister) }
-        return wantsInputs.use { processWantsInputs(it, recvPersister, receiverRpc) }
+        return wantsInputs.use { processWantsInputs(it, recvPersister, receiverRpc, mode) }
     }
 
     private fun processWantsInputs(
         proposal: WantsInputs,
         recvPersister: InMemoryReceiverPersister,
         receiverRpc: RpcClient,
+        mode: TransitionMode,
     ): PayjoinProposal {
         val inputs = getInputs(receiverRpc)
         val wantsFeeRange = try {
@@ -283,24 +322,33 @@ class IntegrationTests {
         } finally {
             inputs.forEach { it.close() }
         }
-        return wantsFeeRange.use { processWantsFeeRange(it, recvPersister, receiverRpc) }
+        return wantsFeeRange.use { processWantsFeeRange(it, recvPersister, receiverRpc, mode) }
     }
 
     private fun processWantsFeeRange(
         proposal: WantsFeeRange,
         recvPersister: InMemoryReceiverPersister,
         receiverRpc: RpcClient,
+        mode: TransitionMode,
     ): PayjoinProposal {
         val provisional = proposal.applyFeeRange(1u, 10u).use { it.save(recvPersister) }
-        return provisional.use { processProvisionalProposal(it, recvPersister, receiverRpc) }
+        return provisional.use { processProvisionalProposal(it, recvPersister, receiverRpc, mode) }
     }
 
     private fun processProvisionalProposal(
         proposal: ProvisionalProposal,
         recvPersister: InMemoryReceiverPersister,
         receiverRpc: RpcClient,
+        mode: TransitionMode,
     ): PayjoinProposal {
-        return proposal.finalizeProposal(ProcessPsbtCallback(receiverRpc)).use { it.save(recvPersister) }
+        val transition = when (mode) {
+            TransitionMode.Callback -> proposal.finalizeProposal(ProcessPsbtCallback(receiverRpc))
+            TransitionMode.Nonblocking -> {
+                val signedPsbt = ProcessPsbtCallback(receiverRpc).callback(proposal.psbtToSign())
+                proposal.finalizeSignedProposal(signedPsbt)
+            }
+        }
+        return transition.use { it.save(recvPersister) }
     }
 
     private fun waitForSenderProposal(
@@ -377,10 +425,23 @@ class IntegrationTests {
     }
 }
 
+/** Drives receiver validation through callbacks or through the extract/apply checklist API. */
+private enum class TransitionMode {
+    Callback,
+    Nonblocking,
+}
+
 private const val POLL_SLEEP_MS = 250L
 private const val POLL_TIMEOUT_NS = 30_000_000_000L
 
 private data class OutpointRef(val txid: String, val vout: UInt)
+
+private inline fun <T : AutoCloseable, R> List<T>.useAll(block: (List<T>) -> R): R =
+    try {
+        block(this)
+    } finally {
+        forEach { it.close() }
+    }
 
 private fun rpc(client: RpcClient, method: String, vararg params: String?): String =
     client.call(method, params.toList())

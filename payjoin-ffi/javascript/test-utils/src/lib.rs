@@ -162,3 +162,20 @@ pub fn init_bitcoind_sender_receiver() -> Result<BitcoindEnv> {
         sender: RpcClient { inner: Arc::new(sender) },
     })
 }
+
+/// Like `init_bitcoind_sender_receiver`, but both wallets are funded with
+/// Taproot (P2TR) coins.
+#[napi]
+pub fn init_bitcoind_sender_receiver_taproot() -> Result<BitcoindEnv> {
+    let (bitcoind, receiver, sender) = payjoin_test_utils::init_bitcoind_sender_receiver(
+        Some(AddressType::Bech32m),
+        Some(AddressType::Bech32m),
+    )
+    .map_err(|e| Error::from_reason(format!("Failed to initialize bitcoind: {}", e)))?;
+
+    Ok(BitcoindEnv {
+        bitcoind: BitcoindInstance { _inner: Arc::new(bitcoind) },
+        receiver: RpcClient { inner: Arc::new(receiver) },
+        sender: RpcClient { inner: Arc::new(sender) },
+    })
+}

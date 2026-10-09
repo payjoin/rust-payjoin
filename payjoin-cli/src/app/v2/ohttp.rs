@@ -14,7 +14,7 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
-use payjoin::relay::RelaySelector;
+use payjoin::selector::{DirectorySelector, RelaySelector};
 use payjoin::Url;
 
 use super::Config;
@@ -23,16 +23,17 @@ use super::Config;
 pub struct MailroomManager {
     config: Config,
     relay_selector: Arc<Mutex<RelaySelector>>,
-    failed_directories: Arc<Mutex<Vec<Url>>>,
+    directory_selector: Arc<Mutex<DirectorySelector>>,
 }
 
 impl MailroomManager {
     pub fn new(config: Config) -> Result<Self> {
         let relay_selector = RelaySelector::new(config.v2()?.ohttp_relays.clone());
+        let directory_selector = DirectorySelector::new(config.v2()?.pj_directories.clone());
         Ok(MailroomManager {
             config,
             relay_selector: Arc::new(Mutex::new(relay_selector)),
-            failed_directories: Arc::new(Mutex::new(Vec::new())),
+            directory_selector: Arc::new(Mutex::new(directory_selector)),
         })
     }
 
@@ -45,7 +46,10 @@ impl MailroomManager {
     }
 
     pub fn add_failed_directory(&self, directory: Url) {
-        self.failed_directories.lock().expect("Lock should not be poisoned").push(directory);
+        self.directory_selector
+            .lock()
+            .expect("Lock should not be poisoned")
+            .mark_failed(&directory);
     }
 
     pub fn choose_relay(&self) -> Result<Url> {
@@ -57,21 +61,11 @@ impl MailroomManager {
     }
 
     pub fn choose_directory(&self) -> Result<Url> {
-        use payjoin::bitcoin::secp256k1::rand::prelude::SliceRandom;
-        let directories = &self.config.v2()?.pj_directories;
-        let failed_directories =
-            self.failed_directories.lock().expect("Lock should not be poisoned");
-        let remaining_directories: Vec<_> =
-            directories.iter().filter(|d| !failed_directories.contains(d)).cloned().collect();
-
-        if remaining_directories.is_empty() {
-            return Err(anyhow!("No valid directories available"));
-        }
-
-        remaining_directories
-            .choose(&mut payjoin::bitcoin::key::rand::thread_rng())
-            .cloned()
-            .ok_or_else(|| anyhow!("Failed to select from remaining directories"))
+        self.directory_selector
+            .lock()
+            .expect("Lock should not be poisoned")
+            .select(&mut payjoin::bitcoin::key::rand::thread_rng())
+            .ok_or_else(|| anyhow!("No valid directories available"))
     }
 
     pub(crate) async fn unwrap_ohttp_keys_or_else_fetch_from_directory(

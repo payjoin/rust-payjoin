@@ -327,22 +327,7 @@ impl AppTrait for App {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let persister = ReceiverPersister::new(self.db.clone())?;
-        let (directory, ohttp_keys) = loop {
-            let directory = self.mailroom_manager.choose_directory()?;
-            match self
-                .mailroom_manager
-                .unwrap_ohttp_keys_or_else_fetch_from_directory(&directory)
-                .await
-            {
-                Ok(keys) => break (directory, keys.ohttp_keys),
-                Err(e) => {
-                    tracing::debug!("Directory {directory} failed: {e:#}");
-                    self.mailroom_manager.add_failed_directory(directory);
-                    self.mailroom_manager.clear_failed_relays();
-                    continue;
-                }
-            }
-        };
+        let (directory, ohttp_keys) = self.mailroom_manager.fetch_ohttp_keys().await?;
         let mut receiver_builder =
             ReceiverBuilder::new(address, directory.as_str(), ohttp_keys)?.with_amount(amount);
         if let Some(max_fee_rate) = self.config.max_fee_rate {
@@ -1291,7 +1276,7 @@ impl App {
         E: RequestExpiry + Into<anyhow::Error>,
     {
         loop {
-            let relay = self.mailroom_manager.choose_relay()?;
+            let relay = self.mailroom_manager.choose_relay().await?;
             let (req, ctx) = match build(relay.as_str()) {
                 Ok(r) => r,
                 Err(e) if e.expired() => return Ok(RelayPost::Expired),
@@ -1301,7 +1286,7 @@ impl App {
                 Ok(resp) => return Ok(RelayPost::Posted(resp, ctx)),
                 Err(e) => {
                     tracing::debug!("Request to relay {relay} failed: {e:?}");
-                    self.mailroom_manager.add_failed_relay(relay);
+                    self.mailroom_manager.add_failed_relay(relay).await;
                 }
             }
         }

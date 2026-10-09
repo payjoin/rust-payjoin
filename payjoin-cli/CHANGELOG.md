@@ -4,6 +4,9 @@
 
 - Use `payjoin::RelaySelector` to select OHTTP relays, sharing the library's
   selection policy instead of hand-rolling one
+- Replace the internal `MailroomManager` with `payjoin::mailroom::Mailroom`,
+  which tracks failed directories and fetches OHTTP keys with automatic
+  failover
 
 ## 1.0.0
 

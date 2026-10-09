@@ -1381,6 +1381,15 @@ pub struct InputPair(payjoin::receive::InputPair);
 
 #[uniffi::export]
 impl InputPair {
+    /// Creates a new InputPair from a raw transaction input and PSBT input, validating
+    /// that both refer to the same UTXO.
+    ///
+    /// Prefer a typed constructor such as [`InputPair::new_p2wpkh`] or
+    /// [`InputPair::new_p2tr_keyspend`], which build both halves and set the expected
+    /// input weight for you.
+    ///
+    /// `expected_weight` is required when the weight cannot be predicted from the
+    /// input itself, such as an unsigned P2TR input, and must be `None` otherwise.
     #[uniffi::constructor]
     pub fn new(
         txin: TxIn,
@@ -1391,6 +1400,46 @@ impl InputPair {
         let psbtin = psbtin.into_core()?;
         let expected_weight = expected_weight.map(|weight| weight.into_core()).transpose()?;
         payjoin::receive::InputPair::new(txin, psbtin, expected_weight)
+            .map(Self)
+            .map_err(|err| InputPairError::InvalidPsbtInput(Arc::new(err.into())))
+    }
+
+    /// Constructs a new InputPair for spending a native SegWit P2WPKH output.
+    #[uniffi::constructor]
+    pub fn new_p2wpkh(txout: TxOut, outpoint: OutPoint) -> Result<Self, InputPairError> {
+        let txout = txout.into_core()?;
+        let outpoint = outpoint.into_core()?;
+        payjoin::receive::InputPair::new_p2wpkh(txout, outpoint)
+            .map(Self)
+            .map_err(|err| InputPairError::InvalidPsbtInput(Arc::new(err.into())))
+    }
+
+    /// Constructs a new InputPair for spending a P2TR output via the key path,
+    /// using the default taproot sighash (64-byte signature) and no annex.
+    #[uniffi::constructor]
+    pub fn new_p2tr_keyspend(txout: TxOut, outpoint: OutPoint) -> Result<Self, InputPairError> {
+        let txout = txout.into_core()?;
+        let outpoint = outpoint.into_core()?;
+        payjoin::receive::InputPair::new_p2tr_keyspend(txout, outpoint)
+            .map(Self)
+            .map_err(|err| InputPairError::InvalidPsbtInput(Arc::new(err.into())))
+    }
+
+    /// Constructs a new InputPair for spending a P2TR output via the script path.
+    ///
+    /// `expected_weight` must accurately reflect the script path spend, or fee
+    /// calculation will be wrong. Use [`InputPair::new_p2tr_keyspend`] for key path
+    /// spends.
+    #[uniffi::constructor]
+    pub fn new_p2tr_scriptpath_spend(
+        txout: TxOut,
+        outpoint: OutPoint,
+        expected_weight: Weight,
+    ) -> Result<Self, InputPairError> {
+        let txout = txout.into_core()?;
+        let outpoint = outpoint.into_core()?;
+        let expected_weight = expected_weight.into_core()?;
+        payjoin::receive::InputPair::new_p2tr_scriptpath_spend(txout, outpoint, expected_weight)
             .map(Self)
             .map_err(|err| InputPairError::InvalidPsbtInput(Arc::new(err.into())))
     }
@@ -2058,5 +2107,106 @@ impl payjoin::persist::AsyncSessionPersister for AsyncCallbackPersisterAdapter {
     ) -> impl std::future::Future<Output = Result<(), Self::InternalStorageError>> + Send {
         let persister = self.callback_persister.clone();
         async move { persister.close().await }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TXID: &str = "0000000000000000000000000000000000000000000000000000000000000001";
+
+    fn outpoint() -> OutPoint { OutPoint { txid: TXID.to_string(), vout: 0 } }
+
+    fn p2wpkh_txout() -> TxOut {
+        let mut script_pubkey = vec![0x00, 0x14];
+        script_pubkey.extend([0x01; 20]);
+        TxOut { value_sat: 100_000, script_pubkey }
+    }
+
+    fn p2tr_txout() -> TxOut {
+        let mut script_pubkey = vec![0x51, 0x20];
+        script_pubkey.extend([0x01; 32]);
+        TxOut { value_sat: 100_000, script_pubkey }
+    }
+
+    #[test]
+    fn typed_constructors_accept_matching_script_types() {
+        InputPair::new_p2wpkh(p2wpkh_txout(), outpoint()).expect("valid p2wpkh input");
+        InputPair::new_p2tr_keyspend(p2tr_txout(), outpoint()).expect("valid p2tr key path input");
+        InputPair::new_p2tr_scriptpath_spend(
+            p2tr_txout(),
+            outpoint(),
+            Weight { weight_units: 200 },
+        )
+        .expect("valid p2tr script path input");
+    }
+
+    #[test]
+    fn typed_constructors_reject_mismatched_script_types() {
+        assert!(matches!(
+            InputPair::new_p2wpkh(p2tr_txout(), outpoint()),
+            Err(InputPairError::InvalidPsbtInput(_))
+        ));
+        assert!(matches!(
+            InputPair::new_p2tr_keyspend(p2wpkh_txout(), outpoint()),
+            Err(InputPairError::InvalidPsbtInput(_))
+        ));
+        assert!(matches!(
+            InputPair::new_p2tr_scriptpath_spend(
+                p2wpkh_txout(),
+                outpoint(),
+                Weight { weight_units: 200 }
+            ),
+            Err(InputPairError::InvalidPsbtInput(_))
+        ));
+    }
+
+    #[test]
+    fn typed_constructors_reject_invalid_ffi_values() {
+        let bad_outpoint = OutPoint { txid: "not-a-txid".to_string(), vout: 0 };
+        assert!(matches!(
+            InputPair::new_p2wpkh(p2wpkh_txout(), bad_outpoint),
+            Err(InputPairError::InvalidOutPoint { .. })
+        ));
+
+        let too_much = TxOut { value_sat: u64::MAX, ..p2tr_txout() };
+        assert!(matches!(
+            InputPair::new_p2tr_keyspend(too_much, outpoint()),
+            Err(InputPairError::FfiValidation(FfiValidationError::AmountOutOfRange { .. }))
+        ));
+
+        assert!(matches!(
+            InputPair::new_p2tr_scriptpath_spend(
+                p2tr_txout(),
+                outpoint(),
+                Weight { weight_units: u64::MAX }
+            ),
+            Err(InputPairError::FfiValidation(FfiValidationError::WeightOutOfRange { .. }))
+        ));
+    }
+
+    /// An unsigned P2TR input has no witness to predict its weight from, so the
+    /// generic constructor fails without a caller supplied weight while the key
+    /// path constructor supplies it.
+    #[test]
+    fn p2tr_keyspend_does_not_need_caller_weight() {
+        let txin = TxIn {
+            previous_output: outpoint(),
+            script_sig: vec![],
+            sequence: u32::MAX,
+            witness: vec![],
+        };
+        let psbtin = PsbtInput {
+            witness_utxo: Some(p2tr_txout()),
+            redeem_script: None,
+            witness_script: None,
+        };
+        assert!(matches!(
+            InputPair::new(txin, psbtin, None),
+            Err(InputPairError::InvalidPsbtInput(_))
+        ));
+
+        InputPair::new_p2tr_keyspend(p2tr_txout(), outpoint()).expect("valid p2tr key path input");
     }
 }

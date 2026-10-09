@@ -214,7 +214,14 @@ List<payjoin.InputPair> get_inputs(payjoin.RpcClient rpc_connection) {
       scriptPubkey: scriptPubKey,
     );
     final outpoint = payjoin.OutPoint(txid: txid, vout: vout);
-    inputs.add(payjoin.InputPair.newP2wpkh(txout: txout, outpoint: outpoint));
+    // OP_1 OP_PUSHBYTES_32 <key> is a P2TR output
+    if ((utxo["scriptPubKey"] as String).startsWith("5120")) {
+      inputs.add(
+        payjoin.InputPair.newP2trKeyspend(txout: txout, outpoint: outpoint),
+      );
+    } else {
+      inputs.add(payjoin.InputPair.newP2wpkh(txout: txout, outpoint: outpoint));
+    }
   }
 
   return inputs;
@@ -484,8 +491,12 @@ Future<payjoin.ReceiveSession?> process_receiver_proposal(
   throw Exception("Unknown receiver state: $receiver");
 }
 
-Future<void> run_integration_v2_to_v2(TransitionMode mode) async {
-  env = test_utils.initBitcoindSenderReceiver();
+Future<void> run_integration_v2_to_v2(
+  TransitionMode mode, {
+  test_utils.BitcoindEnv Function() initEnv =
+      test_utils.initBitcoindSenderReceiver,
+}) async {
+  env = initEnv();
   bitcoind = env.getBitcoind();
   receiver = env.getReceiver();
   sender = env.getSender();
@@ -763,6 +774,15 @@ void main() {
     test(
       'Test integration v2 to v2 (nonblocking)',
       () async => run_integration_v2_to_v2(TransitionMode.nonblocking),
+      timeout: const Timeout(Duration(minutes: 5)),
+    );
+
+    test(
+      'Test integration v2 to v2 (taproot)',
+      () async => run_integration_v2_to_v2(
+        TransitionMode.callback,
+        initEnv: test_utils.initBitcoindSenderReceiverTaproot,
+      ),
       timeout: const Timeout(Duration(minutes: 5)),
     );
   });

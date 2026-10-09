@@ -252,7 +252,15 @@ namespace Payjoin.Tests
                 var valueSat = (ulong)Math.Round(amountBtc * 100_000_000.0);
 
                 var txout = new TxOut(valueSat, Convert.FromHexString(scriptPubKeyHex));
-                inputs.Add(InputPair.NewP2wpkh(txout, new OutPoint(txid, vout)));
+                // OP_1 OP_PUSHBYTES_32 <key> is a P2TR output
+                if (scriptPubKeyHex.StartsWith("5120"))
+                {
+                    inputs.Add(InputPair.NewP2trKeyspend(txout, new OutPoint(txid, vout)));
+                }
+                else
+                {
+                    inputs.Add(InputPair.NewP2wpkh(txout, new OutPoint(txid, vout)));
+                }
             }
 
             return inputs.ToArray();
@@ -679,13 +687,16 @@ namespace Payjoin.Tests
         /// restart because every state transition is saved to a persister first.
         /// </summary>
         [Theory]
-        [InlineData(TransitionMode.Callback)]
-        [InlineData(TransitionMode.Nonblocking)]
-        public async Task TestIntegrationV2ToV2(TransitionMode mode)
+        [InlineData(TransitionMode.Callback, false)]
+        [InlineData(TransitionMode.Nonblocking, false)]
+        [InlineData(TransitionMode.Callback, true)]
+        public async Task TestIntegrationV2ToV2(TransitionMode mode, bool taproot)
         {
             var cancellationToken = TestContext.Current.CancellationToken;
 
-            using var env = PayjoinMethods.InitBitcoindSenderReceiver();
+            using var env = taproot
+                ? PayjoinMethods.InitBitcoindSenderReceiverTaproot()
+                : PayjoinMethods.InitBitcoindSenderReceiver();
             using var bitcoind = env.GetBitcoind();
             using var receiver = env.GetReceiver();
             using var sender = env.GetSender();

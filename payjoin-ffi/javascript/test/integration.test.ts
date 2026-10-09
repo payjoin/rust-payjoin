@@ -235,7 +235,12 @@ function getInputs(
             txid: utxo.txid,
             vout: utxo.vout,
         });
-        inputs.push(payjoin.InputPair.newP2wpkh(txOut, outpoint));
+        // OP_1 OP_PUSHBYTES_32 <key> is a P2TR output
+        if (utxo.scriptPubKey.startsWith("5120")) {
+            inputs.push(payjoin.InputPair.newP2trKeyspend(txOut, outpoint));
+        } else {
+            inputs.push(payjoin.InputPair.newP2wpkh(txOut, outpoint));
+        }
     }
     return inputs;
 }
@@ -607,8 +612,9 @@ function testFfiValidation(payjoin: PayjoinModule): void {
 async function testIntegrationV2ToV2(
     payjoin: PayjoinModule,
     mode: TransitionMode,
+    initEnv: () => testUtils.BitcoindEnv = testUtils.initBitcoindSenderReceiver,
 ): Promise<void> {
-    const env = testUtils.initBitcoindSenderReceiver();
+    const env = initEnv();
     const receiver = env.getReceiver();
     const sender = env.getSender();
 
@@ -763,11 +769,21 @@ async function runTests(): Promise<void> {
     testFfiValidation(nodejsPayjoin);
     await testIntegrationV2ToV2(nodejsPayjoin, "callback");
     await testIntegrationV2ToV2(nodejsPayjoin, "nonblocking");
+    await testIntegrationV2ToV2(
+        nodejsPayjoin,
+        "callback",
+        testUtils.initBitcoindSenderReceiverTaproot,
+    );
 
     await webUniffiInitAsync();
     testFfiValidation(webPayjoin);
     await testIntegrationV2ToV2(webPayjoin, "callback");
     await testIntegrationV2ToV2(webPayjoin, "nonblocking");
+    await testIntegrationV2ToV2(
+        webPayjoin,
+        "callback",
+        testUtils.initBitcoindSenderReceiverTaproot,
+    );
 }
 
 runTests().catch((error: unknown) => {

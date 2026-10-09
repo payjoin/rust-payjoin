@@ -257,6 +257,9 @@ pub enum InputPairError {
     /// Input failed validation in the FFI layer.
     #[error("Invalid input: {0}")]
     FfiValidation(FfiValidationError),
+    /// Provided transaction could not be consensus decoded.
+    #[error("Invalid transaction: {0}")]
+    InvalidTransaction(String),
 }
 
 impl InputPairError {

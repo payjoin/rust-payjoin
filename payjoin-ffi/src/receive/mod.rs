@@ -1404,6 +1404,27 @@ impl InputPair {
             .map_err(|err| InputPairError::InvalidPsbtInput(Arc::new(err.into())))
     }
 
+    /// Constructs a new InputPair for spending a legacy P2PKH output.
+    ///
+    /// `non_witness_utxo` is the consensus encoded transaction that created the
+    /// output being spent.
+    #[uniffi::constructor]
+    pub fn new_p2pkh(
+        non_witness_utxo: Vec<u8>,
+        outpoint: OutPoint,
+    ) -> Result<Self, InputPairError> {
+        let non_witness_utxo: payjoin::bitcoin::Transaction =
+            payjoin::bitcoin::consensus::deserialize(&non_witness_utxo)
+                .map_err(|e| InputPairError::InvalidTransaction(e.to_string()))?;
+        for txout in &non_witness_utxo.output {
+            validate_amount_sat(txout.value.to_sat())?;
+        }
+        let outpoint = outpoint.into_core()?;
+        payjoin::receive::InputPair::new_p2pkh(non_witness_utxo, outpoint)
+            .map(Self)
+            .map_err(|err| InputPairError::InvalidPsbtInput(Arc::new(err.into())))
+    }
+
     /// Constructs a new InputPair for spending a native SegWit P2WPKH output.
     #[uniffi::constructor]
     pub fn new_p2wpkh(txout: TxOut, outpoint: OutPoint) -> Result<Self, InputPairError> {
@@ -2208,5 +2229,83 @@ mod tests {
         ));
 
         InputPair::new_p2tr_keyspend(p2tr_txout(), outpoint()).expect("valid p2tr key path input");
+    }
+
+    fn p2pkh_script_pubkey() -> Vec<u8> {
+        let mut script_pubkey = vec![0x76, 0xa9, 0x14];
+        script_pubkey.extend([0x01; 20]);
+        script_pubkey.extend([0x88, 0xac]);
+        script_pubkey
+    }
+
+    fn funding_tx(script_pubkey: Vec<u8>) -> payjoin::bitcoin::Transaction {
+        payjoin::bitcoin::Transaction {
+            version: payjoin::bitcoin::transaction::Version::TWO,
+            lock_time: payjoin::bitcoin::absolute::LockTime::ZERO,
+            input: vec![payjoin::bitcoin::TxIn::default()],
+            output: vec![payjoin::bitcoin::TxOut {
+                value: payjoin::bitcoin::Amount::from_sat(100_000),
+                script_pubkey: payjoin::bitcoin::ScriptBuf::from_bytes(script_pubkey),
+            }],
+        }
+    }
+
+    #[test]
+    fn p2pkh_constructor_accepts_funding_transaction() {
+        let tx = funding_tx(p2pkh_script_pubkey());
+        let outpoint = OutPoint { txid: tx.compute_txid().to_string(), vout: 0 };
+        InputPair::new_p2pkh(payjoin::bitcoin::consensus::serialize(&tx), outpoint)
+            .expect("valid p2pkh input");
+    }
+
+    #[test]
+    fn p2pkh_constructor_rejects_invalid_funding_transaction() {
+        let tx = funding_tx(p2pkh_script_pubkey());
+        let tx_bytes = payjoin::bitcoin::consensus::serialize(&tx);
+        let txid = tx.compute_txid().to_string();
+
+        // Output index past the end of the funding transaction
+        assert!(matches!(
+            InputPair::new_p2pkh(tx_bytes.clone(), OutPoint { txid, vout: 1 }),
+            Err(InputPairError::InvalidPsbtInput(_))
+        ));
+
+        // Funding transaction does not hash to the outpoint txid
+        assert!(matches!(
+            InputPair::new_p2pkh(tx_bytes.clone(), outpoint()),
+            Err(InputPairError::InvalidPsbtInput(_))
+        ));
+
+        // Funding output is not P2PKH
+        let p2wpkh_tx = funding_tx(p2wpkh_txout().script_pubkey);
+        assert!(matches!(
+            InputPair::new_p2pkh(
+                payjoin::bitcoin::consensus::serialize(&p2wpkh_tx),
+                OutPoint { txid: p2wpkh_tx.compute_txid().to_string(), vout: 0 }
+            ),
+            Err(InputPairError::InvalidPsbtInput(_))
+        ));
+
+        assert!(matches!(
+            InputPair::new_p2pkh(vec![0x00], outpoint()),
+            Err(InputPairError::InvalidTransaction(_))
+        ));
+
+        let mut too_much = funding_tx(p2pkh_script_pubkey());
+        too_much.output[0].value = payjoin::bitcoin::Amount::from_sat(u64::MAX);
+        assert!(matches!(
+            InputPair::new_p2pkh(
+                payjoin::bitcoin::consensus::serialize(&too_much),
+                OutPoint { txid: too_much.compute_txid().to_string(), vout: 0 }
+            ),
+            Err(InputPairError::FfiValidation(FfiValidationError::AmountOutOfRange { .. }))
+        ));
+
+        let mut trailing_bytes = tx_bytes;
+        trailing_bytes.push(0x00);
+        assert!(matches!(
+            InputPair::new_p2pkh(trailing_bytes, outpoint()),
+            Err(InputPairError::InvalidTransaction(_))
+        ));
     }
 }

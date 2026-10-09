@@ -119,6 +119,38 @@ impl PayjoinExtras {
 /// with [`check_pj_supported`](Self::check_pj_supported).
 ///
 /// The URI is always owned, so it carries no lifetime parameter.
+///
+/// # Examples
+///
+/// Parse a URI, validate its address against the network you are paying on, and check
+/// whether it requests payjoin at all:
+///
+/// ```
+/// use payjoin::bitcoin::{Amount, Network};
+/// use payjoin::{PjUri, Uri};
+///
+/// const EXAMPLE_URI: &str = "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02\
+///     &pj=HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ\
+///     %23EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC\
+///     -RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV";
+///
+/// // Parsing leaves the address unchecked: it is not yet tied to a network.
+/// let uri = Uri::try_from(EXAMPLE_URI)?;
+///
+/// // Refuse an address that belongs to another network before paying it.
+/// let uri = uri.require_network(Network::Testnet)?;
+///
+/// // A BIP21 URI need not request payjoin. The error variant hands the plain URI back,
+/// // so a caller that gets one can still pay it normally.
+/// let pj_uri: PjUri = uri.check_pj_supported().expect("this URI requests payjoin");
+///
+/// assert_eq!(pj_uri.address().to_string(), "2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7");
+/// assert_eq!(pj_uri.amount(), Some(Amount::from_sat(2_000_000)));
+/// # Ok::<(), payjoin::UriParseError>(())
+/// ```
+///
+/// See [`PjUri`] for dispatching on the payjoin version and initializing the sender
+/// state machine.
 #[derive(Clone, Debug)]
 pub struct Uri<NetVal: NetworkValidation>(
     bitcoin_uri::Uri<'static, NetVal, MaybePayjoinExtrasAdapter>,
@@ -220,6 +252,49 @@ impl fmt::Display for Uri<NetworkChecked> {
 ///
 /// Obtained from [`Uri::check_pj_supported`]. Like [`Uri`], this newtype
 /// insulates the public API from [`bitcoin_uri`] and is always owned.
+///
+/// # Examples
+///
+/// Dispatch on the payjoin version carried by the `pj` parameter, then initialize a BIP 77
+/// sender. The [`PjParam`] variant *is* the version; there is no `version()` to call.
+///
+/// ```
+/// use payjoin::bitcoin::{FeeRate, Network};
+/// use payjoin::persist::InMemoryPersister;
+/// use payjoin::send::v2::SenderBuilder;
+/// use payjoin::{PjParam, Uri};
+/// # use payjoin_test_utils::PARSED_ORIGINAL_PSBT;
+///
+/// const EXAMPLE_URI: &str = "bitcoin:2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7?amount=0.02\
+///     &pj=HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ\
+///     %23EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC\
+///     -RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV";
+///
+/// let pj_uri = Uri::try_from(EXAMPLE_URI)?
+///     .require_network(Network::Testnet)?
+///     .check_pj_supported()
+///     .expect("this URI requests payjoin");
+///
+/// // The Original PSBT is funded and signed already; a real sender builds it with its
+/// // own wallet.
+/// let psbt = PARSED_ORIGINAL_PSBT.clone();
+///
+/// match pj_uri.extras().pj_param() {
+///     PjParam::V2(pj_param) => {
+///         // A real integration supplies its own `SessionPersister` instead.
+///         let persister = InMemoryPersister::default();
+///         let _sender =
+///             SenderBuilder::from_parts(psbt, pj_param, pj_uri.address(), pj_uri.amount())
+///                 .build_recommended(FeeRate::BROADCAST_MIN)?
+///                 .save(&persister)?;
+///         // `_sender` is a `Sender<WithReplyKey>`: call `create_v2_post_request` next.
+///     }
+///     // A BIP 78 (v1) endpoint cannot be paid by a v2 sender. Real senders fall back to
+///     // `send::v1` here; the example URI is BIP 77, so this arm is unreachable.
+///     _ => unreachable!("example URI carries a BIP 77 endpoint"),
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Clone, Debug)]
 pub struct PjUri(bitcoin_uri::Uri<'static, NetworkChecked, PayjoinExtrasAdapter>);
 

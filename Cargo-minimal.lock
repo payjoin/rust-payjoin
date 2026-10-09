@@ -2392,6 +2392,8 @@ name = "payjoin-fuzz"
 version = "0.0.1"
 dependencies = [
  "arbitrary",
+ "bhttp",
+ "bitcoin-ohttp",
  "libfuzzer-sys",
  "payjoin",
 ]

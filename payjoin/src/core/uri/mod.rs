@@ -19,6 +19,7 @@ pub mod v1;
 #[cfg(feature = "v2")]
 pub mod v2;
 
+/// The `pj` endpoint of a BIP21 URI, parsed into the payjoin version it speaks.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 #[cfg_attr(feature = "v2", allow(clippy::large_enum_variant))]
@@ -78,6 +79,7 @@ impl std::fmt::Display for PjParam {
     }
 }
 
+/// The payjoin parameters of a BIP21 URI, which may not request payjoin at all.
 #[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum MaybePayjoinExtras {

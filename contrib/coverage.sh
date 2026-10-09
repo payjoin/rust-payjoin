@@ -11,5 +11,8 @@ cargo llvm-cov clean --workspace
 cargo llvm-cov --locked --no-report --workspace --all-features --exclude payjoin-ffi --exclude payjoin-fuzz
 # Explicitly run payjoin-cli v1 e2e tests
 cargo llvm-cov --locked --no-report --package payjoin-cli --no-default-features --features=v1,_manual-tls
+# Explicitly run payjoin-ffi with added test-utils
+cargo llvm-cov --locked --no-report --package payjoin-ffi --no-default-features --features=_manual-tls,_test-utils
 # generate report without tests
-cargo llvm-cov report --lcov --output-path lcov.info
+# ignore files irrelevant to Rust coverage; namely the uniffi-bindgen
+cargo llvm-cov report --lcov --output-path lcov.info --ignore-filename-regex "uniffi-bindgen"

@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
+[ "$#" -eq 1 ] || {
+    echo "usage: publish.sh <prepared-package-dir>" >&2
+    exit 1
+}
+revision="$(git -C "$(dirname "${BASH_SOURCE[0]}")/.." rev-parse HEAD)"
+cd "$1"
+# Refuse the development tree and require the preparation step's pin.
+[ ! -d .cargo ] || {
+    echo "Refusing to publish a package containing the development .cargo overlay" >&2
+    exit 1
+}
+grep -Fq "rev = \"$revision\"" native/Cargo.toml || {
+    echo "Staged native/Cargo.toml must pin the release checkout $revision" >&2
+    exit 1
+}
 
 # Publish the package to pub.dev via automated publishing (OIDC).
 # `dart pub publish` has no non-interactive authentication mode: without a
@@ -24,5 +39,4 @@ PUB_TOKEN="$(
 export PUB_TOKEN
 dart pub token add https://pub.dev --env-var PUB_TOKEN
 
-cd "$(dirname "$0")/.."
 dart pub publish --force

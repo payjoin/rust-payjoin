@@ -12,9 +12,15 @@ on:
       # change this workflow's environment.
       - flake.nix
       - flake.lock
-  push:
-    tags:
-      - "payjoin-python-[0-9]*"
+      - Cargo-minimal.lock
+      - Cargo-recent.lock
+      - contrib/release/**
+      - .github/actions/**
+      - .github/workflows/python.yml
+      - .github/workflows/verify-tag-hygiene.yml
+      - .github/workflows/release-assets.yml
+      - .github/workflows/bindings-release.yml
+  workflow_call:
 
 jobs:
   build-python-and-test:
@@ -110,78 +116,3 @@ jobs:
           payjoin.Uri.parse("bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?amount=1&pj=https://example.com")
           print("smoke ok")
           '
-
-  verify-tag:
-    name: "Verify release tag"
-    if: startsWith(github.ref, 'refs/tags/payjoin-python-')
-    permissions:
-      contents: read
-    uses: ./.github/workflows/verify-tag-hygiene.yml
-
-  publish-pypi:
-    name: "Publish to PyPI (trusted publishing / OIDC)"
-    runs-on: ubuntu-26.04
-    needs: [build-python-and-test, build-wheel, smoke-wheel, verify-tag]
-    if: startsWith(github.ref, 'refs/tags/payjoin-python-')
-    environment: release
-    permissions:
-      id-token: write # OIDC: PyPI trusted publishing and its PEP 740 attestations
-      attestations: write # actions/attest-build-provenance writes the attestation
-      contents: read # needed only to check out the in-repo verify-tag-version action
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Download wheels
-        uses: actions/download-artifact@v4
-        with:
-          pattern: payjoin-python-wheel-*
-          merge-multiple: true
-          path: dist
-
-      - name: Locate packed artifacts
-        id: locate
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          pkgs=(dist/payjoin-*.whl)
-          if [ "${#pkgs[@]}" -ne 2 ]; then
-            echo "::error::expected exactly two wheels in dist/, found ${#pkgs[@]}: ${pkgs[*]:-none}"
-            exit 1
-          fi
-          # payjoin-0.24.0-py3-none-<platform>.whl -> 0.24.0
-          versions="$(for pkg in "${pkgs[@]}"; do basename "$pkg" | cut -d- -f2; done | sort -u)"
-          if [ "$(echo "$versions" | wc -l)" -ne 1 ]; then
-            echo "::error::wheels disagree on version: $versions; refusing to publish"
-            exit 1
-          fi
-          echo "version=$versions" >> "$GITHUB_OUTPUT"
-
-      - name: Verify tag matches packed artifact version
-        uses: ./.github/actions/verify-tag-version
-        with:
-          tag-prefix: payjoin-python-
-          version: ${{ steps.locate.outputs.version }}
-
-      - name: Attest build provenance (wheels)
-        # A consumer runs: gh attestation verify <file>.whl -R payjoin/rust-payjoin
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: dist/*.whl
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist
-
-  github-release:
-    name: "Attach wheels + SHA256SUMS to the GitHub release"
-    needs: [publish-pypi]
-    if: startsWith(github.ref, 'refs/tags/payjoin-python-')
-    permissions:
-      contents: write # create/update the Release for this tag and upload assets
-    uses: ./.github/workflows/release-assets.yml
-    with:
-      artifact-pattern: payjoin-python-wheel-*
-      tag-prefix: payjoin-python-

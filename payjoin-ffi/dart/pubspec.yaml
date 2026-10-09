@@ -1,6 +1,6 @@
 name: payjoin
 description: Dart bindings for payjoin
-version: 0.3.0+payjoin-1.2.0
+version: 0.25.0+payjoin-1.2.0
 homepage: https://github.com/payjoin/rust-payjoin
 repository: https://github.com/payjoin/rust-payjoin
 

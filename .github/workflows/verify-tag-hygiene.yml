@@ -1,11 +1,11 @@
 name: Verify tag hygiene
 
-# Reusable head of every binding publish workflow: verify the pushed tag is
+# Reusable tag check for the binding release workflow: verify the pushed tag is
 # annotated, signed by a maintainer key in contrib/release/keys/, and an
 # ancestor of master, so only a maintainer can cut a release. Call it as a
 # job the publish job `needs`, so a bad tag fails before the `release`
-# environment asks for approval. The tag comes from the triggering ref; the
-# checks are prefix-agnostic, so there are no inputs.
+# environment asks for approval. Also verify the shared FFI tag and every
+# binding manifest agree. The tag comes from the triggering ref.
 
 on:
   workflow_call:
@@ -29,3 +29,7 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: nix --quiet develop .#release -c ./contrib/release/verify-tag-hygiene.sh "$TAG"
+      - name: Verify common binding versions
+        env:
+          TAG: ${{ github.ref_name }}
+        run: nix --quiet develop .#release -c python3 contrib/release/bindings-version.py --tag "$TAG"

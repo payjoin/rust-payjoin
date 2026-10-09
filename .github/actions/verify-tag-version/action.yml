@@ -7,11 +7,15 @@ description: >
   the tag's metadata is stripped before comparing.
 inputs:
   tag-prefix:
-    description: Expected tag prefix, e.g. payjoin-csharp-
+    description: Expected tag prefix, e.g. payjoin-ffi-
     required: true
   version:
     description: Version of the artifact or package about to be published
     required: true
+  version-format:
+    description: Version spelling used by the artifact, semver or python
+    required: false
+    default: semver
 outputs:
   version:
     description: The version the tag calls for
@@ -26,6 +30,7 @@ runs:
         TAG: ${{ github.ref_name }}
         PREFIX: ${{ inputs.tag-prefix }}
         VERSION: ${{ inputs.version }}
+        VERSION_FORMAT: ${{ inputs.version-format }}
       run: |
         set -euo pipefail
         if [[ $TAG != "$PREFIX"* ]]; then
@@ -41,6 +46,16 @@ runs:
         if [[ $VERSION != *+* ]]; then
           compare_version="${tag_version%%+*}"
         fi
+        case "${VERSION_FORMAT:-semver}" in
+          semver) ;;
+          python)
+            compare_version="$(python3 contrib/release/bindings-version.py --python-version "$compare_version")"
+            ;;
+          *)
+            echo "::error::unknown version format $VERSION_FORMAT"
+            exit 1
+            ;;
+        esac
         if [[ $compare_version != "$VERSION" ]]; then
           echo "::error::tag $TAG implies version $compare_version but the packed version is $VERSION; refusing to publish"
           exit 1

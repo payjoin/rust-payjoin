@@ -359,6 +359,7 @@
               bzip2
               curl
               jq
+              rsync
             ]
             ++ lib.optionals pkgs.stdenv.isLinux [
               pkg-config
@@ -497,9 +498,12 @@
             rustToolchains.stable
             cargo-semver-checks
             jq
+            python3
             gnupg
             curl
             git
+            gh
+            unzip
             gnugrep
             gnused
             gawk

@@ -1435,6 +1435,24 @@ impl InputPair {
             .map_err(|err| InputPairError::InvalidPsbtInput(Arc::new(err.into())))
     }
 
+    /// Constructs a new InputPair for spending a native SegWit P2WSH output.
+    ///
+    /// `expected_weight` must accurately reflect the witness script spend, or fee
+    /// calculation will be wrong.
+    #[uniffi::constructor]
+    pub fn new_p2wsh(
+        txout: TxOut,
+        outpoint: OutPoint,
+        expected_weight: Weight,
+    ) -> Result<Self, InputPairError> {
+        let txout = txout.into_core()?;
+        let outpoint = outpoint.into_core()?;
+        let expected_weight = expected_weight.into_core()?;
+        payjoin::receive::InputPair::new_p2wsh(txout, outpoint, expected_weight)
+            .map(Self)
+            .map_err(|err| InputPairError::InvalidPsbtInput(Arc::new(err.into())))
+    }
+
     /// Constructs a new InputPair for spending a P2TR output via the key path,
     /// using the default taproot sighash (64-byte signature) and no annex.
     #[uniffi::constructor]
@@ -2204,6 +2222,20 @@ mod tests {
                 Weight { weight_units: u64::MAX }
             ),
             Err(InputPairError::FfiValidation(FfiValidationError::WeightOutOfRange { .. }))
+        ));
+    }
+
+    #[test]
+    fn p2wsh_constructor_validates_script_type() {
+        let mut script_pubkey = vec![0x00, 0x20];
+        script_pubkey.extend([0x01; 32]);
+        let p2wsh_txout = TxOut { value_sat: 100_000, script_pubkey };
+        InputPair::new_p2wsh(p2wsh_txout, outpoint(), Weight { weight_units: 300 })
+            .expect("valid p2wsh input");
+
+        assert!(matches!(
+            InputPair::new_p2wsh(p2wpkh_txout(), outpoint(), Weight { weight_units: 300 }),
+            Err(InputPairError::InvalidPsbtInput(_))
         ));
     }
 

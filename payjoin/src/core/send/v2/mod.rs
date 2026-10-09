@@ -21,7 +21,7 @@
 //! [`bitmask-core`](https://github.com/diba-io/bitmask-core) BDK integration. Bring your own
 //! wallet and http client.
 //!
-//! OHTTP Privacy Warning
+//! ## OHTTP Privacy Warning
 //! Encapsulated requests whether GET or POST—**must not be retried or reused**.
 //! Retransmitting the same ciphertext (including via automatic retries) breaks the unlinkability and privacy guarantees of OHTTP,
 //! as it allows the relay to correlate requests by comparing ciphertexts.

@@ -216,6 +216,19 @@ pub trait State: sealed::State {}
 
 impl<S: sealed::State> State for S {}
 
+/// A higher-level sender construct which will be taken through different states through the
+/// protocol workflow.
+///
+/// A Payjoin sender is responsible for posting the Original PSBT to the Payjoin Directory for the
+/// receiver, polling the directory for the receiver's Payjoin proposal, and validating that
+/// proposal against the Original PSBT before signing and broadcasting the resulting transaction.
+///
+/// From a code/implementation perspective, Payjoin Development Kit uses a typestate pattern to
+/// help senders go through the entire Payjoin protocol flow. Each typestate has various functions
+/// to accomplish the goals of the typestate, and one or more functions which will commit the
+/// changes/checks in the current typestate and move to the next one. For more information on the
+/// typestate pattern, see
+/// [The Typestate Pattern in Rust](https://cliffle.com/blog/rust-typestate/).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender<State> {
     pub(crate) state: State,
@@ -351,9 +364,20 @@ impl SendSession {
 
 /// A payjoin V2 sender, allowing the construction of a payjoin V2 request
 /// and the resulting [`OhttpResponse`].
+///
+/// See [`Sender<WithReplyKey>`] for further documentation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithReplyKey;
 
+/// The initial typestate of a Payjoin v2 sender session.
+///
+/// After building the sender with [`SenderBuilder`], post the Original PSBT to the Payjoin
+/// Directory: build a request with [`Sender<WithReplyKey>::create_v2_post_request`], then pass
+/// the response to [`Sender<WithReplyKey>::process_response`], which advances to
+/// [`Sender<PollingForProposal>`] once the directory has accepted the Original PSBT.
+///
+/// [`Sender<WithReplyKey>::cancel`] abandons the session instead and advances to
+/// [`Sender<PendingFallback>`].
 impl Sender<WithReplyKey> {
     fn new(pj_param: PjParam, psbt_ctx: PsbtContext) -> Self {
         Sender {
@@ -487,6 +511,8 @@ pub(crate) fn serialize_v2_body(
 ///
 /// This type is used to make a BIP77 GET request and process the response.
 /// Call [`Sender<PollingForProposal>::process_response`] on it to continue the BIP77 flow.
+///
+/// See [`Sender<PollingForProposal>`] for further documentation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PollingForProposal;
 
@@ -498,6 +524,17 @@ impl ResponseError {
     }
 }
 
+/// Typestate for a sender that has posted the Original PSBT and is polling for the receiver's
+/// Payjoin proposal.
+///
+/// Poll the Payjoin Directory for the receiver's proposal: build a fresh request for each poll
+/// with [`Sender<PollingForProposal>::create_poll_request`], then pass that poll's response to
+/// this typestate's `process_response`, which yields the Payjoin proposal PSBT, validated
+/// against the Original PSBT, and closes the session. The sender then signs and finalizes that
+/// PSBT and broadcasts the resulting transaction.
+///
+/// [`Sender<PollingForProposal>::cancel`] abandons the session instead and advances to
+/// [`Sender<PendingFallback>`].
 impl Sender<PollingForProposal> {
     /// Construct an OHTTP Encapsulated HTTP GET request for the Proposal PSBT
     pub fn create_poll_request(
@@ -616,11 +653,19 @@ impl Sender<PollingForProposal> {
     }
 }
 
+/// The fallback transaction for a cancelled sender session.
+///
+/// See [`Sender<PendingFallback>`] for further documentation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingFallback {
     fallback_tx: bitcoin::Transaction,
 }
 
+/// Typestate holding the fallback transaction after the Payjoin session was cancelled.
+///
+/// The sender may broadcast the fallback transaction returned by
+/// [`Sender<PendingFallback>::fallback_tx`] to complete the payment without Payjoin, then call
+/// [`Sender<PendingFallback>::close`] to close the session.
 impl Sender<PendingFallback> {
     /// Returns the fallback transaction that should be broadcast to complete the payment without Payjoin.
     pub fn fallback_tx(&self) -> &bitcoin::Transaction { &self.fallback_tx }

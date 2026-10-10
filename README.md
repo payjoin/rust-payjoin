@@ -51,7 +51,7 @@ The language bindings which expose the Rust-based Payjoin implementation to [var
 
 ## Minimum Supported Rust Version (MSRV)
 
-All crates in this repository should always compile with any combination of features on Rust **1.85.0**.
+All crates in this repository should always compile with any combination of features on Rust **1.85.0**. It is pinned with `rust-version` in the `payjoin`, `payjoin-cli` and `payjoin-mailroom` manifests, and CI runs their suites on the 1.85.0 toolchain against both `Cargo-recent.lock` and `Cargo-minimal.lock`.
 
 ## Contributing
 

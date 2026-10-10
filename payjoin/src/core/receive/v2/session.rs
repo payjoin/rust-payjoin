@@ -187,11 +187,18 @@ impl SessionHistory {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SessionStatus {
+    /// Protocol work remains, or the proposal is posted and settlement is still being tracked.
     Active,
+    /// The mailbox expired before the session finished its protocol work.
     Expired,
+    /// The session was aborted, or an unrecognized transaction settled it. See
+    /// [`SessionOutcome::Aborted`].
     Failed,
+    /// The protocol finished. Says nothing about which transaction settled.
     Completed,
+    /// The fallback was observed: paid, without cooperation.
     FallbackBroadcasted,
+    /// Stopped, holding a fallback transaction the wallet may still broadcast.
     PendingFallback,
 }
 
@@ -220,29 +227,46 @@ pub enum SessionEvent {
     Closed(SessionOutcome),
 }
 
-/// Represents all possible outcomes for a closed Payjoin session
+/// How a Payjoin session ended.
+///
+/// These record what the protocol did, not how the payment settled. Settlement is never
+/// persisted; [`Receiver<Monitor>::classify`] answers that while the session is open.
 ///
 /// This enum is deliberately exhaustive: a terminal outcome is a closed set, and a wildcard arm
 /// has no meaningful semantics for a caller deciding what a session's conclusion was. A new
 /// unhandled variant _should_ error at compile-time.
+///
+/// [`Receiver<Monitor>::classify`]: super::Receiver::classify
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SessionOutcome {
-    /// Payjoin completed successfully: the transaction with this txid settled the session
-    Success(bitcoin::Txid),
-    /// Payjoin was not successful
-    Aborted,
-    /// Fallback transaction was broadcasted
-    FallbackBroadcasted,
-    /// Payjoin proposal was sent, but its broadcast status cannot be tracked because
-    /// the sender is using non-SegWit inputs which will change the transaction ID
-    /// of the proposal
-    PayjoinProposalSent,
-    /// The contested outpoints were settled by an unrecognized transaction (neither the
-    /// Payjoin nor the fallback), identified by its txid.
+    /// The transaction with this txid was observed settling the session.
     ///
-    /// NOTE: Nothing in this release produces this variant. It is reserved now because this enum is
-    /// deliberately exhaustive, so a new variant after 1.0 would be a semver-breaking API
-    /// change; naming it before the freeze lets the settlement classifier land additively.
+    /// Written only by the deprecated [`Receiver<Monitor>::check_for_transaction`], on first
+    /// sight of the predicted Payjoin txid.
+    ///
+    /// [`Receiver<Monitor>::check_for_transaction`]: super::Receiver::check_for_transaction
+    Success(bitcoin::Txid),
+    /// The session was cancelled or failed, and the receiver closed it.
+    ///
+    /// Can happen before or after the Payjoin proposal was posted. Says nothing about the
+    /// payment: a fallback may have been broadcast and confirmed.
+    Aborted,
+    /// The fallback transaction was observed: paid, without cooperation.
+    ///
+    /// Written only by the deprecated [`Receiver<Monitor>::check_for_transaction`].
+    ///
+    /// [`Receiver<Monitor>::check_for_transaction`]: super::Receiver::check_for_transaction
+    FallbackBroadcasted,
+    /// The receiver posted the Payjoin proposal and settlement no longer needs tracking.
+    ///
+    /// The ordinary terminal outcome of a session that did everything right. Names the protocol
+    /// handoff, and carries no payment verdict.
+    PayjoinProposalSent,
+    /// The contested prevouts were settled by an unrecognized transaction, identified by its
+    /// txid.
+    ///
+    /// NOTE: nothing writes this variant. It exists for reading logs, and because the enum is
+    /// exhaustive, so adding a variant after 1.0 would be a semver break.
     Unrecognized(bitcoin::Txid),
 }
 

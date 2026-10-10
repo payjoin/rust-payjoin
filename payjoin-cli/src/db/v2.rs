@@ -7,6 +7,7 @@ use payjoin::HpkePublicKey;
 use rusqlite::{params, OptionalExtension};
 
 use super::*;
+use crate::app::config::ReceiveOptions;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct SessionId(pub(crate) uuid::Uuid);
@@ -121,13 +122,14 @@ pub(crate) struct ReceiverPersister {
 }
 
 impl ReceiverPersister {
-    pub fn new(db: Arc<Database>) -> crate::db::Result<Self> {
+    pub fn new(db: Arc<Database>, options: &ReceiveOptions) -> crate::db::Result<Self> {
         let conn = db.get_connection()?;
 
+        let options_as_json = serde_json::to_string(options).map_err(Error::Serialize)?;
         let session_id = uuid::Uuid::now_v7();
         conn.execute(
-            "INSERT INTO receive_sessions (session_id) VALUES (?1)",
-            params![session_id.to_string()],
+            "INSERT INTO receive_sessions (session_id, receive_options) VALUES (?1, ?2)",
+            params![session_id.to_string(), options_as_json],
         )?;
 
         Ok(Self { db, session_id: SessionId(session_id) })
@@ -136,6 +138,23 @@ impl ReceiverPersister {
     pub fn from_id(db: Arc<Database>, id: SessionId) -> Self { Self { db, session_id: id } }
 
     pub fn session_id(&self) -> SessionId { self.session_id.clone() }
+
+    /// Receive options recorded when this session was created.
+    ///  A `NULL` column means the row predates the column, so fall back to
+    /// default rather than failing the resume.
+    pub fn receive_options(&self) -> crate::db::Result<ReceiveOptions> {
+        let conn = self.db.get_connection()?;
+        let options_json: Option<String> = conn.query_row(
+            "SELECT receive_options FROM receive_sessions WHERE session_id = ?1",
+            params![self.session_id.0.to_string()],
+            |row| row.get(0),
+        )?;
+
+        match options_json {
+            Some(json) => serde_json::from_str(&json).map_err(Error::Deserialize),
+            None => Ok(ReceiveOptions::default()),
+        }
+    }
 }
 
 impl SessionPersister for ReceiverPersister {

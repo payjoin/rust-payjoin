@@ -751,6 +751,385 @@ mod e2e {
         Ok(())
     }
 
+    /// `--consolidate` merges the receiver's UTXO set into the Payjoin output,
+    /// and the choice survives the gap between `receive` and `resume`.
+    #[cfg(feature = "v2")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn receiver_consolidates_utxos_v2() -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    {
+        use payjoin_test_utils::{init_tracing, TestServices};
+        use tempfile::TempDir;
+
+        type Result<T> = std::result::Result<T, BoxError>;
+
+        /// How long to wait for a payjoin-cli subprocess to print an expected line.
+        const STDOUT_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(10);
+        /// UTXOs the receiver holds before the Payjoin. Kept well under the
+        /// BIP77 proposal size limit of 7088 bytes, which bounds how many
+        /// UTXOs can be contributed.
+        const RECEIVER_UTXOS: usize = 5;
+
+        init_tracing();
+        let mut services = TestServices::initialize_with_relays(3).await?;
+        let temp_dir = tempdir()?;
+
+        let result = tokio::select! {
+            res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {res:?}").into()),
+            res = services.take_directory_handle() => Err(format!("Directory server is long running: {res:?}").into()),
+            res = consolidate_cli_async(&services, &temp_dir) => res,
+        };
+
+        assert!(result.is_ok(), "receiver consolidation test failed: {:#?}", result.unwrap_err());
+
+        async fn wait_for_output(mut child: Child, expected: &str) -> Result<()> {
+            let mut stdout = child.stdout.take().expect("Failed to take child stdout");
+            let res = tokio::time::timeout(
+                STDOUT_TIMEOUT,
+                wait_for_stdout_match(&mut stdout, |line| line.contains(expected)),
+            )
+            .await?;
+
+            terminate(child).await.expect("Failed to kill payjoin-cli");
+            res.ok_or_else(|| format!("payjoin-cli did not report {expected:?}").into()).map(|_| ())
+        }
+
+        async fn consolidate_cli_async(services: &TestServices, temp_dir: &TempDir) -> Result<()> {
+            let receiver_db_path = temp_dir.path().join("receiver_db");
+            let sender_db_path = temp_dir.path().join("sender_db");
+            let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
+
+            // Replace the receiver's single large UTXO with several small ones,
+            // so that consolidating them is observable.
+            let sweep_address = sender.new_address()?;
+            receiver.send_all(std::slice::from_ref(&sweep_address))?;
+            bitcoind.client.generate_to_address(1, &sweep_address)?;
+            for _ in 0..RECEIVER_UTXOS {
+                let funding_address = receiver.new_address()?;
+                sender.send_to_address(&funding_address, Amount::from_sat(100_000))?;
+            }
+            bitcoind.client.generate_to_address(1, &sweep_address)?;
+            assert_eq!(
+                receiver.list_unspent()?.0.len(),
+                RECEIVER_UTXOS,
+                "receiver should start with {RECEIVER_UTXOS} separate UTXOs"
+            );
+
+            let cert_path = &temp_dir.path().join("localhost.der");
+            tokio::fs::write(cert_path, services.cert()).await?;
+            services.wait_for_services_ready().await?;
+            let ohttp_keys = services.fetch_ohttp_keys().await?;
+            let ohttp_keys_path = temp_dir.path().join("ohttp_keys");
+            tokio::fs::write(&ohttp_keys_path, ohttp_keys.encode()?).await?;
+
+            let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
+            let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
+            let cookie_file = &bitcoind.params.cookie_file;
+            let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
+            let directory = &services.directory_url();
+            let ohttp_relays = &services.ohttp_relay_urls();
+
+            // Receiver publishes a BIP21 asking to consolidate, then goes
+            // offline before any sender arrives.
+            let cli_receive_initiator = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("receive")
+                .arg(RECEIVE_SATS)
+                .arg("--pj-directories")
+                .arg(directory)
+                .arg("--ohttp-keys")
+                .arg(&ohttp_keys_path)
+                .arg("--consolidate")
+                .arg(RECEIVER_UTXOS.to_string())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli");
+            let bip21 = get_bip21_from_receiver(cli_receive_initiator).await;
+
+            // Sender posts the original proposal and waits for a response.
+            let cli_send_initiator = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&sender_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&sender_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("send")
+                .arg(&bip21)
+                .arg("--fee-rate")
+                .arg("1")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli");
+            send_until_request_timeout(cli_send_initiator).await?;
+
+            // The resumed session never sees --consolidate on its command line,
+            // so contributing every UTXO proves the flag was persisted with the
+            // session rather than read from the process that started it.
+            let cli_receive_resumer = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("resume")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to resume payjoin-cli receiver");
+            // Watch for the contribution line and the posted response on the
+            // same stdout: the contribution is reported partway through the
+            // session, so terminating there would abort it before the proposal
+            // ever reaches the directory.
+            let mut cli_receive_resumer = cli_receive_resumer;
+            let mut stdout =
+                cli_receive_resumer.stdout.take().expect("Failed to take child stdout");
+            let expected = format!("Contributing {RECEIVER_UTXOS} of {RECEIVER_UTXOS} UTXOs");
+            let contributed = tokio::time::timeout(
+                STDOUT_TIMEOUT,
+                wait_for_stdout_match(&mut stdout, |line| line.contains(&expected)),
+            )
+            .await?;
+            assert!(contributed.is_some(), "receiver did not report {expected:?}");
+            let responded = tokio::time::timeout(
+                STDOUT_TIMEOUT,
+                wait_for_stdout_match(&mut stdout, |line| line.contains("Response successful")),
+            )
+            .await?;
+            terminate(cli_receive_resumer).await.expect("Failed to kill payjoin-cli");
+            assert!(responded.is_some(), "receiver did not respond with a Payjoin proposal");
+
+            // The sender receives and broadcasts the Payjoin proposal.
+            let cli_send_resumer = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&sender_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&sender_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("send")
+                .arg(&bip21)
+                .arg("--fee-rate")
+                .arg("1")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to resume payjoin-cli sender");
+            wait_for_output(cli_send_resumer, "Payjoin sent").await?;
+
+            bitcoind.client.generate_to_address(1, &sweep_address)?;
+
+            assert_eq!(
+                receiver.list_unspent()?.0.len(),
+                1,
+                "receiver's UTXOs should have merged into a single Payjoin output"
+            );
+            Ok(())
+        }
+        Ok(())
+    }
+
+    /// `--cut-through` forwards part of the payment to a third party, funded by
+    /// the receiver's own contributed inputs.
+    #[cfg(feature = "v2")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn receiver_cuts_through_to_third_party_v2(
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use payjoin_test_utils::{init_tracing, TestServices};
+        use tempfile::TempDir;
+
+        type Result<T> = std::result::Result<T, BoxError>;
+
+        /// How long to wait for a payjoin-cli subprocess to print an expected line.
+        const STDOUT_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(10);
+        /// Value of each UTXO the receiver holds before the Payjoin.
+        const RECEIVER_UTXO_SATS: u64 = 100_000;
+        /// How much of the payment is forwarded onward.
+        const FORWARD_SATS: u64 = 50_000;
+
+        init_tracing();
+        let mut services = TestServices::initialize_with_relays(3).await?;
+        let temp_dir = tempdir()?;
+
+        let result = tokio::select! {
+            res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {res:?}").into()),
+            res = services.take_directory_handle() => Err(format!("Directory server is long running: {res:?}").into()),
+            res = cut_through_cli_async(&services, &temp_dir) => res,
+        };
+
+        assert!(result.is_ok(), "receiver cut-through test failed: {:#?}", result.unwrap_err());
+
+        async fn wait_for_output(mut child: Child, expected: &str) -> Result<()> {
+            let mut stdout = child.stdout.take().expect("Failed to take child stdout");
+            let res = tokio::time::timeout(
+                STDOUT_TIMEOUT,
+                wait_for_stdout_match(&mut stdout, |line| line.contains(expected)),
+            )
+            .await?;
+
+            terminate(child).await.expect("Failed to kill payjoin-cli");
+            res.ok_or_else(|| format!("payjoin-cli did not report {expected:?}").into()).map(|_| ())
+        }
+
+        async fn cut_through_cli_async(services: &TestServices, temp_dir: &TempDir) -> Result<()> {
+            let receiver_db_path = temp_dir.path().join("receiver_db");
+            let sender_db_path = temp_dir.path().join("sender_db");
+            let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
+            let third_party = bitcoind.create_wallet("third-party")?;
+            let forward_address = third_party.new_address()?;
+
+            // Give the receiver a couple of UTXOs to fund the forwarded output from.
+            let sweep_address = sender.new_address()?;
+            receiver.send_all(std::slice::from_ref(&sweep_address))?;
+            bitcoind.client.generate_to_address(1, &sweep_address)?;
+            for _ in 0..2 {
+                let funding_address = receiver.new_address()?;
+                sender.send_to_address(&funding_address, Amount::from_sat(RECEIVER_UTXO_SATS))?;
+            }
+            bitcoind.client.generate_to_address(1, &sweep_address)?;
+            assert!(
+                third_party.list_unspent()?.0.is_empty(),
+                "third party should start with nothing"
+            );
+
+            let cert_path = &temp_dir.path().join("localhost.der");
+            tokio::fs::write(cert_path, services.cert()).await?;
+            services.wait_for_services_ready().await?;
+            let ohttp_keys = services.fetch_ohttp_keys().await?;
+            let ohttp_keys_path = temp_dir.path().join("ohttp_keys");
+            tokio::fs::write(&ohttp_keys_path, ohttp_keys.encode()?).await?;
+
+            let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
+            let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
+            let cookie_file = &bitcoind.params.cookie_file;
+            let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
+            let directory = &services.directory_url();
+            let ohttp_relays = &services.ohttp_relay_urls();
+
+            let cli_receive_initiator = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("receive")
+                .arg(RECEIVE_SATS)
+                .arg("--pj-directories")
+                .arg(directory)
+                .arg("--ohttp-keys")
+                .arg(&ohttp_keys_path)
+                .arg("--cut-through")
+                .arg(format!("{forward_address}:{FORWARD_SATS}"))
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli");
+            let bip21 = get_bip21_from_receiver(cli_receive_initiator).await;
+
+            let cli_send_initiator = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&sender_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&sender_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("send")
+                .arg(&bip21)
+                .arg("--fee-rate")
+                .arg("1")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to execute payjoin-cli");
+            send_until_request_timeout(cli_send_initiator).await?;
+
+            // The resumed session never sees --cut-through on its command line,
+            // so forwarding at all proves the option was persisted.
+            let cli_receive_resumer = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&receiver_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&receiver_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("resume")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to resume payjoin-cli receiver");
+            wait_for_output(cli_receive_resumer, "Response successful").await?;
+
+            let cli_send_resumer = Command::new(payjoin_cli)
+                .arg("--root-certificate")
+                .arg(cert_path)
+                .arg("--rpchost")
+                .arg(&sender_rpchost)
+                .arg("--cookie-file")
+                .arg(cookie_file)
+                .arg("--db-path")
+                .arg(&sender_db_path)
+                .arg("--ohttp-relays")
+                .arg(ohttp_relays)
+                .arg("send")
+                .arg(&bip21)
+                .arg("--fee-rate")
+                .arg("1")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .expect("Failed to resume payjoin-cli sender");
+            wait_for_output(cli_send_resumer, "Payjoin sent").await?;
+
+            bitcoind.client.generate_to_address(1, &sweep_address)?;
+
+            let forwarded = third_party.list_unspent()?.0;
+            assert_eq!(forwarded.len(), 1, "third party should have received one output");
+            assert_eq!(
+                Amount::from_btc(forwarded[0].amount)?,
+                Amount::from_sat(FORWARD_SATS),
+                "third party should have received exactly the forwarded amount"
+            );
+            Ok(())
+        }
+        Ok(())
+    }
+
     #[cfg(all(feature = "v1", feature = "v2", feature = "_manual-tls"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin_v2_to_v1() -> Result<(), Box<dyn std::error::Error + Send + Sync>>

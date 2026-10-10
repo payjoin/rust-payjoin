@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### API Additions
+
+- Add settlement classification to `receive::v2::Receiver<Monitor>`.
+  `contested_prevouts` lists the sender's prevouts that the proposal and the
+  fallback both spend, and `classify` reports whether a transaction spending
+  them is the Payjoin proposal, the fallback, or neither, as a
+  `SettlementOutcome`. It recognizes the proposal even after a non-SegWit
+  sender's signature changes its txid. `close` ends the session once the
+  wallet stops tracking settlement, at whatever confirmation depth it
+  chooses. Also adds `expected_payjoin_txid` returning `ExpectedTxid`,
+  `fallback_tx`, and `receiver_prevouts`
+
+### Deprecations
+
+- `Receiver<Monitor>::check_for_transaction` is deprecated. It closes the
+  session on first sight of a predicted txid, never sees a spend that is
+  neither the proposal nor the fallback, and closes a session with non-SegWit
+  sender inputs without checking. Use `contested_prevouts`, `classify`, and
+  `close` instead. It now probes the txid from `expected_payjoin_txid`, which
+  includes the script_sig of a legacy or P2SH-wrapped receiver input. It used
+  to probe a txid that never appears on chain for such a session
+- `Receiver::proposal_txid_is_stable` is deprecated. It checks only the
+  sender's inputs, so a legacy or P2SH-wrapped receiver input can change the
+  txid even when it returns true. Use `Receiver<Monitor>::expected_payjoin_txid`
+
 ## 1.2.0
 
 This release adds a non-blocking interface to the receiver state machine.

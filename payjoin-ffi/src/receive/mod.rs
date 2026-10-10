@@ -1908,6 +1908,7 @@ impl Monitor {
     ///
     /// Returns a [`MonitorTransition`] that, once persisted, completes
     /// the session if a transaction is found.
+    #[allow(deprecated)]
     pub fn check_for_transaction(
         &self,
         find_transaction: Arc<dyn TransactionFinder>,
@@ -1939,6 +1940,7 @@ macro_rules! impl_proposal_txid_is_stable {
                 /// transaction ID: any ID derived from the proposal before the sender
                 /// signs will never appear on the network, and monitoring concludes the
                 /// session without checking.
+                #[allow(deprecated)]
                 pub fn proposal_txid_is_stable(&self) -> bool {
                     self.0.proposal_txid_is_stable()
                 }

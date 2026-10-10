@@ -106,6 +106,13 @@ pub enum Commands {
         #[arg(short, long = "max-fee-rate", value_parser = parse_fee_rate_in_sat_per_vb)]
         max_fee_rate: Option<FeeRate>,
 
+        /// Contribute up to N UTXOs instead of one, consolidating the receiver's
+        /// wallet into the payjoin output. Defaults to 10 if no value is given.
+        /// BIP77 (v2) caps the proposal at 7088 bytes, limiting how many
+        /// UTXOs can be contributed.
+        #[arg(long = "consolidate", num_args = 0..=1, default_missing_value = "10")]
+        consolidate: Option<usize>,
+
         #[cfg(feature = "v1")]
         /// The local port to listen on
         #[arg(short, long = "port")]

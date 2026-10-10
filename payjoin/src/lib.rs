@@ -11,6 +11,14 @@
 //! Payjoin session persistence support and IO utilities for interacting with OHTTP relays to make
 //! integration plug-and-play.
 //!
+//! Start with [`send::v2`] and [`receive::v2`]. BIP 78 support is in `send::v1` and
+//! `receive::v1` behind the `v1` feature. [payjoin-cli] is a complete example of both.
+//!
+//! This crate is runtime-agnostic: it drives the session state machines and leaves the
+//! storage backend, chain access and http client to you, or to a reference integration.
+//! [payjoin-cli] for bitcoind and [payjoin-ffi] for other languages both live in this
+//! repository. [bitmask-core] integrates BDK, and [nolooking] integrates LND over BIP 78 only.
+//!
 //! Both sender and receiver construct design follow [The Typestate Pattern in Rust](https://cliffle.com/blog/rust-typestate/),
 //! where higher-level [`Sender`] and [`Receiver`] structs are transitioned through
 //! consecutive states which represent a specific step they can be on over the course of a Payjoin
@@ -30,6 +38,10 @@
 //!
 //! [`Sender`]: crate::send::v2::Sender
 //! [`Receiver`]: crate::receive::v2::Receiver
+//! [payjoin-cli]: https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli
+//! [payjoin-ffi]: https://github.com/payjoin/rust-payjoin/tree/master/payjoin-ffi
+//! [bitmask-core]: https://github.com/diba-io/bitmask-core
+//! [nolooking]: https://github.com/chaincase-app/nolooking
 
 #[cfg(not(any(feature = "directory", feature = "v1", feature = "v2")))]
 compile_error!("At least one of the features ['directory', 'v1', 'v2'] must be enabled");

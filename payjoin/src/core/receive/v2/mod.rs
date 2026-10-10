@@ -1900,7 +1900,8 @@ impl Receiver<Monitor> {
     /// When the session's mailbox expires.
     ///
     /// The receiver set this when it created the session, so it says nothing about when the
-    /// proposal was posted.
+    /// proposal was posted. A posted session outlives its mailbox and stays open until the wallet
+    /// closes or cancels it.
     pub fn mailbox_expiration(&self) -> SystemTime {
         self.session_context.expiration.to_system_time()
     }

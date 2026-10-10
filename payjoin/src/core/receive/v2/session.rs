@@ -30,7 +30,11 @@ fn construct_history(
 ) -> Result<SessionHistory, ReplayError<ReceiveSession, SessionEvent>> {
     let history = SessionHistory::new(session_events);
     // Closed sessions terminated before expiration; do not surface an expired error for them.
-    if !matches!(receiver, ReceiveSession::Closed(_)) {
+    //
+    // A session that posted its proposal is exempt too, whether still in Monitor or cancelled from
+    // it into PendingFallback: it has no protocol work left, the transaction it awaits can confirm
+    // long after the mailbox is gone, and a wallet gives up on it by cancelling past expiration.
+    if !matches!(receiver, ReceiveSession::Closed(_)) && !history.posted_proposal() {
         let ctx = history.session_context();
         if ctx.expiration.elapsed() {
             return Err(InternalReplayError::Expired(ctx.expiration, history.fallback_tx()).into());
@@ -120,6 +124,11 @@ impl SessionHistory {
             .expect("Session event log must contain at least one event with pj_uri")
     }
 
+    /// Whether the receiver posted its Payjoin proposal to the sender.
+    fn posted_proposal(&self) -> bool {
+        self.events.iter().any(|event| matches!(event, SessionEvent::PostedPayjoinProposal()))
+    }
+
     fn get_unchecked_proposal(&self) -> Option<OriginalPayload> {
         self.events.iter().find_map(|event| match event {
             SessionEvent::RetrievedOriginalPayload { original, .. } => Some(original.clone()),
@@ -171,6 +180,8 @@ impl SessionHistory {
             },
             Some(SessionEvent::Cancelled | SessionEvent::ProtocolFailed) =>
                 SessionStatus::PendingFallback,
+            // A posted session outlives the mailbox; it is active until the wallet closes it.
+            Some(SessionEvent::PostedPayjoinProposal()) => SessionStatus::Active,
             _ if self.session_context().expiration.elapsed() => SessionStatus::Expired,
             _ => SessionStatus::Active,
         }
@@ -260,6 +271,62 @@ mod tests {
         UncheckedOriginalPayload, WantsOutputs,
     };
     use crate::receive::{InternalPayloadError, PayloadError};
+
+    /// The full event chain of a session that posted its Payjoin proposal, which replays to
+    /// [`ReceiveSession::Monitor`].
+    fn posted_proposal_events(session_context: SessionContext) -> Vec<SessionEvent> {
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let original = original_from_test_vector();
+        let maybe_inputs_owned = unchecked_receiver_from_test_vector()
+            .assume_interactive_receiver()
+            .save(&persister)
+            .expect("Save should not fail");
+        let outputs_unknown = maybe_inputs_owned
+            .check_inputs_not_owned(&mut |_| Ok(false))
+            .save(&persister)
+            .expect("No inputs should be owned")
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
+            .save(&persister)
+            .expect("No inputs should be seen before");
+        let wants_outputs = outputs_unknown
+            .identify_receiver_outputs(&mut |_| Ok(true))
+            .save(&persister)
+            .expect("Outputs should be identified");
+        let wants_inputs =
+            wants_outputs.commit_outputs().save(&persister).expect("Save should not fail");
+        let wants_fee_range =
+            wants_inputs.clone().commit_inputs().save(&persister).expect("Save should not fail");
+        let provisional_proposal = wants_fee_range
+            .clone()
+            .apply_fee_range(None, None)
+            .save(&persister)
+            .expect("Fee range should apply");
+        let payjoin_proposal = provisional_proposal
+            .clone()
+            .finalize_proposal(|psbt| Ok(psbt.clone()))
+            .save(&persister)
+            .expect("Payjoin proposal should be finalized");
+
+        vec![
+            SessionEvent::Created(session_context),
+            SessionEvent::RetrievedOriginalPayload { original, reply_key: None },
+            SessionEvent::CheckedBroadcastSuitability(),
+            SessionEvent::CheckedInputsNotOwned(),
+            SessionEvent::CheckedNoInputsSeenBefore(),
+            SessionEvent::IdentifiedReceiverOutputs(vec![0]),
+            SessionEvent::CommittedOutputs {
+                outputs: wants_inputs.state.inner.proposal.payjoin_psbt.unsigned_tx.output.clone(),
+                change_vout: wants_inputs.state.inner.proposal.change_vout,
+            },
+            SessionEvent::CommittedInputs {
+                receiver_inputs: wants_fee_range.state.inner.proposal.receiver_inputs.clone(),
+                payjoin_psbt: wants_fee_range.state.inner.proposal.payjoin_psbt.clone(),
+            },
+            SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()),
+            SessionEvent::FinalizedProposal(payjoin_proposal.psbt().clone()),
+            SessionEvent::PostedPayjoinProposal(),
+        ]
+    }
 
     fn unchecked_receiver_from_test_vector() -> Receiver<UncheckedOriginalPayload> {
         Receiver {
@@ -1225,5 +1292,76 @@ mod tests {
         assert_eq!(status, SessionStatus::FallbackBroadcasted);
 
         Ok(())
+    }
+    #[test]
+    fn monitor_session_past_expiration_still_replays() {
+        // The proposal is posted, so the mailbox expiring costs the receiver nothing while the
+        // transaction it waits on can still confirm. Refusing to replay would make that
+        // settlement unrecordable.
+        let expiration = (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap();
+        let session_context = SessionContext { expiration, ..SHARED_CONTEXT.clone() };
+
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        for event in posted_proposal_events(session_context) {
+            persister.save_event(event).expect("in memory persister save should not fail");
+        }
+
+        let (state, history) =
+            replay_event_log(&persister).expect("a posted session should replay past expiration");
+        assert!(matches!(state, ReceiveSession::Monitor(_)));
+
+        assert_eq!(
+            history.status(),
+            SessionStatus::Active,
+            "a posted session is not stranded by the mailbox expiring"
+        );
+        let ReceiveSession::Monitor(monitor) = state else { unreachable!("asserted above") };
+        assert!(
+            monitor.contested_prevouts().next().is_some(),
+            "settlement stays answerable after the mailbox expires"
+        );
+    }
+
+    #[test]
+    fn cancelled_monitor_session_past_expiration_still_replays() {
+        // Past the mailbox expiration a wallet gives up on a posted session by cancelling it.
+        // If it stops before closing the resulting PendingFallback, replay must still yield the
+        // fallback rather than an expired error.
+        let expiration = (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap();
+        let session_context = SessionContext { expiration, ..SHARED_CONTEXT.clone() };
+
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        for event in posted_proposal_events(session_context) {
+            persister.save_event(event).expect("in memory persister save should not fail");
+        }
+        persister
+            .save_event(SessionEvent::Cancelled)
+            .expect("in memory persister save should not fail");
+
+        let (state, history) = replay_event_log(&persister)
+            .expect("a cancelled posted session should replay past expiration");
+        let ReceiveSession::PendingFallback(pending) = state else {
+            panic!("expected PendingFallback, got {state:?}");
+        };
+        assert_eq!(history.status(), SessionStatus::PendingFallback);
+        assert_eq!(Some(pending.fallback_tx().clone()), history.fallback_tx());
+    }
+
+    #[test]
+    fn open_session_before_the_handoff_still_expires() {
+        // The exemption is for the posted handoff only. A session the receiver abandoned
+        // mid-protocol is still expired.
+        let expiration = (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap();
+        let session_context = SessionContext { expiration, ..SHARED_CONTEXT.clone() };
+
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        persister
+            .save_event(SessionEvent::Created(session_context))
+            .expect("in memory persister save should not fail");
+
+        assert!(
+            replay_event_log(&persister).is_err(),
+            "a session still mid-protocol past expiration should error"
+        );
     }
 }

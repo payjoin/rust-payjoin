@@ -31,6 +31,16 @@
   sender's inputs, so a legacy or P2SH-wrapped receiver input can change the
   txid even when it returns true. Use `classify_tx`
 
+### Bug Fixes
+
+- A receiver session that has posted its proposal now replays after its
+  mailbox expires, and reports `SessionStatus::Active` instead of `Expired`.
+  The transaction it waits on can confirm long after the mailbox is gone, and
+  replay used to refuse the session, so its settlement could never be
+  recorded. So does one cancelled from `Monitor` into `PendingFallback`, as a
+  wallet does to give up on it past expiration. A session still mid-protocol
+  past expiration is still rejected
+
 ## 1.2.0
 
 This release adds a non-blocking interface to the receiver state machine.

@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: uv
+    cooldown:
+      default-days: 7
+    directory: "/payjoin-ffi/python"
+    schedule:
+      interval: weekly
+    groups:
+      uv:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    # All action pins use tag comments so Dependabot can update them. Toolchain
+    # channels (stable/nightly/MSRV) are passed via the toolchain input instead
+    # of branch refs, which Dependabot cannot track.
+    cooldown:
+      default-days: 7
+    directories: ["/", "/.github/actions/*"]
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

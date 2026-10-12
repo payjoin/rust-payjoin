@@ -518,6 +518,50 @@ impl Receiver<Initialized> {
     }
 }
 
+/// A builder for a BIP 77 (v2) receiver session.
+///
+/// This is the receiver's entry point into payjoin v2, the counterpart to the
+/// sender's [`SenderBuilder`](crate::send::v2::SenderBuilder). It collects the
+/// address to be paid, the store-and-forward directory the session runs over,
+/// and that directory's OHTTP keys, then [`build`](ReceiverBuilder::build)s an
+/// [`Initialized`] receiver whose [`pj_uri`](Receiver::pj_uri) the receiver
+/// publishes for a sender to pay.
+///
+/// # Examples
+///
+/// Build a receiver session and read back the Bitcoin URI to share with a sender:
+///
+/// ```
+/// use std::str::FromStr;
+///
+/// use payjoin::bitcoin::address::NetworkUnchecked;
+/// use payjoin::bitcoin::{Address, Amount, Network};
+/// use payjoin::persist::InMemoryPersister;
+/// use payjoin::receive::v2::ReceiverBuilder;
+/// use payjoin::OhttpKeys;
+/// # use payjoin_test_utils::{ohttp_key_config_bytes, EXAMPLE_URL};
+///
+/// // The address the sender will pay. Validate it against the network you expect
+/// // before building a session around it, rather than assuming it is checked.
+/// let address = Address::<NetworkUnchecked>::from_str("2N47mmrWXsNBvQR6k78hWJoTji57zXwNcU7")?
+///     .require_network(Network::Testnet)?;
+///
+/// // The directory is the store-and-forward mailbox the session runs over; its
+/// // OHTTP keys let sender and receiver talk through it without the directory
+/// // reading the payjoin. A real receiver fetches these from its chosen directory.
+/// let ohttp_keys = OhttpKeys::decode(&ohttp_key_config_bytes())?;
+///
+/// // `build` returns a state transition; persisting it yields the live session.
+/// // A real integration supplies its own `SessionPersister` instead.
+/// let receiver = ReceiverBuilder::new(address, EXAMPLE_URL, ohttp_keys)?
+///     .with_amount(Amount::from_sat(2_000_000))
+///     .build()
+///     .save(&InMemoryPersister::default())?;
+///
+/// // The URI carries a `pj=` parameter: the sender scans it to start payjoin.
+/// assert!(receiver.pj_uri().to_string().contains("pj="));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug, Clone)]
 pub struct ReceiverBuilder(SessionContext);
 

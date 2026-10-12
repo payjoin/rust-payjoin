@@ -694,10 +694,9 @@ async function testIntegrationV2ToV2(
         body: requestResponse.request.body,
     });
     const fallbackResponseBuffer = await fallbackResponse.arrayBuffer();
-    proposal.processResponse(
-        fallbackResponseBuffer,
-        requestResponse.clientResponse,
-    );
+    const monitor = proposal
+        .processResponse(fallbackResponseBuffer, requestResponse.clientResponse)
+        .save(recvPersister);
 
     let pollOutcome:
         | PJNested<"PollingForProposalTransitionOutcome", "Progress">
@@ -741,6 +740,43 @@ async function testIntegrationV2ToV2(
     );
     const finalHex = extraction.hex as string;
     sender.call("sendrawtransaction", [JSON.stringify(finalHex)]);
+
+    // Classify the broadcast Payjoin, then close the replayed session with the
+    // resolution, as a wallet that replays its open sessions would.
+    const finalTx = new Uint8Array(Buffer.from(finalHex, "hex")).buffer;
+    const monitorResolution = monitor.classifyTx(finalTx);
+    assert(
+        monitorResolution !== undefined,
+        "Monitor should classify the Payjoin",
+    );
+    assert.strictEqual(
+        monitorResolution.resolvedBy(),
+        payjoin.ResolvedBy.Payjoin,
+        "Monitor should recognize the Payjoin",
+    );
+    const replayed = payjoin.replayReceiverEventLog(recvPersister).state();
+    assert.strictEqual(
+        replayed.tag,
+        "Monitor",
+        "Session should replay to Monitor",
+    );
+    const resolution = payjoin.classifyReceiverTx(replayed, finalTx);
+    assert(
+        resolution !== undefined,
+        "Replayed session should classify the Payjoin",
+    );
+    assert.strictEqual(
+        resolution.resolvedBy(),
+        payjoin.ResolvedBy.Payjoin,
+        "Replayed session should recognize the Payjoin",
+    );
+    payjoin.closeReceiverSession(replayed, resolution).save(recvPersister);
+    assert(recvPersister.closed, "Closing should close the persister");
+    assert.strictEqual(
+        payjoin.replayReceiverEventLog(recvPersister).state().tag,
+        "Closed",
+        "Session should replay as closed",
+    );
 
     const decodedPsbt = JSON.parse(
         sender.call("decodepsbt", [JSON.stringify(finalPsbt)]),

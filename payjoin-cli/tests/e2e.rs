@@ -751,6 +751,178 @@ mod e2e {
         Ok(())
     }
 
+    /// A receiver session the sender settles with its fallback before the
+    /// receiver posts a proposal closes on `resume` once the fallback confirms.
+    #[cfg(feature = "v2")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn receiver_settles_fallback_before_proposal_v2(
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use std::cell::Cell;
+
+        use payjoin_test_utils::{init_tracing, TestServices};
+        use tempfile::TempDir;
+
+        type Result<T> = std::result::Result<T, BoxError>;
+
+        /// How long to wait for a payjoin-cli subprocess to print an expected line.
+        const STDOUT_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(10);
+
+        init_tracing();
+        let mut services = TestServices::initialize_with_relays(3).await?;
+        let temp_dir = tempdir()?;
+
+        let result = tokio::select! {
+            res = services.take_ohttp_relay_handle() => Err(format!("Ohttp relay is long running: {res:?}").into()),
+            res = services.take_directory_handle() => Err(format!("Directory server is long running: {res:?}").into()),
+            res = settle_fallback_cli_async(&services, &temp_dir) => res,
+        };
+
+        assert!(
+            result.is_ok(),
+            "receiver fallback settlement test failed: {:#?}",
+            result.unwrap_err()
+        );
+
+        /// Wait for `child` to print lines containing each of `expected`, in
+        /// order, then terminate it.
+        async fn wait_for_lines(mut child: Child, expected: &[&str]) -> Result<()> {
+            let mut stdout = child.stdout.take().expect("Failed to take child stdout");
+            let next = Cell::new(0);
+            let res = tokio::time::timeout(
+                STDOUT_TIMEOUT,
+                wait_for_stdout_match(&mut stdout, |line| {
+                    while next.get() < expected.len() && line.contains(expected[next.get()]) {
+                        next.set(next.get() + 1);
+                    }
+                    next.get() == expected.len()
+                }),
+            )
+            .await;
+
+            terminate(child).await.expect("Failed to kill payjoin-cli");
+            match res {
+                Ok(Some(_)) => Ok(()),
+                _ => Err(format!("payjoin-cli did not report {:?}", expected[next.get()]).into()),
+            }
+        }
+
+        async fn settle_fallback_cli_async(
+            services: &TestServices,
+            temp_dir: &TempDir,
+        ) -> Result<()> {
+            let receiver_db_path = temp_dir.path().join("receiver_db");
+            let sender_db_path = temp_dir.path().join("sender_db");
+            let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
+
+            // Empty the receiver wallet so its session stops at input
+            // contribution, before a proposal exists.
+            let sweep_address = sender.new_address()?;
+            receiver.send_all(std::slice::from_ref(&sweep_address))?;
+            bitcoind.client.generate_to_address(1, &sweep_address)?;
+
+            let cert_path = &temp_dir.path().join("localhost.der");
+            tokio::fs::write(cert_path, services.cert()).await?;
+            services.wait_for_services_ready().await?;
+            let ohttp_keys = services.fetch_ohttp_keys().await?;
+            let ohttp_keys_path = temp_dir.path().join("ohttp_keys");
+            tokio::fs::write(&ohttp_keys_path, ohttp_keys.encode()?).await?;
+
+            let receiver_rpchost = format!("http://{}/wallet/receiver", bitcoind.params.rpc_socket);
+            let sender_rpchost = format!("http://{}/wallet/sender", bitcoind.params.rpc_socket);
+            let cookie_file = &bitcoind.params.cookie_file;
+            let payjoin_cli = env!("CARGO_BIN_EXE_payjoin-cli");
+            let directory = &services.directory_url();
+            let ohttp_relays = &services.ohttp_relay_urls();
+            let cli = |rpchost: &str, db_path: &std::path::Path| {
+                let mut cmd = Command::new(payjoin_cli);
+                cmd.arg("--root-certificate")
+                    .arg(cert_path)
+                    .arg("--rpchost")
+                    .arg(rpchost)
+                    .arg("--cookie-file")
+                    .arg(cookie_file)
+                    .arg("--db-path")
+                    .arg(db_path)
+                    .arg("--ohttp-relays")
+                    .arg(ohttp_relays)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::inherit());
+                cmd
+            };
+            let resume_receiver = || {
+                cli(&receiver_rpchost, &receiver_db_path)
+                    .arg("resume")
+                    .spawn()
+                    .expect("Failed to execute payjoin-cli")
+            };
+
+            // Receiver publishes a BIP21 and then goes offline.
+            let cli_receive_initiator = cli(&receiver_rpchost, &receiver_db_path)
+                .arg("receive")
+                .arg(RECEIVE_SATS)
+                .arg("--pj-directories")
+                .arg(directory)
+                .arg("--ohttp-keys")
+                .arg(&ohttp_keys_path)
+                .spawn()
+                .expect("Failed to execute payjoin-cli");
+            let bip21 = get_bip21_from_receiver(cli_receive_initiator).await;
+
+            // Sender posts the original proposal and waits for a response.
+            let mut cli_send_initiator = cli(&sender_rpchost, &sender_db_path)
+                .arg("send")
+                .arg(&bip21)
+                .arg("--fee-rate")
+                .arg("1")
+                .spawn()
+                .expect("Failed to execute payjoin-cli");
+            let mut stdout = cli_send_initiator.stdout.take().expect("Failed to take child stdout");
+            let posted_line = tokio::time::timeout(
+                tokio::time::Duration::from_secs(35),
+                wait_for_stdout_match(&mut stdout, |line| line.contains("No response yet.")),
+            )
+            .await?;
+            terminate(cli_send_initiator).await.expect("Failed to kill payjoin-cli");
+            // Session-scoped lines are prefixed with `[<Role> <session id>]`.
+            let sender_session_id = posted_line
+                .expect("sender should post the original proposal")
+                .split_whitespace()
+                .nth(1)
+                .expect("could not split stdout")
+                .trim_end_matches(']')
+                .to_string();
+
+            // Receiver retrieves the original and stops for lack of inputs.
+            wait_for_lines(resume_receiver(), &["No spendable UTXOs available in wallet"]).await?;
+
+            // Sender gives up and broadcasts the fallback.
+            let cli_cancel = cli(&sender_rpchost, &sender_db_path)
+                .arg("cancel")
+                .arg(&sender_session_id)
+                .spawn()
+                .expect("Failed to execute payjoin-cli cancel");
+            wait_for_lines(cli_cancel, &["Broadcasted fallback transaction txid"]).await?;
+
+            // An unconfirmed fallback leaves the session open.
+            wait_for_lines(
+                resume_receiver(),
+                &["Fallback transaction", "has 0 of 1 confirmation(s)"],
+            )
+            .await?;
+
+            // Once the fallback confirms, resume closes the session.
+            bitcoind.client.generate_to_address(1, &sweep_address)?;
+            wait_for_lines(
+                resume_receiver(),
+                &["settled the session with 1 confirmation(s)", "Session completed."],
+            )
+            .await?;
+            wait_for_lines(resume_receiver(), &["No sessions to resume."]).await?;
+            Ok(())
+        }
+        Ok(())
+    }
+
     #[cfg(all(feature = "v1", feature = "v2", feature = "_manual-tls"))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn send_receive_payjoin_v2_to_v1() -> Result<(), Box<dyn std::error::Error + Send + Sync>>

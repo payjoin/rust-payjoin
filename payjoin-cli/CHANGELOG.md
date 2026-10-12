@@ -5,6 +5,12 @@
 - Fix panic when spending taproot UTXOs. They are now contributed as key-path
   spends with an assumed default input weight.
 - Any unsupported coin is simply skipped instead of crashing the cli.
+- `resume` checks the wallet once for transactions settling each open receiver
+  session, in any state, and closes a session once its settling transaction
+  has one confirmation. It reports whether the Payjoin, the fallback, or
+  another transaction settled it. Sessions with non-SegWit senders are now
+  tracked too. The receiver no longer polls the mempool after posting the
+  proposal.
 
 ## 1.0.0
 

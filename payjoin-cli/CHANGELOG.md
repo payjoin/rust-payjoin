@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix panic when spending taproot UTXOs. They are now contributed as key-path
+  spends with an assumed default input weight.
+
 ## 1.0.0
 
 The first stable payjoin-cli release, tracking payjoin 1.2.0. The CLI adopts

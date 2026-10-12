@@ -197,7 +197,12 @@ impl BitcoindWallet {
                 .block_on(async { self.rpc.list_unspent(None, None, None, None, None).await })
         })
         .context("Failed to list unspent")?;
-        Ok(unspent.0.into_iter().map(input_pair_from_corepc).collect())
+        unspent
+            .0
+            .into_iter()
+            .map(input_pair_from_corepc)
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to create input pair from unspent output")
     }
 
     /// Check if wallet has any spendable UTXOs
@@ -215,21 +220,26 @@ impl BitcoindWallet {
     }
 }
 
-pub fn input_pair_from_corepc(utxo: ListUnspentItem) -> InputPair {
+pub fn input_pair_from_corepc(utxo: ListUnspentItem) -> Result<InputPair> {
+    let txout = TxOut {
+        value: Amount::from_btc(utxo.amount.to_btc()).expect("Valid amount"),
+        script_pubkey: utxo.script_pubkey,
+    };
+    let outpoint = OutPoint { txid: utxo.txid, vout: utxo.vout };
+
+    if txout.script_pubkey.is_p2tr() {
+        // bitcoin core wallets spend the taproot key path by default
+        return InputPair::new_p2tr_keyspend(txout, outpoint)
+            .context("Failed to create taproot key-spend input pair");
+    }
+
     let psbtin = Input {
         // NOTE: non_witness_utxo is not necessary because bitcoin-cli always supplies
         // witness_utxo, even for non-witness inputs
-        witness_utxo: Some(TxOut {
-            value: Amount::from_btc(utxo.amount.to_btc()).expect("Valid amount"),
-            script_pubkey: utxo.script_pubkey,
-        }),
-        redeem_script: None,
-        witness_script: None, // Not available in this version
+        witness_utxo: Some(txout),
+        redeem_script: utxo.redeem_script,
         ..Default::default()
     };
-    let txin = TxIn {
-        previous_output: OutPoint { txid: utxo.txid, vout: utxo.vout },
-        ..Default::default()
-    };
-    InputPair::new(txin, psbtin, None).expect("Input pair should be valid")
+    let txin = TxIn { previous_output: outpoint, ..Default::default() };
+    InputPair::new(txin, psbtin, None).context("Failed to create input pair")
 }

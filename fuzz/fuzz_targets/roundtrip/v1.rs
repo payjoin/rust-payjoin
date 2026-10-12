@@ -96,58 +96,69 @@ fuzz_mutator!(|data: &mut [u8], size: usize, max_size: usize, seed: u32| {
     HEADER + psbt.len() + query_len
 });
 
-fn do_test(data: &[u8]) -> bool {
+fn do_test(data: &[u8]) {
     let (psbt_bytes, query_bytes) = split_input(data);
-    let Ok(psbt) = Psbt::deserialize(psbt_bytes) else { return false };
-    let Ok(query) = std::str::from_utf8(query_bytes) else { return false };
+    let is_seed = psbt_bytes == *SEED_PSBT && query_bytes == DEFAULT_QUERY.as_bytes();
 
-    // The payee is output 1 of the BIP-78 vector. Deriving the URI address
-    // from the PSBT rather than hardcoding it keeps the two in agreement:
-    // a mismatch makes the sender builder reject every input, which is how
-    // the first version of this target ended up never reaching a receiver.
-    let Some(txout) = psbt.unsigned_tx.output.get(1) else { return false };
-    let Ok(address) = Address::from_script(&txout.script_pubkey, Network::Bitcoin) else {
-        return false;
-    };
-    let Ok(uri) = build_v1_pj_uri(&address, ENDPOINT, OutputSubstitution::Enabled) else {
-        return false;
-    };
+    let completed = (|| -> bool {
+        let Ok(psbt) = Psbt::deserialize(psbt_bytes) else { return false };
+        let Ok(query) = std::str::from_utf8(query_bytes) else { return false };
 
-    let Ok(sender) = SenderBuilder::new(psbt, uri).build_non_incentivizing(FeeRate::ZERO) else {
-        return false;
-    };
-    let (request, v1_ctx) = sender.create_v1_post_request();
+        // The payee is output 1 of the BIP-78 vector. Deriving the URI address
+        // from the PSBT rather than hardcoding it keeps the two in agreement:
+        // a mismatch makes the sender builder reject every input, which is how
+        // the first version of this target ended up never reaching a receiver.
+        let Some(txout) = psbt.unsigned_tx.output.get(1) else { return false };
+        let Ok(address) = Address::from_script(&txout.script_pubkey, Network::Bitcoin) else {
+            return false;
+        };
+        let Ok(uri) = build_v1_pj_uri(&address, ENDPOINT, OutputSubstitution::Enabled) else {
+            return false;
+        };
 
-    let headers = FuzzHeaders { length: request.body.len().to_string() };
-    let Ok(unchecked) = UncheckedOriginalPayload::from_request(&request.body, query, headers)
-    else {
-        return false;
-    };
+        let Ok(sender) = SenderBuilder::new(psbt, uri).build_non_incentivizing(FeeRate::ZERO)
+        else {
+            return false;
+        };
+        let (request, v1_ctx) = sender.create_v1_post_request();
 
-    // Every check answers unconditionally: a real receiver's answers depend
-    // on its own UTXO set, which is not what this target exercises.
-    let Ok(seen) =
-        unchecked.assume_interactive_receiver().check_inputs_not_owned(&mut |_| Ok(false))
-    else {
-        return false;
-    };
-    let Ok(unknown) = seen.check_no_inputs_seen_before(&mut |_| Ok(false)) else { return false };
-    let Ok(wants_outputs) = unknown.identify_receiver_outputs(&mut |_| Ok(true)) else {
-        return false;
-    };
+        let headers = FuzzHeaders { length: request.body.len().to_string() };
+        let Ok(unchecked) = UncheckedOriginalPayload::from_request(&request.body, query, headers)
+        else {
+            return false;
+        };
 
-    // substitute_receiver_script, replace_receiver_outputs and
-    // contribute_inputs all take receiver-chosen values, so committing
-    // straight through keeps the target on the untrusted path.
-    let wants_fee_range = wants_outputs.commit_outputs().commit_inputs();
+        // Every check answers unconditionally: a real receiver's answers depend
+        // on its own UTXO set, which is not what this target exercises.
+        let Ok(seen) =
+            unchecked.assume_interactive_receiver().check_inputs_not_owned(&mut |_| Ok(false))
+        else {
+            return false;
+        };
+        let Ok(unknown) = seen.check_no_inputs_seen_before(&mut |_| Ok(false)) else {
+            return false;
+        };
+        let Ok(wants_outputs) = unknown.identify_receiver_outputs(&mut |_| Ok(true)) else {
+            return false;
+        };
 
-    let Ok(provisional) = wants_fee_range.apply_fee_range(None, None) else { return false };
-    let Ok(proposal) = provisional.finalize_proposal(|psbt| Ok(psbt.clone())) else { return false };
+        // substitute_receiver_script, replace_receiver_outputs and
+        // contribute_inputs all take receiver-chosen values, so committing
+        // straight through keeps the target on the untrusted path.
+        let wants_fee_range = wants_outputs.commit_outputs().commit_inputs();
 
-    // Close the loop: the sender validates the receiver's proposal.
-    // Rejections are expected during fuzzing; the seed test requires success.
-    let response = proposal.psbt().to_string();
-    v1_ctx.process_response(response.as_bytes()).is_ok()
+        let Ok(provisional) = wants_fee_range.apply_fee_range(None, None) else { return false };
+        let Ok(proposal) = provisional.finalize_proposal(|psbt| Ok(psbt.clone())) else {
+            return false;
+        };
+
+        // Close the loop: the sender validates the receiver's proposal.
+        // Rejections are expected during fuzzing; the seed test requires success.
+        let response = proposal.psbt().to_string();
+        v1_ctx.process_response(response.as_bytes()).is_ok()
+    })();
+
+    assert!(!is_seed || completed, "seed input must complete the roundtrip");
 }
 
 fuzz_target!(|data| {
@@ -172,6 +183,6 @@ mod tests {
         let mut input = len.to_be_bytes().to_vec();
         input.extend_from_slice(psbt);
         input.extend_from_slice(super::DEFAULT_QUERY.as_bytes());
-        assert!(super::do_test(&input));
+        super::do_test(&input);
     }
 }

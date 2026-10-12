@@ -197,12 +197,21 @@ impl BitcoindWallet {
                 .block_on(async { self.rpc.list_unspent(None, None, None, None, None).await })
         })
         .context("Failed to list unspent")?;
-        unspent
+        // Skip UTXOs whose input weight cannot be predicted before signing
+        // (e.g. P2WSH, legacy P2SH, bare scripts) rather than failing the
+        // whole candidate list.
+        let candidate_inputs = unspent
             .0
             .into_iter()
-            .map(input_pair_from_corepc)
-            .collect::<Result<Vec<_>, _>>()
-            .context("Failed to create input pair from unspent output")
+            .filter_map(|utxo| match input_pair_from_corepc(utxo) {
+                Ok(pair) => Some(pair),
+                Err(e) => {
+                    tracing::warn!("Skipping UTXO unusable for payjoin: {e:#}");
+                    None
+                }
+            })
+            .collect();
+        Ok(candidate_inputs)
     }
 
     /// Check if wallet has any spendable UTXOs

@@ -572,10 +572,12 @@ Future<void> run_integration_v2_to_v2(
     headers: {"Content-Type": request_response.request.contentType},
     body: request_response.request.body,
   );
-  proposal.processResponse(
-    body: fallback_response.bodyBytes,
-    ohttpContext: request_response.clientResponse,
-  );
+  payjoin.Monitor monitor = proposal
+      .processResponse(
+        body: fallback_response.bodyBytes,
+        ohttpContext: request_response.clientResponse,
+      )
+      .save(persister: recv_persister);
 
   // **********************
   // Inside the Sender:
@@ -627,6 +629,31 @@ Future<void> run_integration_v2_to_v2(
     sender.call(method: "finalizepsbt", params: [final_psbt, jsonEncode(true)]),
   )["hex"];
   sender.call(method: "sendrawtransaction", params: [jsonEncode(final_tx_hex)]);
+
+  // **********************
+  // Inside the Receiver:
+  // Classify the broadcast Payjoin, then close the session through the
+  // settlement, as a wallet that replays its open sessions would.
+  final final_tx = Uint8List.fromList(hex.decode(final_tx_hex as String));
+  final monitor_settlement = monitor.classifyTx(tx: final_tx);
+  expect(monitor_settlement, isNotNull);
+  expect(monitor_settlement!.outcome(), payjoin.SettlementOutcome.payjoin);
+  final replayed = payjoin
+      .replayReceiverEventLog(persister: recv_persister)
+      .state();
+  expect(replayed, isA<payjoin.MonitorReceiveSession>());
+  final settlement = payjoin.classifyReceiverTx(
+    session: replayed,
+    tx: final_tx,
+  );
+  expect(settlement, isNotNull);
+  expect(settlement!.outcome(), payjoin.SettlementOutcome.payjoin);
+  settlement.close().save(persister: recv_persister);
+  expect(recv_persister.closed, isTrue);
+  expect(
+    payjoin.replayReceiverEventLog(persister: recv_persister).state(),
+    isA<payjoin.ClosedReceiveSession>(),
+  );
 
   // Check resulting transaction and balances
   var decodedTx = jsonDecode(

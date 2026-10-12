@@ -39,6 +39,16 @@ const OHTTP_KEYS = new Uint8Array([
     0x00, 0x03,
 ]).buffer;
 
+// A consensus-encoded transaction with one input and one output. It spends
+// nothing a fresh session holds.
+const UNRELATED_TX = new Uint8Array(
+    Buffer.from(
+        "02000000010000000000000000000000000000000000000000000000000000000000000000" +
+            "0000000000ffffffff0100000000000000000000000000",
+        "hex",
+    ),
+).buffer;
+
 const ORIGINAL_PSBT =
     "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
 
@@ -117,6 +127,38 @@ function runUnitTests(name: string, payjoin: typeof nodejsPayjoin) {
                 state.tag,
                 "Initialized",
                 "State should be Initialized",
+            );
+        });
+
+        test("classify receiver tx without fallback", () => {
+            // A session that has not received the original has nothing to
+            // compare against, and bytes that are not a transaction are
+            // rejected whatever the session's state.
+            const persister = new InMemoryReceiverPersister();
+            new payjoin.ReceiverBuilder(
+                "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+                "https://example.com",
+                payjoin.OhttpKeys.decode(OHTTP_KEYS),
+            )
+                .build()
+                .save(persister);
+            const state = payjoin.replayReceiverEventLog(persister).state();
+
+            assert.strictEqual(
+                payjoin.classifyReceiverTx(state, UNRELATED_TX),
+                undefined,
+                "An Initialized session should classify nothing",
+            );
+            assert.throws(
+                () =>
+                    payjoin.classifyReceiverTx(
+                        state,
+                        new Uint8Array([0]).buffer,
+                    ),
+                (e: unknown) =>
+                    payjoin.TransactionParseError.InvalidTransaction.instanceOf(
+                        e,
+                    ),
             );
         });
 

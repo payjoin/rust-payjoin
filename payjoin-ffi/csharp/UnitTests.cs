@@ -81,6 +81,29 @@ public class PersistenceTests
         Assert.IsType<ReceiveSession.Initialized>(state);
     }
 
+    // A consensus-encoded transaction with one input and one output. It spends
+    // nothing a fresh session holds.
+    private static readonly byte[] UnrelatedTx = Convert.FromHexString(
+        "02000000010000000000000000000000000000000000000000000000000000000000000000" +
+        "0000000000ffffffff0100000000000000000000000000");
+
+    [Fact]
+    public void ClassifyReceiverTxWithoutFallback()
+    {
+        // A session that has not received the original has nothing to compare
+        // against, and bytes that are not a transaction are rejected whatever
+        // the session's state.
+        var persister = new InMemoryReceiverPersister();
+        var ohttpKeys = OhttpKeys.Decode(OhttpKeysData);
+        var builder = new ReceiverBuilder("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4", "https://example.com", ohttpKeys);
+        builder.Build().Save(persister);
+        var state = PayjoinMethods.ReplayReceiverEventLog(persister).State();
+
+        Assert.Null(PayjoinMethods.ClassifyReceiverTx(state, UnrelatedTx));
+        Assert.Throws<TransactionParseException.InvalidTransaction>(() =>
+            PayjoinMethods.ClassifyReceiverTx(state, new byte[] { 0 }));
+    }
+
     [Fact]
     public void SenderPersistence()
     {

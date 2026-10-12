@@ -1,5 +1,25 @@
 ## Unreleased
 
+- Add settlement classification to every receiver state that holds a
+  fallback transaction, from `MaybeInputsOwned` through `Monitor`. Pass
+  every consensus-encoded transaction the wallet receives to `classify_tx`
+  on each open session. It returns a `SettlementOutcome` of `Payjoin`,
+  `Fallback` or `Unrecognized`, or none for a transaction that spends none
+  of the sender's original prevouts, and never reports `Payjoin` before
+  `PayjoinProposal`. `Monitor` also gains `close`, which ends the session
+  once the wallet has settled its outcome. In Kotlin, `close` is
+  `closeSession`.
+- Add `Monitor.mailbox_expiration`, a Unix timestamp in seconds. A posted
+  session outlives its mailbox, so a wallet can use this as the deadline to
+  cancel a session nothing has settled and broadcast the fallback.
+- Remove `Monitor.check_for_transaction`, with its `TransactionFinder`
+  callback and `MonitorTransition`. It closed the session on first sight of
+  a predicted txid and never saw a spend that is neither the proposal nor
+  the fallback. Use `classify_tx` and `close` instead.
+- Remove `proposal_txid_is_stable` from every receiver state. It checked
+  only the sender's inputs, so a legacy or P2SH-wrapped receiver input could
+  change the txid even when it returned true. Use `classify_tx` instead.
+
 ## [0.25.1]
 
 - Wraps payjoin 1.2.0

@@ -1,17 +1,18 @@
 use std::fmt;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
-use payjoin::bitcoin::{Amount, FeeRate, Transaction};
+use payjoin::bitcoin::{Address, Amount, FeeRate, Transaction, Txid};
 use payjoin::persist::{OptionalTransitionOutcome, SessionPersister};
 use payjoin::receive::mark_checklist;
 use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
     MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
     PendingFallback as ReceiverPendingFallback, ProvisionalProposal, ReceiveSession, Receiver,
-    ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload,
-    WantsFeeRange, WantsInputs, WantsOutputs,
+    ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, SettlementOutcome,
+    UncheckedOriginalPayload, WantsFeeRange, WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, PendingFallback as SenderPendingFallback,
@@ -39,6 +40,19 @@ const W_STATUS: usize = 15;
 /// Delay before retrying a transiently failed state transition, so a
 /// misbehaving directory or relay is not hammered in a tight loop.
 const TRANSIENT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Confirmations the settling transaction needs before the receiver stops
+/// tracking it and closes the session.
+const SETTLEMENT_CONFIRMATIONS: i64 = 1;
+
+/// A transaction spending a receiver session's contested prevouts, as found in
+/// the wallet.
+struct Settlement {
+    outcome: SettlementOutcome,
+    txid: Txid,
+    /// Negative for a transaction that conflicts with a confirmed one.
+    confirmations: i64,
+}
 
 /// A request-construction error that can report whether it was caused by
 /// session expiry. Implemented by the sender/receiver request-building error
@@ -106,16 +120,16 @@ impl StatusText for ReceiveSession {
             ReceiveSession::PayjoinProposal(_) => "Payjoin proposal sent",
             ReceiveSession::HasReplyableError(_) =>
                 "Session failure, waiting to post error response",
-            ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
+            ReceiveSession::Monitor(_) => "Payjoin proposal sent, awaiting settlement",
             ReceiveSession::PendingFallback(_) => "Pending fallback handling",
             ReceiveSession::Closed(session_outcome) => match session_outcome {
                 ReceiverSessionOutcome::Aborted => "Session aborted",
-                ReceiverSessionOutcome::Success(_) => "Session success, Payjoin proposal was broadcasted",
+                ReceiverSessionOutcome::Success(_) =>
+                    "Session success, Payjoin proposal was broadcasted",
                 ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
                 ReceiverSessionOutcome::PayjoinProposalSent =>
-                    "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs",
-                ReceiverSessionOutcome::Unrecognized(_) =>
-                    "Settled by an unrecognized transaction",
+                    "Payjoin proposal sent, settlement no longer tracked",
+                ReceiverSessionOutcome::Unrecognized(_) => "Settled by an unrecognized transaction",
             },
         }
     }
@@ -1146,13 +1160,9 @@ impl App {
                     return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
                 }
             };
-        let payjoin_psbt = proposal.psbt().clone();
         match proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister) {
             Ok(session) => {
-                persister.print(format_args!(
-                    "Response successful. Watch mempool for successful Payjoin. TXID: {}",
-                    payjoin_psbt.extract_tx_unchecked_fee_rate().compute_txid()
-                ));
+                persister.print("Response successful. Waiting for the Payjoin to settle.");
                 Ok(ReceiveSession::Monitor(session))
             }
             Err(e) if e.is_transient() => {
@@ -1165,62 +1175,125 @@ impl App {
         }
     }
 
-    /// Watch the mempool for the payjoin transaction until it appears or a
-    /// timeout elapses. The poll/timeout loop is one logical step from the
-    /// session's perspective, so it stays local rather than in the driver.
-    #[allow(deprecated)]
+    /// Wait for the transaction that settles the session's contested prevouts
+    /// to reach `SETTLEMENT_CONFIRMATIONS`, then close the session. The
+    /// poll/timeout loop is one logical step from the session's perspective, so
+    /// it stays local rather than in the driver. A session that times out stays
+    /// open and resumes here, until its mailbox expires with nothing spending
+    /// its contested prevouts. Then it is abandoned.
     async fn monitor_payjoin_proposal(
         &self,
-        mut proposal: Receiver<Monitor>,
+        proposal: Receiver<Monitor>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
-        // On a session resumption, the receiver will resume again in this state.
+        let (_, history) = replay_receiver_event_log(persister)
+            .map_err(|e| anyhow!("Failed to replay receiver session: {e:?}"))?;
+        let address = history.pj_uri().address().clone();
+
         let poll_interval = tokio::time::Duration::from_millis(200);
         let timeout_duration = tokio::time::Duration::from_secs(5);
 
         let mut interval = tokio::time::interval(poll_interval);
         interval.tick().await;
 
-        tracing::debug!("Polling for payment confirmation");
+        tracing::debug!("Polling for settlement");
 
         let result = tokio::time::timeout(timeout_duration, async {
             loop {
                 interval.tick().await;
-                let check_result = proposal
-                    .check_for_transaction(|txid| {
-                        self.wallet()
-                            .get_raw_transaction(&txid)
-                            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-                    })
-                    .save(persister);
-
-                match check_result {
-                    Ok(OptionalTransitionOutcome::Progress(())) => {
-                        persister.print("Payjoin transaction detected in the mempool!");
-                        return Ok(());
-                    }
-                    Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
-                        proposal = current_state;
-                    }
-                    Err(e) if e.is_transient() => {
-                        tracing::debug!(
-                            "Transient error checking for transaction, retrying: {e:?}"
-                        );
-                        proposal =
-                            e.transient_state().expect("transient error carries current state");
-                    }
-                    Err(e) => return Err(e.into()),
+                match self.find_settlement(&proposal, &address) {
+                    Ok(Some(settlement))
+                        if settlement.confirmations >= SETTLEMENT_CONFIRMATIONS =>
+                        return settlement,
+                    Ok(Some(Settlement { outcome, txid, confirmations })) => tracing::debug!(
+                        "Settlement {outcome:?} in {txid} has {confirmations} confirmation(s), waiting"
+                    ),
+                    Ok(None) => {}
+                    Err(e) =>
+                        tracing::debug!("Transient error finding settlement, retrying: {e:?}"),
                 }
             }
         })
         .await;
 
-        match result {
-            Ok(ok) => ok,
-            Err(_) => Err(anyhow!(
-                "No payjoin transaction detected in mempool within {timeout_duration:?}, stopping."
+        let Ok(Settlement { outcome, txid, confirmations }) = result else {
+            if SystemTime::now() >= proposal.mailbox_expiration()
+                && matches!(self.find_settlement(&proposal, &address), Ok(None))
+            {
+                return self.abandon_unsettled_session(proposal, persister);
+            }
+            return Err(anyhow!(
+                "No settling transaction reached {SETTLEMENT_CONFIRMATIONS} confirmation(s) within {timeout_duration:?}, stopping."
+            ));
+        };
+
+        match outcome {
+            SettlementOutcome::Payjoin => persister.print(format_args!(
+                "Payjoin settled in {txid} with {confirmations} confirmation(s)."
+            )),
+            SettlementOutcome::Fallback => persister.print(format_args!(
+                "Fallback transaction {txid} settled with {confirmations} confirmation(s). Paid, without cooperation."
+            )),
+            SettlementOutcome::Unrecognized => persister.print(format_args!(
+                "Sender inputs were spent by unrecognized transaction {txid} with {confirmations} confirmation(s)."
+            )),
+            other => persister.print(format_args!(
+                "Settled ({other:?}) in {txid} with {confirmations} confirmation(s)."
             )),
         }
+        proposal.close().save(persister)?;
+        Ok(())
+    }
+
+    /// Give up on a posted session that nothing settled by its mailbox
+    /// expiration: cancel it, broadcast the fallback, and close it.
+    fn abandon_unsettled_session(
+        &self,
+        proposal: Receiver<Monitor>,
+        persister: &ReceiverPersister,
+    ) -> Result<()> {
+        let pending = proposal.cancel().save(persister)?;
+        match self.wallet().broadcast_tx(pending.fallback_tx()) {
+            Ok(txid) => persister.print(format_args!(
+                "Nothing settled the session by its mailbox expiration. Broadcasted fallback transaction {txid}."
+            )),
+            // Usually another transaction the wallet cannot see already spends
+            // the fallback's inputs. Closing anyway keeps the session from
+            // retrying a broadcast that cannot succeed.
+            Err(e) => {
+                persister.print(format_args!(
+                    "Nothing settled the session by its mailbox expiration, and the fallback transaction was rejected: {e:#}. Broadcast it manually if its inputs are still unspent:"
+                ));
+                println!("{}", serialize_hex(pending.fallback_tx()));
+            }
+        }
+        pending.close().save(persister)?;
+        Ok(())
+    }
+
+    /// Find the deepest wallet-visible transaction spending the session's
+    /// contested prevouts, with its confirmation count.
+    ///
+    /// Classifies every wallet transaction that paid the session's `address`.
+    /// The fallback pays it, and so does the Payjoin, since the CLI never
+    /// substitutes the receiver's output. A sender re-spend that does not pay
+    /// it is invisible here and is not found.
+    fn find_settlement(
+        &self,
+        proposal: &Receiver<Monitor>,
+        address: &Address,
+    ) -> Result<Option<Settlement>> {
+        let mut deepest: Option<Settlement> = None;
+        for txid in self.wallet().txids_paying(address)? {
+            let Some((tx, confirmations)) = self.wallet().get_wallet_transaction(&txid)? else {
+                continue;
+            };
+            let Some(outcome) = proposal.classify_tx(&tx) else { continue };
+            if deepest.as_ref().is_none_or(|deepest| confirmations > deepest.confirmations) {
+                deepest = Some(Settlement { outcome, txid, confirmations });
+            }
+        }
+        Ok(deepest)
     }
 
     /// Handle error by attempting to send an error response over the directory

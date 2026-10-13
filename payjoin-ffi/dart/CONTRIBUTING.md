@@ -60,30 +60,13 @@ validates the archive with a publish dry run
    nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh /tmp/payjoin-pub
    ```
 
-2. Set the version in `pubspec.yaml` and describe the consumer-visible
-   changes under a matching heading in `CHANGELOG.md`.
-3. Confirm every `Build and Test Dart` job is green on the release commit
-   in `master`.
-4. Tag that commit with `contrib/release/tag.sh` and push the tag it
-   names. The tag is `payjoin-dart-<version>`, where `<version>` is the
-   `pubspec.yaml` version exactly (including the `+` build metadata), as
-   [`contrib/release-version.sh`](contrib/release-version.sh) prints it.
-   tag.sh signs it with your key, which must be in `contrib/release/keys/` for
-   `verify-tag` to accept it, refuses a commit that is not on `master`,
-   and prints the push command.
-
-   ```shell
-   nix develop .#release -c contrib/release/tag.sh dart
-   ```
-
-   The tag reruns the tests and the archive verification at the tagged
-   commit, then `publish-pub` verifies the tag matches `pubspec.yaml`,
-   regenerates the production bindings, and publishes through pub.dev
-   [automated publishing] (OIDC), so no long-lived credential is stored
-   anywhere. The job runs in the `release` environment: approve the paused
-   run before anything reaches the registry.
-
-5. Verify the [pub.dev listing](https://pub.dev/packages/payjoin) shows the
-   new version and its changelog.
-
-[automated publishing]: https://dart.dev/tools/pub/automated-publishing
+2. Follow the [shared bindings release instructions](../RELEASING.md).
+   `pubspec.yaml` carries the common FFI version and the wrapped core
+   metadata, for example `0.25.0+payjoin-1.2.0`. One signed
+   `payjoin-ffi-<version>+payjoin-<core-version>` tag starts all publishers.
+3. Configure pub.dev automated publishing with tag pattern
+   `payjoin-ffi-{{version}}` and environment `release` before the first
+   shared release. Approve the release environment when prompted.
+4. Verify the [pub.dev listing](https://pub.dev/packages/payjoin) shows the
+   new version and changelog. The staged package's native Rust revision
+   must equal the shared tag's commit.

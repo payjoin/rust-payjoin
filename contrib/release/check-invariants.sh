@@ -40,7 +40,8 @@ for crate in $crates; do
         recorded="$(lockfile_version "$REPO_ROOT/$lock" "$crate")"
         [ "$recorded" = "$version" ] || problem "$lock records $crate ${recorded:-<missing>}, expected $version"
     done
-    grep -qxF "## $version" "$REPO_ROOT/$crate/CHANGELOG.md" || problem "$crate/CHANGELOG.md has no ## $version section"
+    grep -qxF -e "## $version" -e "## [$version]" "$REPO_ROOT/$crate/CHANGELOG.md" ||
+        problem "$crate/CHANGELOG.md has no ## $version section"
 done
 
 [ "$status" -eq 0 ] && echo "Release invariants hold for: $crates"

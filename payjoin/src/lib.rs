@@ -11,6 +11,9 @@
 //! Payjoin session persistence support and IO utilities for interacting with OHTTP relays to make
 //! integration plug-and-play.
 //!
+//! Start with [`send::v2`] and [`receive::v2`]. BIP 78 support is in `send::v1` and
+//! `receive::v1` behind the `v1` feature. [payjoin-cli] is a complete example of both.
+//!
 //! Both sender and receiver construct design follow [The Typestate Pattern in Rust](https://cliffle.com/blog/rust-typestate/),
 //! where higher-level [`Sender`] and [`Receiver`] structs are transitioned through
 //! consecutive states which represent a specific step they can be on over the course of a Payjoin
@@ -30,6 +33,7 @@
 //!
 //! [`Sender`]: crate::send::v2::Sender
 //! [`Receiver`]: crate::receive::v2::Receiver
+//! [payjoin-cli]: https://github.com/payjoin/rust-payjoin/tree/master/payjoin-cli
 
 #[cfg(not(any(feature = "directory", feature = "v1", feature = "v2")))]
 compile_error!("At least one of the features ['directory', 'v1', 'v2'] must be enabled");

@@ -7,4 +7,5 @@ export "payjoin.dart"
         RpcClient,
         TestServices,
         initBitcoindSenderReceiver,
+        initBitcoindSenderReceiverTaproot,
         originalPsbt;

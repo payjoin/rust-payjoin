@@ -79,7 +79,7 @@ impl From<Url> for payjoin::Url {
     fn from(value: Url) -> Self { value.0 }
 }
 
-#[derive(Debug, uniffi::Object)]
+#[derive(Clone, Debug, uniffi::Object)]
 pub struct Url(payjoin::Url);
 
 #[uniffi::export]

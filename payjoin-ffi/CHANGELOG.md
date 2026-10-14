@@ -1,3 +1,23 @@
+## Unreleased
+
+### RequestHandler
+
+- Export `RequestHandler` for relay and directory selection with
+  failure tracking, driven by the shared core failover loops
+- Add `RequestHandler::post_via_relay`, posting over a
+  binding-supplied `RelayTransport` (`build`/`post`) with relay
+  failover
+- Add `RequestHandler::fetch_ohttp_keys`, fetching a directory's OHTTP
+  keys over a binding-supplied `OhttpKeysFetcher` with relay and
+  directory failover
+- `RequestHandlerError::NoDirectoriesAvailable` and
+  `RelayPostError::NoRelaysAvailable` carry a `last_error` describing
+  the most recent failed attempt
+- `RequestHandler::set_ohttp_keys` and `set_cert_der` pin configuration
+  on the handler itself, so every reference observes it
+- Failed endpoints are cleared on entry to each failover loop, so a
+  transient outage no longer persists to the next call
+
 ## [0.25.0]
 
 - Publish the Python, JavaScript, C#, and Dart packages from one signed

@@ -29,6 +29,10 @@ landed since the last release, so there is nothing to compile here.
       `cargo +nightly`, so run it where rustup has a nightly toolchain. `nix develop .#release`
       has jq but no rustup; there, pass `--no-lock`, then run `contrib/update-lock-files.sh`
       from a rustup shell and `contrib/release/check-invariants.sh CRATE` again.
+- [ ] For a `payjoin` bump, prepare the common bindings version bump in this PR
+      as well, following the [bindings instructions](../../payjoin-ffi/RELEASING.md).
+      The checker requires the FFI core dependency and binding metadata to agree.
+      Publish the Rust core before pushing the corresponding FFI tag.
 - [ ] Read the new changelog section once; fix wording, do not add history.
 - [ ] One commit, "Bump CRATE version to MAJOR.MINOR+1.0". Open the PR against `master`.
       The `Check release version bump` job runs check-invariants, a publish dry run and,
@@ -51,10 +55,11 @@ changelog line. The bump PR is not edited for it.
 
 #### After a `payjoin` release
 
-- [ ] Open the bindings bump PR (python, javascript, csharp, dart manifests and changelogs;
-      Dart's `native/Cargo.toml` pins the `payjoin-MAJOR.MINOR+1.0` tag commit, never a
-      branch commit). Merge, then run
-      `nix develop .#release -c contrib/release/tag.sh --bindings` and push the tags.
+- [ ] Confirm the prepared bindings bump is merged and follow the
+      [bindings release instructions](../../payjoin-ffi/RELEASING.md). Dart's
+      published native source is pinned automatically to the release checkout.
+      Create one signed tag with
+      `nix develop .#release -c contrib/release/tag.sh payjoin-ffi`, then push it.
 - [ ] Bump dependent release crates (`payjoin-cli`, `payjoin-mailroom`) on their own
       schedule, each with this checklist. Their tags verify that `payjoin` is already on
       crates.io.

@@ -6,26 +6,14 @@ package readme.
 
 ## Versioning
 
-- The package version is set in `Payjoin.csproj` (`<Version>`).
-- It is the package's own semantic version, independent of the
-  `payjoin-ffi` crate version. The language bindings follow a
-  `{version}+payjoin-{version}` convention: the [SemVer] build metadata
-  names the wrapped payjoin core release, so `0.1.0+payjoin-1.0.0`
-  packages payjoin 1.0.0. NuGet accepts build metadata per its
-  [package versioning] guidance but ignores it for version comparison
-  and strips it from the `.nupkg` filename, so the package identity is
-  the bare version.
-- Bump `MAJOR.MINOR.PATCH` for C# API changes, and update the build
-  metadata whenever the wrapped payjoin core version changes.
-- A release that only changes the wrapped payjoin core version still
-  needs at least a patch bump: the package identity ignores the build
-  metadata, and nuget.org rejects republishing an identity that
-  already exists.
-- Versions up to `0.24.0-preview.1` tracked the `payjoin-ffi` crate
-  version instead. They predate this scheme and are unlisted on
-  nuget.org so they do not resolve as the latest version.
-- `Payjoin.csproj` is the only place the version is maintained: the CI smoke
-  test derives the version from the packed artifact.
+All published bindings share the payjoin-ffi version, starting with
+0.25.0. Follow the [shared release instructions](../RELEASING.md) to bump
+versions and publish using one signed FFI tag. Retained build metadata
+identifies the wrapped payjoin core, and registries that omit metadata
+publish the bare FFI version.
+
+NuGet retains the historical `0.24.0-preview.1` release. The common
+`0.25.0` release supersedes it as well as the independent C# sequence.
 
 ## Producing a release candidate
 
@@ -68,7 +56,7 @@ Review before every publish to nuget.org. Grounded in the NuGet
 - [ ] Native assets are release-profile builds without `_test-utils` (the
       pack step's validation target enforces both; confirm it ran in CI).
 - [ ] The package is under nuget.org's 250 MB size limit.
-- [ ] Package version in `Payjoin.csproj` carries the intended C# version
+- [ ] Package version in `Payjoin.csproj` carries the common FFI version
       and its `+payjoin-{version}` build metadata matches the wrapped
       payjoin core release.
 
@@ -108,40 +96,15 @@ Review before every publish to nuget.org. Grounded in the NuGet
 
 ## Publishing
 
-CI is the publish path. A tag push builds, packs, smoke-tests, and pushes the
-package to nuget.org via [trusted publishing] (OIDC) — no long-lived API key
-is ever stored. The workflow is
-[`.github/workflows/csharp.yml`](../../.github/workflows/csharp.yml) (jobs
-`publish-nuget` and `github-release`).
+Follow the [shared release procedure](../RELEASING.md). The
+`payjoin-ffi-<version>+payjoin-<core-version>` tag reruns this language's
+build and smoke checks before publishing through the existing `release`
+environment with OIDC. The package version must match the common FFI
+version, and its core metadata must match the declared core dependency.
 
-1. Work through the release readiness checklist above on the release commit in
-   `master`; confirm every `Build and Test CSharp` job is green.
-2. Tag that commit with `contrib/release/tag.sh` and push the tag it
-   names. The tag is `payjoin-csharp-<version>`, where `<version>` is the
-   `Payjoin.csproj` `<Version>` exactly, build metadata included, as
-   [`contrib/release-version.sh`](contrib/release-version.sh) prints it.
-   NuGet strips the metadata from the `Payjoin.<version>.nupkg` filename,
-   so the publish job strips it from the tag as well before comparing.
-   tag.sh signs it with your key, which must be in `contrib/release/keys/` for
-   `verify-tag` to accept it, refuses a commit that is not on `master`,
-   and prints the push command.
-
-   ```shell
-   nix develop .#release -c contrib/release/tag.sh csharp
-   ```
-
-   The tag reruns the full build/pack/smoke graph at the tagged commit, then
-   `publish-nuget` verifies the tag matches the packed
-   `Payjoin.<version>.nupkg`, attests build provenance, exchanges the GitHub
-   OIDC token for a short-lived nuget.org key via [`NuGet/login`], and pushes.
-   The job runs in the `release` environment: if it has required
-   reviewers, approve the paused run before anything reaches nuget.org.
-
-3. `github-release` attaches the `.nupkg` and a generated `SHA256SUMS` to the
-   tag's GitHub release. Optionally sign `SHA256SUMS` locally and upload
-   `SHA256SUMS.asc` — never place a GPG key on a runner.
-4. Complete the post-publish verification section of the checklist, and verify
-   the attestation:
-   `gh attestation verify Payjoin.<version>.nupkg -R payjoin/rust-payjoin`.
+The GitHub release includes all language packages and
+`SHA256SUMS`. Optional local signatures use
+`SHA256SUMS.asc`. Verify installation from the registry and
+check provenance with `gh attestation verify FILE -R payjoin/rust-payjoin`.
 
 [trusted publishing]: https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing

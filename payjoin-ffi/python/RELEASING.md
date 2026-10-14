@@ -6,21 +6,11 @@ Maintainer documentation for publishing the `payjoin` package to
 
 ## Versioning
 
-- The package version is set in `pyproject.toml` (`project.version`).
-- It is the package's own semantic version, independent of the
-  `payjoin-ffi` crate version. The language bindings follow a
-  `{version}+payjoin-{version}` convention where the build metadata
-  names the wrapped payjoin core release, but PyPI rejects PEP 440
-  local version labels (the `+` part), so the package publishes the
-  bare version. The release tag carries the full version, and the
-  wrapped payjoin core version is also recorded in
-  [`CHANGELOG.md`](CHANGELOG.md).
-- A release that only changes the wrapped payjoin core version still
-  needs at least a patch bump: PyPI sees only the bare version and
-  rejects re-uploading one that already exists.
-- `pyproject.toml` is the only place the version is maintained: the
-  publish job derives the version from the built wheels and refuses to
-  publish if it does not match the pushed tag.
+All published bindings share the payjoin-ffi version, starting with
+0.25.0. Follow the [shared release instructions](../RELEASING.md) to bump
+versions and publish using one signed FFI tag. Retained build metadata
+identifies the wrapped payjoin core, and registries that omit metadata
+publish the bare FFI version.
 
 ## Producing the wheels
 
@@ -41,34 +31,13 @@ CPython satisfying `requires-python` can install them.
 
 ## Publishing
 
-1. Confirm every `Build and Test Python` job is green on the release
-   commit in `master`, including the per-platform smoke tests.
-2. Tag that commit with `contrib/release/tag.sh` and push the tag it
-   names. The tag is `payjoin-python-<version>`, where `<version>` is the
-   `pyproject.toml` version plus `+payjoin-<version>` build metadata
-   naming the wrapped payjoin core release, as
-   [`contrib/release-version.sh`](contrib/release-version.sh) prints it;
-   the publish job strips the metadata before comparing the tag against
-   the built wheels. tag.sh signs it with your key, which must be in `contrib/release/keys/` for
-   `verify-tag` to accept it, refuses a commit that is not on `master`,
-   and prints the push command.
+Follow the [shared release procedure](../RELEASING.md). The
+`payjoin-ffi-<version>+payjoin-<core-version>` tag reruns this language's
+build and smoke checks before publishing through the existing `release`
+environment with OIDC. The package version must match the common FFI
+version, and its core metadata must match the declared core dependency.
 
-   ```shell
-   nix develop .#release -c contrib/release/tag.sh python
-   ```
-
-   The tag reruns the full build/wheel/smoke graph at the tagged commit,
-   then `publish-pypi` verifies the tag matches the built wheels, attests
-   build provenance, and uploads through PyPI
-   [trusted publishing](https://docs.pypi.org/trusted-publishers/) (OIDC)
-   with PEP 740 attestations, so no long-lived token is stored anywhere.
-   The job runs in the `release` environment: approve the paused run before
-   anything reaches the registry.
-
-3. `github-release` attaches the wheels and a generated `SHA256SUMS` to
-   the tag's GitHub release. Optionally sign `SHA256SUMS` locally and
-   upload `SHA256SUMS.asc`.
-4. Verify the publication: the PyPI listing shows the new version,
-   `pip install payjoin==<version>` resolves on a supported platform, and
-   `gh attestation verify <wheel> -R payjoin/rust-payjoin` passes against
-   a release asset.
+The GitHub release includes all language packages and
+`SHA256SUMS`. Optional local signatures use
+`SHA256SUMS.asc`. Verify installation from the registry and
+check provenance with `gh attestation verify FILE -R payjoin/rust-payjoin`.

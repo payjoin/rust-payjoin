@@ -16,6 +16,7 @@ scripts/
 
 # Cargo build output
 native/target/
+native/Cargo.lock
 
 # Local-only test helper re-export
 lib/test_utils.dart

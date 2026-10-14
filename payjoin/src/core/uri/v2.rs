@@ -136,6 +136,13 @@ impl PjParam {
     /// previously seen, as it should not be reused across different sessions.
     pub fn receiver_pubkey(&self) -> &HpkePublicKey { &self.receiver_pubkey }
 
+    /// The payjoin directory server carrying this session's mailboxes.
+    ///
+    /// Useful for excluding the directory itself from relay selection: a
+    /// server serving as both relay and directory rejects the resulting
+    /// self-loop request.
+    pub fn directory(&self) -> &Url { &self.directory }
+
     pub(crate) fn ohttp_keys(&self) -> &OhttpKeys { &self.ohttp_keys }
 
     pub(crate) fn expiration(&self) -> Time { self.expiration }

@@ -4,8 +4,29 @@
 
 ### URL Selection
 
-- Add `payjoin::selector::UrlSelector`, reusable OHTTP relay and payjoin directory selection primitives (uniform-random over non-failed URLs; callers mark failures to fail over), so integrators share one selection policy instead of each diverging
-- Add `payjoin::request_handler::RequestHandler`, which owns relay and directory selection (uniform-random over non-failed URLs, via an internal `UrlSelector` so integrators share one selection policy instead of each diverging), tracks failed endpoints, and — with the `io` feature — fetches OHTTP keys with automatic failover (relay failures retry over another relay, directory failures move on to another directory), absorbing the failover loops integrators previously hand-rolled. Selection and failure tracking stay internal to the handler and in-memory per `RequestHandler`. The `io` feature is opt-in: integrators with their own transport drive the same failover without it, while those who enable it get key fetching and failover for free. Routing all selection through one internal path leaves room for topology-aware ordering (for example AS-aware relay selection) to be added later without forking the API
+- Add `payjoin::request_handler::RequestHandler`, which owns relay and
+  directory selection, tracks failed endpoints, and fails over to
+  another URL on error. With the `io` feature it also fetches OHTTP
+  keys
+- Add `RequestHandler::post_via_relay` to post a request over a
+  caller-supplied `RelayTransport`, failing over to another relay on
+  transport error. Takes only `v2`, not `io`
+- Add `RequestHandler::fetch_ohttp_keys_with`, the transport-generic
+  form of the OHTTP key fetch, parameterized over the new
+  `DirectoryFatal` trait
+- `RequestHandler` takes `&self` and no longer implements `Clone`, so
+  it can be shared across tasks via `Arc` and concurrent relay posts
+  do not serialize
+- `PostError::NoRelaysAvailable` carries a `last_error` describing the
+  most recent transport failure
+- Relay and directory selection skip the session directory, which a
+  server serving as both relay and directory would reject as a
+  self-loop. `post_via_relay` takes the directory for this reason;
+  `Sender::directory`, `Receiver::directory`, and `PjParam::directory`
+  expose it
+- Failed endpoints are cleared on entry to each failover loop, so a
+  transient outage no longer retires every relay until the handler is
+  dropped
 
 ## 1.2.0
 

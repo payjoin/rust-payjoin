@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### URL Selection
+
+- Add `payjoin::selector::UrlSelector`, reusable OHTTP relay and payjoin directory selection primitives (uniform-random over non-failed URLs; callers mark failures to fail over), so integrators share one selection policy instead of each diverging
+- Add `payjoin::request_handler::RequestHandler`, which owns relay and directory selection (uniform-random over non-failed URLs, via an internal `UrlSelector` so integrators share one selection policy instead of each diverging), tracks failed endpoints, and — with the `io` feature — fetches OHTTP keys with automatic failover (relay failures retry over another relay, directory failures move on to another directory), absorbing the failover loops integrators previously hand-rolled. Selection and failure tracking stay internal to the handler and in-memory per `RequestHandler`. The `io` feature is opt-in: integrators with their own transport drive the same failover without it, while those who enable it get key fetching and failover for free. Routing all selection through one internal path leaves room for topology-aware ordering (for example AS-aware relay selection) to be added later without forking the API
+
 ## 1.2.0
 
 This release adds a non-blocking interface to the receiver state machine.

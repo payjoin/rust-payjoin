@@ -29,10 +29,6 @@ landed since the last release, so there is nothing to compile here.
       `cargo +nightly`, so run it where rustup has a nightly toolchain. `nix develop .#release`
       has jq but no rustup; there, pass `--no-lock`, then run `contrib/update-lock-files.sh`
       from a rustup shell and `contrib/release/check-invariants.sh CRATE` again.
-- [ ] For a `payjoin` bump, prepare the common bindings version bump in this PR
-      as well, following the [bindings instructions](../../payjoin-ffi/RELEASING.md).
-      The checker requires the FFI core dependency and binding metadata to agree.
-      Publish the Rust core before pushing the corresponding FFI tag.
 - [ ] Read the new changelog section once; fix wording, do not add history.
 - [ ] One commit, "Bump CRATE version to MAJOR.MINOR+1.0". Open the PR against `master`.
       The `Check release version bump` job runs check-invariants, a publish dry run and,

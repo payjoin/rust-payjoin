@@ -32,16 +32,12 @@ Maintainer instructions for publishing to
 
 ### Versioning
 
-Versions take the form `<package version>+payjoin-<crate version>`, for
-example `0.2.1+payjoin-1.0.0-rc.8`. The part before the `+` is the package's
-own semantic version, and is what consumers write version constraints
-against. The build metadata after it records which `payjoin` release the
-bindings wrap, so the pub.dev listing names the supported protocol version
-without a changelog lookup.
-
-Bump the package version for changes to the Dart API or to packaging. Update
-the build metadata whenever the wrapped `payjoin` release changes, which is a
-patch bump at minimum, since the same Dart API gets new behavior.
+Starting with 0.25.0, `pubspec.yaml` carries the common `payjoin-ffi`
+version shared by every published binding. The wrapped `payjoin` release
+is named in the changelog entry rather than in the version, so a release
+that only changes the wrapped core still bumps the common version.
+Earlier versions carried it as build metadata, for example
+`0.2.1+payjoin-1.0.0-rc.8`.
 
 ### Publishing
 
@@ -61,9 +57,8 @@ validates the archive with a publish dry run
    ```
 
 2. Follow the [shared bindings release instructions](../RELEASING.md).
-   `pubspec.yaml` carries the common FFI version and the wrapped core
-   metadata, for example `0.25.0+payjoin-1.2.0`. One signed
-   `payjoin-ffi-<version>+payjoin-<core-version>` tag starts all publishers.
+   `pubspec.yaml` carries the common FFI version, for example `0.25.0`.
+   One signed `payjoin-ffi-<version>` tag starts all publishers.
 3. Configure pub.dev automated publishing with tag pattern
    `payjoin-ffi-{{version}}` and environment `release` before the first
    shared release. Approve the release environment when prompted.

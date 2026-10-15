@@ -8,9 +8,8 @@ package readme.
 
 All published bindings share the payjoin-ffi version, starting with
 0.25.0. Follow the [shared release instructions](../RELEASING.md) to bump
-versions and publish using one signed FFI tag. Retained build metadata
-identifies the wrapped payjoin core, and registries that omit metadata
-publish the bare FFI version.
+versions and publish using one signed FFI tag. The changelog entry names
+the wrapped payjoin core.
 
 NuGet retains the historical `0.24.0-preview.1` release. The common
 `0.25.0` release supersedes it as well as the independent C# sequence.
@@ -56,9 +55,8 @@ Review before every publish to nuget.org. Grounded in the NuGet
 - [ ] Native assets are release-profile builds without `_test-utils` (the
       pack step's validation target enforces both; confirm it ran in CI).
 - [ ] The package is under nuget.org's 250 MB size limit.
-- [ ] Package version in `Payjoin.csproj` carries the common FFI version
-      and its `+payjoin-{version}` build metadata matches the wrapped
-      payjoin core release.
+- [ ] Package version in `Payjoin.csproj` is the common FFI version, and
+      the changelog entry for it names the wrapped payjoin core release.
 
 ### Metadata and trust
 
@@ -97,10 +95,9 @@ Review before every publish to nuget.org. Grounded in the NuGet
 ## Publishing
 
 Follow the [shared release procedure](../RELEASING.md). The
-`payjoin-ffi-<version>+payjoin-<core-version>` tag reruns this language's
-build and smoke checks before publishing through the existing `release`
-environment with OIDC. The package version must match the common FFI
-version, and its core metadata must match the declared core dependency.
+`payjoin-ffi-<version>` tag reruns this language's build and smoke checks
+before publishing through the existing `release` environment with OIDC.
+The package version must match the common FFI version.
 
 The GitHub release includes all language packages and
 `SHA256SUMS`. Optional local signatures use

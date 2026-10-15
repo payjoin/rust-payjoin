@@ -2,16 +2,14 @@
 
 Follow the [shared bindings release instructions](../RELEASING.md) for
 version bumps, registry configuration, and tagging. One
-`payjoin-ffi-<version>+payjoin-<core-version>` tag releases every
-binding.
+`payjoin-ffi-<version>` tag releases every binding.
 
 ## Versioning
 
-Starting with 0.25.0, `package.json` uses the common FFI version. Its
-`releaseTag` field appends the wrapped payjoin core as build metadata.
-Keep both version entries in `package-lock.json` synchronized. npm
-publishes the bare version, so changing only metadata requires another
-common version bump.
+Starting with 0.25.0, `package.json` uses the common FFI version. Keep
+both version entries in `package-lock.json` synchronized. The wrapped
+payjoin core is named in the changelog entry, not in the version, so a
+release that only changes the core still bumps the common version.
 
 ## Package checks
 

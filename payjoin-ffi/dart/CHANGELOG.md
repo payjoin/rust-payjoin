@@ -1,4 +1,4 @@
-## [0.25.0+payjoin-1.2.0]
+## [0.25.0]
 
 - Version aligned with payjoin-ffi 0.25.0. Releases now share one tag
   and the [payjoin-ffi changelog](../CHANGELOG.md). No API changes since

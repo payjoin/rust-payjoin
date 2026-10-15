@@ -25,13 +25,27 @@ it, and `payjoin-ffi/Cargo.toml` requires exactly that version. Every
 release bumps the version, including one that only changes the wrapped
 core.
 
-A bump PR changes all five manifests, both Cargo lockfiles
-(`contrib/update-lock-files.sh`), `python/uv.lock`,
-`javascript/package-lock.json`, and the changelogs.
+Prepare the bump PR with:
+
+```shell
+nix develop .#release -c contrib/release/bump.sh --no-lock payjoin-ffi X.Y.Z
+```
+
+It sets the version in `payjoin-ffi/Cargo.toml`, the four package
+manifests, `python/uv.lock` and `javascript/package-lock.json`, renames
+`## Unreleased` in `payjoin-ffi/CHANGELOG.md` to the version with a fresh
+empty `## Unreleased` above it and a first entry naming the wrapped
+`payjoin` release, and opens a section in each language changelog with a
+stock entry pointing at it. The lock file step calls
+`cargo +nightly`, which the release shell lacks, so pass `--no-lock`
+there, then run `contrib/update-lock-files.sh` from a rustup shell and
+`contrib/release/check-invariants.sh payjoin-ffi` again.
+
 `payjoin-ffi/CHANGELOG.md` is the canonical changelog and becomes the
-GitHub release body. The language changelogs record only language-specific
-changes and link to it; pub.dev displays Dart's. Check the manifests agree
-with:
+GitHub release body; pull requests write to its `## Unreleased` section
+as they do for the release crates. The language changelogs record only
+language-specific changes and link to it; pub.dev displays Dart's. Check
+the manifests agree with:
 
 ```shell
 nix develop .#release -c contrib/release/bindings-version.sh

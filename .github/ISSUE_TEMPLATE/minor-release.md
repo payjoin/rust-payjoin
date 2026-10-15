@@ -51,10 +51,12 @@ changelog line. The bump PR is not edited for it.
 
 #### After a `payjoin` release
 
-- [ ] Confirm the prepared bindings bump is merged and follow the
+- [ ] Prepare the bindings bump with `contrib/release/bump.sh payjoin-ffi X.Y.Z`,
+      which also sets the language package manifests, their lock files and
+      changelogs, and follow the
       [bindings release instructions](../../payjoin-ffi/RELEASING.md). Dart's
       published native source is pinned automatically to the release checkout.
-      Create one signed tag with
+      Once merged, create one signed tag with
       `nix develop .#release -c contrib/release/tag.sh payjoin-ffi`, then push it.
 - [ ] Bump dependent release crates (`payjoin-cli`, `payjoin-mailroom`) on their own
       schedule, each with this checklist. Their tags verify that `payjoin` is already on

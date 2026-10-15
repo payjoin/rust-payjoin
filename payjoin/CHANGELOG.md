@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### URL Selection
+
+- Add `payjoin::request_handler::RequestHandler`, which owns relay and
+  directory selection, tracks failed endpoints, and fails over to
+  another URL on error. With the `io` feature it also fetches OHTTP
+  keys
+- Add `RequestHandler::post_via_relay` to post a request over a
+  caller-supplied `RelayTransport`, failing over to another relay on
+  transport error. Takes only `v2`, not `io`
+- Add `RequestHandler::fetch_ohttp_keys_with`, the transport-generic
+  form of the OHTTP key fetch, parameterized over the new
+  `DirectoryFatal` trait
+- `RequestHandler` takes `&self` and no longer implements `Clone`, so
+  it can be shared across tasks via `Arc` and concurrent relay posts
+  do not serialize
+- `PostError::NoRelaysAvailable` carries a `last_error` describing the
+  most recent transport failure
+- Relay and directory selection skip the session directory, which a
+  server serving as both relay and directory would reject as a
+  self-loop. `post_via_relay` takes the directory for this reason;
+  `Sender::directory`, `Receiver::directory`, and `PjParam::directory`
+  expose it
+- Failed endpoints are cleared on entry to each failover loop, so a
+  transient outage no longer retires every relay until the handler is
+  dropped
+
 ## 1.2.0
 
 This release adds a non-blocking interface to the receiver state machine.

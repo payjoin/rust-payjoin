@@ -442,6 +442,16 @@ impl<State> core::ops::DerefMut for Receiver<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
+impl<State> Receiver<State> {
+    /// The payjoin directory carrying this session.
+    ///
+    /// Pass this as the exclusion target to
+    /// [`crate::request_handler::RequestHandler::post_via_relay`]: a server
+    /// serving as both relay and directory rejects the resulting self-loop
+    /// request.
+    pub fn directory(&self) -> &Url { &self.session_context.directory }
+}
+
 /// The fallback transaction for cancelled or failed receiver session.
 ///
 /// See [`Receiver<PendingFallback>`] for further documentation.

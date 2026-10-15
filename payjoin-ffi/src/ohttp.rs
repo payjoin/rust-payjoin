@@ -40,3 +40,12 @@ impl From<&ClientResponse> for payjoin::OhttpResponse {
 impl From<payjoin::OhttpResponse> for ClientResponse {
     fn from(value: payjoin::OhttpResponse) -> Self { Self(Mutex::new(Some(value))) }
 }
+
+#[cfg(all(test, feature = "_test-utils"))]
+impl ClientResponse {
+    /// A placeholder context for tests that never process a response.
+    ///
+    /// Consuming it panics like any other context that has already been moved
+    /// out of memory, so it must only be used where the response is discarded.
+    pub(crate) fn dangling() -> Self { Self(Mutex::new(None)) }
+}

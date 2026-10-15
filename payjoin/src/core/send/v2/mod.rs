@@ -256,6 +256,14 @@ impl<State> core::ops::DerefMut for Sender<State> {
 impl<State> Sender<State> {
     /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> String { self.session_context.pj_param.endpoint().to_string() }
+
+    /// The payjoin directory carrying this session.
+    ///
+    /// Pass this as the exclusion target to
+    /// [`crate::request_handler::RequestHandler::post_via_relay`]: a server
+    /// serving as both relay and directory rejects the resulting self-loop
+    /// request.
+    pub fn directory(&self) -> &Url { self.session_context.pj_param.directory() }
 }
 
 impl<S: State> Sender<S> {

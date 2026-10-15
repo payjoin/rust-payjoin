@@ -19,6 +19,10 @@ pub use into_url::{Error as IntoUrlError, IntoUrl};
 pub(crate) mod url;
 pub use url::{ParseError as UrlParseError, Url};
 #[cfg(feature = "v2")]
+pub mod request_handler;
+#[cfg(feature = "v2")]
+pub(crate) mod selector;
+#[cfg(feature = "v2")]
 pub mod time;
 pub mod uri;
 pub use uri::{PjParam, PjParseError, PjUri, Uri, UriParseError};

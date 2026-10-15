@@ -13,6 +13,7 @@ use payjoin::receive::v2::{
     ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload,
     WantsFeeRange, WantsInputs, WantsOutputs,
 };
+use payjoin::request_handler::{PostError, RelayPost, RequestExpiry};
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, PendingFallback as SenderPendingFallback,
     PollingForProposal, SendSession, Sender, SenderBuilder, SessionOutcome as SenderSessionOutcome,
@@ -39,30 +40,6 @@ const W_STATUS: usize = 15;
 /// Delay before retrying a transiently failed state transition, so a
 /// misbehaving directory or relay is not hammered in a tight loop.
 const TRANSIENT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// A request-construction error that can report whether it was caused by
-/// session expiry. Implemented by the sender/receiver request-building error
-/// types so `post_via_relay` can hand expiry back to the caller (which owns the
-/// typestate needed to react) instead of flattening it into `anyhow::Error`.
-trait RequestExpiry {
-    fn expired(&self) -> bool;
-}
-
-impl RequestExpiry for payjoin::send::v2::CreateRequestError {
-    fn expired(&self) -> bool { self.is_expired() }
-}
-
-impl RequestExpiry for payjoin::receive::v2::CreateRequestError {
-    fn expired(&self) -> bool { self.is_expired() }
-}
-
-/// Outcome of building and posting a request via `post_via_relay`. HTTP
-/// failures are retried against other relays inside the helper; only session
-/// expiry and fatal build errors escape to the caller.
-enum RelayPost<T> {
-    Posted(reqwest::Response, T),
-    Expired,
-}
 
 #[derive(Clone)]
 pub(crate) struct App {
@@ -197,7 +174,7 @@ impl<Status: StatusText> fmt::Display for SessionHistoryRow<Status> {
 impl AppTrait for App {
     async fn new(config: Config) -> Result<Self> {
         let db = Arc::new(Database::create(&config.db_path)?);
-        let mailroom_manager = MailroomManager::new(config.clone());
+        let mailroom_manager = MailroomManager::new(config.clone())?;
         let (interrupt_tx, interrupt_rx) = watch::channel(());
         tokio::spawn(handle_interrupt(interrupt_tx));
         let wallet = BitcoindWallet::new(&config.bitcoind).await?;
@@ -327,22 +304,7 @@ impl AppTrait for App {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let persister = ReceiverPersister::new(self.db.clone())?;
-        let (directory, ohttp_keys) = loop {
-            let directory = self.mailroom_manager.choose_directory()?;
-            match self
-                .mailroom_manager
-                .unwrap_ohttp_keys_or_else_fetch_from_directory(&directory)
-                .await
-            {
-                Ok(keys) => break (directory, keys.ohttp_keys),
-                Err(e) => {
-                    tracing::debug!("Directory {directory} failed: {e:#}");
-                    self.mailroom_manager.add_failed_directory(directory);
-                    self.mailroom_manager.clear_failed_relays();
-                    continue;
-                }
-            }
-        };
+        let (directory, ohttp_keys) = self.mailroom_manager.fetch_ohttp_keys().await?;
         let mut receiver_builder =
             ReceiverBuilder::new(address, directory.as_str(), ohttp_keys)?.with_amount(amount);
         if let Some(max_fee_rate) = self.config.max_fee_rate {
@@ -871,14 +833,18 @@ impl App {
         sender: Sender<WithReplyKey>,
         persister: &SenderPersister,
     ) -> Result<SendSession> {
-        let (response, ctx) =
-            match self.post_via_relay(|relay| sender.create_v2_post_request(relay)).await? {
-                RelayPost::Posted(resp, ctx) => (resp, ctx),
-                RelayPost::Expired => {
-                    self.cancel_sender_session(persister.session_id(), true)?;
-                    return Ok(SendSession::Closed(SenderSessionOutcome::Aborted));
-                }
-            };
+        let (response, ctx) = match self
+            .post_via_relay(sender.directory(), |relay| {
+                sender.create_v2_post_request(relay.as_str())
+            })
+            .await?
+        {
+            RelayPost::Posted(resp, ctx) => (resp, ctx),
+            RelayPost::Expired => {
+                self.cancel_sender_session(persister.session_id(), true)?;
+                return Ok(SendSession::Closed(SenderSessionOutcome::Aborted));
+            }
+        };
         match sender.process_response(&response.bytes().await?, ctx).save(persister) {
             Ok(sender) => {
                 persister.print("Posted Original PSBT...");
@@ -899,14 +865,16 @@ impl App {
         sender: Sender<PollingForProposal>,
         persister: &SenderPersister,
     ) -> Result<SendSession> {
-        let (response, ctx) =
-            match self.post_via_relay(|relay| sender.create_poll_request(relay)).await? {
-                RelayPost::Posted(resp, ctx) => (resp, ctx),
-                RelayPost::Expired => {
-                    self.cancel_sender_session(persister.session_id(), true)?;
-                    return Ok(SendSession::Closed(SenderSessionOutcome::Aborted));
-                }
-            };
+        let (response, ctx) = match self
+            .post_via_relay(sender.directory(), |relay| sender.create_poll_request(relay.as_str()))
+            .await?
+        {
+            RelayPost::Posted(resp, ctx) => (resp, ctx),
+            RelayPost::Expired => {
+                self.cancel_sender_session(persister.session_id(), true)?;
+                return Ok(SendSession::Closed(SenderSessionOutcome::Aborted));
+            }
+        };
         let res = sender.clone().process_response(&response.bytes().await?, ctx).save(persister);
         match res {
             Ok(OptionalTransitionOutcome::Progress(psbt)) => {
@@ -987,14 +955,18 @@ impl App {
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
         persister.print("Polling receive request...");
-        let (ohttp_response, context) =
-            match self.post_via_relay(|relay| session.create_poll_request(relay)).await? {
-                RelayPost::Posted(resp, ctx) => (resp, ctx),
-                RelayPost::Expired => {
-                    self.cancel_receiver_session(persister.session_id(), true)?;
-                    return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
-                }
-            };
+        let (ohttp_response, context) = match self
+            .post_via_relay(session.directory(), |relay| {
+                session.create_poll_request(relay.as_str())
+            })
+            .await?
+        {
+            RelayPost::Posted(resp, ctx) => (resp, ctx),
+            RelayPost::Expired => {
+                self.cancel_receiver_session(persister.session_id(), true)?;
+                return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
+            }
+        };
         let state_transition = session
             .process_response(ohttp_response.bytes().await?.to_vec().as_slice(), context)
             .save(persister);
@@ -1138,14 +1110,18 @@ impl App {
         proposal: Receiver<PayjoinProposal>,
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
-        let (res, ohttp_ctx) =
-            match self.post_via_relay(|relay| proposal.create_post_request(relay)).await? {
-                RelayPost::Posted(resp, ctx) => (resp, ctx),
-                RelayPost::Expired => {
-                    self.cancel_receiver_session(persister.session_id(), true)?;
-                    return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
-                }
-            };
+        let (res, ohttp_ctx) = match self
+            .post_via_relay(proposal.directory(), |relay| {
+                proposal.create_post_request(relay.as_str())
+            })
+            .await?
+        {
+            RelayPost::Posted(resp, ctx) => (resp, ctx),
+            RelayPost::Expired => {
+                self.cancel_receiver_session(persister.session_id(), true)?;
+                return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
+            }
+        };
         let payjoin_psbt = proposal.psbt().clone();
         match proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister) {
             Ok(session) => {
@@ -1228,14 +1204,18 @@ impl App {
         session: Receiver<HasReplyableError>,
         persister: &ReceiverPersister,
     ) -> Result<ReceiveSession> {
-        let (err_response, err_ctx) =
-            match self.post_via_relay(|relay| session.create_error_request(relay)).await? {
-                RelayPost::Posted(resp, ctx) => (resp, ctx),
-                RelayPost::Expired => {
-                    self.cancel_receiver_session(persister.session_id(), true)?;
-                    return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
-                }
-            };
+        let (err_response, err_ctx) = match self
+            .post_via_relay(session.directory(), |relay| {
+                session.create_error_request(relay.as_str())
+            })
+            .await?
+        {
+            RelayPost::Posted(resp, ctx) => (resp, ctx),
+            RelayPost::Expired => {
+                self.cancel_receiver_session(persister.session_id(), true)?;
+                return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
+            }
+        };
         let err_bytes = match err_response.bytes().await {
             Ok(bytes) => bytes,
             Err(e) => return Err(anyhow!("Failed to get error response bytes: {}", e)),
@@ -1285,25 +1265,21 @@ impl App {
             .context("HTTP request failed")
     }
 
-    async fn post_via_relay<F, T, E>(&self, mut build: F) -> Result<RelayPost<T>>
+    async fn post_via_relay<F, T, E>(
+        &self,
+        directory: &payjoin::Url,
+        build: F,
+    ) -> Result<RelayPost<reqwest::Response, T>>
     where
-        F: FnMut(&str) -> std::result::Result<(payjoin::Request, T), E>,
+        F: FnMut(&payjoin::Url) -> std::result::Result<(payjoin::Request, T), E>,
         E: RequestExpiry + Into<anyhow::Error>,
     {
-        loop {
-            let relay = self.mailroom_manager.choose_relay()?;
-            let (req, ctx) = match build(relay.as_str()) {
-                Ok(r) => r,
-                Err(e) if e.expired() => return Ok(RelayPost::Expired),
-                Err(e) => return Err(e.into()),
-            };
-            match self.post_request(req).await {
-                Ok(resp) => return Ok(RelayPost::Posted(resp, ctx)),
-                Err(e) => {
-                    tracing::debug!("Request to relay {relay} failed: {e:?}");
-                    self.mailroom_manager.add_failed_relay(relay);
-                }
-            }
+        let post = |req: payjoin::Request| async move { self.post_request(req).await };
+        match self.mailroom_manager.post_via_relay(directory, build, post).await {
+            Ok(RelayPost::Posted(resp, ctx)) => Ok(RelayPost::Posted(resp, ctx)),
+            Ok(RelayPost::Expired) => Ok(RelayPost::Expired),
+            Err(PostError::NoRelaysAvailable { .. }) => Err(anyhow!("No valid relays available")),
+            Err(PostError::Build(e)) => Err(e.into()),
         }
     }
 }

@@ -5,6 +5,9 @@
 - Fix panic when spending taproot UTXOs. They are now contributed as key-path
   spends with an assumed default input weight.
 - Any unsupported coin is simply skipped instead of crashing the cli.
+- Replace the CLI's relay/directory bookkeeping and failover loops with
+  `payjoin::RequestHandler`, shared behind an `Arc` so concurrent sessions
+  no longer serialize their relay posts
 
 ## 1.0.0
 

@@ -1,38 +1,51 @@
 # Releasing the language bindings
 
 Python, JavaScript, C#, and Dart share the `payjoin-ffi` version and are
-released together from one signed tag,
-`payjoin-ffi-<version>+payjoin-<core>`, where `<core>` is the wrapped
-`payjoin` release. The first shared release is
-`payjoin-ffi-0.25.0+payjoin-1.2.0`. Kotlin has no published package yet;
-the tag only runs its checks. The `payjoin-ffi` crate itself is not
-published to crates.io.
+released together from one signed tag, `payjoin-ffi-<version>`. The
+first shared release is `payjoin-ffi-0.25.0`. Kotlin has no published
+package yet; the tag only runs its checks. The `payjoin-ffi` crate itself
+is not published to crates.io.
 
 ## Versions
 
 `payjoin-ffi/Cargo.toml` holds the shared version. Each package manifest
-repeats it in the form its registry accepts:
+repeats it:
 
-| Manifest                  | Carries                                       |
-| ------------------------- | --------------------------------------------- |
-| `python/pyproject.toml`   | bare version, PEP 440 spelling                |
-| `javascript/package.json` | bare `version`, full version in `releaseTag`  |
-| `dart/pubspec.yaml`       | full version                                  |
-| `csharp/Payjoin.csproj`   | full version (NuGet drops the metadata again) |
+| Manifest                  | Carries                   |
+| ------------------------- | ------------------------- |
+| `python/pyproject.toml`   | version, PEP 440 spelling |
+| `javascript/package.json` | `version`                 |
+| `dart/pubspec.yaml`       | `version`                 |
+| `csharp/Payjoin.csproj`   | `Version`                 |
 
 Pre-releases are `-rc.N` only; Python spells `0.26.0-rc.1` as `0.26.0rc1`,
-and npm publishes pre-releases to the `next` dist-tag. Every release bumps
-the version, including one that only changes the wrapped core, because
-PyPI, npm, and NuGet ignore the build metadata when deciding whether a
-version already exists.
+and npm publishes pre-releases to the `next` dist-tag. The wrapped
+`payjoin` release is not part of the version; the changelog entry names
+it, and `payjoin-ffi/Cargo.toml` requires exactly that version. Every
+release bumps the version, including one that only changes the wrapped
+core.
 
-A bump PR changes all five manifests, both Cargo lockfiles
-(`contrib/update-lock-files.sh`), `python/uv.lock`,
-`javascript/package-lock.json`, and the changelogs.
+Prepare the bump PR with:
+
+```shell
+nix develop .#release -c contrib/release/bump.sh --no-lock payjoin-ffi X.Y.Z
+```
+
+It sets the version in `payjoin-ffi/Cargo.toml`, the four package
+manifests, `python/uv.lock` and `javascript/package-lock.json`, renames
+`## Unreleased` in `payjoin-ffi/CHANGELOG.md` to the version with a fresh
+empty `## Unreleased` above it and a first entry naming the wrapped
+`payjoin` release, and opens a section in each language changelog with a
+stock entry pointing at it. The lock file step calls
+`cargo +nightly`, which the release shell lacks, so pass `--no-lock`
+there, then run `contrib/update-lock-files.sh` from a rustup shell and
+`contrib/release/check-invariants.sh payjoin-ffi` again.
+
 `payjoin-ffi/CHANGELOG.md` is the canonical changelog and becomes the
-GitHub release body. The language changelogs record only language-specific
-changes and link to it; pub.dev displays Dart's. Check the manifests agree
-with:
+GitHub release body; pull requests write to its `## Unreleased` section
+as they do for the release crates. The language changelogs record only
+language-specific changes and link to it; pub.dev displays Dart's. Check
+the manifests agree with:
 
 ```shell
 nix develop .#release -c contrib/release/bindings-version.sh

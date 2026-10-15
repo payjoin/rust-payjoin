@@ -1,10 +1,10 @@
 name: Release language bindings
 
-# Pushing a signed `payjoin-ffi-<version>+payjoin-<core>` tag verifies the
-# tag and the shared binding version, runs every language's build, package
-# and smoke checks at that commit, then publishes Python, JavaScript, C#,
-# and Dart through the `release` environment (required reviewer) with
-# keyless OIDC and cuts one GitHub release holding every package.
+# Pushing a signed `payjoin-ffi-<version>` tag verifies the tag and the
+# shared binding version, runs every language's build, package and smoke
+# checks at that commit, then publishes Python, JavaScript, C#, and Dart
+# through the `release` environment (required reviewer) with keyless OIDC
+# and cuts one GitHub release holding every package.
 #
 # Each registry has its own publish job. All four wait on every language
 # build, so they reach the environment gate together and one approval
@@ -55,17 +55,13 @@ jobs:
           source contrib/release/crates.sh
           {
             echo "version=$version"
-            # A hyphen in the version proper marks a pre-release; the
-            # +payjoin-<core> build metadata never does.
-            is_prerelease "${version%%+*}" && echo "prerelease=true" || echo "prerelease=false"
+            is_prerelease "$version" && echo "prerelease=true" || echo "prerelease=false"
           } >>"$GITHUB_OUTPUT"
       - name: Verify the wrapped payjoin core is on crates.io
-        env:
-          VERSION: ${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
           source contrib/release/crates.sh
-          core="${VERSION##*+payjoin-}"
+          core="$(nix --quiet develop .#release -c bash -c 'source contrib/release/crates.sh && manifest_version payjoin')"
           # Dart consumers build the bindings from source against it.
           crate_published payjoin "$core" || {
             echo "::error::payjoin $core is not on crates.io; publish it before the bindings"
@@ -297,7 +293,7 @@ jobs:
         run: |
           {
             echo "body<<CHANGELOG_EOF"
-            ./contrib/release/extract-changelog.sh payjoin-ffi "${VERSION%%+*}"
+            ./contrib/release/extract-changelog.sh payjoin-ffi "$VERSION"
             echo "CHANGELOG_EOF"
           } >>"$GITHUB_OUTPUT"
       - name: Create release

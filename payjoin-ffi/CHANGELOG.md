@@ -1,9 +1,21 @@
+## Unreleased
+
 ## [0.25.0]
 
 - Publish the Python, JavaScript, C#, and Dart packages from one signed
   `payjoin-ffi` tag at this common version. Each package jumps from its
   own sequence (Python and JavaScript 0.3.0, C# 0.2.0, Dart
-  0.3.0+payjoin-1.2.0) with no API changes.
+  0.3.0+payjoin-1.2.0); the version jump itself changes no API.
+- Add typed `InputPair` constructors so bindings can contribute inputs
+  without building the `TxIn` and PSBT input by hand: `new_p2wpkh`,
+  `new_p2tr_keyspend` and `new_p2tr_scriptpath_spend`, `new_p2wsh` for
+  witness script spends such as multisig, and `new_p2pkh`, which takes
+  the consensus encoded funding transaction. The key path and P2WPKH
+  constructors supply the expected input weight; the script spends
+  still take it from the caller.
+- Add `InputPairError::InvalidTransaction` for a funding transaction
+  that does not decode. Bindings that match exhaustively on
+  `InputPairError` need to handle the new variant.
 - Wraps payjoin 1.2.0, unchanged.
 
 ## [0.24.0]

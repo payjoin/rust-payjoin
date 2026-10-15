@@ -8,9 +8,8 @@ Maintainer documentation for publishing the `payjoin` package to
 
 All published bindings share the payjoin-ffi version, starting with
 0.25.0. Follow the [shared release instructions](../RELEASING.md) to bump
-versions and publish using one signed FFI tag. Retained build metadata
-identifies the wrapped payjoin core, and registries that omit metadata
-publish the bare FFI version.
+versions and publish using one signed FFI tag. The changelog entry names
+the wrapped payjoin core.
 
 ## Producing the wheels
 
@@ -32,10 +31,9 @@ CPython satisfying `requires-python` can install them.
 ## Publishing
 
 Follow the [shared release procedure](../RELEASING.md). The
-`payjoin-ffi-<version>+payjoin-<core-version>` tag reruns this language's
-build and smoke checks before publishing through the existing `release`
-environment with OIDC. The package version must match the common FFI
-version, and its core metadata must match the declared core dependency.
+`payjoin-ffi-<version>` tag reruns this language's build and smoke checks
+before publishing through the existing `release` environment with OIDC.
+The package version must match the common FFI version.
 
 The GitHub release includes all language packages and
 `SHA256SUMS`. Optional local signatures use

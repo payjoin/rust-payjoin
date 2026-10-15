@@ -1,8 +1,9 @@
 ## [0.25.0]
 
 - Version aligned with payjoin-ffi 0.25.0. Releases now share one tag
-  and the [payjoin-ffi changelog](../CHANGELOG.md). No API changes since
-  0.3.0.
+  and the [payjoin-ffi changelog](../CHANGELOG.md), which lists the
+  `InputPair` constructors added since 0.3.0; the version jump
+  itself changes no API.
 
 ## [0.3.0]
 

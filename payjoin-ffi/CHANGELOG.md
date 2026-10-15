@@ -1,5 +1,9 @@
 ## Unreleased
 
+## [1.0.0-rc.0]
+
+- Wraps payjoin 1.2.0
+
 ## [0.25.0]
 
 - Publish the Python, JavaScript, C#, and Dart packages from one signed

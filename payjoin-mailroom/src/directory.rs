@@ -20,8 +20,19 @@ pub const BHTTP_REQ_BYTES: usize =
     ENCAPSULATED_MESSAGE_BYTES - (CHACHA20_POLY1305_NONCE_LEN + POLY1305_TAG_SIZE);
 const V1_MAX_BUFFER_SIZE: usize = 65536;
 
+/// bhttp framing around a mailbox payload in the gateway's `200` response:
+/// framing indicator (1), status code (2), empty header section (1),
+/// content length (2, as payloads stay below 16384 bytes) and empty
+/// trailer section (1).
+const BHTTP_RES_FRAMING_BYTES: usize = 1 + 2 + 1 + 2 + 1;
+
+/// The largest mailbox payload the gateway can hand back. Every gateway
+/// response is padded to exactly [`BHTTP_REQ_BYTES`], so a larger payload
+/// could be stored but never retrieved intact.
+const MAX_MAILBOX_PAYLOAD_BYTES: usize = BHTTP_REQ_BYTES - BHTTP_RES_FRAMING_BYTES;
+
 const V1_REJECT_RES_JSON: &str =
-    r#"{{"errorCode": "original-psbt-rejected ", "message": "Body is not a string"}}"#;
+    r#"{{"errorCode": "original-psbt-rejected", "message": "Body is not a string"}}"#;
 const V1_UNAVAILABLE_RES_JSON: &str = r#"{{"errorCode": "unavailable", "message": "V2 receiver offline. V1 sends require synchronous communications."}}"#;
 const V1_VERSION_UNSUPPORTED_RES_JSON: &str =
     r#"{"errorCode": "version-unsupported", "supported": [2], "message": "V1 is not supported"}"#;
@@ -224,25 +235,7 @@ impl<D: Db> Service<D> {
         let response = self.handle_decapsulated_request(request).await?;
 
         // Encapsulate OHTTP response
-        let (parts, body) = response.into_parts();
-        let mut bhttp_res = bhttp::Message::response(
-            bhttp::StatusCode::try_from(parts.status.as_u16())
-                .map_err(|e| HandlerError::InternalServerError(e.into()))?,
-        );
-        for (name, value) in parts.headers.iter() {
-            bhttp_res.put_header(name.as_str(), value.to_str().unwrap_or_default());
-        }
-        let full_body = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?
-            .to_bytes();
-        bhttp_res.write_content(&full_body);
-        let mut bhttp_bytes = Vec::new();
-        bhttp_res
-            .write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_bytes)
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?;
-        bhttp_bytes.resize(BHTTP_REQ_BYTES, 0);
+        let bhttp_bytes = encode_bhttp_response(response).await?;
         let ohttp_res = res_ctx
             .encapsulate(&bhttp_bytes)
             .map_err(|e| HandlerError::InternalServerError(e.into()))?;
@@ -273,7 +266,7 @@ impl<D: Db> Service<D> {
             .await
             .map_err(|e| HandlerError::InternalServerError(e.into()))?
             .to_bytes();
-        if req.len() > V1_MAX_BUFFER_SIZE {
+        if req.len() > MAX_MAILBOX_PAYLOAD_BYTES {
             return Err(HandlerError::PayloadTooLarge);
         }
         match self.db.post_v2_payload(&id, req.into()).await {
@@ -357,6 +350,14 @@ impl<D: Db> Service<D> {
         self.check_v1_blocklist(&body_str).await?;
 
         let v2_compat_body = format!("{body_str}\n{query}");
+        // The receiver fetches this through the gateway like any mailbox
+        // payload, so it has to fit in a gateway response.
+        if v2_compat_body.len() > MAX_MAILBOX_PAYLOAD_BYTES {
+            return Err(HandlerError::V1PsbtRejected(anyhow::anyhow!(
+                "V1 request of {} bytes exceeds the {MAX_MAILBOX_PAYLOAD_BYTES} byte mailbox limit",
+                v2_compat_body.len()
+            )));
+        }
         let id = ShortId::from_str(id)?;
         handle_peek(
             self.db.post_v1_request_and_wait_for_response(&id, v2_compat_body.into()).await,
@@ -427,6 +428,37 @@ fn handle_peek<E: SendableError>(
             ))),
         },
     }
+}
+
+/// Encode a handler's response as the bhttp message the gateway
+/// encapsulates, padded to exactly [`BHTTP_REQ_BYTES`].
+///
+/// A response that does not fit is an error rather than being cut off:
+/// truncated bhttp decrypts fine but cannot be parsed by the client.
+async fn encode_bhttp_response(response: Response<Body>) -> Result<Vec<u8>, HandlerError> {
+    let (parts, body) = response.into_parts();
+    let mut bhttp_res = bhttp::Message::response(
+        bhttp::StatusCode::try_from(parts.status.as_u16())
+            .map_err(|e| HandlerError::InternalServerError(e.into()))?,
+    );
+    for (name, value) in parts.headers.iter() {
+        bhttp_res.put_header(name.as_str(), value.to_str().unwrap_or_default());
+    }
+    let full_body =
+        body.collect().await.map_err(|e| HandlerError::InternalServerError(e.into()))?.to_bytes();
+    bhttp_res.write_content(&full_body);
+    let mut bhttp_bytes = Vec::new();
+    bhttp_res
+        .write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_bytes)
+        .map_err(|e| HandlerError::InternalServerError(e.into()))?;
+    if bhttp_bytes.len() > BHTTP_REQ_BYTES {
+        return Err(HandlerError::InternalServerError(anyhow::anyhow!(
+            "bhttp response of {} bytes does not fit in {BHTTP_REQ_BYTES}",
+            bhttp_bytes.len()
+        )));
+    }
+    bhttp_bytes.resize(BHTTP_REQ_BYTES, 0);
+    Ok(bhttp_bytes)
 }
 
 fn landing_page_html() -> String {
@@ -643,6 +675,112 @@ mod tests {
 
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body, V1_REJECT_RES_JSON);
+    }
+
+    #[tokio::test]
+    async fn post_v1_too_large_to_relay_returns_reject() {
+        let mut svc = test_service(Some(V1::new(None))).await;
+        let id = valid_short_id_path();
+        // With the "\n" separator this no longer fits in a mailbox.
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(format!("http://localhost/{id}"))
+            .body(Body::from("a".repeat(MAX_MAILBOX_PAYLOAD_BYTES)))
+            .unwrap();
+
+        let res = tower::Service::call(&mut svc, req).await.unwrap();
+        let (status, body) = collect_body(res).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body, V1_REJECT_RES_JSON);
+    }
+
+    // Gateway response size
+
+    /// Send a request through the OHTTP gateway the way payjoin's client
+    /// does and return the status and content the client ends up with.
+    async fn through_gateway(
+        svc: &mut Service<FilesDb>,
+        method: &str,
+        path: &str,
+        body: &[u8],
+    ) -> (StatusCode, Vec<u8>) {
+        let encoded_config = svc.ohttp.config().encode().expect("encode key config");
+        let config = ohttp::KeyConfig::decode(&encoded_config).expect("decode key config");
+        let mut message = bhttp::Message::request(
+            method.as_bytes().to_vec(),
+            b"https".to_vec(),
+            b"localhost".to_vec(),
+            path.as_bytes().to_vec(),
+        );
+        message.write_content(body);
+        let mut bhttp_req = Vec::new();
+        message.write_bhttp(bhttp::Mode::KnownLength, &mut bhttp_req).expect("encode request");
+        if bhttp_req.len() < BHTTP_REQ_BYTES {
+            bhttp_req.resize(BHTTP_REQ_BYTES, 0);
+        }
+        let (encapsulated, client) = ohttp::ClientRequest::from_config(&config)
+            .expect("client context")
+            .encapsulate(&bhttp_req)
+            .expect("encapsulate request");
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("http://localhost/.well-known/ohttp-gateway")
+            .body(Body::from(encapsulated))
+            .unwrap();
+        let res = tower::Service::call(svc, req).await.unwrap();
+        let (parts, res_body) = res.into_parts();
+        let bytes = res_body.collect().await.unwrap().to_bytes();
+        if parts.status != StatusCode::OK {
+            // Handler errors leave the gateway unencapsulated.
+            return (parts.status, bytes.to_vec());
+        }
+
+        let bhttp_res = client.decapsulate(&bytes).expect("decapsulate response");
+        let message = bhttp::Message::read_bhttp(&mut std::io::Cursor::new(bhttp_res))
+            .expect("gateway response must parse");
+        let status = message.control().status().expect("response status").code();
+        (StatusCode::from_u16(status).unwrap(), message.content().to_vec())
+    }
+
+    #[tokio::test]
+    async fn largest_mailbox_payload_round_trips_through_gateway() {
+        let mut svc = test_service(None).await;
+        let path = format!("/{}", valid_short_id_path());
+        let payload = vec![0x42; MAX_MAILBOX_PAYLOAD_BYTES];
+
+        let (status, _) = through_gateway(&mut svc, "POST", &path, &payload).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, content) = through_gateway(&mut svc, "GET", &path, &[]).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(content, payload);
+    }
+
+    #[tokio::test]
+    async fn mailbox_payload_too_large_to_return_is_rejected() {
+        let mut svc = test_service(None).await;
+        let path = format!("/{}", valid_short_id_path());
+        let payload = vec![0x42; MAX_MAILBOX_PAYLOAD_BYTES + 1];
+
+        let (status, _) = through_gateway(&mut svc, "POST", &path, &payload).await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    /// Pins `MAX_MAILBOX_PAYLOAD_BYTES` to the bhttp framing: the largest
+    /// payload fits exactly, one byte more is an error, not a truncation.
+    #[tokio::test]
+    async fn oversized_bhttp_response_is_an_error() {
+        let fits = Response::new(full(vec![0u8; MAX_MAILBOX_PAYLOAD_BYTES]));
+        let encoded = encode_bhttp_response(fits).await.expect("largest payload fits");
+        assert_eq!(encoded.len(), BHTTP_REQ_BYTES);
+
+        let too_large = Response::new(full(vec![0u8; MAX_MAILBOX_PAYLOAD_BYTES + 1]));
+        assert!(matches!(
+            encode_bhttp_response(too_large).await,
+            Err(HandlerError::InternalServerError(_))
+        ));
     }
 
     #[tokio::test]

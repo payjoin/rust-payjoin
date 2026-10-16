@@ -24,8 +24,9 @@ landed since the last release, so there is nothing to compile here.
 - [ ] Branch `bump-CRATE-MAJOR-MINOR+1` from `master`.
 - [ ] Run `contrib/release/bump.sh CRATE MAJOR.MINOR+1.0`. It sets the version, rewrites
       every workspace member's requirement on the crate, renames `## Unreleased` to
-      `## MAJOR.MINOR+1.0` with a fresh empty `## Unreleased` above it, regenerates both
-      lock files and runs check-invariants. It needs jq, and the lock file step calls
+      `## MAJOR.MINOR+1.0` with a fresh empty `## Unreleased` above it, fills in the
+      `0.0.0-unreleased` placeholders in the crate's source, regenerates both lock files
+      and runs check-invariants. It needs jq, and the lock file step calls
       `cargo +nightly`, so run it where rustup has a nightly toolchain. `nix develop .#release`
       has jq but no rustup; there, pass `--no-lock`, then run `contrib/update-lock-files.sh`
       from a rustup shell and `contrib/release/check-invariants.sh CRATE` again.

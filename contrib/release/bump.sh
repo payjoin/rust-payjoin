@@ -3,8 +3,9 @@
 # Prepare a release crate's bump commit. Sets the crate's version, rewrites
 # every workspace member's version requirement on it, renames the
 # "## Unreleased" changelog section to the new version and opens a fresh
-# empty one above it, regenerates both lock files, then runs
-# check-invariants. Leaves the changes uncommitted for review.
+# empty one above it, fills in the version placeholders in the crate's
+# source, regenerates both lock files, then runs check-invariants. Leaves
+# the changes uncommitted for review.
 #
 # payjoin-ffi is bumped the same way, except that its changelog entry
 # opens by naming the wrapped payjoin release, and its version is also
@@ -53,6 +54,27 @@ open_section() { # <file> <heading> <line>
         held { held = 0; if ($0 !~ /^- /) print "" }
         { print }
     ' "$1" >"$1.tmp" && mv "$1.tmp" "$1"
+}
+
+# Replace the version placeholder in the crate's source. A bare
+# `since = "0.0.0-unreleased"` (a deprecation attribute) takes the new
+# version. `since <crate> 0.0.0-unreleased` in prose takes that workspace
+# crate's version: the bindings' doc comments name the payjoin release, since
+# UniFFI does not carry Rust deprecation attributes into the bindings.
+fill_unreleased() { # <new>
+    local placeholder="${UNRELEASED//./\\.}" name version f
+    while IFS= read -r f; do
+        sed -i "s/since = \"$placeholder\"/since = \"$1\"/g" "$f"
+        while IFS= read -r name; do
+            if [ "$name" = "$crate" ]; then
+                version="$1"
+            else
+                version="$(manifest_version "$name")"
+            fi
+            sed -i "s/since $name $placeholder/since $name $version/g" "$f"
+        done < <(cargo_metadata | jq -r '.packages[].name')
+        echo "  $f: $UNRELEASED filled in"
+    done < <(git grep -l -F -e "$UNRELEASED" -- "$crate/src")
 }
 
 # Set the binding packages to the payjoin-ffi version. Each manifest is
@@ -172,6 +194,8 @@ else
     sed -i "0,/^## Unreleased$/s//## Unreleased\n\n$heading/" "$changelog"
     echo "  $changelog: '## Unreleased' -> '$heading', fresh Unreleased section added"
 fi
+
+fill_unreleased "$new"
 
 if [ "$lock" -eq 1 ]; then
     echo "Regenerating lock files (contrib/update-lock-files.sh)"

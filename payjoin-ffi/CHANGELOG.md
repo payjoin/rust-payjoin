@@ -1,5 +1,22 @@
 ## Unreleased
 
+- Add settlement classification to `Monitor`. Pass a consensus-encoded
+  transaction the wallet found to `classify`, which returns a
+  `SettlementOutcome` of `Payjoin`, `Fallback` or `Unrecognized`, or none
+  for a transaction that spends none of `contested_prevouts`. `close` ends
+  the session once the wallet stops tracking settlement. Also adds
+  `expected_payjoin_txid` returning `ExpectedTxid`, `fallback_tx`,
+  `contested_prevouts` and `receiver_prevouts`. In Kotlin, `close` is
+  `closeSession`.
+- Remove `Monitor.check_for_transaction`, with its `TransactionFinder`
+  callback and `MonitorTransition`. It closed the session on first sight of
+  a predicted txid and never saw a spend that is neither the proposal nor
+  the fallback. Use `classify` and `close` instead.
+- Remove `proposal_txid_is_stable` from every receiver state. It checked
+  only the sender's inputs, so a legacy or P2SH-wrapped receiver input could
+  change the txid even when it returned true. Use
+  `Monitor.expected_payjoin_txid` instead.
+
 ## [0.25.0]
 
 - Publish the Python, JavaScript, C#, and Dart packages from one signed

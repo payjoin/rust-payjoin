@@ -205,8 +205,9 @@ mod integration {
         use http::StatusCode;
         use payjoin::persist::OptionalTransitionOutcome;
         use payjoin::receive::v2::{
-            replay_event_log as replay_receiver_event_log, Monitor, PayjoinProposal,
-            ReceiveSession, Receiver, ReceiverBuilder, SessionStatus, UncheckedOriginalPayload,
+            replay_event_log as replay_receiver_event_log, ExpectedTxid, Monitor, PayjoinProposal,
+            ReceiveSession, Receiver, ReceiverBuilder, SessionStatus, SettlementOutcome,
+            UncheckedOriginalPayload,
         };
         use payjoin::send::v2::{replay_event_log as replay_sender_event_log, SenderBuilder};
         use payjoin::send::ResponseError;
@@ -563,21 +564,24 @@ mod integration {
                 Amount::from_btc(0.0)?
             );
 
-            // Receiver cannot validate that the sender has broadcasted the Payjoin proposal or the fallback transaction.
-            // The sender is using a non-SegWit address, so their signature is going to change the TXID. So we test whether the
-            // function exists early and does not call the closure.
+            // The sender is using a non-SegWit address, so their signature changes the txid. The
+            // receiver cannot predict it, but still recognizes the broadcast Payjoin.
+            assert_eq!(monitoring_payment.expected_payjoin_txid(), ExpectedTxid::Unstable);
+            assert_eq!(
+                monitoring_payment.classify(&broadcasted_transaction),
+                Some(SettlementOutcome::Payjoin)
+            );
             monitoring_payment
-                .check_for_transaction(|_| {
-                    panic!("when the sender is using a non-SegWit address type, the check_for_transaction function should skip the check and return success")
-                })
+                .close()
                 .save(&recv_persister)
-                .expect("receiver should successfully monitor for the payment");
+                .expect("receiver should successfully close the session");
 
             let (_session, session_history) = replay_receiver_event_log(&recv_persister)?;
             assert_eq!(
                 recv_persister.load().unwrap().last(),
-                Some(payjoin::receive::v2::SessionEvent::Closed(payjoin::receive::v2::SessionOutcome::PayjoinProposalSent)),
-                "The last event of the persister should be a SessionOutcome::PayjoinProposalSent since the sender is going to change the TXID when they sign the Payjoin proposal",
+                Some(payjoin::receive::v2::SessionEvent::Closed(
+                    payjoin::receive::v2::SessionOutcome::PayjoinProposalSent
+                )),
             );
             assert_eq!(session_history.status(), SessionStatus::Completed);
             Ok(())
@@ -620,31 +624,28 @@ mod integration {
                 Amount::from_btc(0.0)?
             );
 
-            // Receiver should be able to validate that the sender has broadcasted the Payjoin proposal.
+            // Every input is native SegWit, so the receiver can find the Payjoin by its txid.
+            let ExpectedTxid::Stable(payjoin_txid) = monitoring_payment.expected_payjoin_txid()
+            else {
+                panic!("p2wpkh inputs should leave the payjoin txid stable");
+            };
+            assert_eq!(payjoin_txid, broadcasted_transaction.compute_txid());
+            let found_tx = receiver
+                .get_raw_transaction(payjoin_txid)?
+                .transaction()
+                .expect("transaction should be decodable");
+            assert_eq!(monitoring_payment.classify(&found_tx), Some(SettlementOutcome::Payjoin));
             monitoring_payment
-                .check_for_transaction(|txid| {
-                    let get_tx_result = receiver.get_raw_transaction(txid);
-                    match get_tx_result {
-                        Ok(tx) =>
-                            Ok(Some(tx.transaction().expect("transaction should be decodable"))),
-                        Err(_) => {
-                            panic!("should be able to find the payjoin proposal broadcasted")
-                        }
-                    }
-                })
+                .close()
                 .save(&recv_persister)
-                .expect("receiver should successfully monitor for the payment");
+                .expect("receiver should successfully close the session");
 
-            // Receiver session should have completed with a Success.
             let (_session, session_history) = replay_receiver_event_log(&recv_persister)?;
             assert_eq!(
                 recv_persister.load().unwrap().last(),
                 Some(payjoin::receive::v2::SessionEvent::Closed(
-                    payjoin::receive::v2::SessionOutcome::Success(
-                        broadcasted_transaction.compute_txid()
-                    )
+                    payjoin::receive::v2::SessionOutcome::PayjoinProposalSent
                 )),
-                "The last event of the persister should be a SessionOutcome::Success with the settlement txid",
             );
             assert_eq!(session_history.status(), SessionStatus::Completed);
             Ok(())
@@ -695,31 +696,28 @@ mod integration {
                 Amount::from_btc(0.0)?
             );
 
-            // Receiver should be able to validate that the sender has broadcasted the Payjoin proposal.
+            // Every input is native SegWit, so the receiver can find the Payjoin by its txid.
+            let ExpectedTxid::Stable(payjoin_txid) = monitoring_payment.expected_payjoin_txid()
+            else {
+                panic!("taproot inputs should leave the payjoin txid stable");
+            };
+            assert_eq!(payjoin_txid, broadcasted_transaction.compute_txid());
+            let found_tx = receiver
+                .get_raw_transaction(payjoin_txid)?
+                .transaction()
+                .expect("transaction should be decodable");
+            assert_eq!(monitoring_payment.classify(&found_tx), Some(SettlementOutcome::Payjoin));
             monitoring_payment
-                .check_for_transaction(|txid| {
-                    let get_tx_result = receiver.get_raw_transaction(txid);
-                    match get_tx_result {
-                        Ok(tx) =>
-                            Ok(Some(tx.transaction().expect("transaction should be decodable"))),
-                        Err(_) => {
-                            panic!("should be able to find the payjoin proposal broadcasted")
-                        }
-                    }
-                })
+                .close()
                 .save(&recv_persister)
-                .expect("receiver should successfully monitor for the payment");
+                .expect("receiver should successfully close the session");
 
-            // Receiver session should have completed with a Success.
             let (_session, session_history) = replay_receiver_event_log(&recv_persister)?;
             assert_eq!(
                 recv_persister.load().unwrap().last(),
                 Some(payjoin::receive::v2::SessionEvent::Closed(
-                    payjoin::receive::v2::SessionOutcome::Success(
-                        broadcasted_transaction.compute_txid()
-                    )
+                    payjoin::receive::v2::SessionOutcome::PayjoinProposalSent
                 )),
-                "The last event of the persister should be a SessionOutcome::Success with the settlement txid",
             );
             assert_eq!(session_history.status(), SessionStatus::Completed);
             Ok(())
@@ -765,30 +763,28 @@ mod integration {
                 Amount::from_btc(0.0)?
             );
 
-            // Receiver should be able to validate that the sender has broadcasted the fallback transaction.
-            // The check_for_transaction closure should be called twice: first for the Payjoin proposal, which will not be found,
-            // and then for the fallback transaction, which will be found..
+            // The receiver finds the fallback by its txid and recognizes it.
+            let fallback_txid = monitoring_payment.fallback_tx().compute_txid();
+            assert_eq!(fallback_txid, broadcasted_transaction.compute_txid());
+            let found_tx = receiver
+                .get_raw_transaction(fallback_txid)?
+                .transaction()
+                .expect("transaction should be decodable");
+            assert_eq!(monitoring_payment.classify(&found_tx), Some(SettlementOutcome::Fallback));
             monitoring_payment
-                .check_for_transaction(|txid| {
-                    let get_tx_result = receiver.get_raw_transaction(txid);
-                    match get_tx_result {
-                        Ok(tx) =>
-                            Ok(Some(tx.transaction().expect("transaction should be decodable"))),
-                        Err(_) => Ok(None),
-                    }
-                })
+                .close()
                 .save(&recv_persister)
-                .expect("receiver should successfully monitor for the payment");
+                .expect("receiver should successfully close the session");
 
-            // Receiver session should have completed with a Success and a fallback session
-            // outcome.
+            // Closing records the protocol handoff, not which transaction settled.
             let (_session, session_history) = replay_receiver_event_log(&recv_persister)?;
             assert_eq!(
                 recv_persister.load().unwrap().last(),
-                Some(payjoin::receive::v2::SessionEvent::Closed(payjoin::receive::v2::SessionOutcome::FallbackBroadcasted)),
-                "The last event of the persister should be a SessionOutcome::Success with the correct sender signature",
+                Some(payjoin::receive::v2::SessionEvent::Closed(
+                    payjoin::receive::v2::SessionOutcome::PayjoinProposalSent
+                )),
             );
-            assert_eq!(session_history.status(), SessionStatus::FallbackBroadcasted);
+            assert_eq!(session_history.status(), SessionStatus::Completed);
             Ok(())
         }
 

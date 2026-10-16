@@ -5,6 +5,12 @@
 - Fix panic when spending taproot UTXOs. They are now contributed as key-path
   spends with an assumed default input weight.
 - Any unsupported coin is simply skipped instead of crashing the cli.
+- The receiver closes a posted session only once the settling transaction has
+  one confirmation, using payjoin's `classify` and `close`, and reports whether
+  the Payjoin, the fallback, or another transaction settled it. Sessions with
+  non-SegWit senders are tracked too, where they used to be closed without
+  checking. An unsettled session stays open and continues on the next
+  `payjoin-cli resume` by @xstoicunicornx
 
 ## 1.0.0
 

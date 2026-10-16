@@ -30,7 +30,10 @@ fn construct_history(
 ) -> Result<SessionHistory, ReplayError<ReceiveSession, SessionEvent>> {
     let history = SessionHistory::new(session_events);
     // Closed sessions terminated before expiration; do not surface an expired error for them.
-    if !matches!(receiver, ReceiveSession::Closed(_)) {
+    //
+    // A Monitor session is exempt too: it has no protocol work left, and the transaction it
+    // awaits can confirm long after the mailbox is gone.
+    if !matches!(receiver, ReceiveSession::Closed(_) | ReceiveSession::Monitor(_)) {
         let ctx = history.session_context();
         if ctx.expiration.elapsed() {
             return Err(InternalReplayError::Expired(ctx.expiration, history.fallback_tx()).into());
@@ -171,6 +174,8 @@ impl SessionHistory {
             },
             Some(SessionEvent::Cancelled | SessionEvent::ProtocolFailed) =>
                 SessionStatus::PendingFallback,
+            // A posted session outlives the mailbox; it is active until the wallet closes it.
+            Some(SessionEvent::PostedPayjoinProposal()) => SessionStatus::Active,
             _ if self.session_context().expiration.elapsed() => SessionStatus::Expired,
             _ => SessionStatus::Active,
         }
@@ -182,11 +187,18 @@ impl SessionHistory {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SessionStatus {
+    /// Protocol work remains, or the proposal is posted and settlement is still being tracked.
     Active,
+    /// The mailbox expired before the session finished its protocol work.
     Expired,
+    /// The session was aborted, or an unrecognized transaction settled it. See
+    /// [`SessionOutcome::Aborted`].
     Failed,
+    /// The protocol finished. Says nothing about which transaction settled.
     Completed,
+    /// The fallback was observed: paid, without cooperation.
     FallbackBroadcasted,
+    /// Stopped, holding a fallback transaction the wallet may still broadcast.
     PendingFallback,
 }
 
@@ -215,29 +227,46 @@ pub enum SessionEvent {
     Closed(SessionOutcome),
 }
 
-/// Represents all possible outcomes for a closed Payjoin session
+/// How a Payjoin session ended.
+///
+/// These record what the protocol did, not how the payment settled. Settlement is never
+/// persisted; [`Receiver<Monitor>::classify`] answers that while the session is open.
 ///
 /// This enum is deliberately exhaustive: a terminal outcome is a closed set, and a wildcard arm
 /// has no meaningful semantics for a caller deciding what a session's conclusion was. A new
 /// unhandled variant _should_ error at compile-time.
+///
+/// [`Receiver<Monitor>::classify`]: super::Receiver::classify
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SessionOutcome {
-    /// Payjoin completed successfully: the transaction with this txid settled the session
-    Success(bitcoin::Txid),
-    /// Payjoin was not successful
-    Aborted,
-    /// Fallback transaction was broadcasted
-    FallbackBroadcasted,
-    /// Payjoin proposal was sent, but its broadcast status cannot be tracked because
-    /// the sender is using non-SegWit inputs which will change the transaction ID
-    /// of the proposal
-    PayjoinProposalSent,
-    /// The contested outpoints were settled by an unrecognized transaction (neither the
-    /// Payjoin nor the fallback), identified by its txid.
+    /// The transaction with this txid was observed settling the session.
     ///
-    /// NOTE: Nothing in this release produces this variant. It is reserved now because this enum is
-    /// deliberately exhaustive, so a new variant after 1.0 would be a semver-breaking API
-    /// change; naming it before the freeze lets the settlement classifier land additively.
+    /// Written only by the deprecated [`Receiver<Monitor>::check_for_transaction`], on first
+    /// sight of the predicted Payjoin txid.
+    ///
+    /// [`Receiver<Monitor>::check_for_transaction`]: super::Receiver::check_for_transaction
+    Success(bitcoin::Txid),
+    /// The session was cancelled or failed, and the receiver closed it.
+    ///
+    /// Can happen before or after the Payjoin proposal was posted. Says nothing about the
+    /// payment: a fallback may have been broadcast and confirmed.
+    Aborted,
+    /// The fallback transaction was observed: paid, without cooperation.
+    ///
+    /// Written only by the deprecated [`Receiver<Monitor>::check_for_transaction`].
+    ///
+    /// [`Receiver<Monitor>::check_for_transaction`]: super::Receiver::check_for_transaction
+    FallbackBroadcasted,
+    /// The receiver posted the Payjoin proposal and settlement no longer needs tracking.
+    ///
+    /// The ordinary terminal outcome of a session that did everything right. Names the protocol
+    /// handoff, and carries no payment verdict.
+    PayjoinProposalSent,
+    /// The contested prevouts were settled by an unrecognized transaction, identified by its
+    /// txid.
+    ///
+    /// NOTE: nothing writes this variant. It exists for reading logs, and because the enum is
+    /// exhaustive, so adding a variant after 1.0 would be a semver break.
     Unrecognized(bitcoin::Txid),
 }
 
@@ -260,6 +289,62 @@ mod tests {
         UncheckedOriginalPayload, WantsOutputs,
     };
     use crate::receive::{InternalPayloadError, PayloadError};
+
+    /// The full event chain of a session that posted its Payjoin proposal, which replays to
+    /// [`ReceiveSession::Monitor`].
+    fn posted_proposal_events(session_context: SessionContext) -> Vec<SessionEvent> {
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let original = original_from_test_vector();
+        let maybe_inputs_owned = unchecked_receiver_from_test_vector()
+            .assume_interactive_receiver()
+            .save(&persister)
+            .expect("Save should not fail");
+        let outputs_unknown = maybe_inputs_owned
+            .check_inputs_not_owned(&mut |_| Ok(false))
+            .save(&persister)
+            .expect("No inputs should be owned")
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
+            .save(&persister)
+            .expect("No inputs should be seen before");
+        let wants_outputs = outputs_unknown
+            .identify_receiver_outputs(&mut |_| Ok(true))
+            .save(&persister)
+            .expect("Outputs should be identified");
+        let wants_inputs =
+            wants_outputs.commit_outputs().save(&persister).expect("Save should not fail");
+        let wants_fee_range =
+            wants_inputs.clone().commit_inputs().save(&persister).expect("Save should not fail");
+        let provisional_proposal = wants_fee_range
+            .clone()
+            .apply_fee_range(None, None)
+            .save(&persister)
+            .expect("Fee range should apply");
+        let payjoin_proposal = provisional_proposal
+            .clone()
+            .finalize_proposal(|psbt| Ok(psbt.clone()))
+            .save(&persister)
+            .expect("Payjoin proposal should be finalized");
+
+        vec![
+            SessionEvent::Created(session_context),
+            SessionEvent::RetrievedOriginalPayload { original, reply_key: None },
+            SessionEvent::CheckedBroadcastSuitability(),
+            SessionEvent::CheckedInputsNotOwned(),
+            SessionEvent::CheckedNoInputsSeenBefore(),
+            SessionEvent::IdentifiedReceiverOutputs(vec![0]),
+            SessionEvent::CommittedOutputs {
+                outputs: wants_inputs.state.inner.proposal.payjoin_psbt.unsigned_tx.output.clone(),
+                change_vout: wants_inputs.state.inner.proposal.change_vout,
+            },
+            SessionEvent::CommittedInputs {
+                receiver_inputs: wants_fee_range.state.inner.proposal.receiver_inputs.clone(),
+                payjoin_psbt: wants_fee_range.state.inner.proposal.payjoin_psbt.clone(),
+            },
+            SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()),
+            SessionEvent::FinalizedProposal(payjoin_proposal.psbt().clone()),
+            SessionEvent::PostedPayjoinProposal(),
+        ]
+    }
 
     fn unchecked_receiver_from_test_vector() -> Receiver<UncheckedOriginalPayload> {
         Receiver {
@@ -1225,5 +1310,51 @@ mod tests {
         assert_eq!(status, SessionStatus::FallbackBroadcasted);
 
         Ok(())
+    }
+    #[test]
+    fn monitor_session_past_expiration_still_replays() {
+        // The proposal is posted, so the mailbox expiring costs the receiver nothing while the
+        // transaction it waits on can still confirm. Refusing to replay would make that
+        // settlement unrecordable.
+        let expiration = (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap();
+        let session_context = SessionContext { expiration, ..SHARED_CONTEXT.clone() };
+
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        for event in posted_proposal_events(session_context) {
+            persister.save_event(event).expect("in memory persister save should not fail");
+        }
+
+        let (state, history) =
+            replay_event_log(&persister).expect("a posted session should replay past expiration");
+        assert!(matches!(state, ReceiveSession::Monitor(_)));
+
+        assert_eq!(
+            history.status(),
+            SessionStatus::Active,
+            "a posted session is not stranded by the mailbox expiring"
+        );
+        let ReceiveSession::Monitor(monitor) = state else { unreachable!("asserted above") };
+        assert!(
+            monitor.contested_prevouts().next().is_some(),
+            "settlement stays answerable after the mailbox expires"
+        );
+    }
+
+    #[test]
+    fn open_session_before_the_handoff_still_expires() {
+        // The exemption is for the posted handoff only. A session the receiver abandoned
+        // mid-protocol is still expired.
+        let expiration = (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap();
+        let session_context = SessionContext { expiration, ..SHARED_CONTEXT.clone() };
+
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        persister
+            .save_event(SessionEvent::Created(session_context))
+            .expect("in memory persister save should not fail");
+
+        assert!(
+            replay_event_log(&persister).is_err(),
+            "a session still mid-protocol past expiration should error"
+        );
     }
 }

@@ -160,25 +160,40 @@ impl BitcoindWallet {
         }
     }
 
+    /// Look up a wallet transaction and its confirmation count.
+    ///
+    /// The count is negative for a transaction that conflicts with a confirmed one.
     #[cfg(feature = "v2")]
-    pub fn get_raw_transaction(
-        &self,
-        txid: &Txid,
-    ) -> Result<Option<payjoin::bitcoin::Transaction>> {
-        let raw_tx = tokio::task::block_in_place(|| {
+    pub fn get_wallet_transaction(&self, txid: &Txid) -> Result<Option<(Transaction, i64)>> {
+        let res = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 match self.rpc.get_transaction(txid).await {
-                    Ok(rpc_res) => Ok(Some(rpc_res.tx)),
-                    Err(e) =>
-                        if e.is_tx_not_found() {
-                            Ok(None)
-                        } else {
-                            Err(e)
-                        },
+                    Ok(rpc_res) => Ok(Some((rpc_res.tx, rpc_res.confirmations))),
+                    Err(e) if e.is_tx_not_found() => Ok(None),
+                    Err(e) => Err(e),
                 }
             })
         })?;
-        Ok(raw_tx)
+        Ok(res)
+    }
+
+    /// The txids of the wallet's most recent transactions, newest last.
+    #[cfg(feature = "v2")]
+    pub fn list_recent_txids(&self, count: usize) -> Result<Vec<Txid>> {
+        let entries = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.rpc.list_transactions(Some(count)).await })
+        })
+        .context("Failed to list wallet transactions")?;
+
+        let mut txids = Vec::with_capacity(entries.0.len());
+        for txid in entries.0.into_iter().filter_map(|entry| entry.txid) {
+            // listtransactions reports one entry per wallet output, so a txid may repeat.
+            if !txids.contains(&txid) {
+                txids.push(txid);
+            }
+        }
+        Ok(txids)
     }
 
     /// Get a new address from the wallet

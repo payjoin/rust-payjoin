@@ -35,8 +35,10 @@ It sets the version in `payjoin-ffi/Cargo.toml`, the four package
 manifests, `python/uv.lock` and `javascript/package-lock.json`, renames
 `## Unreleased` in `payjoin-ffi/CHANGELOG.md` to the version with a fresh
 empty `## Unreleased` above it and a first entry naming the wrapped
-`payjoin` release, and opens a section in each language changelog with a
-stock entry pointing at it. The lock file step calls
+`payjoin` release, opens a section in each language changelog with a
+stock entry pointing at it, and fills in the `0.0.0-unreleased`
+placeholders in `payjoin-ffi/src`, such as `Deprecated since payjoin
+0.0.0-unreleased`, with the version each names. The lock file step calls
 `cargo +nightly`, which the release shell lacks, so pass `--no-lock`
 there, then run `contrib/update-lock-files.sh` from a rustup shell and
 `contrib/release/check-invariants.sh payjoin-ffi` again.

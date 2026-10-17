@@ -1,9 +1,9 @@
 # .github/workflows/changelog-check.yml
 #
-# A pull request that changes a release crate's source must add a line to
-# that crate's CHANGELOG.md under "## Unreleased", or carry the
-# "changelog: none" label. The bump PR then only renames the heading, so a
-# merge under an open bump PR never requires editing it.
+# A pull request that changes a release crate's or payjoin-ffi's source
+# must add a line to that crate's CHANGELOG.md under "## Unreleased", or
+# carry the "changelog: none" label. The bump PR then only renames the
+# heading, so a merge under an open bump PR never requires editing it.
 name: Changelog
 
 on:
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Require a changelog line for each changed release crate
+      - name: Require a changelog line for each changed crate
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
@@ -31,7 +31,7 @@ jobs:
           source contrib/release/crates.sh
           changed="$(git diff --name-only "$BASE" "$HEAD")"
           status=0
-          for crate in $RELEASE_CRATES; do
+          for crate in $RELEASE_CRATES payjoin-ffi; do
             grep -q "^$crate/src/" <<<"$changed" || continue
             if ! grep -q "^$crate/CHANGELOG.md$" <<<"$changed"; then
               echo "::error::$crate/src changed but $crate/CHANGELOG.md did not; add a line under '## Unreleased', or say in the PR description that there is no user-visible change so a maintainer can label it 'changelog: none'"

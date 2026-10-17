@@ -488,6 +488,12 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
     async def test_integration_v2_to_v2_nonblocking(self):
         await self._run_integration_v2_to_v2("nonblocking")
 
+    async def test_integration_v2_to_v2_taproot(self):
+        self.env = init_bitcoind_sender_receiver_taproot()
+        self.receiver = self.env.get_receiver()
+        self.sender = self.env.get_sender()
+        await self._run_integration_v2_to_v2("callback")
+
 
 def build_sweep_psbt(sender: RpcClient, pj_uri: PjUri) -> str:
     outputs = {}
@@ -526,17 +532,13 @@ def get_inputs(rpc_connection: RpcClient) -> list[InputPair]:
         script_pubkey = bytes.fromhex(utxo["scriptPubKey"])
         amount_sat = round(utxo["amount"] * 100_000_000)
 
-        txin = TxIn(
-            previous_output=OutPoint(txid=txid, vout=vout),
-            script_sig=bytes(),
-            sequence=0,
-            witness=[],
-        )
-        witness_utxo = TxOut(value_sat=amount_sat, script_pubkey=script_pubkey)
-        psbt_in = PsbtInput(
-            witness_utxo=witness_utxo, redeem_script=None, witness_script=None
-        )
-        inputs.append(InputPair(txin=txin, psbtin=psbt_in, expected_weight=None))
+        txout = TxOut(value_sat=amount_sat, script_pubkey=script_pubkey)
+        outpoint = OutPoint(txid=txid, vout=vout)
+        # OP_1 OP_PUSHBYTES_32 <key> is a P2TR output
+        if utxo["scriptPubKey"].startswith("5120"):
+            inputs.append(InputPair.new_p2tr_keyspend(txout=txout, outpoint=outpoint))
+        else:
+            inputs.append(InputPair.new_p2wpkh(txout=txout, outpoint=outpoint))
 
     return inputs
 

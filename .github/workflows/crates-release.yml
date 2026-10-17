@@ -1,7 +1,9 @@
 name: Release
 
 # A pull request that bumps a release crate's version is checked for
-# consistency and publishability. Pushing a `<crate>-<version>` tag verifies
+# consistency and publishability; one that bumps payjoin-ffi's version is
+# checked for consistency across the binding packages, which
+# bindings-release.yml publishes. Pushing a `<crate>-<version>` tag verifies
 # the tag, waits for CI at that commit, then publishes to crates.io through
 # the `release` environment (required reviewer) with keyless OIDC,
 # cuts the GitHub release, and confirms the upload.
@@ -12,6 +14,7 @@ on:
       - payjoin/Cargo.toml
       - payjoin-cli/Cargo.toml
       - payjoin-mailroom/Cargo.toml
+      - payjoin-ffi/Cargo.toml
   push:
     tags:
       - payjoin-[0-9]*

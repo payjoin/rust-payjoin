@@ -1,0 +1,307 @@
+name: Release language bindings
+
+# Pushing a signed `payjoin-ffi-<version>` tag verifies the tag and the
+# shared binding version, runs every language's build, package and smoke
+# checks at that commit, then publishes Python, JavaScript, C#, and Dart
+# through the `release` environment (required reviewer) with keyless OIDC
+# and cuts one GitHub release holding every package.
+#
+# Each registry has its own publish job. All four wait on every language
+# build, so they reach the environment gate together and one approval
+# releases them all; a registry failure is retried with "Re-run failed
+# jobs" on the same run, reusing the tested artifacts.
+
+on:
+  push:
+    tags:
+      - "payjoin-ffi-[0-9]*"
+
+# Keep two attempts at the same tag from publishing concurrently.
+concurrency:
+  group: bindings-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify-tag:
+    name: Verify release tag
+    runs-on: ubuntu-26.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Fetch master
+        run: git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
+      - name: Verify tag hygiene
+        env:
+          TAG: ${{ github.ref_name }}
+        run: nix --quiet develop .#release -c ./contrib/release/verify-tag-hygiene.sh "$TAG"
+      - name: Verify every binding carries the tagged version
+        id: meta
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="$(nix --quiet develop .#release -c ./contrib/release/bindings-version.sh --tag "$TAG")"
+          nix --quiet develop .#release -c ./contrib/release/check-invariants.sh payjoin-ffi
+          source contrib/release/crates.sh
+          {
+            echo "version=$version"
+            is_prerelease "$version" && echo "prerelease=true" || echo "prerelease=false"
+          } >>"$GITHUB_OUTPUT"
+      - name: Verify the wrapped payjoin core is on crates.io
+        run: |
+          set -euo pipefail
+          source contrib/release/crates.sh
+          core="$(nix --quiet develop .#release -c bash -c 'source contrib/release/crates.sh && manifest_version payjoin')"
+          # Dart consumers build the bindings from source against it.
+          crate_published payjoin "$core" || {
+            echo "::error::payjoin $core is not on crates.io; publish it before the bindings"
+            exit 1
+          }
+
+  python:
+    needs: verify-tag
+    uses: ./.github/workflows/python.yml
+  javascript:
+    needs: verify-tag
+    uses: ./.github/workflows/javascript.yml
+  csharp:
+    needs: verify-tag
+    uses: ./.github/workflows/csharp.yml
+  dart:
+    needs: verify-tag
+    uses: ./.github/workflows/dart.yml
+  kotlin:
+    needs: verify-tag
+    uses: ./.github/workflows/kotlin.yml
+
+  publish-python:
+    name: Publish to PyPI
+    needs: [python, javascript, csharp, dart, kotlin]
+    runs-on: ubuntu-26.04
+    environment: release
+    permissions:
+      id-token: write # OIDC: PyPI trusted publishing and its PEP 740 attestations
+      attestations: write # actions/attest-build-provenance writes the attestation
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: payjoin-python-wheel-*
+          merge-multiple: true
+          path: dist
+      - name: Check both wheels are present
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(dist/payjoin-*.whl)
+          if [ "${#pkgs[@]}" -ne 2 ]; then
+            echo "::error::expected exactly two wheels in dist/, found ${#pkgs[@]}: ${pkgs[*]:-none}"
+            exit 1
+          fi
+      - name: Attest build provenance
+        # A consumer runs: gh attestation verify <file>.whl -R payjoin/rust-payjoin
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*.whl
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  publish-javascript:
+    name: Publish to npmjs.com
+    needs: [verify-tag, python, javascript, csharp, dart, kotlin]
+    runs-on: ubuntu-26.04
+    environment: release
+    permissions:
+      id-token: write # OIDC: npm trusted publishing and its provenance statement
+      attestations: write # actions/attest writes the attestation
+    steps:
+      - name: Download npm package
+        uses: actions/download-artifact@v4
+        with:
+          name: payjoin-javascript-npm-package
+          path: dist
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - name: Update npm
+        run: |
+          npm install -g npm@11
+          npm --version
+      - name: Locate the tarball
+        id: locate
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(dist/payjoin-*.tgz)
+          if [ "${#pkgs[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one .tgz in dist/, found ${#pkgs[@]}: ${pkgs[*]:-none}"
+            exit 1
+          fi
+          echo "tarball=${pkgs[0]}" >>"$GITHUB_OUTPUT"
+      - name: Attest build provenance
+        # A consumer runs: gh attestation verify <file>.tgz -R payjoin/rust-payjoin
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.locate.outputs.tarball }}
+      - name: Publish to npmjs.com
+        env:
+          TARBALL: ${{ steps.locate.outputs.tarball }}
+          # Pre-releases go to the `next` dist-tag so `npm install payjoin`
+          # keeps resolving the latest stable version.
+          CHANNEL: ${{ needs.verify-tag.outputs.prerelease == 'true' && 'next' || 'latest' }}
+        run: npm publish "./$TARBALL" --tag "$CHANNEL"
+
+  publish-csharp:
+    name: Publish to nuget.org
+    needs: [python, javascript, csharp, dart, kotlin]
+    runs-on: ubuntu-26.04
+    environment: release
+    permissions:
+      id-token: write # OIDC: used by both NuGet/login and actions/attest
+      attestations: write # actions/attest writes the attestation
+    steps:
+      - name: Download NuGet package
+        uses: actions/download-artifact@v4
+        with:
+          name: payjoin-csharp-nuget-package
+          path: dist
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Locate the package
+        id: locate
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(dist/*.nupkg)
+          if [ "${#pkgs[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one .nupkg in dist/, found ${#pkgs[@]}: ${pkgs[*]:-none}"
+            exit 1
+          fi
+          echo "nupkg=${pkgs[0]}" >>"$GITHUB_OUTPUT"
+      - name: Attest build provenance
+        # Attesting the .nupkg covers every RID native lib inside it; a consumer
+        # runs: gh attestation verify <file>.nupkg -R payjoin/rust-payjoin
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.locate.outputs.nupkg }}
+      - name: NuGet login (OIDC -> short-lived API key)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Push to nuget.org
+        env:
+          NUPKG: ${{ steps.locate.outputs.nupkg }}
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push "$NUPKG" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --no-symbols \
+            --skip-duplicate
+
+  publish-dart:
+    name: Publish to pub.dev
+    needs: [python, javascript, csharp, dart, kotlin]
+    runs-on: ubuntu-26.04
+    environment: release
+    permissions:
+      id-token: write # OIDC: pub.dev automated publishing
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      - name: Set up nix
+        uses: ./.github/actions/setup-nix
+      - name: Download the staged package
+        uses: actions/download-artifact@v4
+        with:
+          name: payjoin-dart-pub-package
+          path: dist
+      - name: Extract the staged package
+        run: |
+          mkdir -p "$RUNNER_TEMP/payjoin-pub"
+          tar -xzf dist/payjoin-dart.tar.gz -C "$RUNNER_TEMP/payjoin-pub"
+      - name: Publish to pub.dev
+        run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/publish.sh "$RUNNER_TEMP/payjoin-pub"
+
+  github-release:
+    name: Create GitHub release
+    needs:
+      [
+        verify-tag,
+        publish-python,
+        publish-javascript,
+        publish-csharp,
+        publish-dart,
+      ]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write # create the Release for this tag and upload assets
+    env:
+      VERSION: ${{ needs.verify-tag.outputs.version }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      - name: Download every package
+        uses: actions/download-artifact@v4
+        with:
+          pattern: payjoin-*
+          merge-multiple: true
+          path: dist
+      - name: Check the asset set is complete
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          npm=(dist/*.tgz)
+          nuget=(dist/*.nupkg)
+          if [[ ${#wheels[@]} != 2 || ${#npm[@]} != 1 || ${#nuget[@]} != 1 || ! -f dist/payjoin-dart.tar.gz ]]; then
+            echo "::error::expected two wheels, one npm tarball, one NuGet package, and the Dart archive in dist/"
+            ls dist
+            exit 1
+          fi
+      - name: Generate SHA256SUMS
+        # The NuGet package's native libraries are listed individually so
+        # each can be verified on its own. A maintainer's GPG signature over
+        # SHA256SUMS is made locally and uploaded as SHA256SUMS.asc; no
+        # signing key reaches a runner.
+        env:
+          ARCHIVE_GLOBS: "*.nupkg"
+          MEMBER_GLOBS: runtimes/*/native/*
+        run: |
+          ./contrib/release/generate-sha256sums.sh dist
+          cat dist/SHA256SUMS
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          {
+            echo "body<<CHANGELOG_EOF"
+            ./contrib/release/extract-changelog.sh payjoin-ffi "$VERSION"
+            echo "CHANGELOG_EOF"
+          } >>"$GITHUB_OUTPUT"
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: ${{ steps.changelog.outputs.body }}
+          prerelease: ${{ needs.verify-tag.outputs.prerelease }}
+          fail_on_unmatched_files: true
+          files: dist/*

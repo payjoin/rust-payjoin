@@ -6,6 +6,13 @@
 
 RELEASE_CRATES="payjoin payjoin-cli payjoin-mailroom"
 
+# Stands in for the version a pending change will ship in, as in
+# `#[deprecated(since = "0.0.0-unreleased")]`. bump.sh replaces it. It is
+# valid semver so clippy's deprecated_semver lint accepts it, unlike "TBD",
+# which rustc reads as a future deprecation and does not warn about.
+# shellcheck disable=SC2034 # read by the scripts that source this file
+UNRELEASED="0.0.0-unreleased"
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # `cargo metadata` for the workspace. Command substitutions run in a subshell

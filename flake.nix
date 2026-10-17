@@ -359,6 +359,7 @@
               bzip2
               curl
               jq
+              rsync
             ]
             ++ lib.optionals pkgs.stdenv.isLinux [
               pkg-config

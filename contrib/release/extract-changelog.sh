@@ -12,10 +12,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/crates.sh"
     exit 1
 }
 
-# awk matches the heading exactly (a version has regex-special dots); sed
-# drops leading blank lines and the command substitution drops trailing ones.
-section="$(awk -v h="## $2" '
-    $0 == h { inside = 1; next }
+# awk matches the heading exactly (a version has regex-special dots), with
+# or without the brackets the binding changelogs use; sed drops leading
+# blank lines and the command substitution drops trailing ones.
+section="$(awk -v h="## $2" -v b="## [$2]" '
+    $0 == h || $0 == b { inside = 1; next }
     inside && /^## / { exit }
     inside
 ' "$REPO_ROOT/$1/CHANGELOG.md" | sed '/./,$!d')"

@@ -193,6 +193,23 @@ pub fn init_bitcoind_sender_receiver() -> Result<Arc<BitcoindEnv>, FfiError> {
     }))
 }
 
+/// Like [`init_bitcoind_sender_receiver`], but both wallets are funded with
+/// Taproot (P2TR) coins.
+#[uniffi::export]
+pub fn init_bitcoind_sender_receiver_taproot() -> Result<Arc<BitcoindEnv>, FfiError> {
+    let (bitcoind, receiver, sender) = payjoin_test_utils::init_bitcoind_sender_receiver(
+        Some(AddressType::Bech32m),
+        Some(AddressType::Bech32m),
+    )
+    .map_err(|e| FfiError::InitError(e.to_string()))?;
+
+    Ok(Arc::new(BitcoindEnv {
+        bitcoind: Arc::new(BitcoindInstance { _inner: bitcoind }),
+        receiver: Arc::new(RpcClient { inner: receiver }),
+        sender: Arc::new(RpcClient { inner: sender }),
+    }))
+}
+
 #[uniffi::export]
 pub fn example_url() -> String { EXAMPLE_URL.to_string() }
 

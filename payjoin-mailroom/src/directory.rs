@@ -5,7 +5,7 @@ use std::task::{Context, Poll};
 
 use anyhow::Result;
 use axum::body::{Body, Bytes};
-use axum::http::header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
+use axum::http::header::{HeaderValue, CONTENT_TYPE};
 use axum::http::{Method, Request, Response, StatusCode, Uri};
 use http_body_util::BodyExt;
 use payjoin::directory::{ShortId, ShortIdError, ENCAPSULATED_MESSAGE_BYTES};
@@ -147,7 +147,7 @@ impl<D: Db> Service<D> {
             }
         }
 
-        let mut response = match (parts.method, path_segments.as_slice()) {
+        let response = match (parts.method, path_segments.as_slice()) {
             (Method::POST, ["", ".well-known", "ohttp-gateway"]) =>
                 self.handle_ohttp_gateway(body).await,
             (Method::GET, ["", ".well-known", "ohttp-gateway"]) =>
@@ -161,8 +161,6 @@ impl<D: Db> Service<D> {
         }
         .unwrap_or_else(|e| e.to_response());
 
-        // Allow CORS for third-party access
-        response.headers_mut().insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
         Ok(response)
     }
 

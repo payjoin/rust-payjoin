@@ -218,6 +218,9 @@ pub(crate) enum InternalPayloadError {
     FeeTooHigh(bitcoin::FeeRate, bitcoin::FeeRate),
     /// Fee calculation overflowed in arithmetic and was incomputeable
     FeeCalculationOverflow,
+    /// The proposal's total output value exceeds its input value. Receiver
+    /// inputs must cover any increase in the original output value.
+    OutputsExceedInputs,
 }
 
 impl From<&PayloadError> for JsonReply {
@@ -237,6 +240,8 @@ impl From<&PayloadError> for JsonReply {
             | PsbtBelowFeeRate(_, _) => JsonReply::new(OriginalPsbtRejected, e),
 
             FeeTooHigh(_, _) => JsonReply::new(NotEnoughMoney, e),
+
+            OutputsExceedInputs => JsonReply::new(NotEnoughMoney, e),
 
             SenderParams(e) => match e {
                 super::optional_parameters::Error::UnknownVersion { supported_versions } => {
@@ -281,6 +286,10 @@ impl fmt::Display for InternalPayloadError {
                 "Effective receiver feerate exceeds maximum allowed feerate: {proposed_fee_rate} > {max_fee_rate}"
             ),
             FeeCalculationOverflow => write!(f, "Fee arithmetic overflow."),
+            OutputsExceedInputs => write!(
+                f,
+                "The proposal's output value exceeds its inputs; receiver inputs must cover any increase in output value."
+            ),
         }
     }
 }
@@ -297,6 +306,7 @@ impl std::error::Error for PayloadError {
             PsbtBelowFeeRate(_, _) => None,
             FeeTooHigh(_, _) => None,
             FeeCalculationOverflow => None,
+            OutputsExceedInputs => None,
             MissingPayment => None,
             OriginalPsbtNotBroadcastable => None,
             InputOwned(_) => None,

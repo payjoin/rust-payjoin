@@ -2,14 +2,19 @@ name: Formatting
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   Format:
     runs-on: ubuntu-26.04
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
       - name: Set up nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
       - name: Run treefmt
         run: |
           set -eo pipefail

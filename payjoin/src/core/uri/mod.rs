@@ -515,4 +515,218 @@ mod tests {
         // re-serialized.
         assert!(params.iter().all(|(key, _)| *key != "pjos"));
     }
+
+    /// Tests pinning how this crate consumes `bitcoin_uri`'s BIP 321
+    /// tokenizer: which URIs it must reject, and that whatever it accepts
+    /// re-serializes to one canonical form.
+    mod bip321 {
+        use super::*;
+
+        const ADDRESS: &str = "12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX";
+        /// A v2 endpoint, which also parses as a plain https v1 endpoint,
+        /// so these tests run under either feature.
+        const PJ: &str = "HTTPS://EXAMPLE.COM/TXJCGKTKXLUUZ\
+                          %23EX1C4UC6ES-OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC\
+                          -RK1Q0DJS3VVDXWQQTLQ8022QGXSX7ML9PHZ6EDSF6AKEWQG758JPS2EV";
+
+        fn uri(query: &str) -> String { format!("bitcoin:{ADDRESS}?{query}") }
+
+        fn parse_pj(s: &str) -> PjUri {
+            Uri::try_from(s)
+                .unwrap_or_else(|e| panic!("{s} should parse: {e}"))
+                .assume_checked()
+                .check_pj_supported()
+                .unwrap_or_else(|_| panic!("{s} should support payjoin"))
+        }
+
+        fn assert_same_payment(a: &PjUri, b: &PjUri) {
+            assert_eq!(a.address(), b.address());
+            assert_eq!(a.amount(), b.amount());
+            assert_eq!(a.label(), b.label());
+            assert_eq!(a.message(), b.message());
+            assert_eq!(a.extras().endpoint(), b.extras().endpoint());
+            assert_eq!(a.extras().output_substitution(), b.extras().output_substitution());
+        }
+
+        /// Every ordering of `items`, by Heap's algorithm.
+        fn permutations<T: Clone>(items: &[T]) -> Vec<Vec<T>> {
+            fn heap<T: Clone>(k: usize, items: &mut Vec<T>, out: &mut Vec<Vec<T>>) {
+                if k <= 1 {
+                    out.push(items.clone());
+                    return;
+                }
+                for i in 0..k {
+                    heap(k - 1, items, out);
+                    let j = if k % 2 == 0 { i } else { 0 };
+                    items.swap(j, k - 1);
+                }
+            }
+            let mut out = Vec::new();
+            heap(items.len(), &mut items.to_vec(), &mut out);
+            out
+        }
+
+        #[test]
+        fn rejects_unsatisfied_required_params() {
+            // BIP 321: a client MUST reject a URI with a req- param it does
+            // not understand, whether or not it requests payjoin.
+            for query in [
+                "req-foo=1".to_string(),
+                format!("pj={PJ}&req-foo=1"),
+                format!("req-sp=sp1qq&pj={PJ}"),
+            ] {
+                let err =
+                    Uri::try_from(uri(&query)).expect_err("unknown req- param must be rejected");
+                assert!(err.to_string().contains("req-"), "{query}: unexpected error {err}");
+            }
+        }
+
+        #[test]
+        fn understands_required_payjoin_params() {
+            let pjuri = parse_pj(&uri(&format!("req-pj={PJ}")));
+            assert_eq!(pjuri.extras().output_substitution(), OutputSubstitution::Enabled);
+
+            let pjuri = parse_pj(&uri(&format!("req-pjos=0&pj={PJ}")));
+            assert_eq!(pjuri.extras().output_substitution(), OutputSubstitution::Disabled);
+
+            // `pj` and `req-pj` share a base key, so together they repeat it.
+            let err = Uri::try_from(uri(&format!("pj={PJ}&req-pj={PJ}"))).expect_err("pj repeated");
+            assert!(err.to_string().contains("Multiple instances of parameter 'pj'"), "{err}");
+        }
+
+        #[test]
+        fn keys_are_case_insensitive() {
+            let lower = parse_pj(&uri(&format!("amount=0.01&pjos=0&pj={PJ}")));
+            let upper = parse_pj(&format!("BITCOIN:{ADDRESS}?AMOUNT=0.01&PJOS=0&PJ={PJ}"));
+            assert_same_payment(&lower, &upper);
+            assert_eq!(lower.to_string(), upper.to_string());
+
+            let err = Uri::try_from(uri(&format!("pj={PJ}&PJ={PJ}"))).expect_err("pj repeated");
+            assert!(err.to_string().contains("Multiple instances of parameter 'pj'"), "{err}");
+        }
+
+        #[test]
+        fn output_is_independent_of_param_order() {
+            let params = [
+                "amount=0.01".to_string(),
+                "label=Coffee%20%26%20cake".to_string(),
+                "message=Pay%20in%20%E2%82%BF".to_string(),
+                "pjos=0".to_string(),
+                format!("pj={PJ}"),
+            ];
+            let orderings = permutations(&params);
+            assert_eq!(orderings.len(), 120);
+
+            let canonical = parse_pj(&uri(&params.join("&")));
+            for ordering in orderings {
+                let pjuri = parse_pj(&uri(&ordering.join("&")));
+                assert_same_payment(&pjuri, &canonical);
+                assert_eq!(pjuri.to_string(), canonical.to_string(), "ordering {ordering:?}");
+            }
+        }
+
+        #[test]
+        fn display_is_a_fixpoint() {
+            let inputs = [
+                uri(&format!("pj={PJ}")),
+                uri(&format!("pjos=1&pj={PJ}")),
+                uri(&format!("pj={PJ}&amount=21&label=%F0%9F%A5%A9")),
+                uri(&format!("message=a+b%2Bc&pj={PJ}")),
+                format!("BITCOIN:{ADDRESS}?Label=x&PJ={PJ}&Amount=0.00000001"),
+                format!("bitcoin:bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4?pj={PJ}"),
+            ];
+            for input in inputs {
+                let first = parse_pj(&input);
+                let printed = first.to_string();
+                let second = parse_pj(&printed);
+                assert_same_payment(&first, &second);
+                assert_eq!(second.to_string(), printed, "{input} did not settle after one round");
+            }
+        }
+
+        #[test]
+        fn uri_decodes_standard_params_before_pj_check() {
+            // The BIP 21 example query: no payjoin, so it stays a plain `Uri`.
+            let query = "amount=50&label=Luke-Jr&message=Donation%20for%20project%20xyz";
+            let parsed = Uri::try_from(uri(query)).unwrap().assume_checked();
+            assert_eq!(parsed.amount(), Some(Amount::from_btc(50.0).unwrap()));
+            assert_eq!(parsed.label().as_deref(), Some("Luke-Jr"));
+            assert_eq!(parsed.message().as_deref(), Some("Donation for project xyz"));
+            assert!(!parsed.extras().pj_is_supported());
+
+            // A value that is not UTF-8 reads as absent rather than failing.
+            let parsed = Uri::try_from(uri(&format!("label=%FF&message=%C3&pj={PJ}"))).unwrap();
+            assert_eq!(parsed.amount(), None);
+            assert_eq!(parsed.label(), None);
+            assert_eq!(parsed.message(), None);
+        }
+
+        #[test]
+        fn extension_params_leave_payjoin_alone() {
+            let plain = parse_pj(&uri(&format!("pj={PJ}")));
+            let unified = parse_pj(&uri(&format!(
+                "lightning=lnbc1pvjluezpp5qqqsyq&sp=sp1qqgste7&lno=lno1qcp4&pj={PJ}"
+            )));
+            assert_eq!(unified.extras().endpoint(), plain.extras().endpoint());
+            assert_eq!(
+                unified.extras().output_substitution(),
+                plain.extras().output_substitution()
+            );
+        }
+
+        #[test]
+        fn requires_an_on_chain_address() {
+            // BIP 321 makes the body optional; a payjoin sender needs it.
+            let err = Uri::try_from(format!("bitcoin:?pj={PJ}&lightning=lnbc1pvjluezpp5qqqsyq"))
+                .expect_err("payjoin needs an address");
+            assert!(err.to_string().contains("no on-chain address"), "{err}");
+        }
+
+        #[test]
+        fn every_network_round_trips() {
+            use bitcoin::Network;
+            let cases = [
+                (ADDRESS, Network::Bitcoin),
+                ("tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx", Network::Testnet),
+                ("tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx", Network::Signet),
+                ("bcrt1q6rhpng9evdsfnn833a4f4vej0asu6dk5srld6x", Network::Regtest),
+            ];
+            for (address, network) in cases {
+                let input = format!("bitcoin:{address}?amount=1&pj={PJ}");
+                let pjuri = Uri::try_from(input.as_str())
+                    .unwrap()
+                    .require_network(network)
+                    .unwrap_or_else(|e| panic!("{address} on {network}: {e}"))
+                    .check_pj_supported()
+                    .unwrap_or_else(|_| panic!("{input} should support payjoin"));
+                let reparsed = Uri::try_from(pjuri.to_string())
+                    .unwrap()
+                    .require_network(network)
+                    .expect("re-serialized URI keeps its network");
+                assert_eq!(reparsed.address(), pjuri.address());
+            }
+        }
+
+        #[test]
+        fn reports_network_mismatch() {
+            let err = Uri::try_from(uri(&format!("pj={PJ}")))
+                .unwrap()
+                .require_network(bitcoin::Network::Testnet)
+                .expect_err("mainnet address on testnet");
+            assert!(err.to_string().contains("Invalid network"), "{err}");
+        }
+
+        #[test]
+        fn set_amount_keeps_payjoin_params() {
+            let mut pjuri = parse_pj(&uri(&format!("label=tip&message=thanks&pjos=0&pj={PJ}")));
+            pjuri.set_amount(Amount::from_sat(2_100));
+
+            let reparsed = parse_pj(&pjuri.to_string());
+            assert_eq!(reparsed.amount(), Some(Amount::from_sat(2_100)));
+            assert_eq!(reparsed.label().as_deref(), Some("tip"));
+            assert_eq!(reparsed.message().as_deref(), Some("thanks"));
+            assert_eq!(reparsed.extras().output_substitution(), OutputSubstitution::Disabled);
+            assert_eq!(reparsed.extras().endpoint(), pjuri.extras().endpoint());
+        }
+    }
 }

@@ -5,6 +5,10 @@
 - Fix panic when spending taproot UTXOs. They are now contributed as key-path
   spends with an assumed default input weight.
 - Any unsupported coin is simply skipped instead of crashing the cli.
+- The v2 receiver no longer prints the fallback transaction hex when the
+  Original PSBT arrives. The message now points to
+  `payjoin-cli cancel <session-id>`, which broadcasts the fallback transaction
+  if the payjoin fails.
 
 ## 1.0.0
 

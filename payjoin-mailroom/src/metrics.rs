@@ -17,13 +17,42 @@ pub(crate) const TUNNEL_SHEDS: &str = "bootstrap_tunnel_shed_total";
 pub(crate) const HTTP_REQUESTS_TOTAL: &str = "http_requests_total";
 pub(crate) const DB_ENTRIES: &str = "db_entries_total";
 
-// Names of the coarse, settled-window gauges that make up the entire export
-// surface. Everything above stays in-process; only these leave the operator
-// boundary.
 pub(crate) const HTTP_REQUESTS_WEEKLY: &str = "http_requests_weekly";
 pub(crate) const HTTP_REQUESTS_STARTED_WEEKLY: &str = "http_requests_started_weekly";
 pub(crate) const DB_ENTRIES_WEEKLY: &str = "db_entries_weekly";
 pub(crate) const TUNNEL_SHEDS_WEEKLY: &str = "bootstrap_tunnel_sheds_weekly";
+
+/// A coarse, settled-window gauge and the weekly buckets it reports.
+struct ExportGauge {
+    name: &'static str,
+    description: &'static str,
+    buckets: fn(&ExportWindows) -> &WeeklyBuckets,
+}
+
+/// The entire export surface. Every other instrument stays in-process; only
+/// these gauges leave the operator boundary.
+const EXPORT_GAUGES: [ExportGauge; 4] = [
+    ExportGauge {
+        name: HTTP_REQUESTS_WEEKLY,
+        description: "Completed HTTP requests in the last settled UTC reporting week",
+        buckets: |windows| &windows.http_requests,
+    },
+    ExportGauge {
+        name: HTTP_REQUESTS_STARTED_WEEKLY,
+        description: "HTTP requests started in the last settled UTC reporting week",
+        buckets: |windows| &windows.http_requests_started,
+    },
+    ExportGauge {
+        name: DB_ENTRIES_WEEKLY,
+        description: "Mailbox entries stored in the last settled UTC reporting week",
+        buckets: |windows| &windows.db_entries,
+    },
+    ExportGauge {
+        name: TUNNEL_SHEDS_WEEKLY,
+        description: "OHTTP bootstrap tunnels shed in the last settled UTC reporting week",
+        buckets: |windows| &windows.tunnel_sheds,
+    },
+];
 
 /// Number of UTC days in each exported reporting window.
 ///
@@ -384,65 +413,31 @@ impl MetricsService {
 
     fn register_export_gauges(&mut self, provider: &SdkMeterProvider) {
         let meter = provider.meter("payjoin-mailroom");
-
-        let windows = self.windows.clone();
-        let storage = self.storage.clone();
-        let http_requests_weekly = meter
-            .u64_observable_gauge(HTTP_REQUESTS_WEEKLY)
-            .with_description("Completed HTTP requests in the last settled UTC reporting week")
-            .with_callback(move |observer| {
-                let today = SystemTime::now().days_since_epoch();
-                let count = windows
-                    .lock()
-                    .expect("windows lock poisoned")
-                    .http_requests
-                    .settled_window_count(today);
-                observer.observe(count, &[]);
-                // Every collection runs every gauge callback, so writing
-                // from this one persists the buckets once per export.
-                persist(&windows, &storage);
+        self._export_gauges = EXPORT_GAUGES
+            .iter()
+            .enumerate()
+            .map(|(i, gauge)| {
+                let windows = self.windows.clone();
+                let storage = self.storage.clone();
+                let buckets = gauge.buckets;
+                let instrument = meter
+                    .u64_observable_gauge(gauge.name)
+                    .with_description(gauge.description)
+                    .with_callback(move |observer| {
+                        let today = SystemTime::now().days_since_epoch();
+                        let count = buckets(&windows.lock().expect("windows lock poisoned"))
+                            .settled_window_count(today);
+                        observer.observe(count, &[]);
+                        // Every collection runs every gauge callback, so writing
+                        // from the first one persists the buckets once per export.
+                        if i == 0 {
+                            persist(&windows, &storage);
+                        }
+                    })
+                    .build();
+                Arc::new(instrument)
             })
-            .build();
-
-        let windows = self.windows.clone();
-        let http_requests_started_weekly = meter
-            .u64_observable_gauge(HTTP_REQUESTS_STARTED_WEEKLY)
-            .with_description("HTTP requests started in the last settled UTC reporting week")
-            .with_callback(move |observer| {
-                let today = SystemTime::now().days_since_epoch();
-                let windows = windows.lock().expect("windows lock poisoned");
-                observer.observe(windows.http_requests_started.settled_window_count(today), &[]);
-            })
-            .build();
-
-        let windows = self.windows.clone();
-        let db_entries_weekly = meter
-            .u64_observable_gauge(DB_ENTRIES_WEEKLY)
-            .with_description("Mailbox entries stored in the last settled UTC reporting week")
-            .with_callback(move |observer| {
-                let today = SystemTime::now().days_since_epoch();
-                let windows = windows.lock().expect("windows lock poisoned");
-                observer.observe(windows.db_entries.settled_window_count(today), &[]);
-            })
-            .build();
-
-        let windows = self.windows.clone();
-        let tunnel_sheds_weekly = meter
-            .u64_observable_gauge(TUNNEL_SHEDS_WEEKLY)
-            .with_description("OHTTP bootstrap tunnels shed in the last settled UTC reporting week")
-            .with_callback(move |observer| {
-                let today = SystemTime::now().days_since_epoch();
-                let windows = windows.lock().expect("windows lock poisoned");
-                observer.observe(windows.tunnel_sheds.settled_window_count(today), &[]);
-            })
-            .build();
-
-        self._export_gauges = vec![
-            Arc::new(http_requests_weekly),
-            Arc::new(http_requests_started_weekly),
-            Arc::new(db_entries_weekly),
-            Arc::new(tunnel_sheds_weekly),
-        ];
+            .collect();
     }
 
     pub fn record_http_request(&self, endpoint: &str, method: &str, status_code: u16) {
@@ -718,13 +713,6 @@ mod tests {
     /// identify the operator or a client (hostname, IP, instance id, path).
     #[test]
     fn export_surface_is_windowed_gauges_with_allowed_attributes_only() {
-        const EXPORTED_METRICS: &[&str] = &[
-            HTTP_REQUESTS_WEEKLY,
-            HTTP_REQUESTS_STARTED_WEEKLY,
-            DB_ENTRIES_WEEKLY,
-            TUNNEL_SHEDS_WEEKLY,
-        ];
-
         let (exporter, provider) = in_memory_provider();
         let metrics = MetricsService::with_export(&provider);
 
@@ -741,12 +729,12 @@ mod tests {
         let points = exported_points(&exporter);
         let names: std::collections::HashSet<&str> =
             points.iter().map(|(name, _)| name.as_str()).collect();
-        for expected in EXPORTED_METRICS {
+        for expected in EXPORT_GAUGES.map(|gauge| gauge.name) {
             assert!(names.contains(expected), "{expected} missing from the export surface");
         }
         for (name, keys) in &points {
             assert!(
-                EXPORTED_METRICS.contains(&name.as_str()),
+                EXPORT_GAUGES.iter().any(|gauge| gauge.name == name),
                 "unexpected metric {name} on the export provider"
             );
             assert!(

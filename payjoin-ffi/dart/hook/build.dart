@@ -57,6 +57,11 @@ void main(List<String> args) async {
         // resolves a relative --config path against its own working
         // directory, so pass the absolute one.
         if (isWorkspaceBuild) ...['--config', localCargoConfig.path],
+        // A published package ships the native/Cargo.lock its release was
+        // staged with, so consumers build that graph instead of resolving
+        // their own. The workspace overlay redirects `payjoin-ffi` to local
+        // paths, which changes the graph, so development builds run unlocked.
+        if (!isWorkspaceBuild) '--locked',
       ],
       extraCargoEnvironmentVariables: {
         // Cargo takes rustflags from the first source that sets any, and

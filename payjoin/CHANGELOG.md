@@ -1,6 +1,7 @@
 # Payjoin Changelog
 
 ## Unreleased
+- Fix receiver change miscalculation across repeated `contribute_inputs` calls (#1940)
 
 ## 1.2.0
 

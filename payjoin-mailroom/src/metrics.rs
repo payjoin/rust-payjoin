@@ -721,6 +721,8 @@ mod tests {
         metrics.record_http_request("/health", "GET", 200);
         drop(metrics.track_request());
         metrics.record_db_entry(PayjoinVersion::Two);
+        metrics.record_tunnel_open();
+        metrics.record_tunnel_close();
         metrics.record_tunnel_shed();
         metrics.seed_settled_week(13);
 

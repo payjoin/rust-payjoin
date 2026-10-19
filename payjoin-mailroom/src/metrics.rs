@@ -748,6 +748,31 @@ mod tests {
         assert_eq!(gauge_value(&exporter, DB_ENTRIES_WEEKLY), Some(13));
     }
 
+    /// payjoin.org/mailroom links to the README's `## Telemetry` heading, and the
+    /// first table under it documents `EXPORT_GAUGES`.
+    #[test]
+    fn readme_telemetry_section_lists_the_export_surface() {
+        let readme = include_str!("../README.md");
+        let section: Vec<&str> = readme
+            .lines()
+            .skip_while(|line| *line != "## Telemetry")
+            .skip(1)
+            .take_while(|line| !line.starts_with("## "))
+            .collect();
+        assert!(!section.is_empty(), "README.md has no `## Telemetry` section");
+        let documented: std::collections::BTreeSet<&str> = section
+            .iter()
+            .skip_while(|line| !line.starts_with('|'))
+            .take_while(|line| line.starts_with('|'))
+            .filter_map(|line| line.strip_prefix("| `"))
+            .filter_map(|row| row.split('`').next())
+            .collect();
+        let exported: std::collections::BTreeSet<&str> =
+            EXPORT_GAUGES.iter().map(|gauge| gauge.name).collect();
+
+        assert_eq!(documented, exported, "README Telemetry table differs from the export surface");
+    }
+
     /// Traffic recorded today must be invisible in the export: the in-progress
     /// window is never emitted, so there is no live counter for an active
     /// prober to watch move.

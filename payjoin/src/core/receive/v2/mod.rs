@@ -917,9 +917,9 @@ pub struct MaybeInputsOwned {
 
 /// Typestate to check that the Original PSBT has no inputs owned by the receiver.
 ///
-/// At this point, the Original PSBT has been verified as broadcastable; the receiver
-/// can call [`Receiver<MaybeInputsOwned>::extract_tx_to_schedule_broadcast`] to
-/// schedule a fallback broadcast in case the payjoin fails.
+/// At this point, the Original PSBT has been verified as broadcastable. If the payjoin
+/// fails from here on, call [`Receiver<MaybeInputsOwned>::cancel`] to obtain the
+/// fallback transaction to broadcast.
 ///
 /// Call [`Receiver<MaybeInputsOwned>::check_inputs_not_owned`] to advance to
 /// [`Receiver<MaybeInputsSeen>`] to continue validation.
@@ -928,10 +928,18 @@ pub struct MaybeInputsOwned {
 /// [`Receiver<MaybeInputsOwned>::inputs_owned_checklist`] and
 /// [`Receiver<MaybeInputsOwned>::apply_inputs_owned_checklist`].
 impl Receiver<MaybeInputsOwned> {
-    /// Extract the transaction from the Original PSBT for scheduling broadcast as a
-    /// fallback in case the payjoin does not complete.
+    /// Extract the transaction from the Original PSBT.
+    ///
+    /// Broadcasting it from here bypasses the session: the event log never learns that
+    /// the fallback was sent. When the payjoin fails, call
+    /// [`Receiver<MaybeInputsOwned>::cancel`] instead and broadcast
+    /// [`Receiver<PendingFallback>::fallback_tx`].
     ///
     /// Returns the extracted [`bitcoin::Transaction`].
+    #[deprecated(
+        since = "0.0.0-unreleased",
+        note = "cancel the session when the payjoin fails and broadcast `Receiver<PendingFallback>::fallback_tx` instead"
+    )]
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
         self.state.fallback_tx()
     }

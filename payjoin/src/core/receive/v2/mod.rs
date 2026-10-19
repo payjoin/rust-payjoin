@@ -336,7 +336,7 @@ mod sealed {
     impl State for super::Monitor {}
     impl State for super::PendingFallback {}
 
-    pub trait FallbackTx: State {
+    pub(crate) trait FallbackTx: State {
         fn fallback_tx(&self) -> bitcoin::Transaction;
     }
 
@@ -407,9 +407,21 @@ impl<S: sealed::State> State for S {}
 /// Marker trait for receiver protocol states that hold a verified broadcastable
 /// fallback transaction.
 ///
-/// This trait is sealed to prevent external implementations.
+/// This trait is sealed to prevent external implementations. Its methods are not callable
+/// outside this crate. Use [`Receiver::cancel`] to obtain the fallback transaction.
+///
+/// ```compile_fail,E0624
+/// use payjoin::bitcoin::Transaction;
+/// use payjoin::receive::v2::{HasFallbackTx, Receiver};
+///
+/// fn fallback_tx<S: HasFallbackTx>(receiver: &Receiver<S>) -> Transaction {
+///     receiver.fallback_tx()
+/// }
+/// ```
+#[allow(private_bounds)]
 pub trait HasFallbackTx: sealed::FallbackTx {}
 
+#[allow(private_bounds)]
 impl<T: sealed::FallbackTx> HasFallbackTx for T {}
 
 /// A higher-level receiver construct which will be taken through different states through the

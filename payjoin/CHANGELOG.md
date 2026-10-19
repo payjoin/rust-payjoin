@@ -7,6 +7,10 @@
   documented API; such code no longer compiles. Read the fallback transaction
   from `Receiver<PendingFallback>::fallback_tx` after `cancel`, or from
   `SessionHistory::fallback_tx`.
+- Deprecate `Receiver<MaybeInputsOwned>::extract_tx_to_schedule_broadcast`.
+  Schedule the fallback broadcast by cancelling the session when the payjoin
+  fails: `cancel` yields a `Receiver<PendingFallback>` whose `fallback_tx`
+  is the transaction to broadcast.
 
 ## 1.2.0
 

@@ -840,15 +840,10 @@ mod tests {
 
     #[tokio::test]
     async fn getting_fallback_tx() {
-        let persister = InMemoryPersister::<SessionEvent>::default();
         let session_context = SHARED_CONTEXT.clone();
         let mut events = vec![];
         let original = original_from_test_vector();
-        let maybe_inputs_owned = unchecked_receiver_from_test_vector()
-            .assume_interactive_receiver()
-            .save(&persister)
-            .unwrap();
-        let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
+        let expected_fallback = original.psbt.clone().extract_tx_unchecked_fee_rate();
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
@@ -1006,7 +1001,7 @@ mod tests {
             .apply_fee_range(None, None)
             .save(&persister)
             .expect("Contributed inputs should be valid");
-        let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
+        let expected_fallback = original.psbt.clone().extract_tx_unchecked_fee_rate();
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));
@@ -1087,7 +1082,7 @@ mod tests {
             .finalize_proposal(|psbt| Ok(psbt.clone()))
             .save(&persister)
             .expect("Payjoin proposal should be finalized");
-        let expected_fallback = maybe_inputs_owned.extract_tx_to_schedule_broadcast();
+        let expected_fallback = original.psbt.clone().extract_tx_unchecked_fee_rate();
         let reply_key = Some(crate::HpkeKeyPair::gen_keypair().1);
 
         events.push(SessionEvent::Created(session_context.clone()));

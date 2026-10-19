@@ -1,5 +1,9 @@
 ## Unreleased
 
+- Deprecate `MaybeInputsOwned.extract_tx_to_schedule_broadcast`. Cancel the
+  session when the payjoin fails and broadcast the `fallback_tx` of the
+  resulting `ReceiverPendingFallback` instead.
+
 ## [0.25.0]
 
 - Publish the Python, JavaScript, C#, and Dart packages from one signed

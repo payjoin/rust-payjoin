@@ -1028,10 +1028,10 @@ impl App {
         let proposal =
             proposal.apply_broadcast_suitability(None, is_broadcast_suitable).save(persister)?;
 
-        persister.print(
-            "Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:",
-        );
-        println!("{}", serialize_hex(&proposal.extract_tx_to_schedule_broadcast()));
+        let id = persister.session_id();
+        persister.print(format_args!(
+            "Fallback transaction received. Run `payjoin-cli cancel {id}` to cancel and broadcast it if the Payjoin fails."
+        ));
         Ok(ReceiveSession::MaybeInputsOwned(proposal))
     }
 

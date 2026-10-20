@@ -45,6 +45,15 @@ built. The prefixes go through `CARGO_ENCODED_RUSTFLAGS` rather than
 `RUSTFLAGS`, since Cargo splits the latter on whitespace and a consumer's
 project path may contain spaces.
 
+### Reproducible native builds
+
+CI builds the staged package twice the way a Dart consumer does, with
+`contrib/consumer`, and requires byte-identical host libraries. Each
+build gets its own copy of the stage, its own app directory and its own
+`HOME`, and with it its own Cargo, rustup and pub homes. The
+`reproducible-linux` job in `.github/workflows/dart.yml` lists the
+steps.
+
 ## Releasing
 
 Maintainer instructions for publishing to

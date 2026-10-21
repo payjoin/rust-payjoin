@@ -25,6 +25,35 @@ bash ./scripts/generate_bindings.sh
 dart test
 ```
 
+### The native build hook
+
+`hook/build.dart` builds the `native/` wrapper crate for the consumer's
+target. It takes the presence of `.cargo/config.local.toml` as the sign
+that it is running inside this repository rather than from a published
+archive, because `.pubignore` withholds `.cargo/` from that archive. In
+the repository the overlay redirects `payjoin-ffi` to the workspace and
+the hook enables `_test-utils`. From an archive the hook builds the
+shipped `native/Cargo.lock` with `--locked`.
+
+This cannot be an environment variable. `hooks_runner` spawns build hooks
+with an allowlisted environment (`HOME`, `PATH` and a few toolchain
+prefixes), so a project specific variable never reaches the hook.
+
+The hook also passes `--remap-path-prefix` for the package, output, Cargo
+and Rustup directories, so the artifact does not record where it was
+built. The prefixes go through `CARGO_ENCODED_RUSTFLAGS` rather than
+`RUSTFLAGS`, since Cargo splits the latter on whitespace and a consumer's
+project path may contain spaces.
+
+### Reproducible native builds
+
+CI builds the staged package twice the way a Dart consumer does, with
+`contrib/consumer`, and requires byte-identical host libraries. Each
+build gets its own copy of the stage, its own app directory and its own
+`HOME`, and with it its own Cargo, rustup and pub homes. The
+`reproducible-linux` job in `.github/workflows/dart.yml` lists the
+steps.
+
 ## Releasing
 
 Maintainer instructions for publishing to
@@ -49,8 +78,16 @@ validates the archive with a publish dry run
 1. The preparation script stages a separate package and pins its Rust
    dependency to the checkout used to generate production bindings. The
    development pin in `native/Cargo.toml` is replaced only in that staging
-   directory. Cargo overlays and local lockfiles are excluded. Both the
-   publish dry run and publication use the staged package. For local checks:
+   directory. Cargo overlays are excluded. The staged `native/Cargo.lock`
+   is seeded from `Cargo-recent.lock` and resolved against that revision,
+   so consumers build the versions CI tested. A dependency fix reaches
+   Dart consumers through `Cargo-recent.lock` and a new release. Staging
+   fetches the pinned commit from GitHub, so it must be pushed. When a
+   `payjoin` or `payjoin-mailroom` version that `payjoin-ffi` or
+   `payjoin-test-utils` requires is not on crates.io yet, staging takes
+   it from the same revision and writes an `UNPUBLISHED_CORE` marker,
+   which `contrib/publish.sh` refuses. Both the publish dry run and
+   publication use the staged package. For local checks:
 
    ```shell
    nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh /tmp/payjoin-pub

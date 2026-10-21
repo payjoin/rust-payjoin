@@ -11,6 +11,13 @@ grep -Fq "rev = \"$revision\"" native/Cargo.toml || {
     echo "Staged native/Cargo.toml must pin the release checkout $revision" >&2
     exit 1
 }
+# A stage built against an unreleased core is only fit for pull request
+# checks; consumers must build the core they can fetch from crates.io.
+if [[ -e UNPUBLISHED_CORE ]]; then
+    echo "Refusing to publish a stage built against an unpublished core:" >&2
+    cat UNPUBLISHED_CORE >&2
+    exit 1
+fi
 
 # Publish the package to pub.dev via automated publishing (OIDC).
 # `dart pub publish` has no non-interactive authentication mode: without a

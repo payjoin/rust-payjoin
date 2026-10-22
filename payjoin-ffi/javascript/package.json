@@ -1,6 +1,6 @@
 {
     "name": "payjoin",
-    "version": "0.25.0",
+    "version": "0.25.1",
     "description": "JavaScript/WASM bindings for rust-payjoin (EXPERIMENTAL)",
     "scripts": {
         "ubrn:nodejs": "ubrn build web --release --and-generate --config ubrn.nodejs.config.yaml",

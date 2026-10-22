@@ -1,5 +1,8 @@
 ## Unreleased
 
+## [0.25.1]
+
+- Wraps payjoin 1.2.0
 - Dart: the native library no longer records the paths it was built
   from, so two builds of one release from different directories produce
   the same bytes. The build hook sets `CARGO_ENCODED_RUSTFLAGS`, so

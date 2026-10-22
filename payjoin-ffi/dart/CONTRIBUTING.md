@@ -84,11 +84,11 @@ validates the archive with a publish dry run
    Dart consumers through `Cargo-recent.lock` and a new release. Staging
    fetches the pinned commit from GitHub, so it must be pushed. The
    `payjoin` and `payjoin-mailroom` crates come from crates.io, except
-   with `--core-from-revision`, which pull requests use since they may
-   change those crates without a version bump. That option takes them
-   from the same revision and writes an `UNPUBLISHED_CORE` marker, which
-   `contrib/publish.sh` refuses. Both the publish dry run and
-   publication use the staged package. For local checks:
+   with `--core-from-revision`, which every run but a release tag uses
+   since it may wrap core changes not yet on crates.io. That option
+   takes them from the same revision and writes an `UNPUBLISHED_CORE`
+   marker, which `contrib/publish.sh` refuses. Both the publish dry run
+   and publication use the staged package. For local checks:
 
    ```shell
    nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh /tmp/payjoin-pub

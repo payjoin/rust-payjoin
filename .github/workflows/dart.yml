@@ -56,11 +56,12 @@ jobs:
         uses: $/.github/actions/setup-nix
       - name: Generate production bindings and dry-run publish
         run: |
-          # Pull requests may change payjoin or payjoin-mailroom without a
-          # version bump, so they stage those crates from the checkout.
-          # Releases stage against crates.io, as consumers build them.
+          # A release tag stages payjoin and payjoin-mailroom against
+          # crates.io, as consumers build them. Any other run may wrap
+          # changes to those crates that are not published yet, so it
+          # stages them from the checkout.
           flags=()
-          if [[ $GITHUB_EVENT_NAME == pull_request ]]; then
+          if [[ $GITHUB_REF != refs/tags/* ]]; then
             flags+=(--core-from-revision)
           fi
           nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh "${flags[@]}" "$RUNNER_TEMP/payjoin-pub"

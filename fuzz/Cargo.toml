@@ -22,6 +22,8 @@ payjoin = { path = "../payjoin", default-features = false, features = [
   "v1",
   "v2",
 ] }
+payjoin-ffi = { path = "../payjoin-ffi" }
+serde_json = { version = "1.0.149" }
 
 [[bin]]
 name = "uri-deserialize-pjuri"
@@ -68,5 +70,11 @@ bench = false
 [[bin]]
 name = "receiver-v2"
 path = "fuzz_targets/receiver/v2.rs"
+doc = false
+bench = false
+
+[[bin]]
+name = "ffi-session-event-log"
+path = "fuzz_targets/ffi/session_event_log.rs"
 doc = false
 bench = false

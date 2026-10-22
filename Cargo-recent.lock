@@ -2550,6 +2550,8 @@ dependencies = [
  "bitcoin-ohttp",
  "libfuzzer-sys",
  "payjoin",
+ "payjoin-ffi",
+ "serde_json",
 ]
 
 [[package]]

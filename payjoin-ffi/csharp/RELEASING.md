@@ -16,8 +16,9 @@ NuGet retains the historical `0.24.0-preview.1` release. The common
 
 ## Producing a release candidate
 
-CI is the release path. On every pull request touching `payjoin-ffi/**`, the
-`Build and Test CSharp` workflow:
+CI is the release path. On every bindings release and in the
+`Daily language bindings` run on `master`, the `Build and Test CSharp`
+workflow:
 
 1. builds release-profile native assets for each supported RID
    (`linux-arm64`, `linux-x64`, `osx-arm64`, `osx-x64`, `win-arm64`,
@@ -27,8 +28,10 @@ CI is the release path. On every pull request touching `payjoin-ffi/**`, the
 3. installs the package into a clean console app and runs a smoke test on
    each supported RID.
 
-To cut a candidate, download the `payjoin-csharp-nuget-package` artifact from
-the workflow run on the release commit in `master`. Do not pack from a
+Pull requests run only the Linux build and test job. To cut a candidate,
+download the `payjoin-csharp-nuget-package` artifact from a
+`Daily language bindings` run on the release commit in `master`, starting
+one by hand if the latest daily run is on an older commit. Do not pack from a
 development machine for publication; a local pack only contains the native
 assets present on that host.
 
@@ -40,8 +43,8 @@ Review before every publish to nuget.org. Grounded in the NuGet
 
 ### Package correctness
 
-- [ ] Every job of the `Build and Test CSharp` workflow is green on the
-      release commit, including the per-RID smoke tests.
+- [ ] Every C# job of the `Daily language bindings` workflow is green on
+      the release commit, including the per-RID smoke tests.
 - [ ] `unzip -l Payjoin.<version>.nupkg` shows the expected layout:
   - `README.md`
   - `ref/net10.0/Payjoin.dll`

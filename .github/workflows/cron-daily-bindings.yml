@@ -1,0 +1,25 @@
+name: Daily language bindings
+
+# Runs every language binding's build, package and smoke checks on master
+# with the same platform coverage as a bindings release, so a platform
+# regression surfaces before the release tag does.
+
+on:
+  schedule:
+    - cron: "0 5 * * *" # runs daily at 05:00 UTC
+  workflow_dispatch: # allows manual triggering
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    uses: $/.github/workflows/python.yml
+  javascript:
+    uses: $/.github/workflows/javascript.yml
+  csharp:
+    uses: $/.github/workflows/csharp.yml
+  dart:
+    uses: $/.github/workflows/dart.yml
+  kotlin:
+    uses: $/.github/workflows/kotlin.yml

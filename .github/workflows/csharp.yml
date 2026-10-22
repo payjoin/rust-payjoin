@@ -13,12 +13,37 @@ permissions:
   contents: read
 
 jobs:
-  build-csharp-and-test-unix:
+  # Pull requests run only the Linux build and test job. The other jobs
+  # cover macOS, Windows and packaging, and run on bindings releases and
+  # the daily run.
+  build-csharp-and-test-linux:
     name: "Build and test csharp"
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-26.04, macos-latest]
+    runs-on: ubuntu-26.04
+    env:
+      RUSTUP_TOOLCHAIN: 1.85.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
+      - name: "Install Rust 1.85.0"
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.85.0
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
+          shared-key: msrv-workspace
+      - name: Set up nix
+        uses: $/.github/actions/setup-nix
+      - name: "Build and test"
+        run: nix develop .#csharp -c ./payjoin-ffi/csharp/contrib/test.sh
+
+  build-csharp-and-test-macos:
+    name: "Build and test csharp (macos)"
+    if: github.event_name != 'pull_request'
+    runs-on: macos-latest
     env:
       RUSTUP_TOOLCHAIN: 1.85.0
     steps:
@@ -42,6 +67,7 @@ jobs:
 
   build-csharp-and-test-windows:
     name: "Build and test csharp (windows)"
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     env:
       RUSTUP_TOOLCHAIN: 1.85
@@ -87,6 +113,7 @@ jobs:
     # Microsoft CRT/SDK. The per-RID smoke jobs verify each produced asset on
     # real hardware.
     name: "Build NuGet native asset"
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     env:
       # Must match the dtolnay/rust-toolchain version exactly: the cross-target
@@ -172,6 +199,7 @@ jobs:
 
   pack-nuget:
     name: "Pack C# NuGet package"
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     needs: build-nuget-native
     env:
@@ -230,6 +258,7 @@ jobs:
 
   smoke-nuget:
     name: "Smoke test C# NuGet package"
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     needs: pack-nuget
     defaults:

@@ -13,8 +13,9 @@ the wrapped payjoin core.
 
 ## Producing the wheels
 
-CI is the release path. On every pull request touching `payjoin-ffi/**`,
-the `Build and Test Python` workflow builds release wheels with
+CI is the release path. On every bindings release and in the
+`Daily language bindings` run on `master`, the `Build and Test Python`
+workflow builds release wheels with
 [`contrib/build-wheel.sh`](contrib/build-wheel.sh) (release profile, no
 `_test-utils`) and smoke-installs them on every supported platform:
 

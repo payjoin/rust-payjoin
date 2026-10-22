@@ -53,6 +53,11 @@ impl Time {
 
     /// Check if the time is in the past.
     pub(crate) fn elapsed(self) -> bool { self <= Self::now() }
+
+    /// Convert to a [`SystemTime`].
+    pub(crate) fn to_system_time(self) -> SystemTime {
+        UNIX_EPOCH + Duration::from_secs(self.0.to_consensus_u32().into())
+    }
 }
 
 #[derive(Debug)]

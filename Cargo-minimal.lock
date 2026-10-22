@@ -2338,6 +2338,7 @@ dependencies = [
  "uniffi",
  "uniffi-bindgen-cs",
  "uniffi-dart",
+ "web-time",
  "yoke-derive",
 ]
 

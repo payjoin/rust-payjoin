@@ -36,6 +36,9 @@ uniffi-bindgen-cs = { git = "https://github.com/NordSecurity/uniffi-bindgen-cs",
 uniffi-dart = { git = "https://github.com/Uniffi-Dart/uniffi-dart.git", tag = "v0.2.1+v0.31.2", optional = true }
 yoke-derive = "=0.8.2"
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = "1.1.0"
+
 # Pinned transitive dependencies that appear unused to cargo-machete
 [package.metadata.cargo-machete]
 ignored = ["getrandom", "socks", "yoke-derive"]

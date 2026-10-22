@@ -15,9 +15,9 @@ mod integration {
     use payjoin::{ImplementationError, PjUri, Request, Uri};
     #[cfg(feature = "v1")]
     use payjoin::{OutputSubstitution, Url};
-    use payjoin_test_utils::corepc_node::vtype::ListUnspentItem;
-    use payjoin_test_utils::corepc_node::AddressType;
-    use payjoin_test_utils::{corepc_node, init_bitcoind_sender_receiver, init_tracing, BoxError};
+    use payjoin_test_utils::bitcoind::vtype::ListUnspentItem;
+    use payjoin_test_utils::bitcoind::AddressType;
+    use payjoin_test_utils::{bitcoind, init_bitcoind_sender_receiver, init_tracing, BoxError};
     use serde_json::json;
 
     #[cfg(feature = "v1")]
@@ -102,8 +102,8 @@ mod integration {
         }
 
         fn do_v1_to_v1(
-            sender: corepc_node::Client,
-            receiver: corepc_node::Client,
+            sender: bitcoind::Client,
+            receiver: bitcoind::Client,
             expected_weight: Weight,
         ) -> Result<(), BoxError> {
             // Receiver creates the payjoin URI
@@ -801,8 +801,8 @@ mod integration {
         /// how the receiver is going to validate the action the sender takes.
         async fn do_v2_to_v2<R, S>(
             services: &TestServices,
-            receiver: &corepc_node::Client,
-            sender: &corepc_node::Client,
+            receiver: &bitcoind::Client,
+            sender: &bitcoind::Client,
             recv_persister: &R,
             send_persister: &S,
             sender_final_action: SenderFinalAction,
@@ -1051,7 +1051,7 @@ mod integration {
                 // **********************
                 // Inside the Receiver:
                 let agent_clone: Arc<Client> = agent.clone();
-                let receiver: Arc<corepc_node::Client> = Arc::new(receiver);
+                let receiver: Arc<bitcoind::Client> = Arc::new(receiver);
                 let receiver_clone = receiver.clone();
                 let ohttp_relay = services.ohttp_relay_url().to_string();
                 let receiver_loop = tokio::task::spawn(async move {
@@ -1145,7 +1145,7 @@ mod integration {
         }
 
         fn handle_directory_proposal(
-            receiver: &corepc_node::Client,
+            receiver: &bitcoind::Client,
             proposal: Receiver<UncheckedOriginalPayload>,
             recv_persister: &impl SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent>,
             custom_inputs: Option<Vec<InputPair>>,
@@ -1239,7 +1239,7 @@ mod integration {
                 .finalize_proposal(|psbt: &Psbt| {
                     receiver
                         // call RPC manually to pass custom options
-                        .call::<corepc_node::vtype::WalletProcessPsbt>(
+                        .call::<bitcoind::vtype::WalletProcessPsbt>(
                             "walletprocesspsbt",
                             &[
                                 json!(psbt.to_string()),
@@ -1256,7 +1256,7 @@ mod integration {
         }
 
         pub fn build_sweep_psbt(
-            sender: &corepc_node::Client,
+            sender: &bitcoind::Client,
             pj_uri: &PjUri,
         ) -> Result<Psbt, BoxError> {
             let mut outputs = HashMap::with_capacity(1);
@@ -1270,7 +1270,7 @@ mod integration {
             });
             let psbt = sender
                 // call RPC manually to pass custom options
-                .call::<corepc_node::vtype::WalletCreateFundedPsbt>(
+                .call::<bitcoind::vtype::WalletCreateFundedPsbt>(
                     "walletcreatefundedpsbt",
                     &[
                         json!(&[] as &[serde_json::Value]), // inputs
@@ -1473,7 +1473,7 @@ mod integration {
         }
     }
 
-    fn build_original_psbt(sender: &corepc_node::Client, pj_uri: &PjUri) -> Result<Psbt, BoxError> {
+    fn build_original_psbt(sender: &bitcoind::Client, pj_uri: &PjUri) -> Result<Psbt, BoxError> {
         let mut outputs = HashMap::with_capacity(1);
         outputs.insert(
             pj_uri.address().to_string(),
@@ -1487,7 +1487,7 @@ mod integration {
         });
         let psbt = sender
             // call RPC manually to pass custom options
-            .call::<corepc_node::vtype::WalletCreateFundedPsbt>(
+            .call::<bitcoind::vtype::WalletCreateFundedPsbt>(
                 "walletcreatefundedpsbt",
                 &[
                     json!(&[] as &[serde_json::Value]), // inputs
@@ -1508,7 +1508,7 @@ mod integration {
     fn handle_v1_pj_request(
         req: Request,
         headers: impl payjoin::receive::v1::Headers,
-        receiver: &corepc_node::Client,
+        receiver: &bitcoind::Client,
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,
         custom_inputs: Option<Vec<InputPair>>,
@@ -1529,7 +1529,7 @@ mod integration {
     #[cfg(feature = "v1")]
     fn handle_proposal(
         proposal: payjoin::receive::v1::UncheckedOriginalPayload,
-        receiver: &corepc_node::Client,
+        receiver: &bitcoind::Client,
         custom_outputs: Option<Vec<TxOut>>,
         drain_script: Option<&bitcoin::Script>,
         custom_inputs: Option<Vec<InputPair>>,
@@ -1608,7 +1608,7 @@ mod integration {
         let payjoin_proposal = payjoin.finalize_proposal(|psbt: &Psbt| {
             receiver
                 // call RPC manually to pass custom options
-                .call::<corepc_node::vtype::WalletProcessPsbt>(
+                .call::<bitcoind::vtype::WalletProcessPsbt>(
                     "walletprocesspsbt",
                     &[
                         json!(psbt.to_string()),
@@ -1624,7 +1624,7 @@ mod integration {
     }
 
     fn extract_pj_tx(
-        sender: &corepc_node::Client,
+        sender: &bitcoind::Client,
         psbt: Psbt,
     ) -> Result<bitcoin::Transaction, Box<dyn std::error::Error>> {
         let payjoin_psbt = sender.wallet_process_psbt(&psbt)?.psbt;
@@ -1646,7 +1646,7 @@ mod integration {
             // witness_utxo, even for non-witness inputs
             witness_utxo: Some(TxOut { value: utxo.amount, script_pubkey: utxo.script_pubkey }),
             redeem_script: utxo.redeem_script,
-            //FIXME needs later corepc_node bitcoin version
+            //FIXME needs later bitcoind bitcoin version
             //witness_script: utxo.witness_script.clone(),
             ..Default::default()
         };

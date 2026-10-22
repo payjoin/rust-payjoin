@@ -8,6 +8,7 @@
 - Specify the versions for deps more precisely in the cargo toml [#696](https://github.com/payjoin/rust-payjoin/pull/696)
 - Extend tests for rest of receive module [#632](https://github.com/payjoin/rust-payjoin/pull/632)
 - Fix uninline format clippy violations [#667](https://github.com/payjoin/rust-payjoin/pull/667)
+- Replace corepc-node with bitcoind
 
 ## 0.0.0
 

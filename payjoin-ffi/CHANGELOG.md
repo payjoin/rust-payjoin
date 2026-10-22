@@ -8,6 +8,7 @@
 - Dart: the package ships the `native/Cargo.lock` it was released with
   and the build hook builds it with `--locked`, so every build compiles
   the dependency versions CI tested.
+- corepc-node dep replaced with bitcoind re-exported through payjoin-test-utils
 
 ## [0.25.0]
 

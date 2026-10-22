@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use payjoin_test_utils::corepc_node::AddressType;
+use payjoin_test_utils::bitcoind::AddressType;
 use serde_json::Value;
 
 #[napi]
@@ -32,13 +32,13 @@ impl BitcoindEnv {
 #[napi]
 #[derive(Clone)]
 pub struct BitcoindInstance {
-    _inner: Arc<payjoin_test_utils::corepc_node::Node>,
+    _inner: Arc<payjoin_test_utils::bitcoind::BitcoinD>,
 }
 
 #[napi]
 #[derive(Clone)]
 pub struct RpcClient {
-    inner: Arc<payjoin_test_utils::corepc_node::Client>,
+    inner: Arc<payjoin_test_utils::bitcoind::Client>,
 }
 
 #[napi]

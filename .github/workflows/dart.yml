@@ -15,10 +15,31 @@ permissions:
 jobs:
   build-dart-and-test:
     name: "Build and test dart"
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-26.04, macos-latest]
+    runs-on: ubuntu-26.04
+    env:
+      RUSTUP_TOOLCHAIN: 1.85.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
+      - name: "Install Rust 1.85.0"
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.85.0
+      - name: "Use cache"
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
+          shared-key: msrv-workspace
+      - name: Set up nix
+        uses: $/.github/actions/setup-nix
+      - name: "Build and test"
+        run: nix develop .#dart -c bash ./payjoin-ffi/dart/contrib/test.sh
+
+  build-dart-and-test-macos:
+    name: "Build and test dart (macos)"
+    runs-on: macos-latest
     env:
       RUSTUP_TOOLCHAIN: 1.85.0
     steps:

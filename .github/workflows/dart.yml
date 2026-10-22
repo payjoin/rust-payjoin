@@ -55,7 +55,15 @@ jobs:
       - name: Set up nix
         uses: $/.github/actions/setup-nix
       - name: Generate production bindings and dry-run publish
-        run: nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh "$RUNNER_TEMP/payjoin-pub"
+        run: |
+          # Pull requests may change payjoin or payjoin-mailroom without a
+          # version bump, so they stage those crates from the checkout.
+          # Releases stage against crates.io, as consumers build them.
+          flags=()
+          if [[ $GITHUB_EVENT_NAME == pull_request ]]; then
+            flags+=(--core-from-revision)
+          fi
+          nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh "${flags[@]}" "$RUNNER_TEMP/payjoin-pub"
       # The release workflow publishes this exact stage, so it is archived
       # rather than regenerated in the publish job.
       - name: Archive the staged package

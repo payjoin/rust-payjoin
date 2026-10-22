@@ -82,11 +82,12 @@ validates the archive with a publish dry run
    is seeded from `Cargo-recent.lock` and resolved against that revision,
    so consumers build the versions CI tested. A dependency fix reaches
    Dart consumers through `Cargo-recent.lock` and a new release. Staging
-   fetches the pinned commit from GitHub, so it must be pushed. When a
-   `payjoin` or `payjoin-mailroom` version that `payjoin-ffi` or
-   `payjoin-test-utils` requires is not on crates.io yet, staging takes
-   it from the same revision and writes an `UNPUBLISHED_CORE` marker,
-   which `contrib/publish.sh` refuses. Both the publish dry run and
+   fetches the pinned commit from GitHub, so it must be pushed. The
+   `payjoin` and `payjoin-mailroom` crates come from crates.io, except
+   with `--core-from-revision`, which pull requests use since they may
+   change those crates without a version bump. That option takes them
+   from the same revision and writes an `UNPUBLISHED_CORE` marker, which
+   `contrib/publish.sh` refuses. Both the publish dry run and
    publication use the staged package. For local checks:
 
    ```shell

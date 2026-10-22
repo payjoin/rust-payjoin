@@ -2,9 +2,9 @@ use std::io;
 use std::sync::Arc;
 
 use lazy_static::lazy_static;
-use payjoin_test_utils::corepc_node::AddressType;
+use payjoin_test_utils::bitcoind::AddressType;
 use payjoin_test_utils::{
-    corepc_node, EXAMPLE_URL, INVALID_PSBT, ORIGINAL_PSBT, PAYJOIN_PROPOSAL,
+    bitcoind, EXAMPLE_URL, INVALID_PSBT, ORIGINAL_PSBT, PAYJOIN_PROPOSAL,
     PAYJOIN_PROPOSAL_WITH_SENDER_INFO, QUERY_PARAMS, RECEIVER_INPUT_CONTRIBUTION,
 };
 use serde_json::Value;
@@ -34,12 +34,12 @@ impl BitcoindEnv {
 
 #[derive(uniffi::Object)]
 pub struct BitcoindInstance {
-    _inner: corepc_node::Node,
+    _inner: bitcoind::BitcoinD,
 }
 
 #[derive(uniffi::Object)]
 pub struct RpcClient {
-    inner: corepc_node::Client,
+    inner: bitcoind::Client,
 }
 
 #[uniffi::export]

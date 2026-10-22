@@ -13,6 +13,9 @@ permissions:
   contents: read
 
 jobs:
+  # Pull requests run only the Linux build and test job. The other jobs
+  # cover macOS, Windows and packaging, and run on bindings releases and
+  # the daily run.
   build-js-and-test:
     name: "Build and test javascript"
     runs-on: ubuntu-26.04
@@ -39,6 +42,7 @@ jobs:
 
   build-js-and-test-macos:
     name: "Build and test javascript (macos)"
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     env:
       RUSTUP_TOOLCHAIN: 1.85.0
@@ -65,6 +69,7 @@ jobs:
     # The package ships only dist/ (wasm + compiled TypeScript), which is
     # platform-independent, so one pack on Linux is the entire release build.
     name: "Pack npm package"
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
@@ -88,6 +93,7 @@ jobs:
 
   smoke-npm:
     name: "Smoke test npm package"
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     needs: pack-npm
     strategy:

@@ -13,6 +13,9 @@ permissions:
   contents: read
 
 jobs:
+  # Pull requests run only the Linux build and test job. The other jobs
+  # cover macOS, Windows and packaging, and run on bindings releases and
+  # the daily run.
   build-dart-and-test:
     name: "Build and test dart"
     runs-on: ubuntu-26.04
@@ -39,6 +42,7 @@ jobs:
 
   build-dart-and-test-macos:
     name: "Build and test dart (macos)"
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     env:
       RUSTUP_TOOLCHAIN: 1.85.0
@@ -63,6 +67,7 @@ jobs:
 
   verify-pub-package:
     name: "Verify pub.dev package"
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
@@ -103,6 +108,7 @@ jobs:
   # the Cargo, rustup and pub caches.
   reproducible-linux:
     name: "Reproduce the Linux native library"
+    if: github.event_name != 'pull_request'
     needs: verify-pub-package
     runs-on: ubuntu-26.04
     timeout-minutes: 60

@@ -70,9 +70,10 @@ Earlier versions carried it as build metadata, for example
 
 ### Publishing
 
-CI is the publish path. On every pull request touching `payjoin-ffi/**`,
-the `Build and Test Dart` workflow regenerates the production bindings and
-validates the archive with a publish dry run
+CI is the publish path. On every bindings release and in the
+`Daily language bindings` run on `master`, the `Build and Test Dart`
+workflow regenerates the production bindings and validates the archive
+with a publish dry run
 ([`contrib/prepare-publish.sh`](contrib/prepare-publish.sh)).
 
 1. The preparation script stages a separate package and pins its Rust

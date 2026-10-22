@@ -13,6 +13,9 @@ permissions:
   contents: read
 
 jobs:
+  # Pull requests run only the Linux build and test job. The other jobs
+  # cover macOS, Windows and packaging, and run on bindings releases and
+  # the daily run.
   build-csharp-and-test-linux:
     name: "Build and test csharp"
     runs-on: ubuntu-26.04
@@ -39,6 +42,7 @@ jobs:
 
   build-csharp-and-test-macos:
     name: "Build and test csharp (macos)"
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     env:
       RUSTUP_TOOLCHAIN: 1.85.0
@@ -63,6 +67,7 @@ jobs:
 
   build-csharp-and-test-windows:
     name: "Build and test csharp (windows)"
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     env:
       RUSTUP_TOOLCHAIN: 1.85
@@ -108,6 +113,7 @@ jobs:
     # Microsoft CRT/SDK. The per-RID smoke jobs verify each produced asset on
     # real hardware.
     name: "Build NuGet native asset"
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     env:
       # Must match the dtolnay/rust-toolchain version exactly: the cross-target
@@ -193,6 +199,7 @@ jobs:
 
   pack-nuget:
     name: "Pack C# NuGet package"
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     needs: build-nuget-native
     env:
@@ -251,6 +258,7 @@ jobs:
 
   smoke-nuget:
     name: "Smoke test C# NuGet package"
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     needs: pack-nuget
     defaults:

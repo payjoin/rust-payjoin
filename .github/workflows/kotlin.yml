@@ -14,6 +14,8 @@ permissions:
   contents: read
 
 jobs:
+  # Pull requests run only the Linux build and test job. The macOS job
+  # runs on bindings releases and the daily run.
   build-kotlin-and-test:
     name: "Build and test kotlin"
     runs-on: ubuntu-26.04
@@ -44,6 +46,7 @@ jobs:
 
   build-kotlin-and-test-macos:
     name: "Build and test kotlin (macos)"
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     env:
       RUSTUP_TOOLCHAIN: 1.85.0

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+- Accept URIs that mark the payjoin parameters as required with `req-pj`
+  or `req-pjos`. BIP 321 lets a URI require any parameter the payer must
+  understand, and payjoin understands both, but they were rejected as
+  unknown required parameters. Any other unknown `req-` parameter is still
+  rejected
+
+### Dependencies
+
+- Upgrade `bitcoin_uri` from 0.1 to 0.2, which parses BIP 321 URIs. The
+  `Uri` and `PjUri` API and the URIs they print are unchanged
+
 ## 1.2.0
 
 This release adds a non-blocking interface to the receiver state machine.

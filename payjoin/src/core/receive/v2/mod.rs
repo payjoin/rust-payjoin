@@ -1926,7 +1926,9 @@ pub mod test {
     use crate::persist::{
         InMemoryPersister, OptionalTransitionOutcome, RejectTransient, Rejection, SessionPersister,
     };
+    use crate::receive::common::tests::candidate_input_from_test_vector;
     use crate::receive::optional_parameters::Params;
+    use crate::receive::tests::original_from_test_vector;
     use crate::receive::v2;
     use crate::ImplementationError;
 
@@ -2182,6 +2184,66 @@ pub mod test {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn repeated_input_contributions_accumulate_change() {
+        let original = original_from_test_vector();
+        let original_output_value = original.psbt.unsigned_tx.output[0].value;
+
+        let first_value = Amount::from_sat(100);
+        let second_value = Amount::from_sat(200);
+        let first_input = candidate_input_from_test_vector(first_value);
+        let second_input = candidate_input_from_test_vector(second_value);
+
+        let wants_inputs =
+            receiver(WantsOutputs { inner: common::WantsOutputs::new(original, vec![0]) })
+                .commit_outputs()
+                .save(&InMemoryPersister::default())
+                .expect("Outputs should be committed")
+                .contribute_inputs([first_input])
+                .expect("First input contribution should succeed")
+                .contribute_inputs([second_input])
+                .expect("Second input contribution should succeed");
+
+        let proposal = &wants_inputs.state.inner.proposal;
+        let drain_value = proposal.payjoin_psbt.unsigned_tx.output[proposal.change_vout].value;
+
+        assert_eq!(
+            drain_value,
+            original_output_value + first_value + second_value,
+            "The drain output should include both input contributions"
+        );
+    }
+
+    #[test]
+    fn repeated_input_contributions_second_smaller_than_first() {
+        let original = original_from_test_vector();
+        let original_output_value = original.psbt.unsigned_tx.output[0].value;
+
+        let first_value = Amount::from_sat(200);
+        let second_value = Amount::from_sat(100);
+        let first_input = candidate_input_from_test_vector(first_value);
+        let second_input = candidate_input_from_test_vector(second_value);
+
+        let wants_inputs =
+            receiver(WantsOutputs { inner: common::WantsOutputs::new(original, vec![0]) })
+                .commit_outputs()
+                .save(&InMemoryPersister::default())
+                .expect("Outputs should be committed")
+                .contribute_inputs([first_input])
+                .expect("First input contribution should succeed")
+                .contribute_inputs([second_input])
+                .expect("Second input contribution should succeed"); // <-- fails on master
+
+        let proposal = &wants_inputs.state.inner.proposal;
+        let drain_value = proposal.payjoin_psbt.unsigned_tx.output[proposal.change_vout].value;
+
+        assert_eq!(
+            drain_value,
+            original_output_value + first_value + second_value,
+            "The drain output should include both input contributions"
+        );
     }
 
     #[test]

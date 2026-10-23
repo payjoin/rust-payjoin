@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stop mailbox pruning from panicking when the system clock moves backwards
+
 ## 0.1.3
 
 - Enforce `blocked_regions` and `blocked_ips` on the ACME and manual TLS serve paths (#1941)

@@ -485,8 +485,10 @@ impl Mailboxes {
         self.insert_order
             .front()
             .map(|(created, _id)| {
+                // A timestamp in the future means the clock was stepped back
+                // since the mailbox was written. Treat it as just created.
                 self.ttl
-                    .checked_sub(created.elapsed().expect("system clock moved back"))
+                    .checked_sub(created.elapsed().unwrap_or(Duration::ZERO))
                     .unwrap_or(self.ttl)
             })
             .unwrap_or(self.ttl)
@@ -967,6 +969,42 @@ mod tests {
         // Empty db should remain empty after prune
         db.prune().await.expect("pruning should not fail");
         assert_eq!(db.mailboxes.lock().await.len(), 0);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_prune_with_future_timestamp() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let ttl = Duration::from_secs(600);
+
+        let db = FilesDb::init(Duration::from_millis(2), dir.path().to_owned(), ttl)
+            .await
+            .expect("initializing mailbox database should succeed");
+
+        let id = ShortId([0u8; 8]);
+        db.post_v2_payload(&id, b"fooo".to_vec())
+            .await
+            .expect("posting payload should succeed")
+            .expect("contents should be accepted");
+
+        // Simulate the system clock being stepped back after the write
+        {
+            let mut guard = db.mailboxes.lock().await;
+            for (ts, _) in guard.insert_order.iter_mut() {
+                *ts += Duration::from_secs(60);
+            }
+        }
+
+        assert_eq!(db.prune().await.expect("pruning should not fail"), ttl);
+        assert_eq!(db.mailboxes.lock().await.len(), 1);
+
+        // Other requests must keep working while the clock catches up
+        db.post_v2_payload(&ShortId([1u8; 8]), b"barr".to_vec())
+            .await
+            .expect("posting payload should succeed")
+            .expect("contents should be accepted");
+        assert_eq!(db.mailboxes.lock().await.len(), 2);
 
         Ok(())
     }

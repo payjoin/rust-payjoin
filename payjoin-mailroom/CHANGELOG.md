@@ -4,6 +4,7 @@
 
 - Let relay operators accept gateway purposes besides BIP77 with `[ohttp_relay] extra_allowed_purposes` (#2024)
 - Reject mailbox payloads too large to return through the OHTTP gateway with 413, and V1 requests too large to relay with `original-psbt-rejected`, instead of truncating the response (#1983)
+- Stop mailbox requests and the background prune task from panicking when the system clock steps back
 
 ## 0.1.3
 

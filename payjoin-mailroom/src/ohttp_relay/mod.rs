@@ -10,10 +10,7 @@ use http::uri::Authority;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::{Bytes, Incoming};
-use hyper::header::{
-    HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-    ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_LENGTH, CONTENT_TYPE,
-};
+use hyper::header::{HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use hyper::{Method, Request, Response};
 use hyper_rustls::builderstates::WantsSchemes;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
@@ -182,8 +179,7 @@ where
     let path = req.uri().path();
     let authority = req.uri().authority().cloned();
 
-    let mut res = match (&method, path) {
-        (&Method::OPTIONS, _) => Ok(handle_preflight()),
+    let res = match (&method, path) {
         (&Method::GET, "/health") => Ok(health_check().await),
         (&Method::POST, _) => match parse_gateway_uri(&method, path, authority, config).await {
             Ok(gateway_uri) => handle_ohttp_relay(req, config, gateway_uri).await,
@@ -206,7 +202,6 @@ where
         _ => Err(Error::NotFound),
     }
     .unwrap_or_else(|e| e.to_response());
-    res.headers_mut().insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
     Ok(res)
 }
 
@@ -253,21 +248,6 @@ fn parse_gateway_uri_from_path(path: &str, default: &GatewayUri) -> Result<Gatew
     } else {
         Ok(Authority::from_str(path)?.into())
     }
-}
-
-fn handle_preflight() -> Response<BoxBody<Bytes, hyper::Error>> {
-    let mut res = Response::new(empty());
-    *res.status_mut() = hyper::StatusCode::NO_CONTENT;
-    res.headers_mut().insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
-    res.headers_mut().insert(
-        ACCESS_CONTROL_ALLOW_METHODS,
-        HeaderValue::from_static("CONNECT, GET, OPTIONS, POST"),
-    );
-    res.headers_mut().insert(
-        ACCESS_CONTROL_ALLOW_HEADERS,
-        HeaderValue::from_static("Content-Type, Content-Length"),
-    );
-    res
 }
 
 async fn health_check() -> Response<BoxBody<Bytes, hyper::Error>> { Response::new(empty()) }

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+- Reject proposals whose outputs exceed their inputs. A receiver that raises
+  the total output value through `replace_receiver_outputs` without
+  contributing inputs covering the increase could otherwise produce a
+  proposal with a lower absolute fee than the original transaction, which
+  the sender would reject (#1939)
+
 ## 1.2.0
 
 This release adds a non-blocking interface to the receiver state machine.

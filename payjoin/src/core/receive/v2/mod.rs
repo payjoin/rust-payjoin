@@ -1462,8 +1462,14 @@ impl Receiver<WantsFeeRange> {
                     session_context: self.session_context,
                 },
             ),
-            Err(e) =>
-                MaybeFatalTransition::transient(ProtocolError::OriginalPayload(e.into()), self),
+            Err(e) => match e {
+                InternalPayloadError::OutputsExceedInputs => MaybeFatalTransition::fatal(
+                    SessionEvent::Closed(SessionOutcome::Aborted),
+                    ProtocolError::OriginalPayload(e.into()),
+                ),
+                _ =>
+                    MaybeFatalTransition::transient(ProtocolError::OriginalPayload(e.into()), self),
+            },
         }
     }
 
@@ -2694,6 +2700,44 @@ pub mod test {
             Ok(_) => panic!("Expected session expiration error, got success"),
         }
         Ok(())
+    }
+
+    #[test]
+    fn receiver_rejects_proposal_with_outputs_exceeding_inputs() {
+        let persister = InMemoryPersister::default();
+        let original =
+            OriginalPayload { psbt: PARSED_ORIGINAL_PSBT.clone(), params: Params::default() };
+        let original_output = original.psbt.unsigned_tx.output[0].clone();
+        let wants_outputs =
+            receiver(WantsOutputs { inner: common::WantsOutputs::new(original, vec![0]) });
+        let replacement_output = bitcoin::TxOut {
+            value: original_output.value + Amount::ONE_SAT,
+            script_pubkey: original_output.script_pubkey.clone(),
+        };
+
+        let wants_inputs = wants_outputs
+            .replace_receiver_outputs(
+                [replacement_output],
+                original_output.script_pubkey.as_script(),
+            )
+            .expect("Output replacement should succeed")
+            .commit_outputs()
+            .save(&persister)
+            .expect("Outputs should be committed");
+        let wants_fee_range =
+            wants_inputs.commit_inputs().save(&persister).expect("Inputs should be committed");
+        let err = wants_fee_range
+            .apply_fee_range(None, None)
+            .save(&persister)
+            .expect_err("A proposal whose outputs exceed its inputs must be rejected");
+
+        assert!(err.is_fatal());
+        assert!(!err.is_transient());
+        assert!(matches!(
+            err.api_error(),
+            Some(ProtocolError::OriginalPayload(e))
+                if matches!(e.0, InternalPayloadError::OutputsExceedInputs)
+        ));
     }
 
     #[test]

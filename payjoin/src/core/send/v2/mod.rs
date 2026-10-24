@@ -522,7 +522,7 @@ impl ResponseError {
 ///
 /// Poll the Payjoin Directory for the receiver's proposal: build a fresh request for each poll
 /// with [`Sender<PollingForProposal>::create_poll_request`], then pass that poll's response to
-/// this typestate's `process_response`, which yields the Payjoin proposal PSBT, validated
+/// [`Sender<PollingForProposal>::process_response`], which yields the Payjoin proposal PSBT, validated
 /// against the Original PSBT, and closes the session. The sender then signs and finalizes that
 /// PSBT and broadcasts the resulting transaction.
 ///

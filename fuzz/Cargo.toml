@@ -23,7 +23,9 @@ payjoin = { path = "../payjoin", default-features = false, features = [
   "v2",
 ] }
 payjoin-ffi = { path = "../payjoin-ffi" }
-serde_json = { version = "1.0.149" }
+# Without float_roundtrip, serde_json parses floats inexactly, so a float in
+# a replyable error's extra map drifts on every to_json/from_json cycle.
+serde_json = { version = "1.0.149", features = ["float_roundtrip"] }
 
 [[bin]]
 name = "uri-deserialize-pjuri"

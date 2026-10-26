@@ -17,6 +17,12 @@ use serde_json::Value;
 const SEED_LOGS: [&str; 2] =
     [include_str!("seeds/receiver.jsonl"), include_str!("seeds/sender.jsonl")];
 
+/// Standalone events that no seed session reaches, such as replyable
+/// errors and the other closed outcomes. Splicing only draws from what the
+/// seeds and this bank contain, so anything missing from both is out of
+/// reach.
+const EVENT_BANK: &str = include_str!("seeds/events.jsonl");
+
 /// Share of mutations left to libFuzzer untouched, so malformed JSON and
 /// non-UTF-8 input stay covered.
 const RAW_MUTATION_IN: u32 = 4;
@@ -29,6 +35,12 @@ static SEEDS: LazyLock<Vec<Vec<Value>>> = LazyLock::new(|| {
         .iter()
         .map(|log| log.lines().map(|e| serde_json::from_str(e).expect("valid seed")).collect())
         .collect()
+});
+
+/// Every event a splice can draw from: the seed sessions plus the bank.
+static EVENTS: LazyLock<Vec<Value>> = LazyLock::new(|| {
+    let bank = EVENT_BANK.lines().map(|e| serde_json::from_str(e).expect("valid event"));
+    SEEDS.iter().flatten().cloned().chain(bank).collect()
 });
 
 /// Event log handed back by the host, as a JSON persister would on resume.
@@ -108,39 +120,105 @@ fn mutate_leaf(value: &mut Value) {
     }
 }
 
-fn mutate_nth_leaf(value: &mut Value, n: &mut usize) -> bool {
+// Swap a leaf for a value of another type, so serde's type mismatch paths
+// are reached from inputs that are otherwise well formed.
+fn typeflip_leaf(value: &mut Value) {
+    *value = match value {
+        Value::Null => Value::Bool(false),
+        Value::Bool(b) => Value::from(u8::from(*b)),
+        Value::Number(n) => Value::String(n.to_string()),
+        Value::String(s) => match s.parse::<u64>() {
+            Ok(n) => Value::from(n),
+            Err(_) => s
+                .parse::<f64>()
+                .ok()
+                .and_then(serde_json::Number::from_f64)
+                .map(Value::Number)
+                .unwrap_or(Value::Null),
+        },
+        _ => Value::Null,
+    };
+}
+
+fn with_nth_leaf(value: &mut Value, n: &mut usize, f: fn(&mut Value)) -> bool {
     if is_leaf(value) {
         if *n == 0 {
-            mutate_leaf(value);
+            f(value);
             return true;
         }
         *n -= 1;
         return false;
     }
     match value {
-        Value::Array(items) => items.iter_mut().any(|v| mutate_nth_leaf(v, n)),
-        Value::Object(map) => map.values_mut().any(|v| mutate_nth_leaf(v, n)),
+        Value::Array(items) => items.iter_mut().any(|v| with_nth_leaf(v, n, f)),
+        Value::Object(map) => map.values_mut().any(|v| with_nth_leaf(v, n, f)),
+        _ => false,
+    }
+}
+
+/// Object fields and array items that can be removed. Byte fields count as
+/// one entry of their parent, not as a container of numbers.
+fn count_entries(value: &Value) -> usize {
+    match value {
+        _ if as_bytes(value).is_some() => 0,
+        Value::Array(items) => items.len() + items.iter().map(count_entries).sum::<usize>(),
+        Value::Object(map) => map.len() + map.values().map(count_entries).sum::<usize>(),
+        _ => 0,
+    }
+}
+
+// Dropping a field or array item exercises missing-field handling and
+// length assumptions, such as a vout that no longer points at an output.
+fn remove_nth_entry(value: &mut Value, n: &mut usize) -> bool {
+    if as_bytes(value).is_some() {
+        return false;
+    }
+    match value {
+        Value::Object(map) => {
+            if *n < map.len() {
+                let key = map.keys().nth(*n).expect("index below len").clone();
+                map.remove(&key);
+                return true;
+            }
+            *n -= map.len();
+            map.values_mut().any(|v| remove_nth_entry(v, n))
+        }
+        Value::Array(items) => {
+            if *n < items.len() {
+                items.remove(*n);
+                return true;
+            }
+            *n -= items.len();
+            items.iter_mut().any(|v| remove_nth_entry(v, n))
+        }
         _ => false,
     }
 }
 
 fn mutate_log(log: &mut Vec<Value>, rng: &mut Rng) {
-    let seed = &SEEDS[rng.below(SEEDS.len())];
     let i = rng.below(log.len());
     let j = rng.below(log.len());
-    match rng.below(5) {
+    match rng.below(7) {
         0 | 1 => {
             let mut n = rng.below(count_leaves(&log[i]));
-            mutate_nth_leaf(&mut log[i], &mut n);
+            with_nth_leaf(&mut log[i], &mut n, mutate_leaf);
+        }
+        2 => {
+            let mut n = rng.below(count_leaves(&log[i]));
+            with_nth_leaf(&mut log[i], &mut n, typeflip_leaf);
+        }
+        3 => {
+            let mut n = rng.below(count_entries(&log[i]));
+            remove_nth_entry(&mut log[i], &mut n);
         }
         // Reordering, dropping and repeating events drives replay through
         // transitions a well-behaved persister never produces.
-        2 if log.len() > 1 => {
+        4 if log.len() > 1 => {
             log.remove(i);
         }
-        2 => log.push(log[i].clone()),
-        3 => log.swap(i, j),
-        _ => log.insert(rng.below(log.len() + 1), seed[rng.below(seed.len())].clone()),
+        4 => log.push(log[i].clone()),
+        5 => log.swap(i, j),
+        _ => log.insert(rng.below(log.len() + 1), EVENTS[rng.below(EVENTS.len())].clone()),
     }
 }
 
@@ -246,5 +324,26 @@ mod tests {
         for log in super::SEED_LOGS {
             super::do_test(log.as_bytes());
         }
+    }
+
+    #[test]
+    fn bank_events_decode() {
+        use super::{ReceiverSessionEvent, SenderSessionEvent};
+
+        for event in super::EVENT_BANK.lines() {
+            let receiver = ReceiverSessionEvent::from_json(event.to_string()).is_ok();
+            let sender = SenderSessionEvent::from_json(event.to_string()).is_ok();
+            assert!(receiver || sender, "bank event decodes as neither party: {event}");
+            super::do_test(event.as_bytes());
+        }
+    }
+
+    #[test]
+    fn float_in_reply_extra_round_trips() {
+        let event = format!(
+            r#"{{"GotReplyableError":{{"error_code":"OriginalPsbtRejected","message":"","extra":{{"x":{}}}}}}}"#,
+            "7".repeat(84)
+        );
+        super::do_test(event.as_bytes());
     }
 }

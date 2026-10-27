@@ -1168,6 +1168,7 @@ impl App {
     /// Watch the mempool for the payjoin transaction until it appears or a
     /// timeout elapses. The poll/timeout loop is one logical step from the
     /// session's perspective, so it stays local rather than in the driver.
+    #[allow(deprecated)]
     async fn monitor_payjoin_proposal(
         &self,
         mut proposal: Receiver<Monitor>,

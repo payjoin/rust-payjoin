@@ -261,6 +261,61 @@ mod tests {
     };
     use crate::receive::{InternalPayloadError, PayloadError};
 
+    /// The events of a session that posted its Payjoin proposal.
+    fn posted_proposal_events(session_context: SessionContext) -> Vec<SessionEvent> {
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let original = original_from_test_vector();
+        let maybe_inputs_owned = unchecked_receiver_from_test_vector()
+            .assume_interactive_receiver()
+            .save(&persister)
+            .expect("Save should not fail");
+        let outputs_unknown = maybe_inputs_owned
+            .check_inputs_not_owned(&mut |_| Ok(false))
+            .save(&persister)
+            .expect("No inputs should be owned")
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
+            .save(&persister)
+            .expect("No inputs should be seen before");
+        let wants_outputs = outputs_unknown
+            .identify_receiver_outputs(&mut |_| Ok(true))
+            .save(&persister)
+            .expect("Outputs should be identified");
+        let wants_inputs =
+            wants_outputs.commit_outputs().save(&persister).expect("Save should not fail");
+        let wants_fee_range =
+            wants_inputs.clone().commit_inputs().save(&persister).expect("Save should not fail");
+        let provisional_proposal = wants_fee_range
+            .clone()
+            .apply_fee_range(None, None)
+            .save(&persister)
+            .expect("Fee range should apply");
+        let payjoin_proposal = provisional_proposal
+            .clone()
+            .finalize_proposal(|psbt| Ok(psbt.clone()))
+            .save(&persister)
+            .expect("Payjoin proposal should be finalized");
+
+        vec![
+            SessionEvent::Created(session_context),
+            SessionEvent::RetrievedOriginalPayload { original, reply_key: None },
+            SessionEvent::CheckedBroadcastSuitability(),
+            SessionEvent::CheckedInputsNotOwned(),
+            SessionEvent::CheckedNoInputsSeenBefore(),
+            SessionEvent::IdentifiedReceiverOutputs(vec![0]),
+            SessionEvent::CommittedOutputs {
+                outputs: wants_inputs.state.inner.proposal.payjoin_psbt.unsigned_tx.output.clone(),
+                change_vout: wants_inputs.state.inner.proposal.change_vout,
+            },
+            SessionEvent::CommittedInputs {
+                receiver_inputs: wants_fee_range.state.inner.proposal.receiver_inputs.clone(),
+                payjoin_psbt: wants_fee_range.state.inner.proposal.payjoin_psbt.clone(),
+            },
+            SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()),
+            SessionEvent::FinalizedProposal(payjoin_proposal.psbt().clone()),
+            SessionEvent::PostedPayjoinProposal(),
+        ]
+    }
+
     fn unchecked_receiver_from_test_vector() -> Receiver<UncheckedOriginalPayload> {
         Receiver {
             state: UncheckedOriginalPayload { original: original_from_test_vector() },
@@ -1225,5 +1280,24 @@ mod tests {
         assert_eq!(status, SessionStatus::FallbackBroadcasted);
 
         Ok(())
+    }
+
+    #[test]
+    fn posted_session_past_expiration_replays_as_expired() {
+        let expiration = (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap();
+        let session_context = SessionContext { expiration, ..SHARED_CONTEXT.clone() };
+
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let events = posted_proposal_events(session_context);
+        for event in events.clone() {
+            persister.save_event(event).expect("in memory persister save should not fail");
+        }
+
+        let err = replay_event_log(&persister).expect_err("a posted session should expire");
+        assert!(err.is_expired());
+        let history = SessionHistory::new(events);
+        assert_eq!(err.expiry_fallback_tx().cloned(), history.fallback_tx());
+        assert!(history.fallback_tx().is_some());
+        assert_eq!(history.status(), SessionStatus::Expired);
     }
 }

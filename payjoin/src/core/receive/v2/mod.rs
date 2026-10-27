@@ -29,7 +29,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use bitcoin::psbt::Psbt;
-use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, ScriptBuf, TxOut, Txid};
+use bitcoin::{Address, Amount, FeeRate, OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
 pub use error::{CreateRequestError, SessionError};
 pub(crate) use error::{InternalCreateRequestError, InternalSessionError};
 use serde::de::Deserializer;
@@ -149,6 +149,29 @@ pub enum ReceiveSession {
 }
 
 impl ReceiveSession {
+    /// Classify a transaction against this session.
+    ///
+    /// Returns the result of [`Receiver::classify_tx`] for states that hold a fallback, and
+    /// `None` for all other states.
+    pub fn classify_tx(&self, tx: &Transaction) -> Option<Settlement> {
+        match self {
+            ReceiveSession::MaybeInputsOwned(r) => r.classify_tx(tx),
+            ReceiveSession::MaybeInputsSeen(r) => r.classify_tx(tx),
+            ReceiveSession::OutputsUnknown(r) => r.classify_tx(tx),
+            ReceiveSession::WantsOutputs(r) => r.classify_tx(tx),
+            ReceiveSession::WantsInputs(r) => r.classify_tx(tx),
+            ReceiveSession::WantsFeeRange(r) => r.classify_tx(tx),
+            ReceiveSession::ProvisionalProposal(r) => r.classify_tx(tx),
+            ReceiveSession::PayjoinProposal(r) => r.classify_tx(tx),
+            ReceiveSession::Monitor(r) => r.classify_tx(tx),
+            ReceiveSession::Initialized(_)
+            | ReceiveSession::UncheckedOriginalPayload(_)
+            | ReceiveSession::HasReplyableError(_)
+            | ReceiveSession::PendingFallback(_)
+            | ReceiveSession::Closed(_) => None,
+        }
+    }
+
     fn new(context: SessionContext) -> Self {
         ReceiveSession::Initialized(Receiver { state: Initialized {}, session_context: context })
     }
@@ -321,6 +344,8 @@ fn try_pending_fallback(session: ReceiveSession) -> Result<ReceiveSession, Box<R
 }
 
 mod sealed {
+    use super::{SessionOutcome, SettlementOutcome};
+
     pub trait State {}
     impl State for super::Initialized {}
     impl State for super::UncheckedOriginalPayload {}
@@ -337,60 +362,71 @@ mod sealed {
     impl State for super::PendingFallback {}
 
     pub(crate) trait FallbackTx: State {
-        fn fallback_tx(&self) -> bitcoin::Transaction;
+        fn original_psbt(&self) -> &bitcoin::Psbt;
+
+        fn fallback_tx(&self) -> bitcoin::Transaction {
+            self.original_psbt().clone().extract_tx_unchecked_fee_rate()
+        }
+
+        /// The finalized Payjoin proposal, if the sender may have received it.
+        fn payjoin_psbt(&self) -> Option<&bitcoin::Psbt> { None }
+
+        /// The outcome a session in this state closes with once settled by `outcome`.
+        fn settled_session_outcome(&self, _outcome: SettlementOutcome) -> SessionOutcome {
+            SessionOutcome::Aborted
+        }
     }
 
     impl FallbackTx for super::MaybeInputsOwned {
-        fn fallback_tx(&self) -> bitcoin::Transaction {
-            self.original.psbt.clone().extract_tx_unchecked_fee_rate()
-        }
+        fn original_psbt(&self) -> &bitcoin::Psbt { &self.original.psbt }
     }
 
     impl FallbackTx for super::MaybeInputsSeen {
-        fn fallback_tx(&self) -> bitcoin::Transaction {
-            self.original.psbt.clone().extract_tx_unchecked_fee_rate()
-        }
+        fn original_psbt(&self) -> &bitcoin::Psbt { &self.original.psbt }
     }
 
     impl FallbackTx for super::OutputsUnknown {
-        fn fallback_tx(&self) -> bitcoin::Transaction {
-            self.original.psbt.clone().extract_tx_unchecked_fee_rate()
-        }
+        fn original_psbt(&self) -> &bitcoin::Psbt { &self.original.psbt }
     }
 
     impl FallbackTx for super::WantsOutputs {
-        fn fallback_tx(&self) -> bitcoin::Transaction {
-            self.inner.original_psbt().clone().extract_tx_unchecked_fee_rate()
-        }
+        fn original_psbt(&self) -> &bitcoin::Psbt { self.inner.original_psbt() }
     }
 
     impl FallbackTx for super::WantsInputs {
-        fn fallback_tx(&self) -> bitcoin::Transaction {
-            self.inner.original_psbt().clone().extract_tx_unchecked_fee_rate()
-        }
+        fn original_psbt(&self) -> &bitcoin::Psbt { self.inner.original_psbt() }
     }
 
     impl FallbackTx for super::WantsFeeRange {
-        fn fallback_tx(&self) -> bitcoin::Transaction {
-            self.inner.original_psbt().clone().extract_tx_unchecked_fee_rate()
-        }
+        fn original_psbt(&self) -> &bitcoin::Psbt { self.inner.original_psbt() }
     }
 
     impl FallbackTx for super::ProvisionalProposal {
-        fn fallback_tx(&self) -> bitcoin::Transaction {
-            self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate()
-        }
+        fn original_psbt(&self) -> &bitcoin::Psbt { &self.psbt_context.original_psbt }
     }
 
+    // The proposal may have reached the sender even if persisting the post failed.
     impl FallbackTx for super::PayjoinProposal {
-        fn fallback_tx(&self) -> bitcoin::Transaction {
-            self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate()
+        fn original_psbt(&self) -> &bitcoin::Psbt { &self.psbt_context.original_psbt }
+
+        fn payjoin_psbt(&self) -> Option<&bitcoin::Psbt> { Some(&self.psbt_context.payjoin_psbt) }
+
+        // Only a settled Payjoin proves the proposal reached the sender.
+        fn settled_session_outcome(&self, outcome: SettlementOutcome) -> SessionOutcome {
+            match outcome {
+                SettlementOutcome::Payjoin => SessionOutcome::PayjoinProposalSent,
+                _ => SessionOutcome::Aborted,
+            }
         }
     }
 
     impl FallbackTx for super::Monitor {
-        fn fallback_tx(&self) -> bitcoin::Transaction {
-            self.psbt_context.original_psbt.clone().extract_tx_unchecked_fee_rate()
+        fn original_psbt(&self) -> &bitcoin::Psbt { &self.psbt_context.original_psbt }
+
+        fn payjoin_psbt(&self) -> Option<&bitcoin::Psbt> { Some(&self.psbt_context.payjoin_psbt) }
+
+        fn settled_session_outcome(&self, _outcome: SettlementOutcome) -> SessionOutcome {
+            SessionOutcome::PayjoinProposalSent
         }
     }
 }
@@ -416,6 +452,24 @@ impl<S: sealed::State> State for S {}
 ///
 /// fn fallback_tx<S: HasFallbackTx>(receiver: &Receiver<S>) -> Transaction {
 ///     receiver.fallback_tx()
+/// }
+/// ```
+///
+/// ```compile_fail,E0624
+/// use payjoin::bitcoin::Psbt;
+/// use payjoin::receive::v2::{HasFallbackTx, Receiver};
+///
+/// fn original_psbt<S: HasFallbackTx>(receiver: &Receiver<S>) -> Psbt {
+///     receiver.original_psbt().clone()
+/// }
+/// ```
+///
+/// ```compile_fail,E0624
+/// use payjoin::bitcoin::Psbt;
+/// use payjoin::receive::v2::{HasFallbackTx, Receiver};
+///
+/// fn payjoin_psbt<S: HasFallbackTx>(receiver: &Receiver<S>) -> Option<Psbt> {
+///     receiver.payjoin_psbt().cloned()
 /// }
 /// ```
 #[allow(private_bounds)]
@@ -496,26 +550,68 @@ impl<S: HasFallbackTx> Receiver<S> {
         )
     }
 
-    /// Whether the payjoin proposal's transaction ID is knowable in advance.
+    /// The prevouts spent by the sender's original transaction, and so by both the fallback and
+    /// the Payjoin proposal.
+    fn contested_prevouts(&self) -> impl Iterator<Item = OutPoint> + '_ {
+        self.state.original_psbt().unsigned_tx.input.iter().map(|txin| txin.previous_output)
+    }
+
+    /// Classify a transaction against this session's Payjoin proposal and fallback.
     ///
-    /// If every sender input is native SegWit, the sender's final signatures
-    /// live in the witness and each script_sig stays empty, so the
-    /// transaction ID computed from the unsigned proposal remains valid once
-    /// the sender re-signs — the receiver can record it (e.g. to reconcile an
-    /// incoming payment) and monitor the network for it.
+    /// Call this with each transaction the wallet receives. Signatures are not verified, so pass
+    /// only transactions seen on the network. If several transactions spend the sender's inputs,
+    /// classify the one with the most confirmations.
     ///
-    /// If any sender input finalizes with a non-empty script_sig — legacy
-    /// inputs, whose signatures live there, but also P2SH-wrapped SegWit
-    /// inputs, whose script_sig carries the redeem script push — that
-    /// script_sig is part of the txid preimage and changes the transaction
-    /// ID. Any transaction ID derived from the proposal before the sender
-    /// signs will never appear on the network, and
-    /// [`Receiver<Monitor>::check_for_transaction`] concludes the session
-    /// without monitoring. Receivers that track payments by transaction ID
-    /// can use this to choose a policy up front: decline to contribute and
-    /// let the fallback pay, or reconcile that session by script instead of
-    /// by transaction ID.
-    pub fn proposal_txid_is_stable(&self) -> bool {
+    /// Returns `None` if `tx` spends none of the sender's original inputs. Otherwise returns a
+    /// [`Settlement`] with outcome [`SettlementOutcome::Fallback`] if `tx` is the fallback,
+    /// [`SettlementOutcome::Payjoin`] if it is the proposal, or
+    /// [`SettlementOutcome::Unrecognized`] otherwise. States before [`Receiver<PayjoinProposal>`]
+    /// never return [`SettlementOutcome::Payjoin`].
+    pub fn classify_tx(&self, tx: &Transaction) -> Option<Settlement> {
+        let outcome = self.settlement_outcome(tx)?;
+        Some(Settlement { outcome, session_outcome: self.state.settled_session_outcome(outcome) })
+    }
+
+    /// Which transaction `tx` is to this session, if it spends a contested prevout.
+    fn settlement_outcome(&self, tx: &Transaction) -> Option<SettlementOutcome> {
+        let spends_contested_prevout = tx
+            .input
+            .iter()
+            .any(|txin| self.contested_prevouts().any(|prevout| prevout == txin.previous_output));
+        if !spends_contested_prevout {
+            return None;
+        }
+
+        let mut unsigned_tx = tx.clone();
+        for txin in &mut unsigned_tx.input {
+            txin.script_sig = ScriptBuf::new();
+        }
+        let unsigned_txid = unsigned_tx.compute_txid();
+
+        if unsigned_txid == self.state.original_psbt().unsigned_tx.compute_txid() {
+            return Some(SettlementOutcome::Fallback);
+        }
+        if let Some(payjoin_psbt) = self.state.payjoin_psbt() {
+            if unsigned_txid == payjoin_psbt.unsigned_tx.compute_txid() {
+                return Some(SettlementOutcome::Payjoin);
+            }
+        }
+        Some(SettlementOutcome::Unrecognized)
+    }
+
+    /// Whether every sender input finalizes with an empty script_sig, so the sender's signatures
+    /// leave the Payjoin proposal's txid unchanged.
+    ///
+    /// Only sender inputs are checked. A legacy or P2SH-wrapped receiver input still changes the
+    /// txid of the unsigned proposal.
+    #[deprecated(
+        since = "0.0.0-unreleased",
+        note = "checks only the sender's inputs; use `Receiver::classify_tx`"
+    )]
+    pub fn proposal_txid_is_stable(&self) -> bool { self.sender_script_sigs_are_empty() }
+
+    /// Whether every sender input finalizes with an empty script_sig.
+    fn sender_script_sigs_are_empty(&self) -> bool {
         self.state.fallback_tx().input.iter().all(|txin| txin.script_sig.is_empty())
     }
 }
@@ -1266,6 +1362,9 @@ impl Receiver<WantsOutputs> {
 
     /// Substitute the receiver output script with the provided script.
     ///
+    /// If `output_script` is not owned by the receiver's wallet, watch it to find the Payjoin
+    /// proposal when it settles.
+    ///
     /// Returns an updated [`Receiver<WantsOutputs>`] with the substituted output.
     pub fn substitute_receiver_script(
         self,
@@ -1805,7 +1904,7 @@ impl Receiver<HasReplyableError> {
     }
 }
 
-/// Completed payjoin proposal monitoring for the payjoin or fallback transaction.
+/// Completed Payjoin proposal that has been posted to the sender.
 ///
 /// See [`Receiver<Monitor>`] for further documentation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1813,23 +1912,68 @@ pub struct Monitor {
     psbt_context: PsbtContext,
 }
 
-/// Typestate to monitor the network for the Payjoin proposal or fallback transaction.
+/// Which transaction spent the sender's original inputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SettlementOutcome {
+    /// The Payjoin proposal.
+    Payjoin,
+    /// The fallback transaction.
+    Fallback,
+    /// Neither the Payjoin proposal nor the fallback, e.g. a fee bump or a sender double-spend.
+    Unrecognized,
+}
+
+/// A transaction spending the sender's original inputs, as classified by
+/// [`Receiver::classify_tx`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settlement {
+    outcome: SettlementOutcome,
+    session_outcome: SessionOutcome,
+}
+
+impl Settlement {
+    /// Returns which transaction settled the session.
+    pub fn outcome(&self) -> SettlementOutcome { self.outcome }
+
+    /// Close the Payjoin session.
+    ///
+    /// Call this once the settlement has enough confirmations for the wallet.
+    ///
+    /// Returns a [`TerminalTransition`] that, once successfully persisted, closes the receiver
+    /// session as [`SessionOutcome::PayjoinProposalSent`] if the proposal was delivered, or
+    /// [`SessionOutcome::Aborted`] otherwise.
+    pub fn close(self) -> TerminalTransition<SessionEvent, ()> {
+        TerminalTransition::new(SessionEvent::Closed(self.session_outcome), ())
+    }
+}
+
+/// Typestate for a Payjoin proposal that has been posted to the sender.
 ///
-/// After the Payjoin proposal is signed and sent back to the sender, the receiver should monitor
-/// the network and confirm the status of transaction (or the fallback). In this case, the status
-/// can refer to whether the transaction has been broadcast, has some number of confirmations, etc.
-/// The caller should decide the condition that must be satisfied for the Payjoin to be considered
-/// successful.
-///
-/// Call [`Receiver<Monitor>::check_for_transaction`] to confirm the status of the transaction in the
-/// network and conclude the Payjoin session.
+/// Call [`Receiver::classify_tx`] with each transaction the wallet receives, and
+/// [`Settlement::close`] the returned settlement once it has enough confirmations. If nothing
+/// settles the session before it expires, [`cancel`](Receiver::cancel) it and broadcast the
+/// fallback.
 impl Receiver<Monitor> {
-    /// Check the network for the payjoin or fallback transaction via the `find_transaction`
+    /// The txid of the broadcast Payjoin proposal, or `None` if the sender's signatures change
+    /// it.
+    fn stable_payjoin_txid(&self) -> Option<Txid> {
+        if !self.sender_script_sigs_are_empty() {
+            return None;
+        }
+        // Includes the script_sigs of the receiver's finalized inputs.
+        let payjoin_tx =
+            self.state.psbt_context.payjoin_psbt.clone().extract_tx_unchecked_fee_rate();
+        Some(payjoin_tx.compute_txid())
+    }
+
+    /// Check the network for the Payjoin or fallback transaction via the `find_transaction`
     /// callback.
     ///
     /// Returns a [`MaybeFatalOrSuccessTransition`] that, once successfully persisted, either
     /// concludes the session if a transaction is found, or yields a [`Receiver<Monitor>`] to
     /// remain in stasis if no transaction is found yet.
+    #[deprecated(since = "0.0.0-unreleased", note = "use `classify_tx` and `Settlement::close`")]
     pub fn check_for_transaction(
         self,
         find_transaction: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,
@@ -1839,14 +1983,13 @@ impl Receiver<Monitor> {
         // If the fallback transaction included any non-SegWit inputs, then the transaction ID of
         // the Payjoin proposal is going to change when the sender signs their non-SegWit address
         // one more time. The receiver cannot monitor the transaction, and should conclude the session.
-        if !self.proposal_txid_is_stable() {
-            return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                SessionOutcome::PayjoinProposalSent,
-            ));
-        }
-
-        let payjoin_proposal = &self.state.psbt_context.payjoin_psbt;
-        let payjoin_txid = payjoin_proposal.unsigned_tx.compute_txid();
+        let payjoin_txid = match self.stable_payjoin_txid() {
+            Some(txid) => txid,
+            None =>
+                return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                    SessionOutcome::PayjoinProposalSent,
+                )),
+        };
         // If the sender is spending SegWit-only inputs, then the transaction ID of the Payjoin proposal
         // is not going to change when the sender signs it. So we can use the TXID to check the
         // network for the Payjoin proposal.
@@ -1863,9 +2006,11 @@ impl Receiver<Monitor> {
                 }
                 // Payjoin transaction with SegWit inputs was detected. Complete the session,
                 // recording the txid of the transaction that settled it.
-                return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                    SessionOutcome::Success(tx_id),
-                ));
+                if let Some(SettlementOutcome::Payjoin) = self.settlement_outcome(&tx) {
+                    return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                        SessionOutcome::Success(tx_id),
+                    ));
+                }
             }
             Ok(None) => {}
             Err(e) =>
@@ -1875,10 +2020,12 @@ impl Receiver<Monitor> {
         // If the Payjoin proposal was not found, check the fallback transaction, as it is
         // the second of two transactions whose IDs the receiver is aware of.
         match find_transaction(fallback_tx.compute_txid()) {
-            Ok(Some(_)) =>
-                return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
-                    SessionOutcome::FallbackBroadcasted,
-                )),
+            Ok(Some(tx)) =>
+                if let Some(SettlementOutcome::Fallback) = self.settlement_outcome(&tx) {
+                    return MaybeFatalOrSuccessTransition::success(SessionEvent::Closed(
+                        SessionOutcome::FallbackBroadcasted,
+                    ));
+                },
             Ok(None) => {}
             Err(e) =>
                 return MaybeFatalOrSuccessTransition::transient(Error::Implementation(e), self),
@@ -2095,6 +2242,7 @@ pub mod test {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_monitor_typestate() -> Result<(), BoxError> {
         let psbt_ctx = native_segwit_psbt_context();
         let payjoin_tx = psbt_ctx.payjoin_psbt.unsigned_tx.clone();
@@ -2197,6 +2345,7 @@ pub mod test {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_nested_segwit_sender_input_txid_is_unstable() -> Result<(), BoxError> {
         use bitcoin::hashes::Hash;
 
@@ -2279,6 +2428,338 @@ pub mod test {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn test_classify_tx_payjoin_with_receiver_script_sig() {
+        // A receiver input with a script_sig changes the txid of the unsigned proposal.
+        let mut psbt_ctx = native_segwit_psbt_context();
+        psbt_ctx.payjoin_psbt.inputs[1].final_script_sig = Some(ScriptBuf::from_bytes(vec![0x51]));
+        let unsigned_txid = psbt_ctx.payjoin_psbt.unsigned_tx.compute_txid();
+        let mut broadcast_tx = psbt_ctx.payjoin_psbt.clone().extract_tx_unchecked_fee_rate();
+        let mut sender_witness = Witness::new();
+        sender_witness.push([0x30; 71]); // dummy signature
+        sender_witness.push([0x02; 33]); // dummy compressed pubkey
+        broadcast_tx.input[0].witness = sender_witness;
+        let monitor = Receiver {
+            state: Monitor { psbt_context: psbt_ctx },
+            session_context: SHARED_CONTEXT.clone(),
+        };
+
+        assert_ne!(broadcast_tx.compute_txid(), unsigned_txid);
+        assert_eq!(
+            monitor.classify_tx(&broadcast_tx).map(|s| s.outcome()),
+            Some(SettlementOutcome::Payjoin)
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_check_for_transaction_regression() {
+        // A receiver input with a script_sig changes the txid of the unsigned proposal.
+        let mut psbt_ctx = native_segwit_psbt_context();
+        psbt_ctx.payjoin_psbt.inputs[1].final_script_sig = Some(ScriptBuf::from_bytes(vec![0x51]));
+        let payjoin_tx = psbt_ctx.payjoin_psbt.clone().extract_tx_unchecked_fee_rate();
+        let fallback_tx = psbt_ctx.original_psbt.clone().extract_tx_unchecked_fee_rate();
+        let monitor = Receiver {
+            state: Monitor { psbt_context: psbt_ctx },
+            session_context: SHARED_CONTEXT.clone(),
+        };
+        let check_for = |broadcast: &Transaction| {
+            let persister = InMemoryPersister::default();
+            monitor
+                .clone()
+                .check_for_transaction(|txid| {
+                    Ok((txid == broadcast.compute_txid()).then(|| broadcast.clone()))
+                })
+                .save(&persister)
+                .expect("InMemoryPersister shouldn't fail");
+            let inner = persister.inner.lock().expect("Shouldn't be poisoned");
+            assert!(inner.is_closed);
+            inner.events.last().cloned()
+        };
+
+        assert_eq!(
+            check_for(&payjoin_tx),
+            Some(SessionEvent::Closed(SessionOutcome::Success(payjoin_tx.compute_txid())))
+        );
+        assert_eq!(
+            check_for(&fallback_tx),
+            Some(SessionEvent::Closed(SessionOutcome::FallbackBroadcasted))
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_proposal_txid_is_stable_regression() {
+        // The BIP78 test vectors use a P2SH-wrapped SegWit sender.
+        let native_segwit_monitor = Receiver {
+            state: Monitor { psbt_context: native_segwit_psbt_context() },
+            session_context: SHARED_CONTEXT.clone(),
+        };
+        assert!(native_segwit_monitor.proposal_txid_is_stable());
+        assert!(!segwit_monitor().proposal_txid_is_stable());
+    }
+
+    fn segwit_monitor() -> Receiver<Monitor> {
+        let psbt_ctx = PsbtContext {
+            original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+            payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+        };
+        Receiver {
+            state: Monitor { psbt_context: psbt_ctx },
+            session_context: SHARED_CONTEXT.clone(),
+        }
+    }
+
+    /// A monitor whose proposal is identical to the original transaction.
+    fn identical_proposal_monitor() -> Receiver<Monitor> {
+        let original = PARSED_ORIGINAL_PSBT.clone();
+        let psbt_ctx = PsbtContext { original_psbt: original.clone(), payjoin_psbt: original };
+        Receiver {
+            state: Monitor { psbt_context: psbt_ctx },
+            session_context: SHARED_CONTEXT.clone(),
+        }
+    }
+
+    /// A monitor whose proposal substitutes an output and contributes no input.
+    fn cutthrough_monitor() -> Receiver<Monitor> {
+        let original = PARSED_ORIGINAL_PSBT.clone();
+        let mut proposal = original.clone();
+        proposal.unsigned_tx.output[0].script_pubkey =
+            ScriptBuf::from_bytes(vec![0x6a, 0x01, 0x2a]);
+        let psbt_ctx = PsbtContext { original_psbt: original, payjoin_psbt: proposal };
+        Receiver {
+            state: Monitor { psbt_context: psbt_ctx },
+            session_context: SHARED_CONTEXT.clone(),
+        }
+    }
+
+    /// The finalized fallback transaction.
+    fn fallback_tx() -> Transaction { PARSED_ORIGINAL_PSBT.clone().extract_tx().expect("valid tx") }
+
+    /// Returns `tx` with a non-empty script_sig on its first input, changing only its txid.
+    fn with_perturbed_txid(mut tx: Transaction) -> Transaction {
+        tx.input[0].script_sig = ScriptBuf::from_bytes(vec![0x51]); // OP_TRUE, arbitrary
+        tx
+    }
+
+    /// Returns `tx` with a different output value, spending the same prevouts.
+    fn respent(mut tx: Transaction) -> Transaction {
+        tx.output[0].value = Amount::from_sat(tx.output[0].value.to_sat() - 1);
+        tx
+    }
+
+    #[test]
+    fn test_classify_tx_ignores_unrelated_tx() {
+        use bitcoin::hashes::Hash as _;
+
+        let monitor = segwit_monitor();
+        let mut unrelated = PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx;
+        for txin in unrelated.input.iter_mut() {
+            txin.previous_output = OutPoint { txid: Txid::all_zeros(), vout: 9 };
+        }
+        assert_eq!(monitor.classify_tx(&unrelated).map(|s| s.outcome()), None);
+    }
+
+    #[test]
+    fn test_classify_tx_payjoin() {
+        let monitor = segwit_monitor();
+        let payjoin_tx = PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx;
+
+        assert_eq!(
+            monitor.classify_tx(&payjoin_tx).map(|s| s.outcome()),
+            Some(SettlementOutcome::Payjoin)
+        );
+    }
+
+    #[test]
+    fn test_classify_tx_payjoin_with_changed_txid() {
+        // A non-SegWit sender's signature changes the proposal's txid.
+        let monitor = segwit_monitor();
+        let signed_tx = with_perturbed_txid(PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx);
+        assert_ne!(signed_tx.compute_txid(), PARSED_PAYJOIN_PROPOSAL.unsigned_tx.compute_txid());
+
+        assert_eq!(
+            monitor.classify_tx(&signed_tx).map(|s| s.outcome()),
+            Some(SettlementOutcome::Payjoin)
+        );
+    }
+
+    #[test]
+    fn test_classify_tx_payjoin_without_receiver_input() {
+        let monitor = cutthrough_monitor();
+        let proposal_tx = monitor.state.psbt_context.payjoin_psbt.unsigned_tx.clone();
+        assert!(proposal_tx
+            .input
+            .iter()
+            .map(|txin| txin.previous_output)
+            .eq(monitor.contested_prevouts()));
+
+        assert_eq!(
+            monitor.classify_tx(&proposal_tx).map(|s| s.outcome()),
+            Some(SettlementOutcome::Payjoin)
+        );
+    }
+
+    #[test]
+    fn test_classify_tx_fallback() {
+        let monitor = segwit_monitor();
+        assert_eq!(
+            monitor.classify_tx(&fallback_tx()).map(|s| s.outcome()),
+            Some(SettlementOutcome::Fallback)
+        );
+    }
+
+    #[test]
+    fn test_classify_tx_malleated_fallback() {
+        // A third party can malleate a non-SegWit fallback's script_sig.
+        let monitor = segwit_monitor();
+        let malleated = with_perturbed_txid(fallback_tx());
+        assert_ne!(malleated.compute_txid(), monitor.fallback_tx().compute_txid());
+
+        assert_eq!(
+            monitor.classify_tx(&malleated).map(|s| s.outcome()),
+            Some(SettlementOutcome::Fallback)
+        );
+    }
+
+    #[test]
+    fn test_classify_tx_identical_proposal_is_fallback() {
+        let monitor = identical_proposal_monitor();
+        assert_eq!(
+            monitor.classify_tx(&fallback_tx()).map(|s| s.outcome()),
+            Some(SettlementOutcome::Fallback)
+        );
+    }
+
+    #[test]
+    fn test_classify_tx_unrecognized() {
+        let monitor = segwit_monitor();
+        let other_tx = respent(fallback_tx());
+
+        assert_eq!(
+            monitor.classify_tx(&other_tx).map(|s| s.outcome()),
+            Some(SettlementOutcome::Unrecognized)
+        );
+    }
+
+    #[test]
+    fn test_classify_tx_reordered_outputs_is_unrecognized() {
+        let monitor = cutthrough_monitor();
+        let mut reordered_tx = monitor.state.psbt_context.payjoin_psbt.unsigned_tx.clone();
+        reordered_tx.output.reverse();
+
+        assert_eq!(
+            monitor.classify_tx(&reordered_tx).map(|s| s.outcome()),
+            Some(SettlementOutcome::Unrecognized)
+        );
+    }
+
+    #[test]
+    fn test_classify_tx_shared_prevouts_are_not_payjoin() {
+        // Same inputs as the proposal, different outputs.
+        let monitor = segwit_monitor();
+        let other_tx = respent(PARSED_PAYJOIN_PROPOSAL.clone().unsigned_tx);
+        assert_eq!(other_tx.input, PARSED_PAYJOIN_PROPOSAL.unsigned_tx.input);
+
+        assert_eq!(
+            monitor.classify_tx(&other_tx).map(|s| s.outcome()),
+            Some(SettlementOutcome::Unrecognized)
+        );
+    }
+
+    /// The events persisted by closing `settlement`.
+    fn close_events(settlement: Settlement) -> Vec<SessionEvent> {
+        let persister = InMemoryPersister::default();
+        settlement.close().save(&persister).expect("InMemoryPersister shouldn't fail");
+        let inner = persister.inner.lock().expect("Shouldn't be poisoned");
+        assert!(inner.is_closed, "close must close the session");
+        inner.events.clone()
+    }
+
+    #[test]
+    fn test_settlement_close_from_monitor_records_no_settlement_outcome() {
+        let monitor = segwit_monitor();
+        let closed = vec![SessionEvent::Closed(SessionOutcome::PayjoinProposalSent)];
+        for tx in
+            [PARSED_PAYJOIN_PROPOSAL.unsigned_tx.clone(), fallback_tx(), respent(fallback_tx())]
+        {
+            let settlement = monitor.classify_tx(&tx).expect("tx spends the contested prevouts");
+            assert_eq!(close_events(settlement), closed);
+        }
+    }
+
+    #[test]
+    fn test_settlement_close_from_payjoin_proposal() {
+        let receiver = Receiver {
+            state: PayjoinProposal {
+                psbt_context: PsbtContext {
+                    original_psbt: PARSED_ORIGINAL_PSBT.clone(),
+                    payjoin_psbt: PARSED_PAYJOIN_PROPOSAL.clone(),
+                },
+            },
+            session_context: SHARED_CONTEXT.clone(),
+        };
+        let cases = [
+            (
+                PARSED_PAYJOIN_PROPOSAL.unsigned_tx.clone(),
+                SettlementOutcome::Payjoin,
+                SessionOutcome::PayjoinProposalSent,
+            ),
+            (fallback_tx(), SettlementOutcome::Fallback, SessionOutcome::Aborted),
+            (respent(fallback_tx()), SettlementOutcome::Unrecognized, SessionOutcome::Aborted),
+        ];
+        for (tx, outcome, closed) in cases {
+            let settlement = receiver.classify_tx(&tx).expect("tx spends the contested prevouts");
+            assert_eq!(settlement.outcome(), outcome);
+            assert_eq!(close_events(settlement), vec![SessionEvent::Closed(closed)]);
+        }
+    }
+
+    #[test]
+    fn test_settlement_close_before_proposal_is_aborted() {
+        let receiver = Receiver {
+            state: maybe_inputs_owned_v2_from_test_vector(),
+            session_context: SHARED_CONTEXT.clone(),
+        };
+        let cases = [
+            (fallback_tx(), SettlementOutcome::Fallback),
+            (respent(fallback_tx()), SettlementOutcome::Unrecognized),
+            (PARSED_PAYJOIN_PROPOSAL.unsigned_tx.clone(), SettlementOutcome::Unrecognized),
+        ];
+        for (tx, outcome) in cases {
+            let settlement = receiver.classify_tx(&tx).expect("tx spends the contested prevouts");
+            assert_eq!(settlement.outcome(), outcome);
+            assert_eq!(
+                close_events(settlement),
+                vec![SessionEvent::Closed(SessionOutcome::Aborted)]
+            );
+        }
+    }
+
+    #[test]
+    fn test_receive_session_classify_tx() {
+        let monitor = segwit_monitor();
+        assert_eq!(
+            ReceiveSession::Monitor(monitor.clone()).classify_tx(&fallback_tx()),
+            monitor.classify_tx(&fallback_tx())
+        );
+
+        let initialized = ReceiveSession::Initialized(Receiver {
+            state: Initialized {},
+            session_context: SHARED_CONTEXT.clone(),
+        });
+        assert_eq!(initialized.classify_tx(&fallback_tx()), None);
+        let pending_fallback = ReceiveSession::PendingFallback(Receiver {
+            state: PendingFallback { fallback_tx: fallback_tx() },
+            session_context: SHARED_CONTEXT.clone(),
+        });
+        assert_eq!(pending_fallback.classify_tx(&fallback_tx()), None);
+        assert_eq!(
+            ReceiveSession::Closed(SessionOutcome::Aborted).classify_tx(&fallback_tx()),
+            None
+        );
     }
 
     #[test]

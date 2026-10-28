@@ -12,7 +12,8 @@ The Android targets need the NDK, which only `.#native-android` provides.
 The library lands in `<out-dir>/<triple>/`. The
 [native workflow](../../.github/workflows/native.yml) builds every target
 twice, on separate runners from different paths, and fails unless both
-builds are byte-identical.
+builds are byte-identical. A macOS runner checks the Apple libraries
+against Xcode and never produces any.
 
 | Invariant | Rule                                                                                                                                                                                                                                               |
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

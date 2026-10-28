@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 import 'package:native_toolchain_rust/native_toolchain_rust.dart';
 
@@ -22,6 +23,7 @@ void main(List<String> args) async {
     final rustupHome =
         nonEmpty(environment['RUSTUP_HOME']) ??
         (home == null ? null : '${strip(home)}$separator.rustup');
+    final code = input.config.buildCodeAssets ? input.config.code : null;
     // Encoded rather than RUSTFLAGS, which Cargo splits on whitespace: the
     // output directory lives under the consumer's project, whose path may
     // contain spaces. hooks_runner never passes RUSTFLAGS to a build hook,
@@ -37,6 +39,12 @@ void main(List<String> args) async {
         if (rustupHome != null) (rustupHome, '/rustup'),
       ])
         '--remap-path-prefix=${strip(from)}=$to',
+      // native_toolchain_rust accepts NDK r27, which aligns 64-bit libraries
+      // to 4 KB, and Google Play requires 16 KB. Later NDKs already align to
+      // 16 KB, and the flag leaves their output unchanged.
+      if (code?.targetOS == OS.android &&
+          code?.targetArchitecture != Architecture.arm)
+        '-Clink-arg=-Wl,-z,max-page-size=16384',
     ].join('\x1f');
 
     // The path overlay doubles as the development marker. `.pubignore`

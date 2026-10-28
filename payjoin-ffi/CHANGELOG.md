@@ -3,6 +3,8 @@
 - Python: the Linux wheel's library now needs at most glibc 2.17, and
   the wheel is tagged `manylinux_2_17`. The macOS wheel now supports
   macOS 10.15 and later, down from 13.
+- Dart: Android builds with NDK r27 now align 64-bit libraries to
+  16 KB, as Google Play requires. Later NDKs already did.
 
 ## [0.25.1]
 

@@ -68,8 +68,10 @@ jobs:
   build-wheel:
     # The wheel bundles a prebuilt native library, so each supported
     # platform packs its own wheel: x86_64 on Linux (retagged manylinux by
-    # auditwheel) and a fat universal2 dylib for macOS. Both wheels build
-    # on a Linux host. The smoke jobs below verify each wheel on real hardware.
+    # auditwheel) and a fat universal2 dylib for macOS. Both libraries build
+    # on Linux with the native build contract's script, and the universal2
+    # file is combined from its two slices the way the native workflow does
+    # it. The smoke jobs below verify each wheel on real hardware.
     name: "Build wheel"
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
@@ -89,9 +91,26 @@ jobs:
       - name: Set up nix
         uses: $/.github/actions/setup-nix
       - name: Build the wheel
-        run: nix develop .#python --command bash ./payjoin-ffi/python/contrib/build-wheel.sh
         env:
           PAYJOIN_WHEEL_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          out=$RUNNER_TEMP/out
+          if [[ $PAYJOIN_WHEEL_PLATFORM == linux-x64 ]]; then
+            nix develop .#native -c contrib/native/build.sh x86_64-unknown-linux-gnu "$out"
+            lib=$out/x86_64-unknown-linux-gnu/libpayjoin_ffi.so
+          else
+            for target in aarch64-apple-darwin x86_64-apple-darwin; do
+              nix develop .#native -c contrib/native/build.sh "$target" "$out"
+            done
+            lib=$out/universal2-apple-darwin/libpayjoin_ffi.dylib
+            mkdir -p "$(dirname "$lib")"
+            nix develop .#native -c llvm-lipo -create \
+              "$out/aarch64-apple-darwin/libpayjoin_ffi.dylib" \
+              "$out/x86_64-apple-darwin/libpayjoin_ffi.dylib" \
+              -output "$lib"
+          fi
+          nix develop .#python --command bash ./payjoin-ffi/python/contrib/build-wheel.sh "$lib"
       - name: Upload wheel
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -9,7 +9,10 @@ nix develop .#native -c contrib/native/build.sh <triple> <out-dir>
 
 The Android targets need the NDK, which only `.#native-android` provides.
 
-The library lands in `<out-dir>/<triple>/`.
+The library lands in `<out-dir>/<triple>/`. The
+[native workflow](../../.github/workflows/native.yml) builds every target
+twice, on separate runners from different paths, and fails unless both
+builds are byte-identical.
 
 | Invariant | Rule                                                                                                                                                                                                                                               |
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

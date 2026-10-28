@@ -23,3 +23,5 @@ jobs:
     uses: $/.github/workflows/dart.yml
   kotlin:
     uses: $/.github/workflows/kotlin.yml
+  native:
+    uses: $/.github/workflows/native.yml

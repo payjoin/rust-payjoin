@@ -27,6 +27,9 @@
 - Remove `proposal_txid_is_stable` from every receiver state. It checked
   only the sender's inputs, so a legacy or P2SH-wrapped receiver input could
   change the txid even when it returned true. Use `classify_tx` instead.
+- The GitHub release now attaches every native library as
+  `payjoin_ffi-<version>-<target>.<ext>`, listed in `SHA256SUMS` and
+  attested. `VERIFYING.md` explains how to check one or rebuild it.
 
 ## [0.25.1]
 

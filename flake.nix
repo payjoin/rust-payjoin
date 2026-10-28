@@ -321,11 +321,11 @@
           builtins.removeAttrs pythonWorkspace.deps.all [ "payjoin" ]
         );
 
-        # Rust toolchain for the javascript dev shell: msrv pinned to match
-        # payjoin-ffi/javascript build requirements, with wasm32 target added
+        # Rust toolchain for the javascript dev shell: the release version, as
+        # pack-npm builds the published wasm here, with wasm32 target added
         # so cargo can build per-arch artifacts under nix (rustup target add
         # is a no-op against a nix-provided toolchain).
-        jsRustToolchain = pkgs.rust-bin.stable.${msrv-version}.default.override {
+        jsRustToolchain = pkgs.rust-bin.stable.${release-version}.default.override {
           extensions = [
             "rust-src"
             "rustfmt"
@@ -413,11 +413,11 @@
           BITCOIND_SKIP_DOWNLOAD = 1;
         };
 
-        # Rust toolchain for the python dev shell: msrv pinned to match
-        # payjoin-ffi/python build requirements, with per-arch targets added
+        # Rust toolchain for the python dev shell: the release version, as
+        # build-wheel generates the published bindings here, with per-arch targets added
         # so cargo can build artifacts under nix for payjoin-ffi/python/scripts/generate_bindings.sh
         # (rustup target add is a no-op against a nix-provided toolchain).
-        pythonRustToolchain = pkgs.rust-bin.stable.${msrv-version}.default.override {
+        pythonRustToolchain = pkgs.rust-bin.stable.${release-version}.default.override {
           extensions = [
             "rust-src"
             "rustfmt"

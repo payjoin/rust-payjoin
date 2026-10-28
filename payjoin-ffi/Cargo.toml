@@ -2,6 +2,7 @@
 name = "payjoin-ffi"
 version = "0.25.1"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 exclude = ["tests"]
 

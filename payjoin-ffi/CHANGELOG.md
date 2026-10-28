@@ -3,6 +3,9 @@
 - Python: require Python 3.11+ and replace httpx with httpx2. Callers catching HTTP errors from fetch_ohttp_keys should use httpx2.HTTPError instead of httpx.HTTPError.
 - Dart: Android builds with NDK r27 now align 64-bit libraries to
   16 KB, as Google Play requires. Later NDKs already did.
+- The GitHub release now attaches every native library as
+  `payjoin_ffi-<version>-<target>.<ext>`, listed in `SHA256SUMS` and
+  attested. `VERIFYING.md` explains how to check one or rebuild it.
 
 ## [0.25.1]
 

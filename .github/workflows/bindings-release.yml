@@ -1,10 +1,11 @@
 name: Release language bindings
 
 # Pushing a signed `payjoin-ffi-<version>` tag verifies the tag and the
-# shared binding version, runs every language's build, package and smoke
-# checks at that commit, then publishes Python, JavaScript, C#, and Dart
-# through the `release` environment (required reviewer) with keyless OIDC
-# and cuts one GitHub release holding every package.
+# shared binding version, builds the native libraries once, runs every
+# language's build, package and smoke checks at that commit, then
+# publishes Python, JavaScript, C#, and Dart through the `release`
+# environment (required reviewer) with keyless OIDC and cuts one GitHub
+# release holding every package and native library.
 #
 # Each registry has its own publish job. All four wait on every language
 # build, so they reach the environment gate together and one approval
@@ -84,10 +85,13 @@ jobs:
   kotlin:
     needs: verify-tag
     uses: $/.github/workflows/kotlin.yml
+  native:
+    needs: verify-tag
+    uses: $/.github/workflows/native.yml
 
   publish-python:
     name: Publish to PyPI
-    needs: [python, javascript, csharp, dart, kotlin]
+    needs: [python, javascript, csharp, dart, kotlin, native]
     runs-on: ubuntu-26.04
     environment: release
     permissions:
@@ -121,7 +125,7 @@ jobs:
 
   publish-javascript:
     name: Publish to npmjs.com
-    needs: [verify-tag, python, javascript, csharp, dart, kotlin]
+    needs: [verify-tag, python, javascript, csharp, dart, kotlin, native]
     runs-on: ubuntu-26.04
     environment: release
     permissions:
@@ -165,7 +169,7 @@ jobs:
 
   publish-csharp:
     name: Publish to nuget.org
-    needs: [python, javascript, csharp, dart, kotlin]
+    needs: [python, javascript, csharp, dart, kotlin, native]
     runs-on: ubuntu-26.04
     environment: release
     permissions:
@@ -216,7 +220,7 @@ jobs:
 
   publish-dart:
     name: Publish to pub.dev
-    needs: [python, javascript, csharp, dart, kotlin]
+    needs: [python, javascript, csharp, dart, kotlin, native]
     runs-on: ubuntu-26.04
     environment: release
     permissions:
@@ -254,6 +258,8 @@ jobs:
     runs-on: ubuntu-26.04
     permissions:
       contents: write # create the Release for this tag and upload assets
+      id-token: write # OIDC: used by actions/attest
+      attestations: write # actions/attest writes the attestation
     env:
       VERSION: ${{ needs.verify-tag.outputs.version }}
     steps:
@@ -267,6 +273,15 @@ jobs:
           pattern: payjoin-*
           merge-multiple: true
           path: dist
+      - name: Name the native libraries for the release
+        # payjoin-native lands as one directory per target.
+        run: |
+          set -euo pipefail
+          for lib in dist/*/*; do
+            target=$(basename "$(dirname "$lib")")
+            mv "$lib" "dist/payjoin_ffi-$VERSION-$target.${lib##*.}"
+            rmdir "$(dirname "$lib")"
+          done
       - name: Check the asset set is complete
         run: |
           set -euo pipefail
@@ -274,11 +289,17 @@ jobs:
           wheels=(dist/*.whl)
           npm=(dist/*.tgz)
           nuget=(dist/*.nupkg)
-          if [[ ${#wheels[@]} != 2 || ${#npm[@]} != 1 || ${#nuget[@]} != 1 || ! -f dist/payjoin-dart.tar.gz ]]; then
-            echo "::error::expected two wheels, one npm tarball, one NuGet package, and the Dart archive in dist/"
+          native=(dist/payjoin_ffi-*)
+          if [[ ${#wheels[@]} != 2 || ${#npm[@]} != 1 || ${#nuget[@]} != 1 || ! -f dist/payjoin-dart.tar.gz || ${#native[@]} != 12 ]]; then
+            echo "::error::expected two wheels, one npm tarball, one NuGet package, the Dart archive and 12 native libraries in dist/"
             ls dist
             exit 1
           fi
+      - name: Attest build provenance of the native libraries
+        # A consumer runs: gh attestation verify <file> -R payjoin/rust-payjoin
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/payjoin_ffi-*
       - name: Generate SHA256SUMS
         # The NuGet package's native libraries are listed individually so
         # each can be verified on its own. A maintainer's GPG signature over

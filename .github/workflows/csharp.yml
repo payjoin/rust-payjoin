@@ -107,22 +107,12 @@ jobs:
         run: dotnet test Payjoin.Tests.csproj --logger "console;verbosity=minimal"
 
   build-nuget-native:
-    # Every RID cross-compiles from Linux: cargo-zigbuild links the Linux targets
-    # against a pinned glibc floor and the macOS targets against zig's bundled
-    # libSystem stubs; cargo-xwin links MSVC-ABI Windows targets against the
-    # Microsoft CRT/SDK. The per-RID smoke jobs verify each produced asset on
-    # real hardware.
+    # Every RID builds on Linux with the native build contract's script, the
+    # one the native workflow checks for reproducibility. The per-RID smoke
+    # jobs verify each produced asset on real hardware.
     name: "Build NuGet native asset"
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
-    env:
-      # Must match the dtolnay/rust-toolchain version exactly: the cross-target
-      # std components are installed for that toolchain, and a partial version
-      # here selects a different rustup toolchain entry without them (E0463).
-      RUSTUP_TOOLCHAIN: 1.85.0
-    defaults:
-      run:
-        working-directory: payjoin-ffi/csharp
     strategy:
       # Let every RID report its own result; a failure in one target should not
       # cancel the signal from the others.
@@ -147,54 +137,19 @@ jobs:
         with:
           persist-credentials: false # unneeded: no git auth beyond checkout
 
-      - name: Install Rust 1.85.0
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
-        with:
-          toolchain: 1.85.0
-          targets: ${{ matrix.target }}
-
-      - name: Use cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
-
-      - name: Install cross toolchain
-        # Version- and hash-pinned: these tools produce the shipped binaries.
-        run: pip install --require-hashes -r scripts/cross-requirements.txt
-
-      - name: Install MSVC toolchain frontends (clang-cl, llvm-lib)
-        if: startsWith(matrix.rid, 'win-')
-        # cargo-xwin compiles C dependencies with clang-cl and archives them with
-        # llvm-lib. The runner image ships LLVM with versioned binary names only,
-        # so expose the unversioned names cc-rs looks for.
-        run: |
-          for tool in clang-cl llvm-lib; do
-            if command -v "$tool" >/dev/null; then
-              continue
-            fi
-            latest=$(ls -1 /usr/bin/"$tool"-* 2>/dev/null | sort -V | tail -n 1)
-            if [ -z "$latest" ]; then
-              sudo apt-get update -q
-              sudo apt-get install -y -q llvm clang
-              latest=$(ls -1 /usr/bin/"$tool"-* 2>/dev/null | sort -V | tail -n 1)
-            fi
-            if [ -z "$latest" ]; then
-              echo "$tool not found on the runner" >&2
-              exit 1
-            fi
-            sudo ln -s "$latest" /usr/local/bin/"$tool"
-          done
-          command -v clang-cl llvm-lib
+      - name: Set up nix
+        uses: $/.github/actions/setup-nix
 
       - name: Build release native asset
-        run: |
-          PAYJOIN_FFI_CROSS=1 PAYJOIN_FFI_RID=${{ matrix.rid }} bash ./scripts/build_nuget_native.sh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: nix develop .#native -c contrib/native/build.sh "$TARGET" "$RUNNER_TEMP/out"
 
       - name: Upload NuGet native asset
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.rid }}
-          path: payjoin-ffi/csharp/artifacts/runtimes/${{ matrix.rid }}/native/*
+          path: ${{ runner.temp }}/out/${{ matrix.target }}/*
           if-no-files-found: error
 
   pack-nuget:

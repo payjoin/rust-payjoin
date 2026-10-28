@@ -474,6 +474,65 @@
           '';
         };
 
+        # Release builds of the payjoin-ffi native library through
+        # contrib/native/build.sh. The tools come from unstable: the release
+        # branch only has zig 0.15, and 0.17 regressed the iOS Mach-O linker.
+        unstablePkgs = nixpkgs-unstable.legacyPackages.${system};
+
+        nativeRustToolchain = pkgs.rust-bin.stable.${release-version}.minimal.override {
+          targets = [
+            "aarch64-apple-ios"
+            "aarch64-apple-ios-sim"
+            "aarch64-unknown-linux-gnu"
+            "x86_64-unknown-linux-gnu"
+            "aarch64-apple-darwin"
+            "x86_64-apple-darwin"
+            "aarch64-pc-windows-msvc"
+            "x86_64-pc-windows-msvc"
+            "aarch64-linux-android"
+            "armv7-linux-androideabi"
+            "x86_64-linux-android"
+          ];
+        };
+
+        # The NDK and the SDK parts it pulls in are unfree, so they come from
+        # an instance used for nothing else.
+        androidPkgs = import nixpkgs-unstable {
+          inherit system;
+          config = {
+            android_sdk.accept_license = true;
+            allowUnfree = true;
+          };
+        };
+
+        androidNdk =
+          (androidPkgs.androidenv.composeAndroidPackages {
+            includeNDK = true;
+            ndkVersions = [ "29.0.14206865" ];
+          }).ndk-bundle;
+
+        nativeDevShell = pkgs.mkShell {
+          name = "native";
+          packages = with unstablePkgs; [
+            nativeRustToolchain
+            zig_0_16
+            # nixpkgs wraps cargo-zigbuild with its default zig, 0.17.
+            (cargo-zigbuild.override { zig = zig_0_16; })
+            xwin
+            # The Windows targets compile C with clang-cl, archive with
+            # llvm-lib and link with lld-link.
+            llvmPackages_21.clang-unwrapped
+            llvmPackages_21.lld
+            llvmPackages_21.llvm
+          ];
+        };
+
+        # Only the Android builds fetch the NDK.
+        nativeAndroidDevShell = nativeDevShell.overrideAttrs {
+          name = "native-android";
+          ANDROID_NDK_HOME = "${androidNdk}/libexec/android-sdk/ndk-bundle";
+        };
+
         simpleCheck =
           args:
           pkgs.stdenvNoCC.mkDerivation (
@@ -527,6 +586,8 @@
           csharp = csharpDevShell;
           dart = dartDevShell;
           kotlin = kotlinDevShell;
+          native = nativeDevShell;
+          native-android = nativeAndroidDevShell;
         };
         formatter = treefmtEval.config.build.wrapper;
         checks =

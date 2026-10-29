@@ -39,7 +39,7 @@ jobs:
           # This is necessary for payjoin-mailroom integration tests
           echo "$(nix build .#nginx-with-stream --print-out-paths --no-link)/bin" >> $GITHUB_PATH
       - name: "Use cache"
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
           shared-key: ${{ matrix.rust == 'stable' && 'stable-workspace' || matrix.rust == '1.85.0' && 'msrv-workspace' || '' }}
@@ -54,7 +54,7 @@ jobs:
         with:
           persist-credentials: false # unneeded: no git auth beyond checkout
       - name: "Use cache"
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: Set up nix
@@ -92,11 +92,11 @@ jobs:
           # This is necessary for payjoin-mailroom integration tests
           echo "$(nix build .#nginx-with-stream --print-out-paths --no-link)/bin" >> $GITHUB_PATH
       - name: "Use cache"
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: "Install cargo-llvm-cov"
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
           tool: cargo-llvm-cov
       - name: "Generate code coverage for tests"
@@ -136,7 +136,7 @@ jobs:
         run: |
           git branch -av
           git diff origin/${BASE_REF}.. -- '*.rs' | tee git.diff
-      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
           tool: cargo-mutants@27.1.0
       - name: "Install toolchain"
@@ -144,7 +144,7 @@ jobs:
         with:
           toolchain: stable
       - name: "Use cache"
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: Run cargo-mutants on diff
@@ -172,7 +172,7 @@ jobs:
           # pinned nightly, bumped weekly by contrib/bump-nightly.sh
           toolchain: nightly-2026-10-26
       - name: "Use cache"
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: "Prepare lockfile"

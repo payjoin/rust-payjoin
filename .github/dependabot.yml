@@ -12,12 +12,9 @@ updates:
           - "*"
 
   - package-ecosystem: github-actions
-    # All action pins use tag comments so Dependabot can update them. Toolchain
-    # channels (stable/nightly/MSRV) are passed via the toolchain input instead
-    # of branch refs, which Dependabot cannot track.
     cooldown:
       default-days: 7
-    directories: ["/", "/.github/actions/*"]
+    directory: "/.github/*"
     schedule:
       interval: weekly
     groups:

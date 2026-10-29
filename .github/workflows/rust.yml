@@ -14,7 +14,7 @@ jobs:
         rust:
           - 1.85.0 # MSRV
           - stable
-          - nightly-2026-10-12 # pinned nightly, bumped weekly by contrib/bump-nightly.sh
+          - nightly-2026-10-26 # pinned nightly, bumped weekly by contrib/bump-nightly.sh
     env:
       # Override the value from the rust-toolchain file
       # This is necessary because even though the correct toolchain
@@ -170,7 +170,7 @@ jobs:
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           # pinned nightly, bumped weekly by contrib/bump-nightly.sh
-          toolchain: nightly-2026-10-12
+          toolchain: nightly-2026-10-26
       - name: "Use cache"
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:

@@ -1,0 +1,13 @@
+{"RetrievedOriginalPayload":{"original":{"psbt":{"unsigned_tx":{"version":2,"lock_time":211,"input":[{"previous_output":"833b085de288cda6ff614c6e8655f61e7ae4f84604a2751998dc25a0d1ba278f:0","script_sig":"","sequence":4294967294,"witness":[]}],"output":[{"value":95983068,"script_pubkey":"a9141de849f069d274150e3afeae8d72eb5a6b09443087"},{"value":2000000,"script_pubkey":"a914774096dbcf486743c22f4347e9b469febe8b677a87"}]},"version":0,"xpub":{},"proprietary":[],"unknown":[],"inputs":[{"non_witness_utxo":null,"witness_utxo":{"value":97983400,"script_pubkey":"a914de4e1e9061ca59135b035ad5e6d47990454354d087"},"partial_sigs":{},"sighash_type":null,"redeem_script":null,"witness_script":null,"bip32_derivation":[],"final_script_sig":"160014c78a45725355828d5658074dd5260d5fcb698530","final_script_witness":["304402207c43e03a75ea7e473f76be1cb6ea54f4023667e0f44b8bc05ff6aa01fc2324d302203ff463d8f599de01235244e584344d010d205f04ceeedf67f95d78a59ea8963501","03159ac01aa0d58754c4b4d8b7d349ed1edfcf0b362b4f6b55106723a2858f8516"],"ripemd160_preimages":{},"sha256_preimages":{},"hash160_preimages":{},"hash256_preimages":{},"tap_key_sig":null,"tap_script_sigs":[],"tap_scripts":[],"tap_key_origins":[],"tap_internal_key":null,"tap_merkle_root":null,"proprietary":[],"unknown":[]}],"outputs":[{"redeem_script":"001446f61a2bba73828ee585b4a5fc37946a7d8cc514","witness_script":null,"bip32_derivation":[],"tap_internal_key":null,"tap_tree":null,"tap_key_origins":[],"proprietary":[],"unknown":[]},{"redeem_script":null,"witness_script":null,"bip32_derivation":[],"tap_internal_key":null,"tap_tree":null,"tap_key_origins":[],"proprietary":[],"unknown":[]}]},"params":{"v":1,"output_substitution":"Enabled","additional_fee_contribution":[182,0],"min_fee_rate":250}},"reply_key":null}}
+{"GotReplyableError":{"error_code":"Unavailable","message":"Receiver error","extra":{}}}
+{"GotReplyableError":{"error_code":"NotEnoughMoney","message":"Receiver error","extra":{}}}
+{"GotReplyableError":{"error_code":"VersionUnsupported","message":"Receiver error","extra":{}}}
+{"GotReplyableError":{"error_code":"OriginalPsbtRejected","message":"Receiver error","extra":{}}}
+{"GotReplyableError":{"error_code":"OriginalPsbtRejected","message":"","extra":{"supported":[1,2]}}}
+"Cancelled"
+"ProtocolFailed"
+{"Closed":{"Success":"0000000000000000000000000000000000000000000000000000000000000000"}}
+{"Closed":"Aborted"}
+{"Closed":"FallbackBroadcasted"}
+{"Closed":{"Unrecognized":"0000000000000000000000000000000000000000000000000000000000000000"}}
+{"Cancelled":[]}

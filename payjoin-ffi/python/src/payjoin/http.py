@@ -1,7 +1,7 @@
 import ssl
 from urllib.parse import urljoin
 
-import httpx
+import httpx2
 
 from .payjoin import OhttpKeys
 
@@ -17,7 +17,7 @@ async def fetch_ohttp_keys(
     ssl_context.verify_mode = ssl.CERT_REQUIRED
     pem_certificate = ssl.DER_cert_to_PEM_cert(certificate)
     ssl_context.load_verify_locations(cadata=pem_certificate)
-    async with httpx.AsyncClient(
+    async with httpx2.AsyncClient(
         proxy=ohttp_relay_url, verify=ssl_context, timeout=30.0
     ) as client:
         response = await client.get(

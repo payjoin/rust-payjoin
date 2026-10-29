@@ -20,10 +20,13 @@ workflow builds release wheels with
 `_test-utils`) and smoke-installs them on every supported platform:
 
 - `manylinux` x86_64, tagged by auditwheel with the glibc floor the binary
-  actually satisfies;
-- macOS `universal2` (a fat x86_64 + arm64 dylib), cross-compiled from the
-  Linux host with cargo-zigbuild, so the dylib links the Apple SDK stubs
-  zig bundles and records system install names rather than nix store paths.
+  actually satisfies, 2.17;
+- macOS `universal2` (a fat x86_64 + arm64 dylib), combined from the two
+  macOS slices.
+
+Both libraries come from the native workflow, which builds each one twice
+on Linux under the [native build contract](../../contrib/native/README.md),
+and the wheel carries them byte for byte.
 
 The wheels are tagged `py3-none` because the generated bindings load the
 bundled library through `ctypes` and do not depend on a CPython ABI; any

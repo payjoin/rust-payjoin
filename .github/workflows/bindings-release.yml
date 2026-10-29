@@ -71,13 +71,13 @@ jobs:
           }
 
   python:
-    needs: verify-tag
+    needs: [verify-tag, native]
     uses: $/.github/workflows/python.yml
   javascript:
     needs: verify-tag
     uses: $/.github/workflows/javascript.yml
   csharp:
-    needs: verify-tag
+    needs: [verify-tag, native]
     uses: $/.github/workflows/csharp.yml
   dart:
     needs: verify-tag
@@ -301,13 +301,8 @@ jobs:
         with:
           subject-path: dist/payjoin_ffi-*
       - name: Generate SHA256SUMS
-        # The NuGet package's native libraries are listed individually so
-        # each can be verified on its own. A maintainer's GPG signature over
-        # SHA256SUMS is made locally and uploaded as SHA256SUMS.asc; no
-        # signing key reaches a runner.
-        env:
-          ARCHIVE_GLOBS: "*.nupkg"
-          MEMBER_GLOBS: runtimes/*/native/*
+        # A maintainer's GPG signature over SHA256SUMS is made locally and
+        # uploaded as SHA256SUMS.asc; no signing key reaches a runner.
         run: |
           ./contrib/release/generate-sha256sums.sh dist
           cat dist/SHA256SUMS

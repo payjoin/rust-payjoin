@@ -84,9 +84,9 @@ environment, and allow `payjoin-ffi-*` in the repository's tag rules.
    jobs. Each registry is published with OIDC from the tested artifacts.
 5. The run attaches the wheels, npm tarball, NuGet package, staged Dart
    package, every native library as `payjoin_ffi-<version>-<target>.<ext>`,
-   and one `SHA256SUMS` covering them all, including the native libraries
-   inside the NuGet package, to the GitHub release. Verify an install from
-   each registry and check provenance with
+   and one `SHA256SUMS` covering them all to the GitHub release. The
+   wheels and the NuGet package carry those same native libraries, byte for
+   byte. Verify an install from each registry and check provenance with
    `gh attestation verify FILE -R payjoin/rust-payjoin`. Optionally sign
    `SHA256SUMS` locally and upload `SHA256SUMS.asc`; no signing key reaches
    a runner.

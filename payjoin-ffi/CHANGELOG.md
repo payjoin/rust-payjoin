@@ -1,6 +1,9 @@
 ## Unreleased
 
 - Python: require Python 3.11+ and replace httpx with httpx2. Callers catching HTTP errors from fetch_ohttp_keys should use httpx2.HTTPError instead of httpx.HTTPError.
+- Python: the Linux wheel's library now needs at most glibc 2.17, and
+  the wheel is tagged `manylinux_2_17`. The macOS wheel now supports
+  macOS 10.15 and later, down from 13.
 - Dart: Android builds with NDK r27 now align 64-bit libraries to
   16 KB, as Google Play requires. Later NDKs already did.
 - The GitHub release now attaches every native library as

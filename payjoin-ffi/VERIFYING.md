@@ -3,8 +3,8 @@
 Every bindings release attaches each native library it ships to its
 [GitHub release](https://github.com/payjoin/rust-payjoin/releases) as
 `payjoin_ffi-<version>-<target>.<ext>`, listed in `SHA256SUMS` and
-attested by the release workflow. The Python wheels and the NuGet package
-carry those same files, byte for byte.
+attested by the release workflow. The Python wheels, the NuGet package and
+the Dart package carry those same files, byte for byte.
 
 CI builds each library twice, on separate runners from different paths,
 and the release only goes ahead when both builds match. You can rebuild
@@ -22,6 +22,20 @@ gh attestation verify payjoin_ffi-<version>-<target>.<ext> -R payjoin/rust-payjo
 A maintainer may also upload `SHA256SUMS.asc`, a signature over
 `SHA256SUMS` made with a key in
 [`contrib/release/keys/`](../contrib/release/keys/).
+
+## Check the Dart package
+
+The Dart package ships each library as `prebuilt/<target>/<file>`, and
+`dart pub get` unpacks it into the pub cache. Compare one with the line
+for `payjoin_ffi-<version>-<target>.<ext>` in `SHA256SUMS`:
+
+```shell
+sha256sum ~/.pub-cache/hosted/pub.dev/payjoin-<version>/prebuilt/<target>/*
+```
+
+Use `$PUB_CACHE` in place of `~/.pub-cache` if you set it. The release
+also attests the staged package, `payjoin-dart.tar.gz`, which it
+attaches.
 
 ## Rebuild a library
 

@@ -1,21 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build the production wheel for one platform into dist/: release profile,
-# no test utils. Select the platform with PAYJOIN_WHEEL_PLATFORM
-# (linux-x64, the default, or macos-universal2).
-#
-# Both wheels build on a Linux host: a dylib linked inside the nix dev shell
-# on a mac records nix store install names that exist on no user machine,
-# while cargo-zigbuild links against zig's bundled Apple SDK stubs and records
-# the system ones.
+# Build the production wheel for one platform into dist/ around a native
+# library built under the native build contract (contrib/native/build.sh):
+# release profile, no test utils. Select the platform with
+# PAYJOIN_WHEEL_PLATFORM (linux-x64, the default, or macos-universal2) and
+# pass the library, libpayjoin_ffi.so or the universal2
+# libpayjoin_ffi.dylib, as the only argument.
 
 if [[ "$(uname -s)" != Linux ]]; then
     echo "error: release wheels build on a Linux host only" >&2
     exit 1
 fi
+if [[ $# -ne 1 ]]; then
+    echo "usage: $0 <native library>" >&2
+    exit 1
+fi
+LIBRARY=$(realpath "$1")
 
 PLATFORM=${PAYJOIN_WHEEL_PLATFORM:-linux-x64}
+case "$PLATFORM" in
+    linux-x64 | macos-universal2) ;;
+    *)
+        echo "error: unsupported PAYJOIN_WHEEL_PLATFORM: $PLATFORM" >&2
+        exit 1
+        ;;
+esac
 
 # Build against the maintained lockfile instead of resolving the dependency
 # graph fresh on every run. use_lockfile copies Cargo-recent.lock into place
@@ -27,28 +37,18 @@ use_lockfile Cargo-recent.lock
 
 cd "$REPO_ROOT/payjoin-ffi/python"
 
+# uniffi reads its metadata from the static symbol table, which the
+# zig-linked Linux library does not have, so the bindings come from a
+# development build of the same featureless library.
 echo "==> Generating production FFI bindings..."
-PAYJOIN_FFI_FEATURES="" PAYJOIN_FFI_PROFILE=release bash ./scripts/generate_bindings.sh
+(cd .. && cargo build --lib &&
+    cargo run --bin uniffi-bindgen generate \
+        --library ../target/debug/libpayjoin_ffi.so \
+        --language python --out-dir python/src/payjoin/)
 
-# generate_bindings.sh stages the host's library; make sure the wheel
-# ships exactly one platform's binary.
-case "$PLATFORM" in
-    linux-x64)
-        rm -f src/payjoin/libpayjoin_ffi.dylib
-        ;;
-    macos-universal2)
-        echo "==> Cross-compiling the universal2 macOS library..."
-        (cd "$REPO_ROOT/payjoin-ffi" &&
-            cargo zigbuild --profile release --target universal2-apple-darwin)
-        rm -f src/payjoin/libpayjoin_ffi.so
-        cp "$REPO_ROOT/target/universal2-apple-darwin/release/libpayjoin_ffi.dylib" \
-            src/payjoin/
-        ;;
-    *)
-        echo "error: unsupported PAYJOIN_WHEEL_PLATFORM: $PLATFORM" >&2
-        exit 1
-        ;;
-esac
+# A development build may have staged the other platform's library.
+rm -f src/payjoin/libpayjoin_ffi.so src/payjoin/libpayjoin_ffi.dylib
+cp "$LIBRARY" src/payjoin/
 
 echo "==> Building the wheel..."
 # Drop setuptools' build/ staging dir too: it survives across runs and
@@ -72,11 +72,14 @@ if [[ $PLATFORM == linux-x64 ]]; then
     rm dist/*-linux_x86_64.whl
 else
     # setup.py tagged the wheel with the build machine's (Linux) platform.
-    # The macOS floor is zig's: its bundled SDK stubs currently support
-    # macOS >= 13, and that is the minos both slices record. Keep this tag
-    # in sync with the LC_BUILD_VERSION of the built dylib if zig moves.
-    wheel tags --platform-tag macosx_13_0_universal2 --remove dist/*.whl
+    # The native build contract's macOS deployment target is 10.15 for the
+    # x86_64 slice and 11.0, the first macOS on Apple silicon, for arm64.
+    wheel tags --platform-tag macosx_10_15_universal2 --remove dist/*.whl
 fi
+
+# The release lists the library on its own, so the wheel must carry it
+# unchanged.
+unzip -p dist/*.whl "payjoin/$(basename "$LIBRARY")" | cmp - "$LIBRARY"
 
 echo "==> Built wheel:"
 ls -l dist

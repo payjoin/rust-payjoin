@@ -27,6 +27,9 @@
 - Remove `proposal_txid_is_stable` from every receiver state. It checked
   only the sender's inputs, so a legacy or P2SH-wrapped receiver input could
   change the txid even when it returned true. Use `classify_tx` instead.
+- Python: the Linux wheel's library now needs at most glibc 2.17, and
+  the wheel is tagged `manylinux_2_17`. The macOS wheel now supports
+  macOS 10.15 and later, down from 13.
 - The GitHub release now attaches every native library as
   `payjoin_ffi-<version>-<target>.<ext>`, listed in `SHA256SUMS` and
   attested. `VERIFYING.md` explains how to check one or rebuild it.

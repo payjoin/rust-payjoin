@@ -20,9 +20,9 @@ CI is the release path. On every bindings release and in the
 `Daily language bindings` run on `master`, the `Build and Test CSharp`
 workflow:
 
-1. builds release-profile native assets for each supported RID
+1. takes the native workflow's library for each supported RID
    (`linux-arm64`, `linux-x64`, `osx-arm64`, `osx-x64`, `win-arm64`,
-   `win-x64`),
+   `win-x64`), built twice on Linux under the native build contract,
 2. generates production bindings (no `_test-utils`) and packs the `.nupkg`
    with all RID assets,
 3. installs the package into a clean console app and runs a smoke test on

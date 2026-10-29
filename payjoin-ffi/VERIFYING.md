@@ -3,7 +3,8 @@
 Every bindings release attaches each native library it ships to its
 [GitHub release](https://github.com/payjoin/rust-payjoin/releases) as
 `payjoin_ffi-<version>-<target>.<ext>`, listed in `SHA256SUMS` and
-attested by the release workflow.
+attested by the release workflow. The Python wheels and the NuGet package
+carry those same files, byte for byte.
 
 CI builds each library twice, on separate runners from different paths,
 and the release only goes ahead when both builds match. You can rebuild

@@ -27,16 +27,19 @@ dart test
 
 ### The native build hook
 
-`hook/build.dart` builds the `native/` wrapper crate for the consumer's
-target. It takes the presence of `.cargo/config.local.toml` as the sign
-that it is running inside this repository rather than from a published
-archive, because `.pubignore` withholds `.cargo/` from that archive. In
-the repository the overlay redirects `payjoin-ffi` to the workspace and
-the hook enables `_test-utils`. From an archive the hook builds the
-shipped `native/Cargo.lock` with `--locked`.
+`hook/build.dart` has three modes, chosen by the `build` user define in
+the root package's `pubspec.yaml` (see the [README](README.md)):
 
-This cannot be an environment variable. `hooks_runner` spawns build hooks
-with an allowlisted environment (`HOME`, `PATH` and a few toolchain
+- `prebuilt`, the default, uses the release's library for the target
+  from `prebuilt/<target>/`, which only a staged package has.
+- `source` builds the `native/` wrapper crate from the shipped
+  `native/Cargo.lock` with `--locked`.
+- `workspace`, which this package's own `pubspec.yaml` sets, builds it
+  through the `.cargo/config.local.toml` overlay, which redirects
+  `payjoin-ffi` to the workspace, and enables `_test-utils`.
+
+The mode cannot be an environment variable. `hooks_runner` spawns build
+hooks with an allowlisted environment (`HOME`, `PATH` and a few toolchain
 prefixes), so a project specific variable never reaches the hook.
 
 The hook also passes `--remap-path-prefix` for the package, output, Cargo
@@ -88,11 +91,17 @@ with a publish dry run
    with `--core-from-revision`, which every run but a release tag uses
    since it may wrap core changes not yet on crates.io. That option
    takes them from the same revision and writes an `UNPUBLISHED_CORE`
-   marker, which `contrib/publish.sh` refuses. Both the publish dry run
-   and publication use the staged package. For local checks:
+   marker, which `contrib/publish.sh` refuses. The script also copies
+   the native workflow's `payjoin-native` artifact of the same run, the
+   libraries the release attaches, into `prebuilt/<target>/` for every
+   target but `universal2-apple-darwin`. Both the publish dry run and
+   publication use the staged package. For local checks, with the
+   libraries built under the
+   [native build contract](../../contrib/native/README.md) in
+   `/tmp/native/<triple>/`:
 
    ```shell
-   nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh /tmp/payjoin-pub
+   nix develop .#dart -c ./payjoin-ffi/dart/contrib/prepare-publish.sh /tmp/native /tmp/payjoin-pub
    ```
 
 2. Follow the [shared bindings release instructions](../RELEASING.md).

@@ -22,6 +22,7 @@ jobs:
     needs: native
     uses: $/.github/workflows/csharp.yml
   dart:
+    needs: native
     uses: $/.github/workflows/dart.yml
   kotlin:
     uses: $/.github/workflows/kotlin.yml

@@ -64,7 +64,7 @@ jobs:
           set -euo pipefail
           source contrib/release/crates.sh
           core="$(nix --quiet develop .#release -c bash -c 'source contrib/release/crates.sh && manifest_version payjoin')"
-          # Dart consumers build the bindings from source against it.
+          # Dart's source build mode builds the bindings against it.
           crate_published payjoin "$core" || {
             echo "::error::payjoin $core is not on crates.io; publish it before the bindings"
             exit 1
@@ -80,7 +80,7 @@ jobs:
     needs: [verify-tag, native]
     uses: $/.github/workflows/csharp.yml
   dart:
-    needs: verify-tag
+    needs: [verify-tag, native]
     uses: $/.github/workflows/dart.yml
   kotlin:
     needs: verify-tag
@@ -224,7 +224,8 @@ jobs:
     runs-on: ubuntu-26.04
     environment: release
     permissions:
-      id-token: write # OIDC: pub.dev automated publishing
+      id-token: write # OIDC: pub.dev automated publishing and actions/attest
+      attestations: write # actions/attest writes the attestation
       contents: read
     steps:
       - name: Checkout repo
@@ -238,6 +239,11 @@ jobs:
         with:
           name: payjoin-dart-pub-package
           path: dist
+      - name: Attest build provenance
+        # A consumer runs: gh attestation verify payjoin-dart.tar.gz -R payjoin/rust-payjoin
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/payjoin-dart.tar.gz
       - name: Extract the staged package
         run: |
           mkdir -p "$RUNNER_TEMP/payjoin-pub"

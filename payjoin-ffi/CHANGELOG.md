@@ -9,6 +9,11 @@
 - The GitHub release now attaches every native library as
   `payjoin_ffi-<version>-<target>.<ext>`, listed in `SHA256SUMS` and
   attested. `VERIFYING.md` explains how to check one or rebuild it.
+- Dart: the package now ships the release's prebuilt native libraries,
+  and the build hook uses them instead of compiling Rust, so apps no
+  longer need a Rust toolchain or network access at build time. Set
+  `build: source` under `hooks: user_defines: payjoin:` in your app's
+  `pubspec.yaml` to keep compiling it.
 
 ## [0.25.1]
 

@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 pub use error::{
     AddressParseError, BuildReceiverError, CoinSelectionError, InputContributionError,
     InputPairError, JsonReply, OutputSubstitutionError, ProtocolError, PsbtInputError,
-    ReceiverCreateRequestError, ReceiverError, SessionError,
+    ReceiverCreateRequestError, ReceiverError, SessionError, TransactionParseError,
 };
 use payjoin::bitcoin::consensus::Decodable;
 use payjoin::bitcoin::psbt::Psbt;
@@ -192,6 +192,40 @@ macro_rules! impl_pending_fallback_cancel_for_receiver {
     };
 }
 
+fn decode_transaction(tx: &[u8]) -> Result<payjoin::bitcoin::Transaction, TransactionParseError> {
+    payjoin::bitcoin::Transaction::consensus_decode(&mut &tx[..])
+        .map_err(|e| TransactionParseError::InvalidTransaction(e.to_string()))
+}
+
+macro_rules! impl_settlement_classification_for_receiver {
+    ($ty:ident) => {
+        #[uniffi::export]
+        impl $ty {
+            /// Classify a consensus-encoded transaction against this session's
+            /// Payjoin proposal and fallback.
+            ///
+            /// Call this with each transaction the wallet receives. Signatures
+            /// are not verified, so pass only transactions seen on the network.
+            /// If several transactions spend the sender's inputs, classify the
+            /// one with the most confirmations.
+            ///
+            /// Returns `None` if `tx` spends none of the sender's original
+            /// inputs. Otherwise returns a [`Settlement`] with outcome
+            /// [`SettlementOutcome::Fallback`] if `tx` is the fallback,
+            /// [`SettlementOutcome::Payjoin`] if it is the proposal, or
+            /// [`SettlementOutcome::Unrecognized`] otherwise. States before
+            /// [`PayjoinProposal`] never return [`SettlementOutcome::Payjoin`].
+            pub fn classify_tx(
+                &self,
+                tx: Vec<u8>,
+            ) -> Result<Option<Arc<Settlement>>, TransactionParseError> {
+                let tx = decode_transaction(&tx)?;
+                Ok(self.0.classify_tx(&tx).map(|settlement| Arc::new(settlement.into())))
+            }
+        }
+    };
+}
+
 impl_terminal_cancel_for_receiver!(Initialized);
 impl_terminal_cancel_for_receiver!(UncheckedOriginalPayload);
 impl_pending_fallback_cancel_for_receiver!(MaybeInputsOwned);
@@ -203,6 +237,16 @@ impl_pending_fallback_cancel_for_receiver!(WantsFeeRange);
 impl_pending_fallback_cancel_for_receiver!(ProvisionalProposal);
 impl_pending_fallback_cancel_for_receiver!(PayjoinProposal);
 impl_pending_fallback_cancel_for_receiver!(Monitor);
+
+impl_settlement_classification_for_receiver!(MaybeInputsOwned);
+impl_settlement_classification_for_receiver!(MaybeInputsSeen);
+impl_settlement_classification_for_receiver!(OutputsUnknown);
+impl_settlement_classification_for_receiver!(WantsOutputs);
+impl_settlement_classification_for_receiver!(WantsInputs);
+impl_settlement_classification_for_receiver!(WantsFeeRange);
+impl_settlement_classification_for_receiver!(ProvisionalProposal);
+impl_settlement_classification_for_receiver!(PayjoinProposal);
+impl_settlement_classification_for_receiver!(Monitor);
 
 #[uniffi::export]
 impl HasReplyableError {
@@ -322,6 +366,36 @@ impl ReplayResult {
     pub fn state(&self) -> ReceiveSession { self.state.clone() }
 
     pub fn session_history(&self) -> ReceiverSessionHistory { self.session_history.clone() }
+}
+
+/// Classify a consensus-encoded transaction against a receiver session.
+///
+/// Returns the result of `classify_tx` for states that hold a fallback, and
+/// `None` for all other states.
+#[uniffi::export]
+pub fn classify_receiver_tx(
+    session: ReceiveSession,
+    tx: Vec<u8>,
+) -> Result<Option<Arc<Settlement>>, TransactionParseError> {
+    match session {
+        ReceiveSession::MaybeInputsOwned { inner } => inner.classify_tx(tx),
+        ReceiveSession::MaybeInputsSeen { inner } => inner.classify_tx(tx),
+        ReceiveSession::OutputsUnknown { inner } => inner.classify_tx(tx),
+        ReceiveSession::WantsOutputs { inner } => inner.classify_tx(tx),
+        ReceiveSession::WantsInputs { inner } => inner.classify_tx(tx),
+        ReceiveSession::WantsFeeRange { inner } => inner.classify_tx(tx),
+        ReceiveSession::ProvisionalProposal { inner } => inner.classify_tx(tx),
+        ReceiveSession::PayjoinProposal { inner } => inner.classify_tx(tx),
+        ReceiveSession::Monitor { inner } => inner.classify_tx(tx),
+        ReceiveSession::Initialized { .. }
+        | ReceiveSession::UncheckedOriginalPayload { .. }
+        | ReceiveSession::HasReplyableError { .. }
+        | ReceiveSession::ReceiverPendingFallback { .. }
+        | ReceiveSession::Closed { .. } => {
+            decode_transaction(&tx)?;
+            Ok(None)
+        }
+    }
 }
 
 #[uniffi::export]
@@ -1277,6 +1351,9 @@ impl WantsOutputs {
 
     /// Substitute the receiver output script with the provided script.
     ///
+    /// If `output_script` is not owned by the receiver's wallet, watch it to
+    /// find the Payjoin proposal when it settles.
+    ///
     /// Returns an updated [`WantsOutputs`] with the substituted output.
     pub fn substitute_receiver_script(
         &self,
@@ -1834,29 +1911,85 @@ impl HasReplyableError {
     }
 }
 
-#[uniffi::export(with_foreign)]
-pub trait TransactionFinder: Send + Sync {
-    fn callback(&self, txid: String) -> Result<Option<Vec<u8>>, ForeignError>;
+/// Typestate for a Payjoin proposal that has been posted to the sender.
+///
+/// Call [`Monitor::classify_tx`] with each transaction the wallet receives, and
+/// [`Settlement::close`] the returned settlement once it has enough
+/// confirmations. If nothing settles the session before it expires, cancel it
+/// and broadcast the fallback.
+#[derive(uniffi::Object)]
+pub struct Monitor(pub payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>);
+
+impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>> for Monitor {
+    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>) -> Self {
+        Self(value)
+    }
 }
 
-#[allow(clippy::type_complexity)]
+/// Which transaction spent the sender's original inputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SettlementOutcome {
+    /// The Payjoin proposal.
+    Payjoin,
+    /// The fallback transaction.
+    Fallback,
+    /// Neither the Payjoin proposal nor the fallback, e.g. a fee bump or a
+    /// sender double-spend.
+    Unrecognized,
+}
+
+impl From<payjoin::receive::v2::SettlementOutcome> for SettlementOutcome {
+    fn from(value: payjoin::receive::v2::SettlementOutcome) -> Self {
+        use payjoin::receive::v2::SettlementOutcome as Core;
+
+        match value {
+            Core::Payjoin => SettlementOutcome::Payjoin,
+            Core::Fallback => SettlementOutcome::Fallback,
+            Core::Unrecognized => SettlementOutcome::Unrecognized,
+            // The core enum is non_exhaustive.
+            _ => SettlementOutcome::Unrecognized,
+        }
+    }
+}
+
+/// A transaction spending the sender's original inputs, as classified by
+/// `classify_tx`.
 #[derive(uniffi::Object)]
-pub struct MonitorTransition(
+pub struct Settlement(payjoin::receive::v2::Settlement);
+
+impl From<payjoin::receive::v2::Settlement> for Settlement {
+    fn from(value: payjoin::receive::v2::Settlement) -> Self { Self(value) }
+}
+
+#[uniffi::export]
+impl Settlement {
+    /// Returns which transaction settled the session.
+    pub fn outcome(&self) -> SettlementOutcome { self.0.outcome().into() }
+
+    /// Close the Payjoin session.
+    ///
+    /// Call this once the settlement has enough confirmations for the wallet.
+    ///
+    /// Returns a [`SettlementCloseTransition`] that, once successfully
+    /// persisted, closes the receiver session.
+    pub fn close(&self) -> SettlementCloseTransition {
+        SettlementCloseTransition(Arc::new(RwLock::new(Some(self.0.clone().close()))))
+    }
+}
+
+/// A transition produced by closing a settled session.
+#[derive(uniffi::Object)]
+#[allow(clippy::type_complexity)]
+pub struct SettlementCloseTransition(
     Arc<
         RwLock<
-            Option<
-                payjoin::persist::MaybeFatalOrSuccessTransition<
-                    payjoin::receive::v2::SessionEvent,
-                    payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>,
-                    payjoin::receive::Error,
-                >,
-            >,
+            Option<payjoin::persist::TerminalTransition<payjoin::receive::v2::SessionEvent, ()>>,
         >,
     >,
 );
 
 #[uniffi::export]
-impl MonitorTransition {
+impl SettlementCloseTransition {
     pub fn save(
         &self,
         persister: Arc<dyn JsonReceiverSessionPersister>,
@@ -1866,7 +1999,9 @@ impl MonitorTransition {
 
         let value = inner.take().expect("Already saved or moved");
 
-        value.save(&adapter).map_err(ReceiverPersistedError::from)?;
+        value
+            .save(&adapter)
+            .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
         Ok(())
     }
 
@@ -1880,84 +2015,13 @@ impl MonitorTransition {
             inner.take().expect("Already saved or moved")
         };
 
-        value.save_async(&adapter).await.map_err(ReceiverPersistedError::from)?;
+        value
+            .save_async(&adapter)
+            .await
+            .map_err(|e| ReceiverPersistedError::from(ImplementationError::new(e)))?;
         Ok(())
     }
 }
-
-#[derive(uniffi::Object)]
-pub struct Monitor(pub payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>);
-
-impl From<payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>> for Monitor {
-    fn from(value: payjoin::receive::v2::Receiver<payjoin::receive::v2::Monitor>) -> Self {
-        Self(value)
-    }
-}
-
-fn try_deserialize_tx(
-    buf: Vec<u8>,
-) -> Result<payjoin::bitcoin::transaction::Transaction, ForeignError> {
-    payjoin::bitcoin::transaction::Transaction::consensus_decode(&mut buf.as_slice())
-        .map_err(|e| ForeignError::InternalError(e.to_string()))
-}
-
-#[uniffi::export]
-impl Monitor {
-    /// Check the network for the payjoin or fallback transaction via the
-    /// `find_transaction` callback.
-    ///
-    /// Returns a [`MonitorTransition`] that, once persisted, completes
-    /// the session if a transaction is found.
-    pub fn check_for_transaction(
-        &self,
-        find_transaction: Arc<dyn TransactionFinder>,
-    ) -> MonitorTransition {
-        MonitorTransition(Arc::new(RwLock::new(Some(self.0.clone().check_for_transaction(
-            |txid| {
-                find_transaction
-                    .callback(txid.to_string())
-                    .and_then(|buf| buf.map(try_deserialize_tx).transpose())
-                    .map_err(|e| ImplementationError::new(e).into())
-            },
-        )))))
-    }
-}
-
-macro_rules! impl_proposal_txid_is_stable {
-    ($($state:ty),* $(,)?) => {
-        $(
-            #[uniffi::export]
-            impl $state {
-                /// Whether the payjoin proposal's transaction ID is knowable in advance.
-                ///
-                /// If every sender input is native SegWit (empty script_sig), the
-                /// transaction ID computed from the unsigned proposal remains valid once
-                /// the sender re-signs, so the receiver can record it (e.g. to reconcile
-                /// an incoming payment) and monitor the network for it. If any sender
-                /// input finalizes with a non-empty script_sig — legacy inputs, but also
-                /// P2SH-wrapped SegWit — the sender's final script_sig changes the
-                /// transaction ID: any ID derived from the proposal before the sender
-                /// signs will never appear on the network, and monitoring concludes the
-                /// session without checking.
-                pub fn proposal_txid_is_stable(&self) -> bool {
-                    self.0.proposal_txid_is_stable()
-                }
-            }
-        )*
-    };
-}
-
-impl_proposal_txid_is_stable!(
-    MaybeInputsOwned,
-    MaybeInputsSeen,
-    OutputsUnknown,
-    WantsOutputs,
-    WantsInputs,
-    WantsFeeRange,
-    ProvisionalProposal,
-    PayjoinProposal,
-    Monitor,
-);
 
 #[derive(uniffi::Object)]
 #[allow(clippy::type_complexity)]

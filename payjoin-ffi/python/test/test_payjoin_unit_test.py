@@ -60,6 +60,36 @@ class TestReceiverPersistence(unittest.TestCase):
         self.assertTrue(result.state().is_INITIALIZED())
 
 
+# A consensus-encoded transaction with one input and one output. It spends
+# nothing a fresh session holds.
+UNRELATED_TX = bytes.fromhex(
+    "02000000010000000000000000000000000000000000000000000000000000000000000000"
+    "0000000000ffffffff0100000000000000000000000000"
+)
+
+
+class TestClassifyReceiverTx(unittest.TestCase):
+    def test_classify_receiver_tx_without_fallback(self):
+        # A session that has not received the original has nothing to compare
+        # against, and bytes that are not a transaction are rejected whatever
+        # the session's state.
+        persister = InMemoryReceiverPersister()
+        payjoin.ReceiverBuilder(
+            "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+            "https://example.com",
+            payjoin.OhttpKeys.decode(
+                bytes.fromhex(
+                    "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003"
+                )
+            ),
+        ).build().save(persister)
+        state = payjoin.replay_receiver_event_log(persister).state()
+
+        self.assertIsNone(payjoin.classify_receiver_tx(state, UNRELATED_TX))
+        with self.assertRaises(payjoin.TransactionParseError):
+            payjoin.classify_receiver_tx(state, b"\x00")
+
+
 class TestSenderPersistence(unittest.TestCase):
     def test_sender_persistence(self):
         # Create a receiver to just get the pj uri

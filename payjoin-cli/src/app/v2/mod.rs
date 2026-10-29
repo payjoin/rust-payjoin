@@ -3,15 +3,15 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
-use payjoin::bitcoin::{Amount, FeeRate, Transaction};
+use payjoin::bitcoin::{Address, Amount, FeeRate, Transaction, Txid};
 use payjoin::persist::{OptionalTransitionOutcome, SessionPersister};
 use payjoin::receive::mark_checklist;
 use payjoin::receive::v2::{
     replay_event_log as replay_receiver_event_log, HasReplyableError, Initialized,
-    MaybeInputsOwned, MaybeInputsSeen, Monitor, OutputsUnknown, PayjoinProposal,
+    MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal,
     PendingFallback as ReceiverPendingFallback, ProvisionalProposal, ReceiveSession, Receiver,
-    ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, UncheckedOriginalPayload,
-    WantsFeeRange, WantsInputs, WantsOutputs,
+    ReceiverBuilder, SessionOutcome as ReceiverSessionOutcome, Settlement, SettlementOutcome,
+    UncheckedOriginalPayload, WantsFeeRange, WantsInputs, WantsOutputs,
 };
 use payjoin::send::v2::{
     replay_event_log as replay_sender_event_log, PendingFallback as SenderPendingFallback,
@@ -39,6 +39,27 @@ const W_STATUS: usize = 15;
 /// Delay before retrying a transiently failed state transition, so a
 /// misbehaving directory or relay is not hammered in a tight loop.
 const TRANSIENT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Confirmations required before a receiver session is closed.
+const SETTLEMENT_CONFIRMATIONS: i64 = 1;
+
+/// A wallet transaction that settles a receiver session.
+struct FoundSettlement {
+    settlement: Settlement,
+    txid: Txid,
+    /// Negative for a transaction that conflicts with a confirmed one.
+    confirmations: i64,
+}
+
+/// The result of checking the wallet for a receiver session's settlement.
+enum SettlementCheck {
+    /// No wallet transaction settles the session.
+    Unsettled,
+    /// A settling transaction has fewer than `SETTLEMENT_CONFIRMATIONS`.
+    Confirming,
+    /// The session was closed.
+    Closed,
+}
 
 /// A request-construction error that can report whether it was caused by
 /// session expiry. Implemented by the sender/receiver request-building error
@@ -106,16 +127,16 @@ impl StatusText for ReceiveSession {
             ReceiveSession::PayjoinProposal(_) => "Payjoin proposal sent",
             ReceiveSession::HasReplyableError(_) =>
                 "Session failure, waiting to post error response",
-            ReceiveSession::Monitor(_) => "Monitoring payjoin proposal",
+            ReceiveSession::Monitor(_) => "Payjoin proposal sent, awaiting settlement",
             ReceiveSession::PendingFallback(_) => "Pending fallback handling",
             ReceiveSession::Closed(session_outcome) => match session_outcome {
                 ReceiverSessionOutcome::Aborted => "Session aborted",
-                ReceiverSessionOutcome::Success(_) => "Session success, Payjoin proposal was broadcasted",
+                ReceiverSessionOutcome::Success(_) =>
+                    "Session success, Payjoin proposal was broadcasted",
                 ReceiverSessionOutcome::FallbackBroadcasted => "Fallback broadcasted",
                 ReceiverSessionOutcome::PayjoinProposalSent =>
-                    "Payjoin proposal sent, skipping monitoring as the sender is spending non-SegWit inputs",
-                ReceiverSessionOutcome::Unrecognized(_) =>
-                    "Settled by an unrecognized transaction",
+                    "Payjoin proposal sent, settlement no longer tracked",
+                ReceiverSessionOutcome::Unrecognized(_) => "Settled by an unrecognized transaction",
             },
         }
     }
@@ -367,7 +388,9 @@ impl AppTrait for App {
             res = self.process_receiver_session(
                 ReceiveSession::Initialized(session.clone()),
                 &persister,
-            ) => res?,
+            ) => {
+                res?;
+            }
             _ = interrupt.changed() => {
                 let session_id = persister.session_id();
                 persister.print(format_args!(
@@ -396,19 +419,21 @@ impl AppTrait for App {
             return Ok(());
         }
 
-        let mut tasks: Vec<((Role, SessionId), tokio::task::JoinHandle<Result<()>>)> = Vec::new();
+        // Each task returns whether its session finished.
+        let mut tasks: Vec<((Role, SessionId), tokio::task::JoinHandle<Result<bool>>)> = Vec::new();
 
         // Process receiver sessions
         for session_id in recv_session_ids {
             let self_clone = self.clone();
             let recv_persister = ReceiverPersister::from_id(self.db.clone(), session_id.clone());
             match replay_receiver_event_log(&recv_persister) {
-                Ok((receiver_state, _)) => {
+                Ok((receiver_state, history)) => {
+                    let address = history.pj_uri().address().clone();
                     tasks.push((
                         (Role::Receiver, session_id),
                         tokio::spawn(async move {
                             self_clone
-                                .process_receiver_session(receiver_state, &recv_persister)
+                                .resume_receiver_session(receiver_state, &address, &recv_persister)
                                 .await
                         }),
                     ));
@@ -437,7 +462,10 @@ impl AppTrait for App {
                     tasks.push((
                         (Role::Sender, session_id),
                         tokio::spawn(async move {
-                            self_clone.process_sender_session(sender_state, &sender_persister).await
+                            self_clone
+                                .process_sender_session(sender_state, &sender_persister)
+                                .await
+                                .map(|()| true)
                         }),
                     ));
                 }
@@ -462,9 +490,11 @@ impl AppTrait for App {
 
                 for ((role, id), task) in tasks {
                     match task.await {
-                        Ok(Ok(())) => {
+                        Ok(Ok(true)) => {
                             print_session(role, &id, "Session completed.");
                         }
+                        // The session already printed what it awaits.
+                        Ok(Ok(false)) => {}
                         Ok(Err(e)) => {
                             print_session(role, &id, format_args!("Session error: {e:#}"));
                         }
@@ -931,15 +961,17 @@ impl App {
         }
     }
 
-    /// Drive the receiver state machine until the session terminates. Each
-    /// step function performs one state transition and returns the next
-    /// state; the driver stops on the terminal `Closed` and
-    /// `PendingFallback` states.
+    /// Drive the receiver state machine until the session terminates or awaits
+    /// settlement. Each step function performs one state transition and
+    /// returns the next state; the driver stops on the terminal `Closed` and
+    /// `PendingFallback` states, and on `Monitor`.
+    ///
+    /// Returns `false` if the session stopped on `Monitor`.
     async fn process_receiver_session(
         &self,
         mut session: ReceiveSession,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         loop {
             session = match session {
                 ReceiveSession::Initialized(proposal) =>
@@ -964,18 +996,20 @@ impl App {
                     self.send_payjoin_proposal(proposal, persister).await?,
                 ReceiveSession::HasReplyableError(error) =>
                     self.handle_error(error, persister).await?,
-                ReceiveSession::Monitor(proposal) => {
-                    self.monitor_payjoin_proposal(proposal, persister).await?;
-                    return Ok(());
+                ReceiveSession::Monitor(_) => {
+                    persister.print(
+                        "Awaiting settlement. Run `payjoin-cli resume` to check the wallet again.",
+                    );
+                    return Ok(false);
                 }
                 ReceiveSession::PendingFallback(_) => {
                     let id = persister.session_id();
                     persister.print(format_args!(
                         "Session was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
                     ));
-                    return Ok(());
+                    return Ok(true);
                 }
-                ReceiveSession::Closed(_) => return Ok(()),
+                ReceiveSession::Closed(_) => return Ok(true),
             };
         }
     }
@@ -1146,13 +1180,9 @@ impl App {
                     return Ok(ReceiveSession::Closed(ReceiverSessionOutcome::Aborted));
                 }
             };
-        let payjoin_psbt = proposal.psbt().clone();
         match proposal.process_response(&res.bytes().await?, ohttp_ctx).save(persister) {
             Ok(session) => {
-                persister.print(format_args!(
-                    "Response successful. Watch mempool for successful Payjoin. TXID: {}",
-                    payjoin_psbt.extract_tx_unchecked_fee_rate().compute_txid()
-                ));
+                persister.print("Response successful.");
                 Ok(ReceiveSession::Monitor(session))
             }
             Err(e) if e.is_transient() => {
@@ -1165,61 +1195,79 @@ impl App {
         }
     }
 
-    /// Watch the mempool for the payjoin transaction until it appears or a
-    /// timeout elapses. The poll/timeout loop is one logical step from the
-    /// session's perspective, so it stays local rather than in the driver.
-    async fn monitor_payjoin_proposal(
+    /// Check the wallet for the session's settlement, then drive the session
+    /// if nothing settled it.
+    ///
+    /// Returns whether the session finished.
+    async fn resume_receiver_session(
         &self,
-        mut proposal: Receiver<Monitor>,
+        session: ReceiveSession,
+        address: &Address,
         persister: &ReceiverPersister,
-    ) -> Result<()> {
-        // On a session resumption, the receiver will resume again in this state.
-        let poll_interval = tokio::time::Duration::from_millis(200);
-        let timeout_duration = tokio::time::Duration::from_secs(5);
-
-        let mut interval = tokio::time::interval(poll_interval);
-        interval.tick().await;
-
-        tracing::debug!("Polling for payment confirmation");
-
-        let result = tokio::time::timeout(timeout_duration, async {
-            loop {
-                interval.tick().await;
-                let check_result = proposal
-                    .check_for_transaction(|txid| {
-                        self.wallet()
-                            .get_raw_transaction(&txid)
-                            .map_err(|e| ImplementationError::from(e.into_boxed_dyn_error()))
-                    })
-                    .save(persister);
-
-                match check_result {
-                    Ok(OptionalTransitionOutcome::Progress(())) => {
-                        persister.print("Payjoin transaction detected in the mempool!");
-                        return Ok(());
-                    }
-                    Ok(OptionalTransitionOutcome::Stasis(current_state)) => {
-                        proposal = current_state;
-                    }
-                    Err(e) if e.is_transient() => {
-                        tracing::debug!(
-                            "Transient error checking for transaction, retrying: {e:?}"
-                        );
-                        proposal =
-                            e.transient_state().expect("transient error carries current state");
-                    }
-                    Err(e) => return Err(e.into()),
-                }
-            }
-        })
-        .await;
-
-        match result {
-            Ok(ok) => ok,
-            Err(_) => Err(anyhow!(
-                "No payjoin transaction detected in mempool within {timeout_duration:?}, stopping."
-            )),
+    ) -> Result<bool> {
+        match self.check_settlement(&session, address, persister)? {
+            SettlementCheck::Closed => Ok(true),
+            SettlementCheck::Confirming => Ok(false),
+            SettlementCheck::Unsettled => self.process_receiver_session(session, persister).await,
         }
+    }
+
+    /// Classify the wallet's transactions paying `address` against the
+    /// session, and close it once a settling transaction has
+    /// `SETTLEMENT_CONFIRMATIONS`.
+    fn check_settlement(
+        &self,
+        session: &ReceiveSession,
+        address: &Address,
+        persister: &ReceiverPersister,
+    ) -> Result<SettlementCheck> {
+        let Some(FoundSettlement { settlement, txid, confirmations }) =
+            self.find_settlement(session, address)?
+        else {
+            return Ok(SettlementCheck::Unsettled);
+        };
+
+        let settled_by = match settlement.outcome() {
+            SettlementOutcome::Payjoin => format!("Payjoin {txid}"),
+            SettlementOutcome::Fallback => format!("Fallback transaction {txid}"),
+            SettlementOutcome::Unrecognized => format!("Unrecognized transaction {txid}"),
+            other => format!("{other:?} transaction {txid}"),
+        };
+        if confirmations < SETTLEMENT_CONFIRMATIONS {
+            persister.print(format_args!(
+                "{settled_by} spent the sender's inputs and has {confirmations} of {SETTLEMENT_CONFIRMATIONS} confirmation(s). Run `payjoin-cli resume` again once it confirms."
+            ));
+            return Ok(SettlementCheck::Confirming);
+        }
+
+        persister.print(format_args!(
+            "{settled_by} settled the session with {confirmations} confirmation(s)."
+        ));
+        settlement.close().save(persister)?;
+        Ok(SettlementCheck::Closed)
+    }
+
+    /// Find the most-confirmed wallet transaction paying `address` that
+    /// settles the session.
+    ///
+    /// The CLI never substitutes the receiver output, so both the fallback and
+    /// the Payjoin pay `address`.
+    fn find_settlement(
+        &self,
+        session: &ReceiveSession,
+        address: &Address,
+    ) -> Result<Option<FoundSettlement>> {
+        let mut deepest: Option<FoundSettlement> = None;
+        for txid in self.wallet().txids_paying(address)? {
+            let Some((tx, confirmations)) = self.wallet().get_wallet_transaction(&txid)? else {
+                continue;
+            };
+            let Some(settlement) = session.classify_tx(&tx) else { continue };
+            if deepest.as_ref().is_none_or(|deepest| confirmations > deepest.confirmations) {
+                deepest = Some(FoundSettlement { settlement, txid, confirmations });
+            }
+        }
+        Ok(deepest)
     }
 
     /// Handle error by attempting to send an error response over the directory

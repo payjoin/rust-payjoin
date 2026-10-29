@@ -182,11 +182,17 @@ impl SessionHistory {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SessionStatus {
+    /// The session is open and has not expired.
     Active,
+    /// The session expired before it was closed.
     Expired,
+    /// The session closed as [`SessionOutcome::Aborted`].
     Failed,
+    /// The session closed after the Payjoin proposal was sent.
     Completed,
+    /// The session closed as [`SessionOutcome::FallbackBroadcasted`].
     FallbackBroadcasted,
+    /// The session was cancelled or failed and holds a fallback transaction to broadcast.
     PendingFallback,
 }
 
@@ -215,29 +221,36 @@ pub enum SessionEvent {
     Closed(SessionOutcome),
 }
 
-/// Represents all possible outcomes for a closed Payjoin session
+/// Represents all possible outcomes for a closed Payjoin session.
+///
+/// Outcomes describe the protocol, not which transaction settled the payment.
 ///
 /// This enum is deliberately exhaustive: a terminal outcome is a closed set, and a wildcard arm
 /// has no meaningful semantics for a caller deciding what a session's conclusion was. A new
 /// unhandled variant _should_ error at compile-time.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SessionOutcome {
-    /// Payjoin completed successfully: the transaction with this txid settled the session
-    Success(bitcoin::Txid),
-    /// Payjoin was not successful
-    Aborted,
-    /// Fallback transaction was broadcasted
-    FallbackBroadcasted,
-    /// Payjoin proposal was sent, but its broadcast status cannot be tracked because
-    /// the sender is using non-SegWit inputs which will change the transaction ID
-    /// of the proposal
-    PayjoinProposalSent,
-    /// The contested outpoints were settled by an unrecognized transaction (neither the
-    /// Payjoin nor the fallback), identified by its txid.
+    /// The Payjoin transaction with this txid was found.
     ///
-    /// NOTE: Nothing in this release produces this variant. It is reserved now because this enum is
-    /// deliberately exhaustive, so a new variant after 1.0 would be a semver-breaking API
-    /// change; naming it before the freeze lets the settlement classifier land additively.
+    /// Only produced by the deprecated [`Receiver<Monitor>::check_for_transaction`].
+    ///
+    /// [`Receiver<Monitor>::check_for_transaction`]: super::Receiver::check_for_transaction
+    Success(bitcoin::Txid),
+    /// The session ended without delivering the Payjoin proposal, or was cancelled.
+    ///
+    /// The fallback may still have paid the receiver.
+    Aborted,
+    /// The fallback transaction was found.
+    ///
+    /// Only produced by the deprecated [`Receiver<Monitor>::check_for_transaction`].
+    ///
+    /// [`Receiver<Monitor>::check_for_transaction`]: super::Receiver::check_for_transaction
+    FallbackBroadcasted,
+    /// The Payjoin proposal was delivered to the sender.
+    PayjoinProposalSent,
+    /// The sender's inputs were spent by an unrecognized transaction with this txid.
+    ///
+    /// NOTE: Nothing produces this variant. It is reserved because this enum is exhaustive.
     Unrecognized(bitcoin::Txid),
 }
 
@@ -260,6 +273,61 @@ mod tests {
         UncheckedOriginalPayload, WantsOutputs,
     };
     use crate::receive::{InternalPayloadError, PayloadError};
+
+    /// The events of a session that posted its Payjoin proposal.
+    fn posted_proposal_events(session_context: SessionContext) -> Vec<SessionEvent> {
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let original = original_from_test_vector();
+        let maybe_inputs_owned = unchecked_receiver_from_test_vector()
+            .assume_interactive_receiver()
+            .save(&persister)
+            .expect("Save should not fail");
+        let outputs_unknown = maybe_inputs_owned
+            .check_inputs_not_owned(&mut |_| Ok(false))
+            .save(&persister)
+            .expect("No inputs should be owned")
+            .check_no_inputs_seen_before(&mut |_| Ok(false))
+            .save(&persister)
+            .expect("No inputs should be seen before");
+        let wants_outputs = outputs_unknown
+            .identify_receiver_outputs(&mut |_| Ok(true))
+            .save(&persister)
+            .expect("Outputs should be identified");
+        let wants_inputs =
+            wants_outputs.commit_outputs().save(&persister).expect("Save should not fail");
+        let wants_fee_range =
+            wants_inputs.clone().commit_inputs().save(&persister).expect("Save should not fail");
+        let provisional_proposal = wants_fee_range
+            .clone()
+            .apply_fee_range(None, None)
+            .save(&persister)
+            .expect("Fee range should apply");
+        let payjoin_proposal = provisional_proposal
+            .clone()
+            .finalize_proposal(|psbt| Ok(psbt.clone()))
+            .save(&persister)
+            .expect("Payjoin proposal should be finalized");
+
+        vec![
+            SessionEvent::Created(session_context),
+            SessionEvent::RetrievedOriginalPayload { original, reply_key: None },
+            SessionEvent::CheckedBroadcastSuitability(),
+            SessionEvent::CheckedInputsNotOwned(),
+            SessionEvent::CheckedNoInputsSeenBefore(),
+            SessionEvent::IdentifiedReceiverOutputs(vec![0]),
+            SessionEvent::CommittedOutputs {
+                outputs: wants_inputs.state.inner.proposal.payjoin_psbt.unsigned_tx.output.clone(),
+                change_vout: wants_inputs.state.inner.proposal.change_vout,
+            },
+            SessionEvent::CommittedInputs {
+                receiver_inputs: wants_fee_range.state.inner.proposal.receiver_inputs.clone(),
+                payjoin_psbt: wants_fee_range.state.inner.proposal.payjoin_psbt.clone(),
+            },
+            SessionEvent::AppliedFeeRange(provisional_proposal.state.psbt_context.clone()),
+            SessionEvent::FinalizedProposal(payjoin_proposal.psbt().clone()),
+            SessionEvent::PostedPayjoinProposal(),
+        ]
+    }
 
     fn unchecked_receiver_from_test_vector() -> Receiver<UncheckedOriginalPayload> {
         Receiver {
@@ -1225,5 +1293,24 @@ mod tests {
         assert_eq!(status, SessionStatus::FallbackBroadcasted);
 
         Ok(())
+    }
+
+    #[test]
+    fn posted_session_past_expiration_replays_as_expired() {
+        let expiration = (SystemTime::now() - Duration::from_secs(1)).try_into().unwrap();
+        let session_context = SessionContext { expiration, ..SHARED_CONTEXT.clone() };
+
+        let persister = InMemoryPersister::<SessionEvent>::default();
+        let events = posted_proposal_events(session_context);
+        for event in events.clone() {
+            persister.save_event(event).expect("in memory persister save should not fail");
+        }
+
+        let err = replay_event_log(&persister).expect_err("a posted session should expire");
+        assert!(err.is_expired());
+        let history = SessionHistory::new(events);
+        assert_eq!(err.expiry_fallback_tx().cloned(), history.fallback_tx());
+        assert!(history.fallback_tx().is_some());
+        assert_eq!(history.status(), SessionStatus::Expired);
     }
 }

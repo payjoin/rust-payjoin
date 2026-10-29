@@ -120,7 +120,7 @@ If the change has no user-visible effect (refactoring, tests, CI, comments), say
 Mark a deprecation with the version placeholder instead of guessing the next release:
 
 ```rust
-#[deprecated(since = "0.0.0-unreleased", note = "use `Receiver<Monitor>::classify`")]
+#[deprecated(since = "0.0.0-unreleased", note = "use `Receiver::classify_tx`")]
 ```
 
 `contrib/release/bump.sh` replaces it with the crate's version in the release PR, and the release checks fail if one is left. rustc warns callers about it like any other deprecation. Don't use `TBD`, which rustc treats as a future deprecation and does not warn about.

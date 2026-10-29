@@ -164,23 +164,28 @@ class IntegrationTests {
                                 cancelReceiver(payjoinProposal, recvPersister)
                                 return
                             }
-                            payjoinProposal.createPostRequest(relay).useDisposable { posted ->
+                            val monitor = payjoinProposal.createPostRequest(relay).useDisposable { posted ->
                                 val body = http.post(posted.request)
                                 payjoinProposal.processResponse(body, posted.clientResponse).use { transition ->
-                                    transition.save(recvPersister).use { }
+                                    transition.save(recvPersister)
                                 }
                             }
+                            monitor.use {
+                                // **********************
+                                // Inside the Sender:
+                                val psbtBase64 = waitForSenderProposal(pollingForProposal, sendPersister, http, relay)
+                                val finalTx = finishPayjoin(
+                                    senderRpc,
+                                    receiverRpc,
+                                    psbtBase64,
+                                    senderOutpoints,
+                                    receiverOutpoints,
+                                )
 
-                            // **********************
-                            // Inside the Sender:
-                            val psbtBase64 = waitForSenderProposal(pollingForProposal, sendPersister, http, relay)
-                            finishPayjoin(
-                                senderRpc,
-                                receiverRpc,
-                                psbtBase64,
-                                senderOutpoints,
-                                receiverOutpoints,
-                            )
+                                // **********************
+                                // Inside the Receiver:
+                                settleReceiver(monitor, recvPersister, finalTx)
+                            }
                         }
                     }
                 }
@@ -391,7 +396,7 @@ class IntegrationTests {
         psbtBase64: String,
         senderOutpoints: Set<OutpointRef>,
         receiverOutpoints: Set<OutpointRef>,
-    ) {
+    ): ByteArray {
         val payjoinPsbt = Json.parseToJsonElement(rpc(senderRpc, "walletprocesspsbt", jstr(psbtBase64)))
             .jsonObject.getValue("psbt").jsonPrimitive.content
         val finalPsbt = Json.parseToJsonElement(rpc(senderRpc, "finalizepsbt", jstr(payjoinPsbt), "false"))
@@ -426,6 +431,26 @@ class IntegrationTests {
         assertEquals(100.0 - networkFees, receiverPending, 1e-6)
         val senderBalance = Json.parseToJsonElement(rpc(senderRpc, "getbalance")).jsonPrimitive.double
         assertEquals(0.0, senderBalance, 1e-6)
+        return HexFormat.of().parseHex(finalTxHex)
+    }
+
+    /**
+     * Classifies the broadcast Payjoin, then closes the session through the settlement, as a
+     * wallet that replays its open sessions would.
+     */
+    private fun settleReceiver(monitor: Monitor, recvPersister: InMemoryReceiverPersister, finalTx: ByteArray) {
+        assertNotNull(monitor.classifyTx(finalTx), "Monitor should classify the Payjoin").use { settlement ->
+            assertEquals(SettlementOutcome.PAYJOIN, settlement.outcome())
+        }
+        val replayed = replayReceiverEventLog(recvPersister).state()
+        assertIs<ReceiveSession.Monitor>(replayed)
+        assertNotNull(classifyReceiverTx(replayed, finalTx), "Replayed session should classify the Payjoin")
+            .use { settlement ->
+                assertEquals(SettlementOutcome.PAYJOIN, settlement.outcome())
+                settlement.closeSession().use { it.save(recvPersister) }
+            }
+        assertTrue(recvPersister.closed, "closing should close the persister")
+        assertIs<ReceiveSession.Closed>(replayReceiverEventLog(recvPersister).state())
     }
 }
 

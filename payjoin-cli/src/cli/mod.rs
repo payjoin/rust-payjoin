@@ -131,7 +131,7 @@ pub enum Commands {
         #[arg(long = "expire-in")]
         expire_in: Option<u64>,
     },
-    /// Resume pending payjoins (BIP77/v2 only)
+    /// Resume pending payjoins and close receiver sessions settled in the wallet (BIP77/v2 only)
     #[cfg(feature = "v2")]
     Resume {
         /// Only resume a specific session

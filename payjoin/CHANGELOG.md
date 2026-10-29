@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+- Close a leak in the `HasFallbackTx` seal. Generic code bounded on the trait
+  could call the sealed `fallback_tx` method, which was never part of the
+  documented API; such code no longer compiles. Read the fallback transaction
+  from `Receiver<PendingFallback>::fallback_tx` after `cancel`, or from
+  `SessionHistory::fallback_tx`.
+
+### API Additions
+
+- Add settlement classification to `receive::v2::Receiver`. On every state
+  that holds a fallback transaction, `classify_tx` returns a `Settlement`
+  for a transaction spending the sender's original prevouts. Its `outcome`
+  is a `SettlementOutcome` saying whether that transaction is the Payjoin
+  proposal, the fallback, or neither. `ReceiveSession::classify_tx` does the
+  same for a session in any state. Wallets should pass every transaction
+  they receive to `classify_tx` on each open session. It recognizes the
+  proposal even after a non-SegWit sender's signature changes its txid, and
+  never reports `Payjoin` before `PayjoinProposal`
+- Add `Settlement::close`, which ends a session once its settlement meets
+  the wallet's confirmation bar, without broadcasting the fallback. Only
+  `classify_tx` makes a `Settlement`, so a session closes this way only after
+  a transaction has settled it. It records `PayjoinProposalSent` from
+  `Monitor`, and from `PayjoinProposal` when the Payjoin settled it, and
+  `Aborted` otherwise
+
+### Deprecations
+
+- `Receiver<Monitor>::check_for_transaction` is deprecated. It closes the
+  session on first sight of a predicted txid, never sees a spend that is
+  neither the proposal nor the fallback, and closes a session with non-SegWit
+  sender inputs without checking. Use `classify_tx` and `Settlement::close`
+  instead. It now probes a txid that includes the script_sig of a legacy or
+  P2SH-wrapped receiver input. It used to probe a txid that never appears on
+  chain for such a session
+- `Receiver::proposal_txid_is_stable` is deprecated. It checks only the
+  sender's inputs, so a legacy or P2SH-wrapped receiver input can change the
+  txid even when it returns true. Use `classify_tx`
+
 ## 1.2.0
 
 This release adds a non-blocking interface to the receiver state machine.

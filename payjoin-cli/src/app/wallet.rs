@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+#[cfg(feature = "v2")]
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
@@ -11,6 +13,13 @@ use payjoin::bitcoin::{
     Address, Amount, FeeRate, Network, OutPoint, Script, Transaction, TxIn, TxOut, Txid,
 };
 use payjoin::receive::InputPair;
+
+/// One address entry from listreceivedbyaddress.
+#[cfg(feature = "v2")]
+#[derive(Debug, serde::Deserialize)]
+struct ReceivedByAddress {
+    txids: Vec<String>,
+}
 
 #[derive(Clone)]
 pub struct BitcoindWallet {
@@ -160,25 +169,45 @@ impl BitcoindWallet {
         }
     }
 
+    /// Returns a wallet transaction and its confirmation count, which is
+    /// negative if it conflicts with a confirmed transaction.
     #[cfg(feature = "v2")]
-    pub fn get_raw_transaction(
-        &self,
-        txid: &Txid,
-    ) -> Result<Option<payjoin::bitcoin::Transaction>> {
-        let raw_tx = tokio::task::block_in_place(|| {
+    pub fn get_wallet_transaction(&self, txid: &Txid) -> Result<Option<(Transaction, i64)>> {
+        let res = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 match self.rpc.get_transaction(txid).await {
-                    Ok(rpc_res) => Ok(Some(rpc_res.tx)),
-                    Err(e) =>
-                        if e.is_tx_not_found() {
-                            Ok(None)
-                        } else {
-                            Err(e)
-                        },
+                    Ok(rpc_res) => Ok(Some((rpc_res.tx, rpc_res.confirmations))),
+                    Err(e) if e.is_tx_not_found() => Ok(None),
+                    Err(e) => Err(e),
                 }
             })
         })?;
-        Ok(raw_tx)
+        Ok(res)
+    }
+
+    /// Returns the txids of all wallet transactions paying `address`,
+    /// including unconfirmed ones.
+    #[cfg(feature = "v2")]
+    pub fn txids_paying(&self, address: &Address) -> Result<Vec<Txid>> {
+        // bitcoind-async-client has no wrapper for listreceivedbyaddress.
+        // Arguments: minconf, include_empty, include_watchonly, address_filter.
+        let params = [
+            serde_json::json!(0),
+            serde_json::json!(false),
+            serde_json::json!(true),
+            serde_json::json!(address.to_string()),
+        ];
+        let received: Vec<ReceivedByAddress> = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.rpc.call_raw("listreceivedbyaddress", &params).await })
+        })
+        .context("Failed to list transactions received by address")?;
+
+        received
+            .into_iter()
+            .flat_map(|entry| entry.txids)
+            .map(|txid| Txid::from_str(&txid).context("Invalid txid from listreceivedbyaddress"))
+            .collect()
     }
 
     /// Get a new address from the wallet

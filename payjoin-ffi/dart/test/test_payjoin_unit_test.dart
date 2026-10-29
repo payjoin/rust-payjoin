@@ -6,6 +6,15 @@ import "package:payjoin/payjoin.dart" as payjoin;
 
 import "utils.dart";
 
+// A consensus-encoded transaction with one input and one output. It spends
+// nothing a fresh session holds.
+final unrelatedTx = Uint8List.fromList(
+  hex.decode(
+    "02000000010000000000000000000000000000000000000000000000000000000000000000"
+    "0000000000ffffffff0100000000000000000000000000",
+  ),
+);
+
 void main() {
   group('Test URIs', () {
     test('Test url userinfo rejection', () {
@@ -88,6 +97,39 @@ void main() {
         result.state(),
         isA<payjoin.InitializedReceiveSession>(),
         reason: "receiver should be in Initialized state",
+      );
+    });
+
+    test("Test classify receiver tx without fallback", () {
+      // A session that has not received the original has nothing to compare
+      // against, and bytes that are not a transaction are rejected whatever
+      // the session's state.
+      var persister = InMemoryReceiverPersister();
+      payjoin.ReceiverBuilder(
+        address: "tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4",
+        directory: "https://example.com",
+        ohttpKeys: payjoin.OhttpKeys.decode(
+          bytes: Uint8List.fromList(
+            hex.decode(
+              "01001604ba48c49c3d4a92a3ad00ecc63a024da10ced02180c73ec12d8a7ad2cc91bb483824fe2bee8d28bfe2eb2fc6453bc4d31cd851e8a6540e86c5382af588d370957000400010003",
+            ),
+          ),
+        ),
+      ).build().save(persister: persister);
+      final state = payjoin
+          .replayReceiverEventLog(persister: persister)
+          .state();
+
+      expect(
+        payjoin.classifyReceiverTx(session: state, tx: unrelatedTx),
+        isNull,
+      );
+      expect(
+        () => payjoin.classifyReceiverTx(
+          session: state,
+          tx: Uint8List.fromList([0]),
+        ),
+        throwsA(isA<payjoin.TransactionParseException>()),
       );
     });
 

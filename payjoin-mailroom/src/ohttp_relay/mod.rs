@@ -248,7 +248,7 @@ fn parse_gateway_uri_from_path(path: &str, default: &GatewayUri) -> Result<Gatew
 
     let path = &path[1..];
 
-    if "http://" == &path[..7] || "https://" == &path[..8] {
+    if path.starts_with("http://") || path.starts_with("https://") {
         GatewayUri::from_str(path)
     } else {
         Ok(Authority::from_str(path)?.into())
@@ -343,4 +343,31 @@ pub(crate) fn empty() -> BoxBody<Bytes, hyper::Error> {
 
 pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into()).map_err(|never| match never {}).boxed()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_gateway_path_returns_error() {
+        let default = GatewayUri::from_static(DEFAULT_GATEWAY);
+
+        assert!(parse_gateway_uri_from_path("/http:/", &default).is_err());
+        assert!(parse_gateway_uri_from_path("/https:/", &default).is_err());
+    }
+
+    #[test]
+    fn short_gateway_host_and_full_gateway_path_parse() {
+        let default = GatewayUri::from_static(DEFAULT_GATEWAY);
+
+        assert_eq!(
+            parse_gateway_uri_from_path("/a.io", &default).unwrap(),
+            GatewayUri::from_static("https://a.io")
+        );
+        assert_eq!(
+            parse_gateway_uri_from_path("/https://payjo.in", &default).unwrap(),
+            GatewayUri::from_static("https://payjo.in")
+        );
+    }
 }

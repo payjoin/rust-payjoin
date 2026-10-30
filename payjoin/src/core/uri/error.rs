@@ -1,3 +1,8 @@
+use alloc::fmt;
+#[cfg(not(feature = "std"))]
+use core::error;
+#[cfg(feature = "std")]
+use std::error;
 #[derive(Debug)]
 pub struct PjParseError(pub(super) InternalPjParseError);
 
@@ -5,9 +10,11 @@ pub struct PjParseError(pub(super) InternalPjParseError);
 ///
 /// This wraps the underlying `bitcoin_uri` parse error so that a breaking change
 /// in that crate does not force a breaking change in this crate's public API.
+#[cfg(feature = "std")]
 #[derive(Debug)]
 pub struct UriParseError(InternalUriParseError);
 
+#[cfg(feature = "std")]
 #[derive(Debug)]
 enum InternalUriParseError {
     /// The BIP21 URI itself (address, amount, or standard parameters) is invalid.
@@ -19,6 +26,7 @@ enum InternalUriParseError {
     PayjoinParams(PjParseError),
 }
 
+#[cfg(feature = "std")]
 impl UriParseError {
     /// Erases the foreign `bitcoin_uri` parse error into this opaque type.
     ///
@@ -43,8 +51,9 @@ impl UriParseError {
     }
 }
 
-impl std::fmt::Display for UriParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+#[cfg(feature = "std")]
+impl fmt::Display for UriParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
             InternalUriParseError::Bip21(e) => write!(f, "Invalid BIP21 URI: {e}"),
             InternalUriParseError::PayjoinParams(e) => write!(f, "Invalid payjoin parameters: {e}"),
@@ -52,8 +61,9 @@ impl std::fmt::Display for UriParseError {
     }
 }
 
-impl std::error::Error for UriParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+#[cfg(feature = "std")]
+impl error::Error for UriParseError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self.0 {
             InternalUriParseError::Bip21(e) => Some(e),
             InternalUriParseError::PayjoinParams(e) => Some(e),
@@ -67,10 +77,11 @@ pub(super) enum InternalPjParseError {
     DuplicateParams(&'static str),
     MissingEndpoint,
     NotUtf8,
+    #[cfg(any(feature = "v1", feature = "v2-ohttp"))]
     IntoUrl(crate::into_url::Error),
     #[cfg(feature = "v1")]
     UnsecureEndpoint,
-    #[cfg(feature = "v2")]
+    #[cfg(feature = "v2-ohttp")]
     V2(super::v2::PjParseError),
 }
 
@@ -78,25 +89,26 @@ impl From<InternalPjParseError> for PjParseError {
     fn from(value: InternalPjParseError) -> Self { PjParseError(value) }
 }
 
-impl std::error::Error for PjParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl error::Error for PjParseError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         use InternalPjParseError::*;
         match &self.0 {
             BadPjOs => None,
             DuplicateParams(_) => None,
             MissingEndpoint => None,
             NotUtf8 => None,
+            #[cfg(any(feature = "v1", feature = "v2-ohttp"))]
             IntoUrl(e) => Some(e),
             #[cfg(feature = "v1")]
             UnsecureEndpoint => None,
-            #[cfg(feature = "v2")]
+            #[cfg(feature = "v2-ohttp")]
             V2(e) => Some(e),
         }
     }
 }
 
-impl std::fmt::Display for PjParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for PjParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use InternalPjParseError::*;
         match &self.0 {
             BadPjOs => write!(f, "Bad pjos parameter"),
@@ -105,12 +117,13 @@ impl std::fmt::Display for PjParseError {
             }
             MissingEndpoint => write!(f, "Missing payjoin endpoint"),
             NotUtf8 => write!(f, "Endpoint is not valid UTF-8"),
+            #[cfg(any(feature = "v1", feature = "v2-ohttp"))]
             IntoUrl(e) => write!(f, "Endpoint is not valid: {e:?}"),
             #[cfg(feature = "v1")]
             UnsecureEndpoint => {
                 write!(f, "Endpoint scheme is not secure (https or onion)")
             }
-            #[cfg(feature = "v2")]
+            #[cfg(feature = "v2-ohttp")]
             V2(e) => write!(f, "Invalid v2 parameter: {e:?}"),
         }
     }

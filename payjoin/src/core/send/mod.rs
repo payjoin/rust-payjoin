@@ -9,16 +9,22 @@
 //! If you specifically need to use
 //! version 1, refer to the `send::v1` module documentation after enabling the `v1` feature.
 
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
+use alloc::string::ToString;
+use alloc::vec::Vec;
+
 use bitcoin::psbt::{Psbt, PsbtSighashType};
 use bitcoin::sighash::TapSighashType;
 use bitcoin::{Amount, FeeRate, Script, ScriptBuf, TxIn, TxOut, Weight};
 pub use error::{BuildSenderError, ResponseError, ValidationError, WellKnownError};
-pub(crate) use error::{InternalBuildSenderError, InternalProposalError, InternalValidationError};
+pub(crate) use error::{InternalBuildSenderError, InternalProposalError};
 
 pub use crate::core::error_codes::ErrorCode;
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 use crate::core::Url;
 use crate::output_substitution::OutputSubstitution;
 use crate::psbt::{AddressTypeError, PsbtExt, NON_WITNESS_INPUT_WEIGHT};
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 use crate::Version;
 
 // See usize casts
@@ -35,6 +41,7 @@ pub mod v1;
 #[cfg_attr(docsrs, doc(cfg(feature = "v2")))]
 pub mod v2;
 
+#[allow(dead_code)]
 type InternalResult<T> = Result<T, InternalProposalError>;
 
 /// A builder to construct the properties of a `PsbtContext`.
@@ -83,7 +90,7 @@ impl PsbtContextBuilder {
     ) -> Result<PsbtContext, BuildSenderError> {
         // TODO support optional batched payout scripts. This would require a change to
         // build() which now checks for a single payee.
-        let mut payout_scripts = std::iter::once(self.payee.clone());
+        let mut payout_scripts = core::iter::once(self.payee.clone());
 
         // Check if the PSBT is a sweep transaction with only one output that's a payout script and no change
         if self.psbt.unsigned_tx.output.len() == 1
@@ -705,6 +712,7 @@ fn determine_fee_contribution(
     Ok(contribution.filter(|contribution| contribution.max_amount > bitcoin::Amount::ZERO))
 }
 
+#[cfg(any(feature = "v1", feature = "v2-ohttp"))]
 fn serialize_url(
     endpoint: Url,
     output_substitution: OutputSubstitution,
@@ -746,6 +754,7 @@ mod test {
     };
 
     use super::*;
+    #[cfg(feature = "v2-ohttp")]
     use crate::core::Url;
     use crate::output_substitution::OutputSubstitution;
     use crate::psbt::PsbtExt;
@@ -766,6 +775,7 @@ mod test {
         })
     }
 
+    #[cfg(feature = "v1")]
     #[test]
     fn ordered_subsequence_requires_original_order() {
         let txin = |vout| TxIn {
@@ -821,6 +831,7 @@ mod test {
         Ok(())
     }
 
+    #[cfg(feature = "v1")]
     #[test]
     fn test_restore_original_outputs() -> Result<(), BoxError> {
         let mut original_psbt = PARSED_ORIGINAL_PSBT.clone();

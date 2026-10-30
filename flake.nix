@@ -74,6 +74,8 @@
         };
 
         msrv-version = "1.85.0";
+        # Rust version used to build release artifacts.
+        release-version = "1.85.1";
 
         nginxWithStream = pkgs.nginxMainline.overrideAttrs (oldAttrs: {
           configureFlags = oldAttrs.configureFlags ++ [
@@ -319,11 +321,11 @@
           builtins.removeAttrs pythonWorkspace.deps.all [ "payjoin" ]
         );
 
-        # Rust toolchain for the javascript dev shell: msrv pinned to match
-        # payjoin-ffi/javascript build requirements, with wasm32 target added
+        # Rust toolchain for the javascript dev shell: the release version, as
+        # pack-npm builds the published wasm here, with wasm32 target added
         # so cargo can build per-arch artifacts under nix (rustup target add
         # is a no-op against a nix-provided toolchain).
-        jsRustToolchain = pkgs.rust-bin.stable.${msrv-version}.default.override {
+        jsRustToolchain = pkgs.rust-bin.stable.${release-version}.default.override {
           extensions = [
             "rust-src"
             "rustfmt"
@@ -411,26 +413,25 @@
           BITCOIND_SKIP_DOWNLOAD = 1;
         };
 
-        # Rust toolchain for the python dev shell: msrv pinned to match
-        # payjoin-ffi/python build requirements, with per-arch targets added
+        # Rust toolchain for the python dev shell: the release version, as
+        # build-wheel generates the published bindings here, with per-arch targets added
         # so cargo can build artifacts under nix for payjoin-ffi/python/scripts/generate_bindings.sh
         # (rustup target add is a no-op against a nix-provided toolchain).
-        pythonRustToolchain = pkgs.rust-bin.stable.${msrv-version}.default.override {
+        pythonRustToolchain = pkgs.rust-bin.stable.${release-version}.default.override {
           extensions = [
             "rust-src"
             "rustfmt"
             "llvm-tools-preview"
           ];
-          targets = [
-            # On Darwin the native test builds lipo both arches; on Linux
-            # cargo-zigbuild cross-links the release wheel's universal2
-            # dylib from these same targets.
-            "aarch64-apple-darwin"
-            "x86_64-apple-darwin"
-          ]
-          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-            "x86_64-unknown-linux-gnu"
-          ];
+          targets =
+            # On Darwin the native test builds lipo both arches.
+            pkgs.lib.optionals pkgs.stdenv.isDarwin [
+              "aarch64-apple-darwin"
+              "x86_64-apple-darwin"
+            ]
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              "x86_64-unknown-linux-gnu"
+            ];
         };
 
         pythonDevShell = pkgs.mkShell {
@@ -452,10 +453,8 @@
               # Applies the manylinux platform tag the release wheel satisfies;
               # PyPI rejects raw linux_x86_64 wheels.
               auditwheel
-              # Cross-links the macOS release wheel against zig's bundled
-              # Apple SDK stubs, so the dylib records system install names
-              # instead of nix store paths.
-              cargo-zigbuild
+              # build-wheel.sh compares the packed library with its input.
+              unzip
             ];
 
           env = {
@@ -470,6 +469,65 @@
             # to avoid host/global Python path leaking into the Nix env
             unset PYTHONPATH
           '';
+        };
+
+        # Release builds of the payjoin-ffi native library through
+        # contrib/native/build.sh. The tools come from unstable: the release
+        # branch only has zig 0.15, and 0.17 regressed the iOS Mach-O linker.
+        unstablePkgs = nixpkgs-unstable.legacyPackages.${system};
+
+        nativeRustToolchain = pkgs.rust-bin.stable.${release-version}.minimal.override {
+          targets = [
+            "aarch64-apple-ios"
+            "aarch64-apple-ios-sim"
+            "aarch64-unknown-linux-gnu"
+            "x86_64-unknown-linux-gnu"
+            "aarch64-apple-darwin"
+            "x86_64-apple-darwin"
+            "aarch64-pc-windows-msvc"
+            "x86_64-pc-windows-msvc"
+            "aarch64-linux-android"
+            "armv7-linux-androideabi"
+            "x86_64-linux-android"
+          ];
+        };
+
+        # The NDK and the SDK parts it pulls in are unfree, so they come from
+        # an instance used for nothing else.
+        androidPkgs = import nixpkgs-unstable {
+          inherit system;
+          config = {
+            android_sdk.accept_license = true;
+            allowUnfree = true;
+          };
+        };
+
+        androidNdk =
+          (androidPkgs.androidenv.composeAndroidPackages {
+            includeNDK = true;
+            ndkVersions = [ "29.0.14206865" ];
+          }).ndk-bundle;
+
+        nativeDevShell = pkgs.mkShell {
+          name = "native";
+          packages = with unstablePkgs; [
+            nativeRustToolchain
+            zig_0_16
+            # nixpkgs wraps cargo-zigbuild with its default zig, 0.17.
+            (cargo-zigbuild.override { zig = zig_0_16; })
+            xwin
+            # The Windows targets compile C with clang-cl, archive with
+            # llvm-lib and link with lld-link.
+            llvmPackages_21.clang-unwrapped
+            llvmPackages_21.lld
+            llvmPackages_21.llvm
+          ];
+        };
+
+        # Only the Android builds fetch the NDK.
+        nativeAndroidDevShell = nativeDevShell.overrideAttrs {
+          name = "native-android";
+          ANDROID_NDK_HOME = "${androidNdk}/libexec/android-sdk/ndk-bundle";
         };
 
         simpleCheck =
@@ -525,6 +583,8 @@
           csharp = csharpDevShell;
           dart = dartDevShell;
           kotlin = kotlinDevShell;
+          native = nativeDevShell;
+          native-android = nativeAndroidDevShell;
         };
         formatter = treefmtEval.config.build.wrapper;
         checks =

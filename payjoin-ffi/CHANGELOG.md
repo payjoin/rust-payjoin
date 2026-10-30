@@ -1,6 +1,19 @@
 ## Unreleased
 
 - Python: require Python 3.11+ and replace httpx with httpx2. Callers catching HTTP errors from fetch_ohttp_keys should use httpx2.HTTPError instead of httpx.HTTPError.
+- Python: the Linux wheel's library now needs at most glibc 2.17, and
+  the wheel is tagged `manylinux_2_17`. The macOS wheel now supports
+  macOS 10.15 and later, down from 13.
+- Dart: Android builds with NDK r27 now align 64-bit libraries to
+  16 KB, as Google Play requires. Later NDKs already did.
+- The GitHub release now attaches every native library as
+  `payjoin_ffi-<version>-<target>.<ext>`, listed in `SHA256SUMS` and
+  attested. `VERIFYING.md` explains how to check one or rebuild it.
+- Dart: the package now ships the release's prebuilt native libraries,
+  and the build hook uses them instead of compiling Rust, so apps no
+  longer need a Rust toolchain or network access at build time. Set
+  `build: source` under `hooks: user_defines: payjoin:` in your app's
+  `pubspec.yaml` to keep compiling it.
 
 ## [0.25.1]
 

@@ -12,3 +12,7 @@ doc/api/
 
 # Auto-generated bindings
 lib/payjoin.dart
+
+# Release libraries, which contrib/prepare-publish.sh copies into the
+# staged package
+prebuilt/

@@ -16,6 +16,14 @@ else
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Build against the maintained lockfile instead of resolving the dependency
+# graph fresh on every run. use_lockfile copies Cargo-recent.lock into place
+# and restores the previous state when this script exits.
+cd "$SCRIPT_DIR/../../.."
+source contrib/lockfile.sh
+use_lockfile Cargo-recent.lock
+
 cd "$SCRIPT_DIR/../.."
 
 echo "Generating payjoin Kotlin..."

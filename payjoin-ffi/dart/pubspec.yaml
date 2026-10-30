@@ -18,3 +18,8 @@ dev_dependencies:
 
 hooks:
   build: hook/build.dart
+  # Applies only where this package is the root, that is in the repository.
+  # Consumers choose their own mode; see README.md.
+  user_defines:
+    payjoin:
+      build: workspace

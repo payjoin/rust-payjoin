@@ -5,18 +5,20 @@ if [[ ${1:-} == --core-from-revision ]]; then
     core_from_revision=true
     shift
 fi
-[ "$#" -eq 1 ] || {
-    echo "usage: prepare-publish.sh [--core-from-revision] <new-package-dir>" >&2
+[ "$#" -eq 2 ] || {
+    echo "usage: prepare-publish.sh [--core-from-revision] <native-dir> <new-package-dir>" >&2
     exit 1
 }
 # Resolve before changing directories; the destination must not exist.
-stage="$(realpath -m "$1")"
+native="$(realpath "$1")"
+stage="$(realpath -m "$2")"
 
 # Prepare the package for publishing to pub.dev and verify the archive with
-# a dry run. The archive ships Dart source plus the native/ wrapper crate;
-# consumers compile the Rust themselves via hook/build.dart, so no binaries
-# are packed here. Publishing itself stays a separate step so this script
-# can run anywhere, including on pull requests.
+# a dry run. The archive ships Dart source, the native/ wrapper crate for
+# source builds, and under prebuilt/<target>/ the libraries in
+# <native-dir>, the native workflow's payjoin-native artifact, which
+# hook/build.dart uses by default. Publishing itself stays a separate step
+# so this script can run anywhere.
 
 # Build against the maintained lockfile instead of resolving the dependency
 # graph fresh on every run. use_lockfile copies Cargo-recent.lock into place
@@ -33,12 +35,26 @@ PAYJOIN_FFI_FEATURES="" bash ./scripts/generate_bindings.sh
 
 revision="$(git rev-parse HEAD)"
 mkdir "$stage"
-# Include generated bindings while excluding development Cargo overlays,
-# then pin the native crate to the checkout that generated them.
-rsync -a --exclude=.git --exclude-from=.pubignore ./ "$stage/"
+# Include generated bindings while excluding development Cargo overlays and
+# any local prebuilt/, then pin the native crate to the checkout that
+# generated them.
+rsync -a --exclude=.git --exclude=/prebuilt/ --exclude-from=.pubignore ./ "$stage/"
 sed -i "s/rev = \"[0-9a-f]*\"/rev = \"$revision\"/" "$stage/native/Cargo.toml"
 grep -Fq "rev = \"$revision\"" "$stage/native/Cargo.toml" || {
     echo "Could not pin the staged native crate to $revision" >&2
+    exit 1
+}
+# Every target the hook maps, which is all of them but the universal macOS
+# library.
+for lib in "$native"/*/*; do
+    target="$(basename "$(dirname "$lib")")"
+    [[ $target == universal2-apple-darwin ]] && continue
+    mkdir -p "$stage/prebuilt/$target"
+    cp "$lib" "$stage/prebuilt/$target/"
+done
+count="$(find "$stage/prebuilt" -type f | wc -l)"
+[ "$count" -eq 11 ] || {
+    echo "Expected 11 prebuilt libraries in $native, found $count" >&2
     exit 1
 }
 

@@ -385,8 +385,13 @@ impl WantsInputs {
 
         // Insert contributions at random indices for privacy
         let mut rng = rand::thread_rng();
-        let receiver_input_amount =
-            checked_sum(inputs.iter().map(|input_pair| input_pair.previous_txout().value))?;
+        let receiver_input_amount = checked_sum(
+            self.proposal
+                .receiver_inputs
+                .iter()
+                .map(|p| p.previous_txout().value)
+                .chain(inputs.iter().map(|p| p.previous_txout().value)),
+        )?;
         for input_pair in inputs.clone() {
             let index = rng.gen_range(0..=self.proposal.payjoin_psbt.unsigned_tx.input.len());
             payjoin_psbt.inputs.insert(index, input_pair.psbtin);
@@ -592,7 +597,7 @@ impl WantsFeeRange {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::str::FromStr;
 
     use bitcoin::absolute::{LockTime, Time};
@@ -685,7 +690,7 @@ mod tests {
         );
     }
 
-    fn candidate_input_from_test_vector(value: Amount) -> InputPair {
+    pub(crate) fn candidate_input_from_test_vector(value: Amount) -> InputPair {
         let txout = TxOut {
             value,
             script_pubkey: ScriptBuf::new_p2pkh(&PubkeyHash::from_byte_array(DUMMY20)),

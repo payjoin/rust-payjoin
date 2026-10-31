@@ -481,6 +481,21 @@ impl WantsFeeRange {
 
         let mut payjoin_psbt = self.proposal.payjoin_psbt.clone();
 
+        let original_fee = self
+            .original
+            .original_psbt
+            .fee()
+            .map_err(|_| InternalPayloadError::FeeCalculationOverflow)?;
+        let proposal_fee = match self.proposal.payjoin_psbt.fee() {
+            Ok(fee) => fee,
+            Err(bitcoin::psbt::Error::NegativeFee) =>
+                return Err(InternalPayloadError::OutputsExceedInputs),
+            Err(_) => return Err(InternalPayloadError::FeeCalculationOverflow),
+        };
+        if proposal_fee < original_fee {
+            return Err(InternalPayloadError::OutputsExceedInputs);
+        }
+
         // If the sender specified a fee contribution, the receiver is allowed to decrease the
         // sender's fee output to pay for additional input fees. Any fees in excess of
         // `max_additional_fee_contribution` must be covered by the receiver.
@@ -844,6 +859,60 @@ mod tests {
         assert_eq!(wants_inputs.proposal.receiver_inputs.len(), 2);
         assert_eq!(wants_inputs.proposal.receiver_inputs[0], input_pair_1);
         assert_eq!(wants_inputs.proposal.receiver_inputs[1], input_pair_2);
+    }
+
+    #[test]
+    fn receiver_rejects_proposal_with_outputs_exceeding_inputs() {
+        let original = original_from_test_vector();
+        let original_output = original.psbt.unsigned_tx.output[1].clone();
+        let wants_outputs = WantsOutputs::new(original, vec![1]);
+        let replacement_output = TxOut {
+            value: original_output.value + Amount::ONE_SAT,
+            script_pubkey: original_output.script_pubkey.clone(),
+        };
+
+        let wants_fee_range = wants_outputs
+            .replace_receiver_outputs(
+                [replacement_output],
+                original_output.script_pubkey.as_script(),
+            )
+            .expect("Output replacement should succeed")
+            .commit_outputs()
+            .commit_inputs();
+
+        let result = wants_fee_range.calculate_psbt_with_fee_range(None, None);
+        assert!(
+            matches!(result, Err(InternalPayloadError::OutputsExceedInputs)),
+            "A proposal that increases output value without receiver inputs must be rejected"
+        );
+    }
+
+    #[test]
+    fn receiver_accepts_output_increase_covered_by_receiver_input() {
+        let original = original_from_test_vector();
+        let original_fee = original.psbt.fee().expect("Original PSBT should have a valid fee");
+        let original_output = original.psbt.unsigned_tx.output[1].clone();
+        let increase = original_fee + Amount::ONE_SAT;
+
+        let wants_outputs = WantsOutputs::new(original, vec![1]);
+        let replacement_output = TxOut {
+            value: original_output.value + increase,
+            script_pubkey: original_output.script_pubkey.clone(),
+        };
+        let wants_inputs = wants_outputs
+            .replace_receiver_outputs(
+                [replacement_output],
+                original_output.script_pubkey.as_script(),
+            )
+            .expect("Output replacement should succeed")
+            .commit_outputs()
+            // Contributing an input worth exactly the increase keeps the proposal valid.
+            .contribute_inputs([candidate_input_from_test_vector(increase)])
+            .expect("An input covering the output increase should be accepted")
+            .commit_inputs();
+
+        let result = wants_inputs.calculate_psbt_with_fee_range(None, None);
+        assert!(result.is_ok(), "An input covering the output increase must be accepted");
     }
 
     #[test]

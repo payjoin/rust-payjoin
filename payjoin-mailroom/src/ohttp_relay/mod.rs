@@ -229,7 +229,7 @@ async fn parse_gateway_uri(
         None => Err(Error::Unavailable(config.prober.unavailable_for().await)),
     }?;
 
-    if policy.bip77_allowed {
+    if policy.opted_in {
         Ok(gateway_uri)
     } else {
         // TODO Cache-Control header for error based on policy.expires

@@ -20,17 +20,17 @@ const DEFAULT_CAPACITY: usize = 1000;
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub(crate) struct Policy {
-    pub(crate) bip77_allowed: bool,
+    pub(crate) opted_in: bool,
     pub(crate) expires: Instant,
 }
 
 impl Policy {
-    fn always(bip77_allowed: bool) -> Self {
+    fn always(opted_in: bool) -> Self {
         // Rationale for thirty years is same as tokio's Instant::far_future,
         // this value is portable and will not overflow for foreseeable future
         const THIRTY_YEARS: Duration = Duration::from_secs(30 * 365 * 24 * 60 * 60);
         let expires = Instant::now() + THIRTY_YEARS;
-        Self { bip77_allowed, expires }
+        Self { opted_in, expires }
     }
 }
 
@@ -275,7 +275,7 @@ impl Prober {
         // opt-in is tracked via a separate mutable variable since it only
         // occurs in the first sub-branch of this large conditional, which is
         // largely concerned with determining the TTL
-        let mut bip77_allowed = false;
+        let mut opted_in = false;
 
         let ttls = &self.ttl_config;
         let ttl = match &mut res {
@@ -284,9 +284,9 @@ impl Prober {
                 let status = res.status();
 
                 if status.is_success() {
-                    bip77_allowed = Self::is_explicit_opt_in(res).await.is_some();
+                    opted_in = Self::is_explicit_opt_in(res).await.is_some();
 
-                    if bip77_allowed {
+                    if opted_in {
                         ttls.opt_in
                     } else {
                         ttls.http_2xx
@@ -321,7 +321,7 @@ impl Prober {
             }
         };
 
-        Policy { bip77_allowed, expires: Instant::now() + ttl }
+        Policy { opted_in, expires: Instant::now() + ttl }
     }
 
     pub(crate) async fn unavailable_for(&self) -> Duration {
@@ -433,7 +433,7 @@ mod tests {
         assert!(db.no_capacity_for().is_zero(), "capacity should be available right now");
         assert!(db.get(&url).is_none(), "mock gateway should not yet be known");
 
-        let policy = Policy { bip77_allowed: true, expires: Instant::now() + TIMESTEP };
+        let policy = Policy { opted_in: true, expires: Instant::now() + TIMESTEP };
 
         // see comment in implementation of insert(), arguably this should not
         // be allowed as the state machine should start with inflight, but this
@@ -452,7 +452,7 @@ mod tests {
             "allocating inflight future for known gateway should fail"
         );
         assert!(
-            db.insert(&url, Policy { bip77_allowed: false, expires: Instant::now() + TIMESTEP })
+            db.insert(&url, Policy { opted_in: false, expires: Instant::now() + TIMESTEP })
                 .is_none(),
             "inserting a duplicate policy entry should fail"
         );
@@ -474,7 +474,7 @@ mod tests {
 
         // Insert expired
         assert!(
-            db.insert(&url, Policy { bip77_allowed: false, expires: Instant::now() }).is_some(),
+            db.insert(&url, Policy { opted_in: false, expires: Instant::now() }).is_some(),
             "inserting an expired entry should not fail"
         );
         assert!(
@@ -510,7 +510,7 @@ mod tests {
             "with an inflight entry, known gateway set should be at capacity"
         );
         assert!(
-            db.insert(&url, Policy { bip77_allowed: true, expires: Instant::now() + TIMESTEP })
+            db.insert(&url, Policy { opted_in: true, expires: Instant::now() + TIMESTEP })
                 .is_some(),
             "inserting known entry to overwrite inflight one should succeed even at capacity"
         );
@@ -531,11 +531,8 @@ mod tests {
         assert!(db.get(&url_2).is_none(), "unknown entry should not be in the set");
 
         assert!(
-            db.insert(
-                &url_2,
-                Policy { bip77_allowed: false, expires: Instant::now() + (2 * TIMESTEP) }
-            )
-            .is_some(),
+            db.insert(&url_2, Policy { opted_in: false, expires: Instant::now() + (2 * TIMESTEP) })
+                .is_some(),
             "inserting second entry should succeed"
         );
         assert!(!db.has_capacity(), "after insertion gateway set should be at capacity");
@@ -583,13 +580,13 @@ mod tests {
 
         // test happy path
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
-        assert!(status.bip77_allowed, "mock gateway opt-in should have been detected");
+        assert!(status.opted_in, "mock gateway opt-in should have been detected");
         mock_opt_in.assert();
         drop(mock_opt_in);
 
         // test cached result, mockit server will cause failure if another GET query is sent
         let status = prober.check_opt_in(&url).await.expect("second probe must succeed");
-        assert!(status.bip77_allowed, "gateway opt-in should be cached");
+        assert!(status.opted_in, "gateway opt-in should be cached");
     }
 
     #[tokio::test]
@@ -609,7 +606,7 @@ mod tests {
 
         // test happy path
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
-        assert!(status.bip77_allowed, "asserted opt-in should be cached");
+        assert!(status.opted_in, "asserted opt-in should be cached");
     }
 
     #[tokio::test]
@@ -630,7 +627,7 @@ mod tests {
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
         mock_only_rfc_9540.assert();
         assert!(
-            !status.bip77_allowed,
+            !status.opted_in,
             "RFC 9540 gateway which doesn't signal should not be considered opted-in"
         );
     }
@@ -652,7 +649,7 @@ mod tests {
 
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
         mock_not_found.assert();
-        assert!(!status.bip77_allowed, "non-existent gateway should not be considered opt-in");
+        assert!(!status.opted_in, "non-existent gateway should not be considered opt-in");
     }
 
     #[tokio::test]
@@ -723,11 +720,11 @@ mod tests {
 
         mock_delayed.assert();
         assert!(
-            a.expect("probe must succeed").bip77_allowed,
+            a.expect("probe must succeed").opted_in,
             "first concurrent request should detect opt-in"
         );
         assert!(
-            b.expect("probe must succeed").bip77_allowed,
+            b.expect("probe must succeed").opted_in,
             "second concurrent request should detect opt-in"
         );
         assert_eq!(*counter.lock().unwrap(), 1, "requests should have been deduplicated");
@@ -799,12 +796,12 @@ mod tests {
 
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
         mock_429.assert_async().await;
-        assert!(!status.bip77_allowed, "rate-limited gateway should not be considered opt-in");
+        assert!(!status.opted_in, "rate-limited gateway should not be considered opt-in");
 
         // Advance time by less than Retry-After — should use cached result (no new request)
         tokio::time::advance(Duration::from_secs(retry_after_secs - 1)).await;
         let status = prober.check_opt_in(&url).await.expect("cached probe must succeed");
-        assert!(!status.bip77_allowed, "result should still be cached before Retry-After expires");
+        assert!(!status.opted_in, "result should still be cached before Retry-After expires");
 
         // Advance past Retry-After — cache should be expired, new request would be sent
         tokio::time::advance(Duration::from_secs(2)).await;
@@ -836,7 +833,7 @@ mod tests {
 
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
         mock_503.assert_async().await;
-        assert!(!status.bip77_allowed, "unavailable gateway should not be considered opt-in");
+        assert!(!status.opted_in, "unavailable gateway should not be considered opt-in");
     }
 
     #[tokio::test]
@@ -855,13 +852,10 @@ mod tests {
 
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
         mock_429.assert_async().await;
-        assert!(
-            !status.bip77_allowed,
-            "rate-limited gateway without Retry-After should not be opt-in"
-        );
+        assert!(!status.opted_in, "rate-limited gateway without Retry-After should not be opt-in");
 
         // Should be cached — no new request sent
         let status = prober.check_opt_in(&url).await.expect("cached probe must succeed");
-        assert!(!status.bip77_allowed, "result should be cached with default TTL");
+        assert!(!status.opted_in, "result should be cached with default TTL");
     }
 }

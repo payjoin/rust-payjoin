@@ -123,6 +123,16 @@ for a week it was fully down. A node that stays down until the Monday after
 that never exports the week its outage began in: by the time it is back,
 that week is no longer the settled one.
 
+## OHTTP Relay Purposes
+
+The relay forwards only to gateways that opt in: a gateway must list a
+purpose the relay accepts in its `/.well-known/ohttp-gateway?allowed_purposes`
+response. BIP77 is always accepted. Operators who also want to relay another
+protocol's traffic can list its purposes under `extra_allowed_purposes` in the
+[`[ohttp_relay]`](config.example.toml) section. Traffic from every accepted
+protocol then shares the relay, so each protocol's users blend in with the
+others'.
+
 ## Access Control
 
 Build with `--features access-control` to enable:

@@ -46,6 +46,8 @@ struct Services {
 }
 
 pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> anyhow::Result<()> {
+    // Refuse a bad setting before doing anything else.
+    let relay_purposes = relay_purposes(&config)?;
     let sentinel_tag = generate_sentinel_tag();
     let metrics = build_metrics(&config, meter_provider);
     let flush_on_exit = metrics.clone();
@@ -58,7 +60,12 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
 
     let services = Services {
         directory,
-        relay: crate::ohttp_relay::Service::new(sentinel_tag, metrics.clone()).await,
+        relay: crate::ohttp_relay::Service::new_with_purposes(
+            sentinel_tag,
+            metrics.clone(),
+            relay_purposes,
+        )
+        .await,
         metrics,
         #[cfg(feature = "access-control")]
         geoip,
@@ -102,6 +109,8 @@ pub async fn serve_manual_tls(
     root_store: rustls::RootCertStore,
     default_gateway: Option<crate::ohttp_relay::GatewayUri>,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<anyhow::Result<()>>)> {
+    // Refuse a bad setting before doing anything else.
+    let relay_purposes = relay_purposes(&config)?;
     use std::net::SocketAddr;
 
     let sentinel_tag = generate_sentinel_tag();
@@ -119,6 +128,7 @@ pub async fn serve_manual_tls(
             root_store,
             default_gateway,
             metrics.clone(),
+            relay_purposes,
         )
         .await,
         metrics,
@@ -167,6 +177,8 @@ pub async fn serve_acme(
     config: Config,
     meter_provider: Option<SdkMeterProvider>,
 ) -> anyhow::Result<()> {
+    // Refuse a bad setting before doing anything else.
+    let relay_purposes = relay_purposes(&config)?;
     use std::net::SocketAddr;
     use std::sync::Arc;
 
@@ -187,7 +199,12 @@ pub async fn serve_acme(
 
     let services = Services {
         directory,
-        relay: crate::ohttp_relay::Service::new(sentinel_tag, metrics.clone()).await,
+        relay: crate::ohttp_relay::Service::new_with_purposes(
+            sentinel_tag,
+            metrics.clone(),
+            relay_purposes,
+        )
+        .await,
         metrics,
         #[cfg(feature = "access-control")]
         geoip,
@@ -264,6 +281,11 @@ fn spawn_heartbeat(metrics: MetricsService) {
 /// Resolves on SIGINT or SIGTERM, the signals a terminal and systemd use to
 /// stop the service. Returning from the serve loop instead of dying in the
 /// default handler gives the weekly buckets a chance to reach disk.
+/// The gateway purposes the relay forwards to: BIP77 plus any configured.
+fn relay_purposes(config: &Config) -> anyhow::Result<crate::ohttp_relay::AllowedPurposes> {
+    Ok(crate::ohttp_relay::AllowedPurposes::new(&config.ohttp_relay.extra_allowed_purposes)?)
+}
+
 async fn shutdown_signal() {
     let interrupt = tokio::signal::ctrl_c();
     #[cfg(unix)]

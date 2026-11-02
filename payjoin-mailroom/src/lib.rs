@@ -278,14 +278,14 @@ fn spawn_heartbeat(metrics: MetricsService) {
     tokio::spawn(heartbeat::run(metrics, || tokio::time::sleep(heartbeat::HEARTBEAT_INTERVAL)));
 }
 
-/// Resolves on SIGINT or SIGTERM, the signals a terminal and systemd use to
-/// stop the service. Returning from the serve loop instead of dying in the
-/// default handler gives the weekly buckets a chance to reach disk.
 /// The gateway purposes the relay forwards to: BIP77 plus any configured.
 fn relay_purposes(config: &Config) -> anyhow::Result<crate::ohttp_relay::AllowedPurposes> {
     Ok(crate::ohttp_relay::AllowedPurposes::new(&config.ohttp_relay.extra_allowed_purposes)?)
 }
 
+/// Resolves on SIGINT or SIGTERM, the signals a terminal and systemd use to
+/// stop the service. Returning from the serve loop instead of dying in the
+/// default handler gives the weekly buckets a chance to reach disk.
 async fn shutdown_signal() {
     let interrupt = tokio::signal::ctrl_c();
     #[cfg(unix)]

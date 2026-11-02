@@ -2499,6 +2499,7 @@ dependencies = [
  "r2d2_sqlite",
  "reqwest 0.12.28",
  "rusqlite",
+ "scheduled-thread-pool",
  "serde",
  "serde_json",
  "tempfile",

@@ -19,8 +19,9 @@ ohttp = { package = "bitcoin-ohttp", version = "0.7.0" }
 payjoin = { path = "../payjoin", default-features = false, features = [
   "arbitrary",
   "_core",
+  "std",
   "v1",
-  "v2",
+  "v2-ohttp",
 ] }
 payjoin-ffi = { path = "../payjoin-ffi" }
 # Without float_roundtrip, serde_json parses floats inexactly, so a float in

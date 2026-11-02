@@ -1,7 +1,8 @@
-use core::fmt;
-use std::error;
+use core::{error, fmt};
 
+#[cfg(feature = "v2-ohttp")]
 use crate::hpke::HpkeError;
+#[cfg(feature = "v2-ohttp")]
 use crate::ohttp::{DirectoryResponseError, OhttpEncapsulationError};
 use crate::time::Time;
 

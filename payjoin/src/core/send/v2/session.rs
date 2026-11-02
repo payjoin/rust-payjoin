@@ -1,9 +1,22 @@
+#[cfg(feature = "v2-ohttp")]
+use alloc::boxed::Box;
+#[cfg(feature = "v2-ohttp")]
+use alloc::vec::Vec;
+
+#[cfg(feature = "v2-ohttp")]
 use crate::error::{InternalReplayError, ReplayError};
-use crate::persist::{AsyncSessionPersister, SessionPersister};
+#[cfg(feature = "v2-ohttp")]
+use crate::persist::AsyncSessionPersister;
+#[cfg(feature = "v2-ohttp")]
+use crate::persist::SessionPersister;
+#[cfg(feature = "v2-ohttp")]
 use crate::send::v2::{SendSession, SessionContext};
+#[cfg(feature = "v2-ohttp")]
 use crate::uri::v2::PjParam;
+#[cfg(feature = "v2-ohttp")]
 use crate::ImplementationError;
 
+#[cfg(feature = "v2-ohttp")]
 fn replay_events(
     mut logs: impl Iterator<Item = SessionEvent>,
 ) -> Result<(SendSession, Vec<SessionEvent>), ReplayError<SendSession, SessionEvent>> {
@@ -21,15 +34,16 @@ fn replay_events(
     Ok((sender, session_events))
 }
 
+#[cfg(feature = "v2-ohttp")]
 fn construct_history(
     session_events: Vec<SessionEvent>,
-    sender: &SendSession,
+    _sender: &SendSession,
 ) -> Result<SessionHistory, ReplayError<SendSession, SessionEvent>> {
     let history = SessionHistory::new(session_events);
-    // Closed sessions terminated before expiration; do not surface an expired error for them.
-    if !matches!(sender, SendSession::Closed(_)) {
-        let pj_param = history.pj_param();
-        if pj_param.expiration().elapsed() {
+    #[cfg(feature = "std")]
+    {
+        if matches!(history.status(), SessionStatus::Expired) {
+            let pj_param = history.pj_param();
             return Err(InternalReplayError::Expired(
                 pj_param.expiration(),
                 Some(history.fallback_tx()),
@@ -42,6 +56,7 @@ fn construct_history(
 
 /// Replay a sender event log to get the sender in its current state [SendSession]
 /// and a session history [SessionHistory]
+#[cfg(feature = "v2-ohttp")]
 pub fn replay_event_log<P>(
     persister: &P,
 ) -> Result<(SendSession, SessionHistory), ReplayError<SendSession, SessionEvent>>
@@ -69,6 +84,7 @@ where
 }
 
 /// Async version of [replay_event_log]
+#[cfg(feature = "v2-ohttp")]
 pub async fn replay_event_log_async<P>(
     persister: &P,
 ) -> Result<(SendSession, SessionHistory), ReplayError<SendSession, SessionEvent>>
@@ -81,8 +97,7 @@ where
         .load()
         .await
         .map_err(|e| InternalReplayError::PersistenceFailure(ImplementationError::new(e)))?;
-
-    let (sender, session_events) = match replay_events(logs.map(|e| e.into())) {
+    let (sender, session_events) = match replay_events(logs.map(|e: P::SessionEvent| e.into())) {
         Ok(r) => r,
         Err(e) => {
             persister.close().await.map_err(|ce| {
@@ -91,16 +106,17 @@ where
             return Err(e);
         }
     };
-
     let history = construct_history(session_events, &sender)?;
     Ok((sender, history))
 }
 
+#[cfg(feature = "v2-ohttp")]
 #[derive(Debug, Clone)]
 pub struct SessionHistory {
     events: Vec<SessionEvent>,
 }
 
+#[cfg(feature = "v2-ohttp")]
 impl SessionHistory {
     pub(crate) fn new(events: Vec<SessionEvent>) -> Self {
         debug_assert!(!events.is_empty(), "Session event log must contain at least one event");
@@ -131,13 +147,12 @@ impl SessionHistory {
     }
 
     pub fn status(&self) -> SessionStatus {
-        // Terminal states take precedence over expiration: a session that has reached
-        // a `Closed` outcome is done regardless of whether its expiration has elapsed.
         match self.events.last() {
             Some(SessionEvent::Closed(outcome)) => match outcome {
                 SessionOutcome::Success(_) => SessionStatus::Completed,
                 SessionOutcome::Aborted => SessionStatus::Failed,
             },
+            #[cfg(feature = "std")]
             _ if self.pj_param().expiration().elapsed() => SessionStatus::Expired,
             _ => SessionStatus::Active,
         }
@@ -155,6 +170,7 @@ pub enum SessionStatus {
     Completed,
 }
 
+#[cfg(feature = "v2-ohttp")]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SessionEvent {
     /// Sender was created with session data

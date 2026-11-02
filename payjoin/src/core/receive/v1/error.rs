@@ -1,4 +1,8 @@
+use alloc::string::String;
+#[cfg(not(feature = "std"))]
+use core::error;
 use core::fmt;
+#[cfg(feature = "std")]
 use std::error;
 
 /// Error that occurs during validation of an incoming v1 payjoin request.
@@ -21,7 +25,7 @@ pub(crate) enum InternalRequestError {
     /// The Content-Type header has an invalid value
     InvalidContentType(String),
     /// The Content-Length header could not be parsed as a number
-    InvalidContentLength(std::num::ParseIntError),
+    InvalidContentLength(core::num::ParseIntError),
     /// The Content-Length value does not match the actual body length
     ContentLengthMismatch { expected: usize, actual: usize },
 }

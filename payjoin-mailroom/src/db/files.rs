@@ -11,7 +11,7 @@ use rand::RngCore;
 use tokio::fs::{self, File};
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{oneshot, Mutex};
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 use crate::db::{Db as DbTrait, Error as DbError};
 
@@ -487,9 +487,14 @@ impl Mailboxes {
             .map(|(created, _id)| {
                 // A timestamp in the future means the clock was stepped back
                 // since the mailbox was written. Treat it as just created.
-                self.ttl
-                    .checked_sub(created.elapsed().unwrap_or(Duration::ZERO))
-                    .unwrap_or(self.ttl)
+                let elapsed = created.elapsed().unwrap_or_else(|e| {
+                    debug!(
+                        "System clock moved back by {:?} since mailbox was written",
+                        e.duration()
+                    );
+                    Duration::ZERO
+                });
+                self.ttl.checked_sub(elapsed).unwrap_or(self.ttl)
             })
             .unwrap_or(self.ttl)
     }

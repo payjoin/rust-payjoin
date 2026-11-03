@@ -45,6 +45,8 @@ REPOS = [
     "payjoin/tx-indexer",
     "Uniffi-Dart/uniffi-dart",
     "payjoin/concurrent-psbt",
+    "ValeraFinebits/btcpayserver-payjoin-plugin",
+    "ValeraFinebits/bitcoin",
 ]
 
 REPO_FILTER = " ".join(f"repo:{r}" for r in REPOS)

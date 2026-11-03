@@ -43,6 +43,7 @@ reqwest = { version = "0.12.23", default-features = false, features = [
   "rustls-tls",
 ] }
 rusqlite = { version = "0.29.0", features = ["bundled"] }
+scheduled-thread-pool = "=0.2.7"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tokio = { version = "1.52.3", features = ["full"] }
@@ -55,7 +56,7 @@ uuid = { version = "1.18.0", features = ["v7"] }
 
 # Pinned transitive dependencies that appear unused to cargo-machete
 [package.metadata.cargo-machete]
-ignored = ["ahash", "pest_derive"]
+ignored = ["ahash", "scheduled-thread-pool", "pest_derive"]
 
 [dev-dependencies]
 nix = { version = "0.30.1", features = ["aio", "process", "signal"] }

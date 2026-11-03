@@ -425,13 +425,21 @@ impl WantsInputs {
 
     // Compute the minimum amount that the receiver must contribute to the transaction as input.
     //
-    // Output values are sender-supplied, so either sum can overflow.
+    // Output values are sender-supplied, so either sum can overflow. Earlier
+    // contributions were already credited to the change output, so they count
+    // toward the minimum rather than raising it.
     fn receiver_min_input_amount(&self) -> Result<Amount, InputContributionError> {
         let output_amount =
             checked_sum(self.proposal.payjoin_psbt.unsigned_tx.output.iter().map(|o| o.value))?;
         let original_output_amount =
             checked_sum(self.original.original_psbt.unsigned_tx.output.iter().map(|o| o.value))?;
-        Ok(output_amount.checked_sub(original_output_amount).unwrap_or(Amount::ZERO))
+        let contributed_amount = checked_sum(
+            self.proposal.receiver_inputs.iter().map(|input| input.previous_txout().value),
+        )?;
+        Ok(output_amount
+            .checked_sub(original_output_amount)
+            .and_then(|deficit| deficit.checked_sub(contributed_amount))
+            .unwrap_or(Amount::ZERO))
     }
 
     /// Commits the inputs as final, and moves on to the next typestate.
@@ -605,7 +613,7 @@ mod tests {
     use bitcoin::taproot::LeafVersion;
     use bitcoin::{
         Amount, Network, OutPoint, PubkeyHash, ScriptBuf, Sequence, TapLeafHash, TapNodeHash,
-        Transaction, TxIn, TxOut, Weight, Witness,
+        Transaction, TxIn, TxOut, Txid, Weight, Witness,
     };
     use payjoin_test_utils::{DUMMY20, RECEIVER_INPUT_CONTRIBUTION};
 
@@ -844,6 +852,43 @@ mod tests {
         assert_eq!(wants_inputs.proposal.receiver_inputs.len(), 2);
         assert_eq!(wants_inputs.proposal.receiver_inputs[0], input_pair_1);
         assert_eq!(wants_inputs.proposal.receiver_inputs[1], input_pair_2);
+    }
+
+    fn p2wpkh_input(vout: u32, value: Amount) -> InputPair {
+        let txout = TxOut {
+            value,
+            script_pubkey: ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array(DUMMY20)),
+        };
+        let outpoint = OutPoint { txid: Txid::from_byte_array([1; 32]), vout };
+        InputPair::new_p2wpkh(txout, outpoint).expect("valid p2wpkh input")
+    }
+
+    fn output_sum(psbt: &Psbt) -> Amount { psbt.unsigned_tx.output.iter().map(|o| o.value).sum() }
+
+    #[test]
+    fn every_contribution_is_credited_to_change() {
+        let original = original_from_test_vector();
+        let original_sum = output_sum(&original.psbt);
+        let wants_inputs = WantsOutputs::new(original, vec![1]).commit_outputs();
+        let value = Amount::from_sat(100_000);
+
+        let one_call = wants_inputs
+            .clone()
+            .contribute_inputs([p2wpkh_input(0, value), p2wpkh_input(1, value)])
+            .expect("contribution should succeed");
+        let two_calls = wants_inputs
+            .contribute_inputs([p2wpkh_input(0, value)])
+            .expect("first contribution should succeed")
+            .contribute_inputs([p2wpkh_input(1, value)])
+            .expect("second contribution should succeed");
+
+        for proposal in [one_call.proposal, two_calls.proposal] {
+            assert_eq!(
+                output_sum(&proposal.payjoin_psbt),
+                original_sum + value + value,
+                "every contributed sat must reach the change output, not the miner"
+            );
+        }
     }
 
     #[test]

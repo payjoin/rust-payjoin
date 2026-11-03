@@ -150,6 +150,20 @@ impl WantsOutputs {
         let mut payjoin_psbt = self.original.original_psbt.clone();
         let mut outputs = vec![];
         let mut replacement_outputs: Vec<TxOut> = replacement_outputs.into_iter().collect();
+        // Sender outputs are kept as is, so once the drain script is not a sender
+        // script, only a receiver output can carry it.
+        let pays_sender = |script: &Script| {
+            self.original
+                .original_psbt
+                .unsigned_tx
+                .output
+                .iter()
+                .enumerate()
+                .any(|(i, txo)| !self.owned_vouts.contains(&i) && txo.script_pubkey == *script)
+        };
+        if pays_sender(drain_script) {
+            return Err(InternalOutputSubstitutionError::InvalidDrainScript.into());
+        }
         // Substitute the existing receiver outputs, keeping the sender/receiver output ordering
         for (i, original_output) in
             self.original.original_psbt.unsigned_tx.output.iter().enumerate()
@@ -889,6 +903,34 @@ mod tests {
                 "every contributed sat must reach the change output, not the miner"
             );
         }
+    }
+
+    #[test]
+    fn drain_script_must_not_be_a_sender_script() {
+        let original = original_from_test_vector();
+        let sender_output = original.psbt.unsigned_tx.output[0].clone();
+        let wants_outputs = WantsOutputs::new(original, vec![1]);
+        let receiver_output = wants_outputs.payjoin_psbt.unsigned_tx.output[1].clone();
+
+        // Draining to the sender's script would credit the receiver's change to
+        // the sender, even when a receiver output also carries that script.
+        let err = wants_outputs
+            .clone()
+            .substitute_receiver_script(&sender_output.script_pubkey)
+            .expect_err("a sender script cannot be the drain");
+        assert_eq!(err, InternalOutputSubstitutionError::InvalidDrainScript.into());
+        let err = wants_outputs
+            .clone()
+            .replace_receiver_outputs([receiver_output.clone()], &sender_output.script_pubkey)
+            .expect_err("a sender output cannot be the drain");
+        assert_eq!(err, InternalOutputSubstitutionError::InvalidDrainScript.into());
+
+        // A drain script no output carries names no receiver output either.
+        let unknown_script = ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array(DUMMY20));
+        let err = wants_outputs
+            .replace_receiver_outputs([receiver_output], &unknown_script)
+            .expect_err("the drain must be a replacement output");
+        assert_eq!(err, InternalOutputSubstitutionError::InvalidDrainScript.into());
     }
 
     #[test]

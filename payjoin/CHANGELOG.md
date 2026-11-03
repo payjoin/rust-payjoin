@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Close a leak in the `HasFallbackTx` seal. Generic code bounded on the trait
+  could call the sealed `fallback_tx` method, which was never part of the
+  documented API; such code no longer compiles. Read the fallback transaction
+  from `Receiver<PendingFallback>::fallback_tx` after `cancel`, or from
+  `SessionHistory::fallback_tx`.
+- Deprecate `Receiver<MaybeInputsOwned>::extract_tx_to_schedule_broadcast`.
+  Schedule the fallback broadcast by cancelling the session when the payjoin
+  fails: `cancel` yields a `Receiver<PendingFallback>` whose `fallback_tx`
+  is the transaction to broadcast.
+
 ## 1.2.0
 
 This release adds a non-blocking interface to the receiver state machine.

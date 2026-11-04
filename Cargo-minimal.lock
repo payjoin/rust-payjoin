@@ -2330,6 +2330,7 @@ name = "payjoin-fuzz"
 version = "0.0.1"
 dependencies = [
  "arbitrary",
+ "async-trait",
  "bhttp",
  "bitcoin-hpke",
  "bitcoin-ohttp",

@@ -12,6 +12,7 @@ default = []
 
 [dependencies]
 arbitrary = { version = "1.0.1" }
+async-trait = { version = "0.1.89" }
 bhttp = { version = "0.6.1" }
 hpke = { package = "bitcoin-hpke", version = "0.20.0" }
 libfuzzer-sys = { version = "0.4.10" }
@@ -78,5 +79,11 @@ bench = false
 [[bin]]
 name = "ffi-session-event-log"
 path = "fuzz_targets/ffi/session_event_log.rs"
+doc = false
+bench = false
+
+[[bin]]
+name = "ffi-receiver-checklists"
+path = "fuzz_targets/ffi/receiver_checklists.rs"
 doc = false
 bench = false

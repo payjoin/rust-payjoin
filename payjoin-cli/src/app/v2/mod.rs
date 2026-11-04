@@ -721,7 +721,13 @@ impl App {
             persister.print("Session cancelled. Broadcast the original transaction manually:");
             println!("{}", serialize_hex(pending.fallback_tx()));
         } else {
-            self.wallet().broadcast_tx(pending.fallback_tx())?;
+            if let Err(e) = self.wallet().broadcast_tx(pending.fallback_tx()) {
+                let id = persister.session_id();
+                persister.print(format_args!(
+                    "Session is still open. If the fallback transaction was already broadcast or its inputs are spent, run `payjoin-cli cancel {id} --no-broadcast` to close it."
+                ));
+                return Err(e);
+            }
             persister.print(format_args!(
                 "Broadcasted fallback transaction txid: {}",
                 pending.fallback_tx().compute_txid()
@@ -810,7 +816,13 @@ impl App {
             persister.print("Session cancelled. Broadcast the fallback transaction manually:");
             println!("{}", serialize_hex(pending.fallback_tx()));
         } else {
-            self.wallet().broadcast_tx(pending.fallback_tx())?;
+            if let Err(e) = self.wallet().broadcast_tx(pending.fallback_tx()) {
+                let id = persister.session_id();
+                persister.print(format_args!(
+                    "Session is still open. If the fallback transaction was already broadcast or its inputs are spent, run `payjoin-cli cancel {id} --no-broadcast` to close it."
+                ));
+                return Err(e);
+            }
             persister.print(format_args!(
                 "Broadcasted fallback transaction txid: {}",
                 pending.fallback_tx().compute_txid()
@@ -889,7 +901,7 @@ impl App {
                 SendSession::PendingFallback(_) => {
                     let id = persister.session_id();
                     persister.print(format_args!(
-                        "Session was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
+                        "Session was cancelled. Run `payjoin-cli cancel {id}` to broadcast the fallback transaction and close the session, or `payjoin-cli cancel {id} --no-broadcast` to close it without broadcasting."
                     ));
                     return Ok(());
                 }
@@ -1006,7 +1018,7 @@ impl App {
                 ReceiveSession::PendingFallback(_) => {
                     let id = persister.session_id();
                     persister.print(format_args!(
-                        "Session was cancelled. Run `payjoin-cli cancel {id}` to cancel and broadcast the fallback transaction."
+                        "Session was cancelled. Run `payjoin-cli cancel {id}` to broadcast the fallback transaction and close the session, or `payjoin-cli cancel {id} --no-broadcast` to close it without broadcasting."
                     ));
                     return Ok(true);
                 }

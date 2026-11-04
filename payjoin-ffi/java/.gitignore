@@ -1,0 +1,15 @@
+# Generated UniFFI Java (one file per class/interface/enum/record, plus package-info.java)
+src/main/java/org/
+
+# Native library copied by scripts/generate_bindings.sh
+/lib/*.so
+/lib/*.dylib
+/lib/*.dll
+
+# Gradle
+.gradle/
+build/
+local.properties
+
+.idea/
+.DS_Store

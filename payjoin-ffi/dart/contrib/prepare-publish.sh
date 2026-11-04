@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
+core_from_revision=false
+if [[ ${1:-} == --core-from-revision ]]; then
+    core_from_revision=true
+    shift
+fi
+[ "$#" -eq 1 ] || {
+    echo "usage: prepare-publish.sh [--core-from-revision] <new-package-dir>" >&2
+    exit 1
+}
+# Resolve before changing directories; the destination must not exist.
+stage="$(realpath -m "$1")"
 
 # Prepare the package for publishing to pub.dev and verify the archive with
 # a dry run. The archive ships Dart source plus the native/ wrapper crate;
@@ -20,10 +31,53 @@ cd "$REPO_ROOT/payjoin-ffi/dart"
 echo "==> Generating production FFI bindings..."
 PAYJOIN_FFI_FEATURES="" bash ./scripts/generate_bindings.sh
 
-# A Cargo.lock resolved against the .cargo/config.toml path overlay would
-# hand consumers a dependency graph they cannot reproduce.
-echo "==> Cleaning nested Cargo.lock..."
-rm -f native/Cargo.lock
+revision="$(git rev-parse HEAD)"
+mkdir "$stage"
+# Include generated bindings while excluding development Cargo overlays,
+# then pin the native crate to the checkout that generated them.
+rsync -a --exclude=.git --exclude-from=.pubignore ./ "$stage/"
+sed -i "s/rev = \"[0-9a-f]*\"/rev = \"$revision\"/" "$stage/native/Cargo.toml"
+grep -Fq "rev = \"$revision\"" "$stage/native/Cargo.toml" || {
+    echo "Could not pin the staged native crate to $revision" >&2
+    exit 1
+}
+
+# payjoin-ffi and payjoin-test-utils come from the pinned revision, but the
+# release crates they require, payjoin and payjoin-mailroom, come from
+# crates.io. A pull request can change those crates without a version bump,
+# so its payjoin-ffi may not build against what crates.io has. With
+# --core-from-revision, take them from the pinned revision too, and leave a
+# marker that publish.sh refuses: a published package must build against
+# crates its consumers can get from crates.io.
+if [[ $core_from_revision == true ]]; then
+    source "$REPO_ROOT/contrib/release/crates.sh"
+    siblings="$(sibling_deps payjoin-ffi && sibling_deps payjoin-test-utils)"
+    [[ $siblings == *payjoin$'\t'* ]] || {
+        echo "Could not read the payjoin version payjoin-ffi requires" >&2
+        exit 1
+    }
+    while IFS=$'\t' read -r dep _; do
+        echo "==> Staging $dep from $revision"
+        cat >>"$stage/native/Cargo.toml" <<EOF
+
+# Added by prepare-publish.sh --core-from-revision.
+[patch.crates-io.$dep]
+git = "https://github.com/payjoin/rust-payjoin.git"
+rev = "$revision"
+EOF
+        printf '%s comes from %s, not crates.io\n' "$dep" "$revision" \
+            >>"$stage/UNPUBLISHED_CORE"
+    done < <(sort -u <<<"$siblings")
+fi
+
+# Ship the dependency graph this release was tested against; hook/build.dart
+# builds it with --locked. Seeding from the maintained lockfile keeps every
+# pin that still applies, so cargo resolves only what differs from the
+# workspace, chiefly payjoin-ffi coming from the pinned revision.
+echo "==> Locking the staged native crate..."
+cp "$REPO_ROOT/Cargo-recent.lock" "$stage/native/Cargo.lock"
+cargo update --workspace --manifest-path "$stage/native/Cargo.toml"
+cd "$stage"
 
 echo "==> Verifying the publish archive..."
 # The dry run exits 65 whenever validation reports anything, and one
@@ -39,6 +93,10 @@ if [[ $status -ne 0 && $status -ne 65 ]]; then
     exit "$status"
 fi
 unexpected="$(grep '^\* ' <<<"$report" | grep -v "^\* \`dart analyze\` found" || true)"
+# Skipping ahead of the last published version is a release decision made
+# when the shared binding version is bumped, so pub's reminder of the
+# previous version is not a finding.
+unexpected="$(grep -v '^\* The previous version is ' <<<"$unexpected" || true)"
 if [[ -n $unexpected ]]; then
     echo "Unexpected validation findings; fix them before publishing:" >&2
     printf '%s\n' "$unexpected" >&2

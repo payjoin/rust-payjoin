@@ -1,3 +1,14 @@
+## [0.25.1]
+
+- Wraps payjoin-ffi 0.25.1; see its [changelog](https://github.com/payjoin/rust-payjoin/blob/payjoin-ffi-0.25.1/payjoin-ffi/CHANGELOG.md).
+
+## [0.25.0]
+
+- Version aligned with payjoin-ffi 0.25.0. Releases now share one tag
+  and the [payjoin-ffi changelog](../CHANGELOG.md), which lists the
+  `InputPair` constructors added since 0.3.0+payjoin-1.2.0; the version jump
+  itself changes no API.
+
 ## [0.3.0+payjoin-1.2.0]
 
 - Bindings for payjoin-1.2.0, which adds the non-blocking receive

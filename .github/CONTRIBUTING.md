@@ -111,9 +111,21 @@ echo "✓  Pre-commit hook passed"
 
 ### Changelog
 
-Each release crate (`payjoin`, `payjoin-cli`, `payjoin-mailroom`) keeps a `CHANGELOG.md` with an `## Unreleased` section at the top. If your pull request changes what a user of that crate sees, add a line there in the same commit. Write it for the person reading the release notes, not for the reviewer. The release PR renames the heading to the version number and nothing else.
+Each release crate (`payjoin`, `payjoin-cli`, `payjoin-mailroom`) and `payjoin-ffi` keeps a `CHANGELOG.md` with an `## Unreleased` section at the top. If your pull request changes what a user of that crate sees, add a line there in the same commit. Write it for the person reading the release notes, not for the reviewer. The release PR renames the heading to the version number and nothing else. `payjoin-ffi/CHANGELOG.md` is the release notes for the Python, JavaScript, C# and Dart packages, which are released together at its version.
 
-If the change has no user-visible effect (refactoring, tests, CI, comments), say so in the pull request description and a maintainer will apply the `changelog: none` label. CI fails a pull request that touches a release crate's `src/` without either a changelog line or that label.
+If the change has no user-visible effect (refactoring, tests, CI, comments), say so in the pull request description and a maintainer will apply the `changelog: none` label. CI fails a pull request that touches one of those crates' `src/` without either a changelog line or that label.
+
+### Deprecations
+
+Mark a deprecation with the version placeholder instead of guessing the next release:
+
+```rust
+#[deprecated(since = "0.0.0-unreleased", note = "use `Receiver<Monitor>::classify`")]
+```
+
+`contrib/release/bump.sh` replaces it with the crate's version in the release PR, and the release checks fail if one is left. rustc warns callers about it like any other deprecation. Don't use `TBD`, which rustc treats as a future deprecation and does not warn about.
+
+UniFFI does not carry deprecation attributes into the bindings, so `payjoin-ffi` states a deprecation in the doc comment and names the crate whose release deprecates the item, e.g. `Deprecated since payjoin 0.0.0-unreleased`. The payjoin-ffi bump fills in the version that crate is at.
 
 ### Nix Development Shells
 

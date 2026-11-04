@@ -2,8 +2,8 @@ use std::result::Result;
 use std::str::FromStr;
 
 use bitcoin::{Amount, Psbt};
-pub use corepc_node; // re-export for convenience
-use corepc_node::AddressType;
+pub use bitcoind; // re-export for convenience
+use bitcoind::AddressType;
 use once_cell::sync::{Lazy, OnceCell};
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -30,19 +30,19 @@ pub fn init_tracing() {
     });
 }
 
-pub fn init_bitcoind() -> Result<corepc_node::Node, BoxError> {
-    let bitcoind_exe = corepc_node::exe_path()?;
-    let mut conf = corepc_node::Conf::default();
+pub fn init_bitcoind() -> Result<bitcoind::BitcoinD, BoxError> {
+    let bitcoind_exe = bitcoind::exe_path()?;
+    let mut conf = bitcoind::Conf::default();
     conf.view_stdout = tracing::enabled!(target: "corepc", Level::TRACE);
     // conf.args.push("-txindex");
-    let bitcoind = corepc_node::Node::with_conf(bitcoind_exe, &conf)?;
+    let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &conf)?;
     Ok(bitcoind)
 }
 
 pub fn init_bitcoind_sender_receiver(
     sender_address_type: Option<AddressType>,
     receiver_address_type: Option<AddressType>,
-) -> Result<(corepc_node::Node, corepc_node::Client, corepc_node::Client), BoxError> {
+) -> Result<(bitcoind::BitcoinD, bitcoind::Client, bitcoind::Client), BoxError> {
     let bitcoind = init_bitcoind()?;
     let mut wallets = create_and_fund_wallets(
         &bitcoind,
@@ -55,9 +55,9 @@ pub fn init_bitcoind_sender_receiver(
 }
 
 fn create_and_fund_wallets<W: AsRef<str>>(
-    bitcoind: &corepc_node::Node,
+    bitcoind: &bitcoind::BitcoinD,
     wallets: Vec<(W, Option<AddressType>)>,
-) -> Result<Vec<corepc_node::Client>, BoxError> {
+) -> Result<Vec<bitcoind::Client>, BoxError> {
     let mut funded_wallets = vec![];
     let funding_wallet = bitcoind.create_wallet("funding_wallet")?;
     let funding_address = funding_wallet.new_address()?;
@@ -86,7 +86,7 @@ fn create_and_fund_wallets<W: AsRef<str>>(
 
 pub fn init_bitcoind_multi_sender_single_receiver(
     number_of_senders: usize,
-) -> Result<(corepc_node::Node, Vec<corepc_node::Client>, corepc_node::Client), BoxError> {
+) -> Result<(bitcoind::BitcoinD, Vec<bitcoind::Client>, bitcoind::Client), BoxError> {
     let bitcoind = init_bitcoind()?;
     let wallets_to_create =
         (0..number_of_senders + 1).map(|i| (format!("sender_{i}"), None)).collect::<Vec<_>>();

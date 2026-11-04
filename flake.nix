@@ -113,8 +113,10 @@
           filter =
             path: type:
             (builtins.match ".*nginx.conf.template$" path != null)
+            || (builtins.match ".*payjoin-mailroom/README\\.md$" path != null)
             || (builtins.match ".*\\.mmdb$" path != null)
             || (builtins.match ".*\\.html$" path != null)
+            || (builtins.match ".*fuzz_targets/.*\\.jsonl$" path != null)
             || (craneLibVersions.msrv.filterCargoSources path type);
           name = "source";
         };
@@ -359,6 +361,7 @@
               bzip2
               curl
               jq
+              rsync
             ]
             ++ lib.optionals pkgs.stdenv.isLinux [
               pkg-config

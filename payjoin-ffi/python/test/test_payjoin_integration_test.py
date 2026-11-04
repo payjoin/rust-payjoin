@@ -1,6 +1,6 @@
 import os
 import sys
-import httpx
+import httpx2
 import json
 from typing import cast, Protocol, Any, Literal
 
@@ -182,7 +182,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
         ohttp_relay: str,
         mode: TransitionMode,
     ):
-        agent = httpx.AsyncClient()
+        agent = httpx2.AsyncClient()
         request: RequestResponse = receiver.create_poll_request(ohttp_relay)
         response = await agent.post(
             url=request.request.url,
@@ -353,7 +353,7 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
             directory = services.directory_url()
             ohttp_relay = services.ohttp_relay_url()
             ohttp_keys = await fetch_ohttp_keys(ohttp_relay, directory, services.cert())
-            agent = httpx.AsyncClient()
+            agent = httpx2.AsyncClient()
 
             # **********************
             # Inside the Receiver:

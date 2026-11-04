@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 #
 # Sign the release tags for HEAD. For each release crate (and, with
-# --bindings, each language package) whose manifest version has no tag yet,
-# confirm the release invariants hold and HEAD is on payjoin/rust-payjoin's
-# master, then create a signed annotated tag named <crate>-<version> with the
-# message "Release <crate>-<version>". Prints the push command and never
-# pushes.
+# --bindings, the shared language-binding release) whose manifest version
+# has no tag yet, confirm the release invariants hold and HEAD is on
+# payjoin/rust-payjoin's master, then create a signed annotated tag named
+# <crate>-<version> with the message "Release <crate>-<version>". Prints
+# the push command and never pushes.
 #
 # usage: tag.sh [--dry-run] [--bindings] [--key <gpg-key-id>] [name...]
-#   name   limit to these crates or packages: payjoin, payjoin-cli,
-#          payjoin-mailroom, or any payjoin-ffi/<name> with a
-#          contrib/release-version.sh
+#   name   limit to payjoin, payjoin-cli, payjoin-mailroom, or payjoin-ffi
+#          (every language binding, from one tag)
 #
 # Run it in the release devShell, which pins jq, gpg and cargo:
 #   nix develop .#release -c contrib/release/tag.sh [...]
@@ -33,7 +32,7 @@ while [ "$#" -gt 0 ]; do
             shift
             ;;
         -h | --help)
-            sed -n '2,16p' "$0"
+            sed -n '2,15p' "$0"
             exit 0
             ;;
         *) names+=("$1") ;;
@@ -50,23 +49,6 @@ die() {
 # local ref can be stale.
 RELEASE_REPO="payjoin/rust-payjoin"
 
-# Binding packages are the payjoin-ffi/<name> directories that ship a
-# contrib/release-version.sh. It prints the version the next tag names,
-# with +payjoin-X build metadata naming the wrapped payjoin version, and
-# takes the payjoin version as its argument for packages whose manifest
-# cannot hold that metadata.
-binding_reader() {
-    printf '%s/payjoin-ffi/%s/contrib/release-version.sh' "$REPO_ROOT" "$1"
-}
-binding_names() {
-    local reader
-    for reader in "$REPO_ROOT"/payjoin-ffi/*/contrib/release-version.sh; do
-        [ -x "$reader" ] || continue
-        reader="${reader%/contrib/release-version.sh}"
-        printf '%s\n' "${reader##*/}"
-    done
-}
-
 [ -z "$(git status --porcelain --untracked-files=no)" ] ||
     die "working tree has uncommitted changes; tags apply to HEAD"
 git fetch --quiet "https://github.com/$RELEASE_REPO.git" master ||
@@ -82,24 +64,21 @@ if [ "${#names[@]}" -gt 0 ]; then
     want=("${names[@]}")
 else
     read -r -a want <<<"$RELEASE_CRATES"
-    [ "$bindings" -eq 0 ] || mapfile -t -O "${#want[@]}" want < <(binding_names)
+    [ "$bindings" -eq 0 ] || want+=(payjoin-ffi)
 fi
 
 tags=()
 crates=()
 for name in "${want[@]}"; do
-    case " $RELEASE_CRATES " in
-        *" $name "*)
-            version="$(manifest_version "$name")"
-            prefix="$name"
-            ;;
-        *)
-            reader="$(binding_reader "$name")"
-            [ -x "$reader" ] || die "unknown name $name: not a release crate, and no $reader"
-            version="$("$reader" "$(manifest_version payjoin)")" || die "$reader failed"
-            prefix="payjoin-$name"
-            ;;
-    esac
+    if [[ " $RELEASE_CRATES " == *" $name "* ]]; then
+        version="$(manifest_version "$name")"
+    elif [ "$name" = payjoin-ffi ]; then
+        # One tag releases every language binding at this version.
+        version="$("$DIR/bindings-version.sh")" || die "binding versions disagree"
+    else
+        die "unknown name $name; use payjoin-ffi to release the language bindings"
+    fi
+    prefix="$name"
     [ -n "$version" ] || die "could not read a version for $name"
     tag="$prefix-$version"
     if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
@@ -114,16 +93,23 @@ for name in "${want[@]}"; do
         continue
     fi
     tags+=("$tag")
-    case " $RELEASE_CRATES " in
-        *" $name "*) crates+=("$name") ;;
-    esac
+    crates+=("$name")
 done
 [ "${#tags[@]}" -gt 0 ] || {
     echo "Nothing to tag: every manifest version is already tagged"
     exit 0
 }
 
-[ "${#crates[@]}" -eq 0 ] || "$DIR/check-invariants.sh" "${crates[@]}"
+"$DIR/check-invariants.sh" "${crates[@]}"
+# Dart consumers build the bindings from source against the wrapped payjoin
+# on crates.io, so the bindings cannot ship before it.
+case " ${crates[*]} " in
+    *" payjoin-ffi "*)
+        core="$(manifest_version payjoin)"
+        crate_published payjoin "$core" ||
+            die "payjoin $core is not on crates.io; publish it before tagging payjoin-ffi"
+        ;;
+esac
 
 sign=(--sign)
 [ -z "$key" ] || sign+=(--local-user "$key")
@@ -145,7 +131,7 @@ remote="$(git remote -v | awk -v repo="$RELEASE_REPO" \
     '$3 == "(push)" && $2 ~ ("[:/]" repo "(\\.git)?/?$") { print $1; exit }')"
 [ -n "$remote" ] || remote="https://github.com/$RELEASE_REPO.git"
 echo
-echo "Push when ready; each tag starts its publish workflow and the release environment prompt:"
+echo "Push when ready; each tag starts its release workflow and the release environment prompt:"
 printf '  git push %s' "$remote"
 printf ' %s' "${tags[@]}"
 echo

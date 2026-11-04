@@ -8,7 +8,9 @@ Our mission is to provide developers with cross-language libraries that seamless
 
 Each supported language is in its own directory. The Rust code in this project is in the `src` directory and is a wrapper around the Payjoin Dev Kit to expose its APIs uniformly using [UniFFI](https://github.com/mozilla/uniffi-rs) for each supported target language.
 
-The directories below include instructions for using, building, and publishing the native language bindings supported by this project.
+The directories below include instructions for using and building the language bindings.
+See the [shared release instructions](RELEASING.md) for publishing all existing
+packages with one signed payjoin-ffi tag.
 
 | Language   | Platform              | Repository                           | Published Package                               |
 | ---------- | --------------------- | ------------------------------------ | ----------------------------------------------- |

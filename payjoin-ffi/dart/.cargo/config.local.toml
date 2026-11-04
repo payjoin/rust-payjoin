@@ -1,0 +1,13 @@
+# Local Cargo overlay for development in the monorepo. The name keeps it
+# out of Cargo's automatic config discovery, so only hook/build.dart reads
+# it, through an explicit --config. Its presence is also how the hook tells
+# a repository checkout from a published archive, which .pubignore strips
+# .cargo/ from.
+[patch."https://github.com/payjoin/rust-payjoin.git"]
+payjoin-ffi = { path = ".." }
+payjoin = { path = "../../payjoin" }
+
+[patch.crates-io]
+payjoin = { path = "../../payjoin" }
+payjoin-mailroom = { path = "../../payjoin-mailroom" }
+payjoin-test-utils = { path = "../../payjoin-test-utils" }

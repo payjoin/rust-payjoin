@@ -24,8 +24,9 @@ landed since the last release, so there is nothing to compile here.
 - [ ] Branch `bump-CRATE-MAJOR-MINOR+1` from `master`.
 - [ ] Run `contrib/release/bump.sh CRATE MAJOR.MINOR+1.0`. It sets the version, rewrites
       every workspace member's requirement on the crate, renames `## Unreleased` to
-      `## MAJOR.MINOR+1.0` with a fresh empty `## Unreleased` above it, regenerates both
-      lock files and runs check-invariants. It needs jq, and the lock file step calls
+      `## MAJOR.MINOR+1.0` with a fresh empty `## Unreleased` above it, fills in the
+      `0.0.0-unreleased` placeholders in the crate's source, regenerates both lock files
+      and runs check-invariants. It needs jq, and the lock file step calls
       `cargo +nightly`, so run it where rustup has a nightly toolchain. `nix develop .#release`
       has jq but no rustup; there, pass `--no-lock`, then run `contrib/update-lock-files.sh`
       from a rustup shell and `contrib/release/check-invariants.sh CRATE` again.
@@ -51,10 +52,13 @@ changelog line. The bump PR is not edited for it.
 
 #### After a `payjoin` release
 
-- [ ] Open the bindings bump PR (python, javascript, csharp, dart manifests and changelogs;
-      Dart's `native/Cargo.toml` pins the `payjoin-MAJOR.MINOR+1.0` tag commit, never a
-      branch commit). Merge, then run
-      `nix develop .#release -c contrib/release/tag.sh --bindings` and push the tags.
+- [ ] Prepare the bindings bump with `contrib/release/bump.sh payjoin-ffi X.Y.Z`,
+      which also sets the language package manifests, their lock files and
+      changelogs, and follow the
+      [bindings release instructions](../../payjoin-ffi/RELEASING.md). Dart's
+      published native source is pinned automatically to the release checkout.
+      Once merged, create one signed tag with
+      `nix develop .#release -c contrib/release/tag.sh payjoin-ffi`, then push it.
 - [ ] Bump dependent release crates (`payjoin-cli`, `payjoin-mailroom`) on their own
       schedule, each with this checklist. Their tags verify that `payjoin` is already on
       crates.io.

@@ -73,7 +73,7 @@ impl SenderBuilder {
     /// [`SenderBuilder::from_parts`] with the [`crate::PjParam::V2`] contents
     /// instead. That leaves the v1 case for the caller to handle.
     #[deprecated(
-        since = "1.0.1",
+        since = "1.1.0",
         note = "panics on v1 payjoin URIs; match on the URI's `PjParam` and use `SenderBuilder::from_parts`"
     )]
     pub fn new(psbt: Psbt, uri: PjUri) -> Self {

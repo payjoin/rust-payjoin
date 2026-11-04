@@ -4,6 +4,9 @@ on:
   discussion_comment:
     types: [created]
 
+permissions:
+  contents: read
+
 jobs:
   respond:
     if: |
@@ -14,17 +17,20 @@ jobs:
       contains(github.event.comment.body, '/check-in')
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # unneeded: no git auth beyond checkout
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - run: pip install requests pyyaml
       - name: Mint bot token
         id: bot-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ vars.BOT_APP_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          permission-discussions: write
       - run: python .github/scripts/respond_to_standup_comment.py
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}

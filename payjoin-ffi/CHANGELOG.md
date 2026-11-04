@@ -1,3 +1,41 @@
+## Unreleased
+
+- Python: require Python 3.11+ and replace httpx with httpx2. Callers catching HTTP errors from fetch_ohttp_keys should use httpx2.HTTPError instead of httpx.HTTPError.
+- Deprecate `MaybeInputsOwned.extract_tx_to_schedule_broadcast`. Cancel the
+  session when the payjoin fails and broadcast the `fallback_tx` of the
+  resulting `ReceiverPendingFallback` instead.
+
+## [0.25.1]
+
+- Wraps payjoin 1.2.0
+- Dart: the native library no longer records the paths it was built
+  from, so two builds of one release from different directories produce
+  the same bytes. The build hook sets `CARGO_ENCODED_RUSTFLAGS`, so
+  `rustflags` from your Cargo config no longer apply to the payjoin
+  native build.
+- Dart: the package ships the `native/Cargo.lock` it was released with
+  and the build hook builds it with `--locked`, so every build compiles
+  the dependency versions CI tested.
+- corepc-node dep replaced with bitcoind re-exported through payjoin-test-utils
+
+## [0.25.0]
+
+- Publish the Python, JavaScript, C#, and Dart packages from one signed
+  `payjoin-ffi` tag at this common version. Each package jumps from its
+  own sequence (Python and JavaScript 0.3.0, C# 0.2.0, Dart
+  0.3.0+payjoin-1.2.0); the version jump itself changes no API.
+- Add typed `InputPair` constructors so bindings can contribute inputs
+  without building the `TxIn` and PSBT input by hand: `new_p2wpkh`,
+  `new_p2tr_keyspend` and `new_p2tr_scriptpath_spend`, `new_p2wsh` for
+  witness script spends such as multisig, and `new_p2pkh`, which takes
+  the consensus encoded funding transaction. The key path and P2WPKH
+  constructors supply the expected input weight; the script spends
+  still take it from the caller.
+- Add `InputPairError::InvalidTransaction` for a funding transaction
+  that does not decode. Bindings that match exhaustively on
+  `InputPairError` need to handle the new variant.
+- Wraps payjoin 1.2.0, unchanged.
+
 ## [0.24.0]
 
 ### Session Persister

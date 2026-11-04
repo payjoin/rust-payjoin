@@ -1,0 +1,14 @@
+name: payjoin_consumer
+description: >-
+  A minimal Dart program that builds the staged payjoin package the way a
+  desktop or server consumer depending on it from pub.dev would.
+publish_to: none
+version: 0.0.0
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  # CI places a copy of the staged package next to the program.
+  payjoin:
+    path: ../payjoin

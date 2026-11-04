@@ -4,8 +4,11 @@
 # to the base commit, confirm the bump is consistent (check-invariants), the
 # crate still publishes (cargo publish --dry-run), and the bump is large
 # enough for the API changes since the base version (cargo semver-checks).
-# No-ops when no release version changed. A sibling release crate not yet on
-# crates.io is skipped, not failed, since a PR may bump two crates at once.
+# A payjoin-ffi bump is checked for consistency only, including that every
+# binding package carries its version (bindings-version), since it is not
+# published to crates.io. No-ops when no release version changed. A sibling
+# release crate not yet on crates.io is skipped, not failed, since a PR may
+# bump two crates at once.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=contrib/release/crates.sh
@@ -31,11 +34,22 @@ changed=()
 for crate in $RELEASE_CRATES; do
     [ "$(version_at "$base" "$crate")" = "$(manifest_version "$crate")" ] || changed+=("$crate")
 done
+ffi=0
+[ "$(version_at "$base" payjoin-ffi)" = "$(manifest_version payjoin-ffi)" ] || ffi=1
 
-if [ "${#changed[@]}" -eq 0 ]; then
+if [ "${#changed[@]}" -eq 0 ] && [ "$ffi" -eq 0 ]; then
     echo "No release crate version changed"
     exit 0
 fi
+
+if [ "$ffi" -eq 1 ]; then
+    echo "Version changed for: payjoin-ffi"
+    "$DIR/check-invariants.sh" payjoin-ffi
+    # Assigned first so a failing check stops the script under set -e.
+    agreed="$("$DIR/bindings-version.sh")"
+    echo "Binding packages agree at $agreed"
+fi
+[ "${#changed[@]}" -gt 0 ] || exit 0
 
 echo "Version changed for: ${changed[*]}"
 "$DIR/check-invariants.sh" "${changed[@]}"

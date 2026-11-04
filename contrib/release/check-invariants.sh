@@ -2,7 +2,8 @@
 #
 # Check that each release crate is internally consistent: every dependent's
 # version requirement on it matches its manifest version, both tracked lock
-# files record that version, and its CHANGELOG.md has a section for it.
+# files record that version, its CHANGELOG.md has a section for it, and its
+# source has no version placeholder left for bump.sh to fill in.
 # Offline, a few seconds. Checks all release crates, or the ones named.
 set -euo pipefail
 # shellcheck source=contrib/release/crates.sh
@@ -35,12 +36,16 @@ mismatches="$(cargo_metadata | jq -r --argjson t "$(printf '%s' "$crates" | jq -
 
 for crate in $crates; do
     version="$(manifest_version "$crate")"
-    echo "Checking $crate $version: lock files and CHANGELOG.md"
+    echo "Checking $crate $version: lock files, CHANGELOG.md and placeholders"
     for lock in Cargo-minimal.lock Cargo-recent.lock; do
         recorded="$(lockfile_version "$REPO_ROOT/$lock" "$crate")"
         [ "$recorded" = "$version" ] || problem "$lock records $crate ${recorded:-<missing>}, expected $version"
     done
-    grep -qxF "## $version" "$REPO_ROOT/$crate/CHANGELOG.md" || problem "$crate/CHANGELOG.md has no ## $version section"
+    grep -qxF -e "## $version" -e "## [$version]" "$REPO_ROOT/$crate/CHANGELOG.md" ||
+        problem "$crate/CHANGELOG.md has no ## $version section"
+    if git -C "$REPO_ROOT" grep -n -F -e "$UNRELEASED" -- "$crate/src"; then
+        problem "$crate/src still has the $UNRELEASED placeholder; bump.sh fills it in"
+    fi
 done
 
 [ "$status" -eq 0 ] && echo "Release invariants hold for: $crates"

@@ -336,8 +336,13 @@ where
         builder = builder.header(CONTENT_LENGTH, content_length);
     }
 
-    let bytes =
-        body.collect().await.map_err(|e| Error::BadRequest(e.into().to_string()))?.to_bytes();
+    // Bound the forwarded body the same way the directory bounds its own reads,
+    // so the relay cannot be made to buffer an unbounded request before forwarding.
+    let bytes = http_body_util::Limited::new(body, crate::directory::MAX_REQUEST_BODY_BYTES)
+        .collect()
+        .await
+        .map_err(|e| Error::BadRequest(e.to_string()))?
+        .to_bytes();
 
     builder = builder.header(sentinel::HEADER_NAME, sentinel_tag.to_header_value());
 

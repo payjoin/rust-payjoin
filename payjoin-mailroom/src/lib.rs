@@ -752,6 +752,73 @@ mod tests {
         assert!(!reached, "without the setting, only BIP77 gateways are reached");
     }
 
+    /// The relay bounds the forwarded body: an over-limit request is rejected
+    /// with 413 before it is buffered or forwarded; a body at the limit still
+    /// reaches the gateway.
+    async fn relay_body_of_size(body_len: usize) -> (axum::http::StatusCode, bool) {
+        const OTHER_PURPOSE: &[u8] = b"Example v0 5f0a2b6e-6c1d-4f8a-9d3e-2b7c1a0e4d5f";
+
+        let mut gateway = mockito::Server::new_async().await;
+        let mut purposes_body = 1u16.to_be_bytes().to_vec();
+        purposes_body.push(OTHER_PURPOSE.len() as u8);
+        purposes_body.extend_from_slice(OTHER_PURPOSE);
+        let _purposes = gateway
+            .mock("GET", "/.well-known/ohttp-gateway")
+            .match_query(mockito::Matcher::Regex("^allowed_purposes$".into()))
+            .with_header("content-type", "application/x-ohttp-allowed-purposes")
+            .with_body(purposes_body)
+            .create_async()
+            .await;
+        let relayed = gateway
+            .mock("POST", "/.well-known/ohttp-gateway")
+            .with_header("content-type", "message/ohttp-res")
+            .with_body("response")
+            .create_async()
+            .await;
+
+        let cert = local_cert_key();
+        let cert_der = cert.cert.der().to_vec();
+        let key_der = cert.signing_key.serialize_der();
+        let tempdir = tempdir().unwrap();
+        let mut config = test_config(tempdir.path());
+        config.ohttp_relay.extra_allowed_purposes =
+            vec![String::from_utf8(OTHER_PURPOSE.to_vec()).unwrap()];
+        let tls_config = RustlsConfig::from_der(vec![cert_der.clone()], key_der).await.unwrap();
+        let mut root_store = RootCertStore::empty();
+        root_store.add(CertificateDer::from(cert_der.clone())).unwrap();
+        let (port, _handle) =
+            serve_manual_tls(config, Some(tls_config), root_store, None).await.unwrap();
+
+        let client = Arc::new(http_agent(cert_der).unwrap());
+        let relay_url = format!("https://localhost:{port}");
+        wait_for_service_ready(&relay_url, client.clone()).await.unwrap();
+
+        let status = client
+            .post(format!("{relay_url}/{}", gateway.url()))
+            .header("Content-Type", "message/ohttp-req")
+            .body(vec![0u8; body_len])
+            .send()
+            .await
+            .expect("request should complete")
+            .status();
+        (status, relayed.matched_async().await)
+    }
+
+    #[tokio::test]
+    async fn relay_rejects_body_over_limit_before_forwarding() {
+        let (status, reached) =
+            relay_body_of_size(crate::directory::MAX_REQUEST_BODY_BYTES + 1).await;
+        assert_eq!(status, axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(!reached, "an over-limit body must be rejected before it reaches the gateway");
+    }
+
+    #[tokio::test]
+    async fn relay_forwards_body_at_limit() {
+        let (status, reached) = relay_body_of_size(crate::directory::MAX_REQUEST_BODY_BYTES).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert!(reached, "a body at the limit must still reach the gateway");
+    }
+
     #[tokio::test]
     async fn middleware_records_metrics() {
         use axum::body::Body;
@@ -897,5 +964,58 @@ mod tests {
             endpoint_attrs.iter().all(|ep| !ep.contains(&short_id)),
             "actual short ID value must not appear in metrics"
         );
+    }
+
+    async fn build_test_app() -> Router {
+        let config = Config::new(
+            "[::]:0".parse().expect("valid listener address"),
+            tempdir().unwrap().keep(),
+            Duration::from_secs(2),
+            None,
+        );
+        let sentinel_tag = generate_sentinel_tag();
+        let metrics = MetricsService::new(None);
+        let services = Services {
+            directory: init_directory(&config, sentinel_tag, &metrics).await.unwrap(),
+            relay: crate::ohttp_relay::Service::new(sentinel_tag, metrics.clone()).await,
+            metrics,
+            #[cfg(feature = "access-control")]
+            geoip: None,
+        };
+        build_app(services)
+    }
+
+    #[tokio::test]
+    async fn request_body_over_limit_is_rejected_at_ingress() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = build_test_app().await;
+        let oversized = vec![0u8; crate::directory::MAX_REQUEST_BODY_BYTES + 1];
+        let req = Request::builder()
+            .method("POST")
+            .uri("/.well-known/ohttp-gateway")
+            .body(Body::from(oversized))
+            .unwrap();
+        let res = ServiceExt::<Request<Body>>::oneshot(app, req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn request_body_at_limit_passes_ingress() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = build_test_app().await;
+        let at_limit = vec![0u8; crate::directory::MAX_REQUEST_BODY_BYTES];
+        let req = Request::builder()
+            .method("POST")
+            .uri("/.well-known/ohttp-gateway")
+            .body(Body::from(at_limit))
+            .unwrap();
+        let res = ServiceExt::<Request<Body>>::oneshot(app, req).await.unwrap();
+        assert_ne!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

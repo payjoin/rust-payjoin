@@ -41,7 +41,6 @@ reqwest = { version = "0.12.23", default-features = false, features = [
 rustls = { version = "0.23.46", default-features = false, features = [
   "ring",
 ], optional = true }
-tar = "0.4.9"
 tempfile = { version = "3.20.0", optional = true }
 # Pin to 0.3.45 (last version to support our MSRV 1.85)
 time = "=0.3.45"
@@ -51,4 +50,4 @@ tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 # Pinned transitive dependencies that appear unused to cargo-machete
 [package.metadata.cargo-machete]
-ignored = ["tar", "time"]
+ignored = ["time"]

@@ -116,6 +116,7 @@
             || (builtins.match ".*payjoin-mailroom/README\\.md$" path != null)
             || (builtins.match ".*\\.mmdb$" path != null)
             || (builtins.match ".*\\.html$" path != null)
+            || (builtins.match ".*fuzz_targets/.*\\.jsonl$" path != null)
             || (craneLibVersions.msrv.filterCargoSources path type);
           name = "source";
         };

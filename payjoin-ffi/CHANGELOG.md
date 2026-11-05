@@ -1,5 +1,10 @@
 ## Unreleased
 
+- Python: require Python 3.11+ and replace httpx with httpx2. Callers catching HTTP errors from fetch_ohttp_keys should use httpx2.HTTPError instead of httpx.HTTPError.
+- Deprecate `MaybeInputsOwned.extract_tx_to_schedule_broadcast`. Cancel the
+  session when the payjoin fails and broadcast the `fallback_tx` of the
+  resulting `ReceiverPendingFallback` instead.
+
 ## [0.25.1]
 
 - Wraps payjoin 1.2.0

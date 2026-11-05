@@ -419,9 +419,9 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
                 headers={"Content-Type": request_recv.request.content_type},
                 content=request_recv.request.body,
             )
-            payjoin_proposal.process_response(
+            monitor: Monitor = payjoin_proposal.process_response(
                 response.content, request_recv.client_response
-            )
+            ).save(recv_persister)
 
             # **********************
             # Inside the Sender:
@@ -456,6 +456,25 @@ class TestPayjoin(unittest.IsolatedAsyncioTestCase):
                 self.sender.call("finalizepsbt", [final_psbt, json.dumps(True)])
             )["hex"]
             self.sender.call("sendrawtransaction", [json.dumps(final_tx_hex)])
+
+            # **********************
+            # Inside the Receiver:
+            # Classify the broadcast Payjoin, then close the replayed session with
+            # the resolution, as a wallet that replays its open sessions would.
+            final_tx = bytes.fromhex(final_tx_hex)
+            monitor_resolution = monitor.classify_tx(final_tx)
+            self.assertIsNotNone(monitor_resolution)
+            self.assertEqual(monitor_resolution.resolved_by(), ResolvedBy.PAYJOIN)
+            replayed = replay_receiver_event_log(recv_persister).state()
+            self.assertTrue(replayed.is_MONITOR())
+            resolution = classify_receiver_tx(replayed, final_tx)
+            self.assertIsNotNone(resolution)
+            self.assertEqual(resolution.resolved_by(), ResolvedBy.PAYJOIN)
+            close_receiver_session(replayed, resolution).save(recv_persister)
+            self.assertTrue(recv_persister.closed)
+            self.assertTrue(
+                replay_receiver_event_log(recv_persister).state().is_CLOSED()
+            )
 
             # Check resulting transaction and balances
             decoded_psbt = json.loads(

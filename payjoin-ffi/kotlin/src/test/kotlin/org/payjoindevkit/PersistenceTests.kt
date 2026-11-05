@@ -1,8 +1,10 @@
 package org.payjoindevkit
 
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
 
@@ -19,6 +21,23 @@ class PersistenceTests {
         assertFalse(persister.closed)
         persister.closeSession()
         assertTrue(persister.closed)
+    }
+
+    @Test
+    fun classifyReceiverTxWithoutFallback() {
+        // A session that has not received the original has nothing to compare against, and bytes
+        // that are not a transaction are rejected whatever the session's state.
+        val persister = InMemoryReceiverPersister()
+        val ohttpKeys = OhttpKeys.decode(ohttpKeysData)
+        ReceiverBuilder("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4", "https://example.com", ohttpKeys)
+            .build()
+            .save(persister)
+        val state = replayReceiverEventLog(persister).state()
+
+        assertNull(classifyReceiverTx(state, unrelatedTx))
+        assertFailsWith<TransactionParseException.InvalidTransaction> {
+            classifyReceiverTx(state, byteArrayOf(0))
+        }
     }
 
     @Test

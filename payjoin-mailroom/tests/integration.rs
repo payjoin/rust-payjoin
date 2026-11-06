@@ -39,6 +39,7 @@ mod integration {
     const ENCAPSULATED_RES: &str =
         "c789e7151fcba46158ca84b04464910d86f9013e404feea014e7be4a441f234f857fbd";
     const MAGIC_BIP77_PURPOSE: &[u8] = b"BIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e";
+    const OTHER_PURPOSE: &str = "Example v0 5f0a2b6e-6c1d-4f8a-9d3e-2b7c1a0e4d5f";
     const ALLOWED_PURPOSES_CONTENT_TYPE: &str = "application/x-ohttp-allowed-purposes";
 
     /// See: https://www.ietf.org/rfc/rfc9458.html#name-complete-example-of-a-reque
@@ -90,12 +91,71 @@ mod integration {
         }
     }
 
+    #[tokio::test]
+    async fn test_extra_allowed_purpose_from_config() {
+        init_crypto_provider();
+        let gateway_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let gateway =
+            GatewayUri::from_str(&format!("http://{}", gateway_listener.local_addr().unwrap()))
+                .unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let config_path = tempdir.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            format!(
+                "listener = \"127.0.0.1:0\"\nstorage_dir = \"{}\"\ntimeout = 5\nmailbox_ttl = 60\n\n[ohttp_relay]\nextra_allowed_purposes = [\"{}\"]\n",
+                tempdir.path().display(),
+                OTHER_PURPOSE
+            ),
+        )
+        .unwrap();
+        let config = payjoin_mailroom::config::Config::from_file(&config_path).unwrap();
+        let (relay_port, relay_handle) =
+            payjoin_mailroom::serve_manual_tls(config, None, rustls::RootCertStore::empty(), None)
+                .await
+                .unwrap();
+        tokio::select! {
+            result = example_other_purpose_gateway_http(gateway_listener) => {
+                result.expect("Gateway failed");
+                panic!("Gateway exited unexpectedly");
+            }
+            result = relay_handle => {
+                let serve_result = result.expect("Relay task failed");
+                serve_result.expect("Relay failed");
+                panic!("Relay exited unexpectedly");
+            }
+            result = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                extra_purpose_ohttp_req(relay_port, gateway)
+            ) => result.expect("Relay-purpose exchange timed out"),
+        }
+    }
+
     async fn example_gateway_http(port: u16) -> Result<(), Box<dyn std::error::Error>> {
-        example_gateway(port, |stream| {
+        let addr = SocketAddr::from(([127, 0, 0, 1], port));
+        let listener = TcpListener::bind(addr).await?;
+        example_gateway(listener, |stream| {
             tokio::spawn(async move {
                 let io = TokioIo::new(stream);
                 if let Err(err) =
                     http1::Builder::new().serve_connection(io, service_fn(handle_gateway)).await
+                {
+                    println!("Failed to serve connection: {:?}", err);
+                }
+            });
+        })
+        .await
+    }
+
+    async fn example_other_purpose_gateway_http(
+        listener: TcpListener,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        example_gateway(listener, |stream| {
+            tokio::spawn(async move {
+                let io = TokioIo::new(stream);
+                if let Err(err) = http1::Builder::new()
+                    .serve_connection(io, service_fn(handle_other_purpose_gateway))
+                    .await
                 {
                     println!("Failed to serve connection: {:?}", err);
                 }
@@ -114,6 +174,31 @@ mod integration {
                 bootstrap::handle_ohttp_keys(req).await,
             (&hyper::Method::GET, "/.well-known/ohttp-gateway", Some("allowed_purposes")) =>
                 handle_opt_in(req).await,
+            _ => panic!("Unexpected request: {} {}", req.method(), req.uri().path()),
+        }
+        .unwrap();
+        Ok(res)
+    }
+
+    async fn handle_other_purpose_gateway(
+        req: Request<Incoming>,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+        let res = match (req.method(), req.uri().path(), req.uri().query()) {
+            (&hyper::Method::POST, "/.well-known/ohttp-gateway", _) => handle_ohttp_req(req).await,
+            (&hyper::Method::GET, "/.well-known/ohttp-gateway", Some("allowed_purposes")) => {
+                let body = [
+                    b"\x00\x01".as_slice(),
+                    &[OTHER_PURPOSE.len() as u8],
+                    OTHER_PURPOSE.as_bytes(),
+                ]
+                .concat();
+                let content_length = HeaderValue::from_str(&body.len().to_string()).unwrap();
+                let mut res = Response::new(full(body));
+                res.headers_mut()
+                    .insert(CONTENT_TYPE, HeaderValue::from_static(ALLOWED_PURPOSES_CONTENT_TYPE));
+                res.headers_mut().insert(CONTENT_LENGTH, content_length);
+                Ok(res)
+            }
             _ => panic!("Unexpected request: {} {}", req.method(), req.uri().path()),
         }
         .unwrap();
@@ -139,6 +224,19 @@ mod integration {
             .insert(CONTENT_TYPE, HeaderValue::from_static(ALLOWED_PURPOSES_CONTENT_TYPE));
         res.headers_mut().insert(CONTENT_LENGTH, HeaderValue::from_static("45"));
         Ok(res)
+    }
+
+    async fn extra_purpose_ohttp_req(relay_port: u16, gateway: GatewayUri) {
+        let res = reqwest::Client::new()
+            .post(format!("http://127.0.0.1:{}/{}", relay_port, gateway.to_uri()))
+            .header(CONTENT_TYPE, "message/ohttp-req")
+            .body(Vec::from_hex(ENCAPSULATED_REQ).unwrap())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), hyper::StatusCode::OK);
+        assert_eq!(res.headers().get(CONTENT_TYPE).unwrap(), "message/ohttp-res");
+        assert_eq!(res.bytes().await.unwrap().as_ref(), Vec::from_hex(ENCAPSULATED_RES).unwrap());
     }
 
     async fn ohttp_req(relay_port: u16, cert: CertificateDer<'static>, gateway: GatewayUri) {
@@ -173,13 +271,14 @@ mod integration {
         }
     }
 
-    async fn example_gateway<F>(port: u16, handle_conn: F) -> Result<(), Box<dyn std::error::Error>>
+    async fn example_gateway<F>(
+        listener: TcpListener,
+        handle_conn: F,
+    ) -> Result<(), Box<dyn std::error::Error>>
     where
         F: Fn(TcpStream) + Clone + Send + Sync + 'static,
     {
-        let addr = SocketAddr::from(([127, 0, 0, 1], port));
-        let listener = TcpListener::bind(addr).await?;
-        println!("Gateway listening on port {}", port);
+        println!("Gateway listening on {}", listener.local_addr()?);
 
         loop {
             let (stream, _) = listener.accept().await?;
@@ -366,8 +465,10 @@ mod integration {
             cert: Certificate,
         ) -> Result<(), Box<dyn std::error::Error>> {
             let acceptor = Arc::new(build_tls_acceptor(cert));
+            let addr = SocketAddr::from(([127, 0, 0, 1], port));
+            let listener = TcpListener::bind(addr).await?;
 
-            example_gateway(port, move |stream| {
+            example_gateway(listener, move |stream| {
                 let acceptor = acceptor.clone();
                 tokio::spawn(async move {
                     let stream = acceptor.accept(stream).await.expect("TLS error");

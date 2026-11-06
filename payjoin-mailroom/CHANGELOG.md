@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Reject mailbox payloads too large to return through the OHTTP gateway with 413, and V1 requests too large to relay with `original-psbt-rejected`, instead of truncating the response (#1983)
+- Return a parsing error instead of panicking on short gateway paths such as `/a.io` (#1999)
 
 ## 0.1.3
 

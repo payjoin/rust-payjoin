@@ -27,6 +27,17 @@
 - Remove `proposal_txid_is_stable` from every receiver state. It checked
   only the sender's inputs, so a legacy or P2SH-wrapped receiver input could
   change the txid even when it returned true. Use `classify_tx` instead.
+- Python: the Linux wheel's library now needs at most glibc 2.17, and
+  the wheel is tagged `manylinux_2_17`. The macOS wheel now supports
+  macOS 10.15 and later, down from 13.
+- The GitHub release now attaches every native library as
+  `payjoin_ffi-<version>-<target>.<ext>`, listed in `SHA256SUMS` and
+  attested. `VERIFYING.md` explains how to check one or rebuild it.
+- Dart: the package now ships the release's prebuilt native libraries,
+  and the build hook uses them instead of compiling Rust, so apps no
+  longer need a Rust toolchain or network access at build time. Set
+  `build: source` under `hooks: user_defines: payjoin:` in your app's
+  `pubspec.yaml` to keep compiling it.
 
 ## [0.25.1]
 

@@ -684,6 +684,74 @@ mod tests {
         );
     }
 
+    /// Relays one request, from an instance configured with
+    /// `extra_allowed_purposes`, to a mock gateway that declares only
+    /// `Example v0 …`. Returns the relay's status and whether the request
+    /// reached the gateway.
+    async fn relay_to_gateway_declaring_other_purpose(
+        extra_allowed_purposes: Vec<String>,
+    ) -> (axum::http::StatusCode, bool) {
+        const OTHER_PURPOSE: &[u8] = b"Example v0 5f0a2b6e-6c1d-4f8a-9d3e-2b7c1a0e4d5f";
+
+        let mut gateway = mockito::Server::new_async().await;
+        let mut purposes_body = 1u16.to_be_bytes().to_vec();
+        purposes_body.push(OTHER_PURPOSE.len() as u8);
+        purposes_body.extend_from_slice(OTHER_PURPOSE);
+        let _purposes = gateway
+            .mock("GET", "/.well-known/ohttp-gateway")
+            .match_query(mockito::Matcher::Regex("^allowed_purposes$".into()))
+            .with_header("content-type", "application/x-ohttp-allowed-purposes")
+            .with_body(purposes_body)
+            .create_async()
+            .await;
+        let relayed = gateway
+            .mock("POST", "/.well-known/ohttp-gateway")
+            .with_header("content-type", "message/ohttp-res")
+            .with_body("response")
+            .create_async()
+            .await;
+
+        let cert = local_cert_key();
+        let cert_der = cert.cert.der().to_vec();
+        let key_der = cert.signing_key.serialize_der();
+        let tempdir = tempdir().unwrap();
+        let mut config = test_config(tempdir.path());
+        config.ohttp_relay.extra_allowed_purposes = extra_allowed_purposes;
+        let tls_config = RustlsConfig::from_der(vec![cert_der.clone()], key_der).await.unwrap();
+        let mut root_store = RootCertStore::empty();
+        root_store.add(CertificateDer::from(cert_der.clone())).unwrap();
+        let (port, _handle) =
+            serve_manual_tls(config, Some(tls_config), root_store, None).await.unwrap();
+
+        let client = Arc::new(http_agent(cert_der).unwrap());
+        let relay_url = format!("https://localhost:{port}");
+        wait_for_service_ready(&relay_url, client.clone()).await.unwrap();
+
+        let status = client
+            .post(format!("{relay_url}/{}", gateway.url()))
+            .header("Content-Type", "message/ohttp-req")
+            .body(vec![0u8; 100])
+            .send()
+            .await
+            .expect("request should complete")
+            .status();
+        (status, relayed.matched_async().await)
+    }
+
+    #[tokio::test]
+    async fn configured_purposes_reach_the_relay() {
+        let (status, reached) = relay_to_gateway_declaring_other_purpose(vec![
+            "Example v0 5f0a2b6e-6c1d-4f8a-9d3e-2b7c1a0e4d5f".to_string(),
+        ])
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert!(reached, "a gateway declaring a configured purpose must be reached");
+
+        let (status, reached) = relay_to_gateway_declaring_other_purpose(Vec::new()).await;
+        assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+        assert!(!reached, "without the setting, only BIP77 gateways are reached");
+    }
+
     #[tokio::test]
     async fn middleware_records_metrics() {
         use axum::body::Body;

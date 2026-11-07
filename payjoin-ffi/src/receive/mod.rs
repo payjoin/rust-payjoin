@@ -6,7 +6,6 @@ pub use error::{
     InputPairError, JsonReply, OutputSubstitutionError, ProtocolError, PsbtInputError,
     ReceiverCreateRequestError, ReceiverError, SessionError, TransactionParseError,
 };
-use payjoin::bitcoin::consensus::Decodable;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
 use payjoin::persist::{MaybeFatalTransition, NextStateTransition};
@@ -192,8 +191,9 @@ macro_rules! impl_pending_fallback_cancel_for_receiver {
     };
 }
 
+/// Decode a consensus-encoded transaction, rejecting trailing bytes.
 fn decode_transaction(tx: &[u8]) -> Result<payjoin::bitcoin::Transaction, TransactionParseError> {
-    payjoin::bitcoin::Transaction::consensus_decode(&mut &tx[..])
+    payjoin::bitcoin::consensus::deserialize(tx)
         .map_err(|e| TransactionParseError::InvalidTransaction(e.to_string()))
 }
 
@@ -2399,6 +2399,19 @@ mod tests {
                 script_pubkey: payjoin::bitcoin::ScriptBuf::from_bytes(script_pubkey),
             }],
         }
+    }
+
+    #[test]
+    fn decode_transaction_rejects_trailing_bytes() {
+        let tx = funding_tx(p2pkh_script_pubkey());
+        let mut tx_bytes = payjoin::bitcoin::consensus::serialize(&tx);
+        assert_eq!(decode_transaction(&tx_bytes).expect("valid transaction"), tx);
+
+        tx_bytes.push(0x00);
+        assert!(matches!(
+            decode_transaction(&tx_bytes),
+            Err(TransactionParseError::InvalidTransaction(_))
+        ));
     }
 
     #[test]

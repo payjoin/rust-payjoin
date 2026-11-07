@@ -111,9 +111,21 @@ echo "✓  Pre-commit hook passed"
 
 ### Changelog
 
-Each release crate (`payjoin`, `payjoin-cli`, `payjoin-mailroom`) and `payjoin-ffi` keeps a `CHANGELOG.md` with an `## Unreleased` section at the top. If your pull request changes what a user of that crate sees, add a line there in the same commit. Write it for the person reading the release notes, not for the reviewer. The release PR renames the heading to the version number and nothing else. `payjoin-ffi/CHANGELOG.md` is the release notes for the Python, JavaScript, C# and Dart packages, which are released together at its version.
+Each release crate (`payjoin`, `payjoin-cli`, `payjoin-mailroom`) and `payjoin-ffi` keeps a `CHANGELOG.md`. Pull requests don't edit it. If your pull request changes what a user of that crate sees, add a new file to the crate's `changelog.d/` directory in the same commit, such as `payjoin/changelog.d/reject-duplicate-inputs.md`. Give it a name no other pull request is likely to pick, so two pull requests never touch the same file. Write it for the person reading the release notes, not for the reviewer.
 
-If the change has no user-visible effect (refactoring, tests, CI, comments), say so in the pull request description and a maintainer will apply the `changelog: none` label. CI fails a pull request that touches one of those crates' `src/` without either a changelog line or that label.
+A fragment must be a visible, regular `.md` file with LF line endings. It holds one or more Markdown list items starting with `- `. Indent continuation lines by at least two spaces or a tab. Blank lines within an item, including paragraphs and indented code blocks, are preserved; spacing between items, headings and fragments is trimmed. Only `### ` headings are allowed at the top level, such as `### API Additions` or `### Bug Fixes`; the release collects every fragment's items under the heading they share.
+
+```markdown
+- Reject an Original PSBT that spends the same input twice.
+
+### API Additions
+
+- Add `InputPair::outpoint`.
+```
+
+The release PR moves the fragments into the new version's section of `CHANGELOG.md` and deletes them. `payjoin-ffi/CHANGELOG.md` is the release notes for the Python, JavaScript, C# and Dart packages, which are released together at its version. Changes specific to Python, JavaScript or Dart go in `payjoin-ffi/python/changelog.d/`, `payjoin-ffi/javascript/changelog.d/` or `payjoin-ffi/dart/changelog.d/`, respectively. C# changes go in the shared `payjoin-ffi/changelog.d/` directory.
+
+If the change has no user-visible effect (refactoring, tests, CI, comments), say so in the pull request description and a maintainer will apply the `changelog: none` label. CI fails a pull request that touches one of those crates' `src/` without either a fragment or that label.
 
 ### Deprecations
 

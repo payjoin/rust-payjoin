@@ -898,4 +898,57 @@ mod tests {
             "actual short ID value must not appear in metrics"
         );
     }
+
+    async fn build_test_app() -> Router {
+        let config = Config::new(
+            "[::]:0".parse().expect("valid listener address"),
+            tempdir().unwrap().keep(),
+            Duration::from_secs(2),
+            None,
+        );
+        let sentinel_tag = generate_sentinel_tag();
+        let metrics = MetricsService::new(None);
+        let services = Services {
+            directory: init_directory(&config, sentinel_tag, &metrics).await.unwrap(),
+            relay: crate::ohttp_relay::Service::new(sentinel_tag, metrics.clone()).await,
+            metrics,
+            #[cfg(feature = "access-control")]
+            geoip: None,
+        };
+        build_app(services)
+    }
+
+    #[tokio::test]
+    async fn request_body_over_limit_is_rejected_at_ingress() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = build_test_app().await;
+        let oversized = vec![0u8; crate::directory::MAX_REQUEST_BODY_BYTES + 1];
+        let req = Request::builder()
+            .method("POST")
+            .uri("/.well-known/ohttp-gateway")
+            .body(Body::from(oversized))
+            .unwrap();
+        let res = ServiceExt::<Request<Body>>::oneshot(app, req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn request_body_at_limit_passes_ingress() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = build_test_app().await;
+        let at_limit = vec![0u8; crate::directory::MAX_REQUEST_BODY_BYTES];
+        let req = Request::builder()
+            .method("POST")
+            .uri("/.well-known/ohttp-gateway")
+            .body(Body::from(at_limit))
+            .unwrap();
+        let res = ServiceExt::<Request<Body>>::oneshot(app, req).await.unwrap();
+        assert_ne!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
 }

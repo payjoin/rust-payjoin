@@ -18,7 +18,10 @@ const CHACHA20_POLY1305_NONCE_LEN: usize = 32; // chacha20poly1305 n_k
 const POLY1305_TAG_SIZE: usize = 16;
 pub const BHTTP_REQ_BYTES: usize =
     ENCAPSULATED_MESSAGE_BYTES - (CHACHA20_POLY1305_NONCE_LEN + POLY1305_TAG_SIZE);
-const V1_MAX_BUFFER_SIZE: usize = 65536;
+/// The largest raw request body any route accepts, a conservative
+/// in-memory ceiling so a body is never buffered unbounded. The V2
+/// mailbox payload has its own smaller cap in `MAX_MAILBOX_PAYLOAD_BYTES`.
+pub(crate) const MAX_REQUEST_BODY_BYTES: usize = 65536;
 
 /// bhttp framing around a mailbox payload in the gateway's `200` response:
 /// framing indicator (1), status code (2), empty header section (1),
@@ -38,6 +41,25 @@ const V1_VERSION_UNSUPPORTED_RES_JSON: &str =
     r#"{"errorCode": "version-unsupported", "supported": [2], "message": "V1 is not supported"}"#;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Collect a request body into bytes, rejecting it with 413 before more than
+/// `limit` bytes are buffered. Reading an unbounded body into memory is a DoS
+/// vector, so each handler caps the read at the largest size that path accepts.
+async fn collect_within_limit<B>(body: B, limit: usize) -> Result<Bytes, HandlerError>
+where
+    B: axum::body::HttpBody<Data = Bytes> + Send + 'static,
+    B::Error: Into<BoxError>,
+{
+    match http_body_util::Limited::new(body, limit).collect().await {
+        Ok(collected) => Ok(collected.to_bytes()),
+        Err(e) =>
+            if e.downcast_ref::<http_body_util::LengthLimitError>().is_some() {
+                Err(HandlerError::PayloadTooLarge)
+            } else {
+                Err(HandlerError::BadRequest(anyhow::anyhow!("request body could not be read")))
+            },
+    }
+}
 
 /// Opaque blocklist of Bitcoin addresses stored as script pubkeys.
 ///
@@ -204,11 +226,7 @@ impl<D: Db> Service<D> {
         B: axum::body::HttpBody<Data = Bytes> + Send + 'static,
         B::Error: Into<BoxError>,
     {
-        let ohttp_body = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::BadRequest(anyhow::anyhow!(e.into())))?
-            .to_bytes();
+        let ohttp_body = collect_within_limit(body, MAX_REQUEST_BODY_BYTES).await?;
 
         // Decapsulate OHTTP request
         let (bhttp_req, res_ctx) = self
@@ -261,14 +279,7 @@ impl<D: Db> Service<D> {
     async fn post_mailbox(&self, id: &str, body: Body) -> Result<Response<Body>, HandlerError> {
         let none_response = Response::builder().status(StatusCode::OK).body(empty())?;
         let id = ShortId::from_str(id)?;
-        let req = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?
-            .to_bytes();
-        if req.len() > MAX_MAILBOX_PAYLOAD_BYTES {
-            return Err(HandlerError::PayloadTooLarge);
-        }
+        let req = collect_within_limit(body, MAX_MAILBOX_PAYLOAD_BYTES).await?;
         match self.db.post_v2_payload(&id, req.into()).await {
             Ok(_) => Ok(none_response),
             Err(e) => Err(HandlerError::InternalServerError(e.into())),
@@ -305,14 +316,7 @@ impl<D: Db> Service<D> {
     async fn put_payjoin_v1(&self, id: &str, body: Body) -> Result<Response<Body>, HandlerError> {
         let ok_response = Response::builder().status(StatusCode::OK).body(empty())?;
         let id = ShortId::from_str(id)?;
-        let req = body
-            .collect()
-            .await
-            .map_err(|e| HandlerError::InternalServerError(e.into()))?
-            .to_bytes();
-        if req.len() > V1_MAX_BUFFER_SIZE {
-            return Err(HandlerError::PayloadTooLarge);
-        }
+        let req = collect_within_limit(body, MAX_REQUEST_BODY_BYTES).await?;
 
         let body_str = std::str::from_utf8(&req).map_err(|e| HandlerError::BadRequest(e.into()))?;
         self.check_v1_blocklist(body_str).await?;
@@ -339,10 +343,13 @@ impl<D: Db> Service<D> {
         let bad_request_body_res =
             Response::builder().status(StatusCode::BAD_REQUEST).body(full(V1_REJECT_RES_JSON))?;
 
-        let body_bytes = match body.collect().await {
-            Ok(bytes) => bytes.to_bytes(),
-            Err(_) => return Ok(bad_request_body_res),
-        };
+        // A BIP78 v1 sender expects the JSON reject body, not a 413, so an oversized
+        // body here is answered with bad_request_body_res rather than collect_within_limit.
+        let body_bytes =
+            match http_body_util::Limited::new(body, MAX_REQUEST_BODY_BYTES).collect().await {
+                Ok(collected) => collected.to_bytes(),
+                Err(_) => return Ok(bad_request_body_res),
+            };
         let body_str = match String::from_utf8(body_bytes.to_vec()) {
             Ok(body_str) => body_str,
             Err(_) => return Ok(bad_request_body_res),

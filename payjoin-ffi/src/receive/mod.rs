@@ -1540,9 +1540,8 @@ impl InputPair {
         non_witness_utxo: Vec<u8>,
         outpoint: OutPoint,
     ) -> Result<Self, InputPairError> {
-        let non_witness_utxo: payjoin::bitcoin::Transaction =
-            payjoin::bitcoin::consensus::deserialize(&non_witness_utxo)
-                .map_err(|e| InputPairError::InvalidTransaction(e.to_string()))?;
+        let non_witness_utxo =
+            decode_transaction(&non_witness_utxo).map_err(InputPairError::TransactionDecode)?;
         for txout in &non_witness_utxo.output {
             validate_amount_sat(txout.value.to_sat())?;
         }
@@ -2452,7 +2451,7 @@ mod tests {
 
         assert!(matches!(
             InputPair::new_p2pkh(vec![0x00], outpoint()),
-            Err(InputPairError::InvalidTransaction(_))
+            Err(InputPairError::TransactionDecode(TransactionParseError::InvalidTransaction(_)))
         ));
 
         let mut too_much = funding_tx(p2pkh_script_pubkey());
@@ -2469,7 +2468,7 @@ mod tests {
         trailing_bytes.push(0x00);
         assert!(matches!(
             InputPair::new_p2pkh(trailing_bytes, outpoint()),
-            Err(InputPairError::InvalidTransaction(_))
+            Err(InputPairError::TransactionDecode(TransactionParseError::InvalidTransaction(_)))
         ));
     }
 }

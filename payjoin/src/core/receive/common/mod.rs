@@ -397,15 +397,21 @@ impl WantsInputs {
         }
 
         // Add the receiver change amount to the receiver change output, if applicable
-        let receiver_min_input_amount = self.receiver_min_input_amount()?;
-        if receiver_input_amount >= receiver_min_input_amount {
-            let change_amount = receiver_input_amount - receiver_min_input_amount;
+        let required_input_amount = if self.proposal.receiver_inputs.is_empty() {
+            self.receiver_min_input_amount()?
+        } else {
+            Amount::ZERO
+        };
+        if receiver_input_amount >= required_input_amount {
+            let change_amount = receiver_input_amount - required_input_amount;
             // The change output's starting value is sender-supplied, so this can overflow.
             let change_output = &mut payjoin_psbt.unsigned_tx.output[self.proposal.change_vout];
             change_output.value = change_output
                 .value
                 .checked_add(change_amount)
                 .ok_or(InternalInputContributionError::AmountOverflow)?;
+            // Outputs are sender- and receiver-supplied; reject a total that overflows.
+            checked_sum(payjoin_psbt.unsigned_tx.output.iter().map(|o| o.value))?;
         } else {
             return Err(InternalInputContributionError::ValueTooLow.into());
         }
@@ -703,6 +709,62 @@ mod tests {
             None,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn repeated_input_contributions_accumulate_change() {
+        let original = original_from_test_vector();
+        let original_output_value = original.psbt.unsigned_tx.output[0].value;
+
+        let first_value = Amount::from_sat(100);
+        let second_value = Amount::from_sat(200);
+        let first_input = candidate_input_from_test_vector(first_value);
+        let second_input = candidate_input_from_test_vector(second_value);
+
+        let wants_inputs = WantsOutputs::new(original, vec![0])
+            .commit_outputs()
+            .contribute_inputs([first_input])
+            .expect("First input contribution should succeed")
+            .contribute_inputs([second_input])
+            .expect("Second input contribution should succeed");
+
+        let drain_value = wants_inputs.proposal.payjoin_psbt.unsigned_tx.output
+            [wants_inputs.proposal.change_vout]
+            .value;
+
+        assert_eq!(
+            drain_value,
+            original_output_value + first_value + second_value,
+            "The drain output should include both input contributions"
+        );
+    }
+
+    #[test]
+    fn repeated_input_contributions_second_smaller_than_first() {
+        let original = original_from_test_vector();
+        let original_output_value = original.psbt.unsigned_tx.output[0].value;
+
+        let first_value = Amount::from_sat(200);
+        let second_value = Amount::from_sat(100);
+        let first_input = candidate_input_from_test_vector(first_value);
+        let second_input = candidate_input_from_test_vector(second_value);
+
+        let wants_inputs = WantsOutputs::new(original, vec![0])
+            .commit_outputs()
+            .contribute_inputs([first_input])
+            .expect("First input contribution should succeed")
+            .contribute_inputs([second_input])
+            .expect("Second input contribution should succeed");
+
+        let drain_value = wants_inputs.proposal.payjoin_psbt.unsigned_tx.output
+            [wants_inputs.proposal.change_vout]
+            .value;
+
+        assert_eq!(
+            drain_value,
+            original_output_value + first_value + second_value,
+            "The drain output should include both input contributions"
+        );
     }
 
     #[test]
@@ -1294,6 +1356,49 @@ mod tests {
             psbt.unsigned_tx.output[sender_vout].value,
             sender_fee_output.value - max_contribution,
             "sender's output must carry the fee contribution"
+        );
+    }
+
+    #[test]
+    fn split_contributions_match_single_after_output_reduction() {
+        let original = original_from_test_vector();
+        assert_eq!(original.params.output_substitution, OutputSubstitution::Enabled);
+        let receiver_output = original.psbt.unsigned_tx.output[0].clone();
+        let drain_script = receiver_output.script_pubkey.clone();
+        // Lower the receiver output so the payjoin outputs total less than the original's.
+        let reduction = Amount::from_sat(1000);
+        let reduced_output =
+            TxOut { value: receiver_output.value - reduction, script_pubkey: drain_script.clone() };
+        let wants_inputs = WantsOutputs::new(original, vec![0])
+            .replace_receiver_outputs([reduced_output.clone()], &drain_script)
+            .expect("Replacing the receiver output should succeed")
+            .commit_outputs();
+
+        // Both contributions are smaller than the reduction.
+        let first_value = Amount::from_sat(100);
+        let second_value = Amount::from_sat(200);
+        let first_input = candidate_input_from_test_vector(first_value);
+        let second_input = candidate_input_from_test_vector(second_value);
+
+        let single = wants_inputs
+            .clone()
+            .contribute_inputs([first_input.clone(), second_input.clone()])
+            .expect("Single contribution should succeed");
+        let split = wants_inputs
+            .contribute_inputs([first_input])
+            .expect("First contribution should succeed")
+            .contribute_inputs([second_input])
+            .expect("Second contribution should succeed");
+
+        let drain_value = |w: &WantsInputs| {
+            w.proposal.payjoin_psbt.unsigned_tx.output[w.proposal.change_vout].value
+        };
+        let expected = reduced_output.value + first_value + second_value;
+        assert_eq!(drain_value(&single), expected);
+        assert_eq!(
+            drain_value(&split),
+            expected,
+            "Split contributions should not be double-counted"
         );
     }
 

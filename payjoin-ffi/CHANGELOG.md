@@ -1,5 +1,10 @@
 ## Unreleased
 
+- Replace `InputPairError::InvalidTransaction(String)` with
+  `InputPairError::TransactionDecode(TransactionParseError)`, the same error
+  `classify_tx` returns for bytes that do not decode. Bindings that match on
+  the old variant need to match the new one and read the nested
+  `TransactionParseError`.
 - Python: require Python 3.11+ and replace httpx with httpx2. Callers catching HTTP errors from fetch_ohttp_keys should use httpx2.HTTPError instead of httpx.HTTPError.
 - Deprecate `MaybeInputsOwned.extract_tx_to_schedule_broadcast`. Cancel the
   session when the payjoin fails and broadcast the `fallback_tx` of the

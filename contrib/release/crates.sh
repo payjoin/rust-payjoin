@@ -71,3 +71,24 @@ crate_published() {
     curl -sfL -o /dev/null -H "User-Agent: rust-payjoin release tooling" \
         "https://crates.io/api/v1/crates/$1/$2"
 }
+
+# Print the changelog.d directories that hold <crate>'s fragments: its own
+# and, for payjoin-ffi, each language binding's. bump.sh reads no others.
+changelog_dirs() {
+    printf '%s\n' "$1/changelog.d"
+    [ "$1" != payjoin-ffi ] || printf '%s\n' payjoin-ffi/{python,javascript,dart}/changelog.d
+}
+
+# Print the [package] version of <crate>'s manifest at git <ref>, or
+# nothing if it has none there.
+version_at() { # <ref> <crate>
+    git -C "$REPO_ROOT" show "$1:$2/Cargo.toml" 2>/dev/null | awk '
+        /^\[/ { package = ($0 == "[package]") }
+        package && /^version[[:space:]]*=/ {
+            sub(/^version[[:space:]]*=[[:space:]]*"/, "")
+            sub(/".*/, "")
+            print
+            exit
+        }
+    '
+}

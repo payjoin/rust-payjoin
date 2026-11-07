@@ -16,6 +16,7 @@ pub struct Config {
     #[serde(deserialize_with = "deserialize_duration_secs")]
     pub mailbox_ttl: Duration,
     pub v1: Option<V1Config>,
+    pub ohttp_relay: OhttpRelayConfig,
     #[cfg(feature = "telemetry")]
     pub telemetry: Option<TelemetryConfig>,
     #[cfg(feature = "acme")]
@@ -48,6 +49,16 @@ pub struct V1Config {
     pub blocked_addresses_url: Option<String>,
     #[cfg(feature = "access-control")]
     pub blocked_addresses_refresh_secs: Option<u64>,
+}
+
+/// OHTTP relay configuration.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct OhttpRelayConfig {
+    /// Gateway purposes, besides BIP77, that the relay forwards to. A gateway
+    /// is reached only if its `/.well-known/ohttp-gateway?allowed_purposes`
+    /// response lists BIP77 or one of these. Each must be 1 to 255 bytes.
+    pub extra_allowed_purposes: Vec<String>,
 }
 
 #[cfg(feature = "telemetry")]
@@ -133,6 +144,7 @@ impl Default for Config {
             timeout: Duration::from_secs(30),
             mailbox_ttl: Duration::from_secs(60 * 60 * 24 * 7), // 1 week
             v1: None,
+            ohttp_relay: OhttpRelayConfig::default(),
             #[cfg(feature = "telemetry")]
             telemetry: None,
             #[cfg(feature = "acme")]
@@ -165,6 +177,7 @@ impl Config {
             timeout,
             mailbox_ttl: Duration::from_secs(60 * 60 * 24 * 7), // 1 week
             v1,
+            ohttp_relay: OhttpRelayConfig::default(),
             #[cfg(feature = "telemetry")]
             telemetry: None,
             #[cfg(feature = "acme")]
@@ -190,6 +203,7 @@ impl Config {
                     .with_list_parse_key("acme.contact")
                     .with_list_parse_key("access_control.blocked_regions")
                     .with_list_parse_key("access_control.blocked_ips")
+                    .with_list_parse_key("ohttp_relay.extra_allowed_purposes")
                     .try_parsing(true),
             )
             .build()?
@@ -217,6 +231,18 @@ mod tests {
         assert_eq!(parse("").log_format, LogFormat::Text);
         assert_eq!(parse("log_format = \"text\"").log_format, LogFormat::Text);
         assert_eq!(parse("log_format = \"json\"").log_format, LogFormat::Json);
+    }
+
+    #[test]
+    fn extra_allowed_purposes_default_to_none() {
+        assert!(parse("").ohttp_relay.extra_allowed_purposes.is_empty());
+        let config = parse(
+            "[ohttp_relay]\nextra_allowed_purposes = [\"Example v0 5f0a2b6e-6c1d-4f8a-9d3e-2b7c1a0e4d5f\"]",
+        );
+        assert_eq!(
+            config.ohttp_relay.extra_allowed_purposes,
+            ["Example v0 5f0a2b6e-6c1d-4f8a-9d3e-2b7c1a0e4d5f"]
+        );
     }
 
     #[cfg(feature = "telemetry")]

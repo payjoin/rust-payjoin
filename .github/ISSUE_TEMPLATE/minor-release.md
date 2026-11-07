@@ -10,8 +10,8 @@ assignees: ""
 
 Release-managed crates are `payjoin`, `payjoin-cli` and `payjoin-mailroom`. Versions follow
 [Semantic Versioning]. Tags are `<crate>-<version>`. The changelog for this release is the
-`## Unreleased` section of `CRATE/CHANGELOG.md`; it was written by the pull requests that
-landed since the last release, so there is nothing to compile here.
+set of fragments in `CRATE/changelog.d/`; each pull request that landed since the last
+release wrote its own, so there is nothing to compile here.
 
 ### Summary
 
@@ -23,8 +23,9 @@ landed since the last release, so there is nothing to compile here.
 
 - [ ] Branch `bump-CRATE-MAJOR-MINOR+1` from `master`.
 - [ ] Run `contrib/release/bump.sh CRATE MAJOR.MINOR+1.0`. It sets the version, rewrites
-      every workspace member's requirement on the crate, renames `## Unreleased` to
-      `## MAJOR.MINOR+1.0` with a fresh empty `## Unreleased` above it, fills in the
+      every workspace member's requirement on the crate, moves the fragments in
+      `CRATE/changelog.d/` into a new `## MAJOR.MINOR+1.0` section of `CRATE/CHANGELOG.md`
+      and deletes them, fills in the
       `0.0.0-unreleased` placeholders in the crate's source, regenerates both lock files
       and runs check-invariants. It needs jq, and the lock file step calls
       `cargo +nightly`, so run it where rustup has a nightly toolchain. `nix develop .#release`
@@ -36,8 +37,13 @@ landed since the last release, so there is nothing to compile here.
       for `payjoin`, cargo-semver-checks.
 - [ ] Merge.
 
-If a fix must land before the tag, merge it to `master` as usual; it carries its own
-changelog line. The bump PR is not edited for it.
+If a pull request for CRATE merges while the bump PR is open, rebase the bump branch on
+`master`, run `contrib/release/bump.sh CRATE MAJOR.MINOR+1.0` again and amend the bump
+commit. At a version it already set, bump.sh moves the new fragments into that version's
+section and fills in any new placeholders. If one merges after the bump PR and before the
+tag, do the same in a new pull request; if that fills in placeholders under `CRATE/src`,
+it needs the `changelog: none` label. `tag.sh` refuses to tag while `CRATE/changelog.d/`
+holds a fragment.
 
 #### Tag and publish
 

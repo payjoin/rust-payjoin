@@ -1,9 +1,12 @@
 # .github/workflows/changelog-check.yml
 #
 # A pull request that changes a release crate's or payjoin-ffi's source
-# must add a line to that crate's CHANGELOG.md under "## Unreleased", or
-# carry the "changelog: none" label. The bump PR then only renames the
-# heading, so a merge under an open bump PR never requires editing it.
+# must add a changelog fragment under that crate's changelog.d/, or carry
+# the "changelog: none" label. Each pull request writes its own file, so
+# pull requests do not conflict over CHANGELOG.md. A bump PR, which
+# changes the crate's version, passes by deleting the fragments it moves
+# into CHANGELOG.md. Every fragment in the tree must also be one bump.sh
+# reads and can parse, since a bad one stops the next release.
 name: Changelog
 
 on:
@@ -16,14 +19,14 @@ permissions:
 jobs:
   changelog:
     name: Changelog entry
-    if: "${{ !contains(github.event.pull_request.labels.*.name, 'changelog: none') }}"
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false # unneeded: no git auth beyond checkout
           fetch-depth: 0
-      - name: Require a changelog line for each changed crate
+      - name: Require a changelog fragment for each changed crate
+        if: "${{ !contains(github.event.pull_request.labels.*.name, 'changelog: none') }}"
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
@@ -31,12 +34,44 @@ jobs:
           set -euo pipefail
           source contrib/release/crates.sh
           changed="$(git diff --name-only "$BASE" "$HEAD")"
+          written="$(git diff --name-only --diff-filter=AMR "$BASE" "$HEAD")"
+          deleted="$(git diff --name-only --diff-filter=D "$BASE" "$HEAD")"
           status=0
           for crate in $RELEASE_CRATES payjoin-ffi; do
             grep -q "^$crate/src/" <<<"$changed" || continue
-            if ! grep -q "^$crate/CHANGELOG.md$" <<<"$changed"; then
-              echo "::error::$crate/src changed but $crate/CHANGELOG.md did not; add a line under '## Unreleased', or say in the PR description that there is no user-visible change so a maintainer can label it 'changelog: none'"
-              status=1
+            grep -q "^$crate/changelog\.d/" <<<"$written" && continue
+            # A bump, which changes the crate's version, moves fragments
+            # into CHANGELOG.md.
+            old="$(version_at "$BASE" "$crate")"
+            new="$(version_at "$HEAD" "$crate")"
+            if grep -q "^$crate/changelog\.d/" <<<"$deleted" &&
+              [ -n "$new" ] && [ "$old" != "$new" ]; then
+              continue
             fi
+            echo "::error::$crate/src changed but no fragment was added under $crate/changelog.d/; add one (see the Changelog section of CONTRIBUTING.md), or say in the PR description that there is no user-visible change so a maintainer can label it 'changelog: none'"
+            status=1
           done
+          exit "$status"
+      - name: Check every fragment
+        run: |
+          set -euo pipefail
+          source contrib/release/crates.sh
+          dirs=()
+          for crate in $RELEASE_CRATES payjoin-ffi; do
+            mapfile -t -O "${#dirs[@]}" dirs < <(changelog_dirs "$crate")
+          done
+          status=0
+          for dir in "${dirs[@]}"; do
+            echo "Checking $dir"
+            ./contrib/release/changelog-fragments.sh "$dir" >/dev/null || status=1
+          done
+          # bump.sh never releases a fragment kept anywhere else.
+          while IFS= read -r -d '' path; do
+            [[ $path =~ (^|/)changelog\.d/ ]] || continue
+            for dir in "${dirs[@]}"; do
+              [[ $path == "$dir"/* ]] && continue 2
+            done
+            printf '::error::%q is not in a changelog.d directory that bump.sh reads\n' "$path"
+            status=1
+          done < <(git ls-files -z)
           exit "$status"

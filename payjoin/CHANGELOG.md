@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fix receiver change miscalculation across repeated `contribute_inputs` calls (#1940)
 - Close a leak in the `HasFallbackTx` seal. Generic code bounded on the trait
   could call the sealed `fallback_tx` method, which was never part of the
   documented API; such code no longer compiles. Read the fallback transaction

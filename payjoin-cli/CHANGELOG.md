@@ -1,25 +1,5 @@
 # payjoin-cli Changelog
 
-## Unreleased
-
-- Fix panic when spending taproot UTXOs. They are now contributed as key-path
-  spends with an assumed default input weight.
-- Any unsupported coin is simply skipped instead of crashing the cli.
-- The v2 receiver no longer prints the fallback transaction hex when the
-  Original PSBT arrives. The message now points to
-  `payjoin-cli cancel <session-id>`, which broadcasts the fallback transaction
-  if the payjoin fails.
-- `resume` checks the wallet once for transactions settling each open receiver
-  session, in any state, and closes a session once its settling transaction
-  has one confirmation. It reports whether the Payjoin, the fallback, or
-  another transaction settled it. Sessions with non-SegWit senders are now
-  tracked too. The receiver no longer polls the mempool after posting the
-  proposal.
-- When `cancel` fails to broadcast the fallback transaction, it now says the
-  session is still open and points to `cancel --no-broadcast` to close it.
-  The hint for a cancelled session awaiting its fallback mentions the flag
-  too.
-
 ## 1.0.0
 
 The first stable payjoin-cli release, tracking payjoin 1.2.0. The CLI adopts

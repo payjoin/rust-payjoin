@@ -1,0 +1,1 @@
+- Let relay operators accept gateway purposes besides BIP77 with `[ohttp_relay] extra_allowed_purposes` (#2024)

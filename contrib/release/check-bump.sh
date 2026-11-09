@@ -23,11 +23,6 @@ source contrib/lockfile.sh
 }
 base="$1"
 
-# A crate's [package] version at a git ref (the only line-anchored `version`).
-version_at() {
-    git show "$1:$2/Cargo.toml" 2>/dev/null | sed -n 's/^version = "\(.*\)"/\1/p' | head -1
-}
-
 RELEASE_METADATA="$(cargo_metadata)"
 echo "Comparing release crate versions against $base"
 changed=()

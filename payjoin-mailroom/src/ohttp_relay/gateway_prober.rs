@@ -20,17 +20,17 @@ const DEFAULT_CAPACITY: usize = 1000;
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub(crate) struct Policy {
-    pub(crate) bip77_allowed: bool,
+    pub(crate) opted_in: bool,
     pub(crate) expires: Instant,
 }
 
 impl Policy {
-    fn always(bip77_allowed: bool) -> Self {
+    fn always(opted_in: bool) -> Self {
         // Rationale for thirty years is same as tokio's Instant::far_future,
         // this value is portable and will not overflow for foreseeable future
         const THIRTY_YEARS: Duration = Duration::from_secs(30 * 365 * 24 * 60 * 60);
         let expires = Instant::now() + THIRTY_YEARS;
-        Self { bip77_allowed, expires }
+        Self { opted_in, expires }
     }
 }
 
@@ -40,11 +40,56 @@ enum Status {
     Known(Policy),
 }
 
+/// The gateway purposes a relay forwards to.
+///
+/// A gateway is reached only if its `allowed_purposes` response lists one of
+/// these. BIP77 is always included; operators may add others.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllowedPurposes(Vec<Vec<u8>>);
+
+impl Default for AllowedPurposes {
+    fn default() -> Self { Self(vec![MAGIC_BIP77_PURPOSE.to_vec()]) }
+}
+
+impl AllowedPurposes {
+    /// BIP77 plus `extra`. Each purpose must be 1 to 255 bytes, the most an
+    /// `allowed_purposes` entry can hold.
+    pub fn new<S: AsRef<str>>(extra: impl IntoIterator<Item = S>) -> Result<Self, InvalidPurpose> {
+        let mut purposes = Self::default();
+        for purpose in extra {
+            let bytes = purpose.as_ref().as_bytes();
+            if bytes.is_empty() || bytes.len() > usize::from(u8::MAX) {
+                return Err(InvalidPurpose(bytes.len()));
+            }
+            if !purposes.0.iter().any(|p| p == bytes) {
+                purposes.0.push(bytes.to_vec());
+            }
+        }
+        Ok(purposes)
+    }
+
+    /// Whether any purpose a gateway declared is one of these.
+    fn any_of(&self, declared: &[Vec<u8>]) -> bool { declared.iter().any(|d| self.0.contains(d)) }
+}
+
+/// A configured purpose that can't be declared in `allowed_purposes`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidPurpose(usize);
+
+impl std::fmt::Display for InvalidPurpose {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "an OHTTP relay purpose must be 1 to 255 bytes, not {}", self.0)
+    }
+}
+
+impl Error for InvalidPurpose {}
+
 #[derive(Default, Debug)]
 pub(crate) struct Prober {
     gateways: RwLock<KnownGateways>,
     ttl_config: TTLConfig,
     client: super::HttpClient,
+    purposes: AllowedPurposes,
 }
 
 #[derive(Debug)]
@@ -174,8 +219,8 @@ impl KnownGateways {
 }
 
 impl Prober {
-    pub(crate) fn new_with_client(client: super::HttpClient) -> Self {
-        Self { client, ..Self::default() }
+    pub(crate) fn new_with_client(client: super::HttpClient, purposes: AllowedPurposes) -> Self {
+        Self { client, purposes, ..Self::default() }
     }
 
     /// Permanently mark a gateway authority as allowed.
@@ -218,7 +263,10 @@ impl Prober {
         })
     }
 
-    async fn is_explicit_opt_in(res: &mut hyper::Response<Incoming>) -> Option<()> {
+    async fn is_explicit_opt_in(
+        res: &mut hyper::Response<Incoming>,
+        purposes: &AllowedPurposes,
+    ) -> Option<()> {
         if res.status() != hyper::StatusCode::OK {
             return None;
         }
@@ -237,8 +285,8 @@ impl Prober {
             return None;
         }
 
-        let allowed_purposes = parse_alpn_encoded(&body).ok()?;
-        if allowed_purposes.contains(&MAGIC_BIP77_PURPOSE.to_vec()) {
+        let declared = parse_alpn_encoded(&body).ok()?;
+        if purposes.any_of(&declared) {
             return Some(());
         }
 
@@ -275,7 +323,7 @@ impl Prober {
         // opt-in is tracked via a separate mutable variable since it only
         // occurs in the first sub-branch of this large conditional, which is
         // largely concerned with determining the TTL
-        let mut bip77_allowed = false;
+        let mut opted_in = false;
 
         let ttls = &self.ttl_config;
         let ttl = match &mut res {
@@ -284,9 +332,9 @@ impl Prober {
                 let status = res.status();
 
                 if status.is_success() {
-                    bip77_allowed = Self::is_explicit_opt_in(res).await.is_some();
+                    opted_in = Self::is_explicit_opt_in(res, &self.purposes).await.is_some();
 
-                    if bip77_allowed {
+                    if opted_in {
                         ttls.opt_in
                     } else {
                         ttls.http_2xx
@@ -321,7 +369,7 @@ impl Prober {
             }
         };
 
-        Policy { bip77_allowed, expires: Instant::now() + ttl }
+        Policy { opted_in, expires: Instant::now() + ttl }
     }
 
     pub(crate) async fn unavailable_for(&self) -> Duration {
@@ -433,7 +481,7 @@ mod tests {
         assert!(db.no_capacity_for().is_zero(), "capacity should be available right now");
         assert!(db.get(&url).is_none(), "mock gateway should not yet be known");
 
-        let policy = Policy { bip77_allowed: true, expires: Instant::now() + TIMESTEP };
+        let policy = Policy { opted_in: true, expires: Instant::now() + TIMESTEP };
 
         // see comment in implementation of insert(), arguably this should not
         // be allowed as the state machine should start with inflight, but this
@@ -452,7 +500,7 @@ mod tests {
             "allocating inflight future for known gateway should fail"
         );
         assert!(
-            db.insert(&url, Policy { bip77_allowed: false, expires: Instant::now() + TIMESTEP })
+            db.insert(&url, Policy { opted_in: false, expires: Instant::now() + TIMESTEP })
                 .is_none(),
             "inserting a duplicate policy entry should fail"
         );
@@ -474,7 +522,7 @@ mod tests {
 
         // Insert expired
         assert!(
-            db.insert(&url, Policy { bip77_allowed: false, expires: Instant::now() }).is_some(),
+            db.insert(&url, Policy { opted_in: false, expires: Instant::now() }).is_some(),
             "inserting an expired entry should not fail"
         );
         assert!(
@@ -510,7 +558,7 @@ mod tests {
             "with an inflight entry, known gateway set should be at capacity"
         );
         assert!(
-            db.insert(&url, Policy { bip77_allowed: true, expires: Instant::now() + TIMESTEP })
+            db.insert(&url, Policy { opted_in: true, expires: Instant::now() + TIMESTEP })
                 .is_some(),
             "inserting known entry to overwrite inflight one should succeed even at capacity"
         );
@@ -531,11 +579,8 @@ mod tests {
         assert!(db.get(&url_2).is_none(), "unknown entry should not be in the set");
 
         assert!(
-            db.insert(
-                &url_2,
-                Policy { bip77_allowed: false, expires: Instant::now() + (2 * TIMESTEP) }
-            )
-            .is_some(),
+            db.insert(&url_2, Policy { opted_in: false, expires: Instant::now() + (2 * TIMESTEP) })
+                .is_some(),
             "inserting second entry should succeed"
         );
         assert!(!db.has_capacity(), "after insertion gateway set should be at capacity");
@@ -583,13 +628,71 @@ mod tests {
 
         // test happy path
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
-        assert!(status.bip77_allowed, "mock gateway opt-in should have been detected");
+        assert!(status.opted_in, "mock gateway opt-in should have been detected");
         mock_opt_in.assert();
         drop(mock_opt_in);
 
         // test cached result, mockit server will cause failure if another GET query is sent
         let status = prober.check_opt_in(&url).await.expect("second probe must succeed");
-        assert!(status.bip77_allowed, "gateway opt-in should be cached");
+        assert!(status.opted_in, "gateway opt-in should be cached");
+    }
+
+    /// An `allowed_purposes` response listing `purposes`.
+    fn purposes_response(purposes: &[&[u8]]) -> Vec<u8> {
+        let mut body = (purposes.len() as u16).to_be_bytes().to_vec();
+        for p in purposes {
+            body.push(p.len() as u8);
+            body.extend_from_slice(p);
+        }
+        body
+    }
+
+    const OTHER_PURPOSE: &str = "Example v0 5f0a2b6e-6c1d-4f8a-9d3e-2b7c1a0e4d5f";
+
+    async fn probe_gateway_declaring(purposes: &[&[u8]], prober: &Prober) -> bool {
+        let mut server = Server::new_async().await;
+        let url =
+            GatewayUri::from_str(&server.url()).expect("must be able to parse mock server URL");
+        let mock = server
+            .mock("GET", RFC_9540_GATEWAY_PATH)
+            .match_query(mockito::Matcher::Regex("^allowed_purposes$".into()))
+            .with_header(hyper::header::CONTENT_TYPE.as_str(), ALLOWED_PURPOSES_CONTENT_TYPE)
+            .with_body(purposes_response(purposes))
+            .create();
+        let status = prober.check_opt_in(&url).await.expect("probing must succeed");
+        mock.assert();
+        status.opted_in
+    }
+
+    #[tokio::test]
+    async fn test_other_purposes_need_the_operator_to_opt_in() {
+        let other = OTHER_PURPOSE.as_bytes();
+
+        // By default, only BIP77 gateways are reached.
+        assert!(!probe_gateway_declaring(&[other], &Prober::default()).await);
+        assert!(probe_gateway_declaring(&[other, MAGIC_BIP77_PURPOSE], &Prober::default()).await);
+
+        // An operator who accepts the other purpose reaches both kinds.
+        let purposes = AllowedPurposes::new([OTHER_PURPOSE]).expect("valid purpose");
+        let prober =
+            || Prober::new_with_client(super::super::HttpClient::default(), purposes.clone());
+        assert!(probe_gateway_declaring(&[other], &prober()).await);
+        assert!(probe_gateway_declaring(&[MAGIC_BIP77_PURPOSE], &prober()).await);
+        assert!(!probe_gateway_declaring(&[b"Unrelated v1"], &prober()).await);
+    }
+
+    #[test]
+    fn test_allowed_purposes_always_include_bip77_and_reject_bad_lengths() {
+        assert_eq!(AllowedPurposes::default(), AllowedPurposes::new(Vec::<String>::new()).unwrap());
+        assert_eq!(
+            AllowedPurposes::new(["BIP77 454403bb-9f7b-4385-b31f-acd2dae20b7e", OTHER_PURPOSE])
+                .unwrap(),
+            AllowedPurposes::new([OTHER_PURPOSE, OTHER_PURPOSE]).unwrap(),
+            "purposes are deduplicated, and BIP77 is always present"
+        );
+        assert_eq!(AllowedPurposes::new([""]), Err(InvalidPurpose(0)));
+        assert_eq!(AllowedPurposes::new(["x".repeat(256)]), Err(InvalidPurpose(256)));
+        assert!(AllowedPurposes::new(["x".repeat(255)]).is_ok());
     }
 
     #[tokio::test]
@@ -609,7 +712,7 @@ mod tests {
 
         // test happy path
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
-        assert!(status.bip77_allowed, "asserted opt-in should be cached");
+        assert!(status.opted_in, "asserted opt-in should be cached");
     }
 
     #[tokio::test]
@@ -630,7 +733,7 @@ mod tests {
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
         mock_only_rfc_9540.assert();
         assert!(
-            !status.bip77_allowed,
+            !status.opted_in,
             "RFC 9540 gateway which doesn't signal should not be considered opted-in"
         );
     }
@@ -652,7 +755,7 @@ mod tests {
 
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
         mock_not_found.assert();
-        assert!(!status.bip77_allowed, "non-existent gateway should not be considered opt-in");
+        assert!(!status.opted_in, "non-existent gateway should not be considered opt-in");
     }
 
     #[tokio::test]
@@ -723,11 +826,11 @@ mod tests {
 
         mock_delayed.assert();
         assert!(
-            a.expect("probe must succeed").bip77_allowed,
+            a.expect("probe must succeed").opted_in,
             "first concurrent request should detect opt-in"
         );
         assert!(
-            b.expect("probe must succeed").bip77_allowed,
+            b.expect("probe must succeed").opted_in,
             "second concurrent request should detect opt-in"
         );
         assert_eq!(*counter.lock().unwrap(), 1, "requests should have been deduplicated");
@@ -799,12 +902,12 @@ mod tests {
 
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
         mock_429.assert_async().await;
-        assert!(!status.bip77_allowed, "rate-limited gateway should not be considered opt-in");
+        assert!(!status.opted_in, "rate-limited gateway should not be considered opt-in");
 
         // Advance time by less than Retry-After — should use cached result (no new request)
         tokio::time::advance(Duration::from_secs(retry_after_secs - 1)).await;
         let status = prober.check_opt_in(&url).await.expect("cached probe must succeed");
-        assert!(!status.bip77_allowed, "result should still be cached before Retry-After expires");
+        assert!(!status.opted_in, "result should still be cached before Retry-After expires");
 
         // Advance past Retry-After — cache should be expired, new request would be sent
         tokio::time::advance(Duration::from_secs(2)).await;
@@ -836,7 +939,7 @@ mod tests {
 
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
         mock_503.assert_async().await;
-        assert!(!status.bip77_allowed, "unavailable gateway should not be considered opt-in");
+        assert!(!status.opted_in, "unavailable gateway should not be considered opt-in");
     }
 
     #[tokio::test]
@@ -855,13 +958,10 @@ mod tests {
 
         let status = prober.check_opt_in(&url).await.expect("probing must succeed");
         mock_429.assert_async().await;
-        assert!(
-            !status.bip77_allowed,
-            "rate-limited gateway without Retry-After should not be opt-in"
-        );
+        assert!(!status.opted_in, "rate-limited gateway without Retry-After should not be opt-in");
 
         // Should be cached — no new request sent
         let status = prober.check_opt_in(&url).await.expect("cached probe must succeed");
-        assert!(!status.bip77_allowed, "result should be cached with default TTL");
+        assert!(!status.opted_in, "result should be cached with default TTL");
     }
 }

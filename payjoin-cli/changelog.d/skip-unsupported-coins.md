@@ -1,0 +1,1 @@
+- Any unsupported coin is simply skipped instead of crashing the cli.

@@ -1,10 +1,5 @@
 # Payjoin Mailroom Changelog
 
-## Unreleased
-
-- Reject mailbox payloads too large to return through the OHTTP gateway with 413, and V1 requests too large to relay with `original-psbt-rejected`, instead of truncating the response (#1983)
-- Return a parsing error instead of panicking on short gateway paths such as `/a.io` (#1999)
-
 ## 0.1.3
 
 - Enforce `blocked_regions` and `blocked_ips` on the ACME and manual TLS serve paths (#1941)

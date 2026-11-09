@@ -46,6 +46,8 @@ struct Services {
 }
 
 pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> anyhow::Result<()> {
+    // Refuse a bad setting before doing anything else.
+    let relay_purposes = relay_purposes(&config)?;
     let sentinel_tag = generate_sentinel_tag();
     let metrics = build_metrics(&config, meter_provider);
     let flush_on_exit = metrics.clone();
@@ -58,7 +60,12 @@ pub async fn serve(config: Config, meter_provider: Option<SdkMeterProvider>) -> 
 
     let services = Services {
         directory,
-        relay: crate::ohttp_relay::Service::new(sentinel_tag, metrics.clone()).await,
+        relay: crate::ohttp_relay::Service::new_with_purposes(
+            sentinel_tag,
+            metrics.clone(),
+            relay_purposes,
+        )
+        .await,
         metrics,
         #[cfg(feature = "access-control")]
         geoip,
@@ -102,6 +109,8 @@ pub async fn serve_manual_tls(
     root_store: rustls::RootCertStore,
     default_gateway: Option<crate::ohttp_relay::GatewayUri>,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<anyhow::Result<()>>)> {
+    // Refuse a bad setting before doing anything else.
+    let relay_purposes = relay_purposes(&config)?;
     use std::net::SocketAddr;
 
     let sentinel_tag = generate_sentinel_tag();
@@ -119,6 +128,7 @@ pub async fn serve_manual_tls(
             root_store,
             default_gateway,
             metrics.clone(),
+            relay_purposes,
         )
         .await,
         metrics,
@@ -167,6 +177,8 @@ pub async fn serve_acme(
     config: Config,
     meter_provider: Option<SdkMeterProvider>,
 ) -> anyhow::Result<()> {
+    // Refuse a bad setting before doing anything else.
+    let relay_purposes = relay_purposes(&config)?;
     use std::net::SocketAddr;
     use std::sync::Arc;
 
@@ -187,7 +199,12 @@ pub async fn serve_acme(
 
     let services = Services {
         directory,
-        relay: crate::ohttp_relay::Service::new(sentinel_tag, metrics.clone()).await,
+        relay: crate::ohttp_relay::Service::new_with_purposes(
+            sentinel_tag,
+            metrics.clone(),
+            relay_purposes,
+        )
+        .await,
         metrics,
         #[cfg(feature = "access-control")]
         geoip,
@@ -259,6 +276,11 @@ fn build_metrics(config: &Config, export_provider: Option<SdkMeterProvider>) -> 
 /// Logs connection pressure once a minute for as long as the runtime lives.
 fn spawn_heartbeat(metrics: MetricsService) {
     tokio::spawn(heartbeat::run(metrics, || tokio::time::sleep(heartbeat::HEARTBEAT_INTERVAL)));
+}
+
+/// The gateway purposes the relay forwards to: BIP77 plus any configured.
+fn relay_purposes(config: &Config) -> anyhow::Result<crate::ohttp_relay::AllowedPurposes> {
+    Ok(crate::ohttp_relay::AllowedPurposes::new(&config.ohttp_relay.extra_allowed_purposes)?)
 }
 
 /// Resolves on SIGINT or SIGTERM, the signals a terminal and systemd use to
@@ -660,6 +682,74 @@ mod tests {
             axum::http::StatusCode::FORBIDDEN,
             "cross-instance request should not be rejected as forbidden"
         );
+    }
+
+    /// Relays one request, from an instance configured with
+    /// `extra_allowed_purposes`, to a mock gateway that declares only
+    /// `Example v0 …`. Returns the relay's status and whether the request
+    /// reached the gateway.
+    async fn relay_to_gateway_declaring_other_purpose(
+        extra_allowed_purposes: Vec<String>,
+    ) -> (axum::http::StatusCode, bool) {
+        const OTHER_PURPOSE: &[u8] = b"Example v0 5f0a2b6e-6c1d-4f8a-9d3e-2b7c1a0e4d5f";
+
+        let mut gateway = mockito::Server::new_async().await;
+        let mut purposes_body = 1u16.to_be_bytes().to_vec();
+        purposes_body.push(OTHER_PURPOSE.len() as u8);
+        purposes_body.extend_from_slice(OTHER_PURPOSE);
+        let _purposes = gateway
+            .mock("GET", "/.well-known/ohttp-gateway")
+            .match_query(mockito::Matcher::Regex("^allowed_purposes$".into()))
+            .with_header("content-type", "application/x-ohttp-allowed-purposes")
+            .with_body(purposes_body)
+            .create_async()
+            .await;
+        let relayed = gateway
+            .mock("POST", "/.well-known/ohttp-gateway")
+            .with_header("content-type", "message/ohttp-res")
+            .with_body("response")
+            .create_async()
+            .await;
+
+        let cert = local_cert_key();
+        let cert_der = cert.cert.der().to_vec();
+        let key_der = cert.signing_key.serialize_der();
+        let tempdir = tempdir().unwrap();
+        let mut config = test_config(tempdir.path());
+        config.ohttp_relay.extra_allowed_purposes = extra_allowed_purposes;
+        let tls_config = RustlsConfig::from_der(vec![cert_der.clone()], key_der).await.unwrap();
+        let mut root_store = RootCertStore::empty();
+        root_store.add(CertificateDer::from(cert_der.clone())).unwrap();
+        let (port, _handle) =
+            serve_manual_tls(config, Some(tls_config), root_store, None).await.unwrap();
+
+        let client = Arc::new(http_agent(cert_der).unwrap());
+        let relay_url = format!("https://localhost:{port}");
+        wait_for_service_ready(&relay_url, client.clone()).await.unwrap();
+
+        let status = client
+            .post(format!("{relay_url}/{}", gateway.url()))
+            .header("Content-Type", "message/ohttp-req")
+            .body(vec![0u8; 100])
+            .send()
+            .await
+            .expect("request should complete")
+            .status();
+        (status, relayed.matched_async().await)
+    }
+
+    #[tokio::test]
+    async fn configured_purposes_reach_the_relay() {
+        let (status, reached) = relay_to_gateway_declaring_other_purpose(vec![
+            "Example v0 5f0a2b6e-6c1d-4f8a-9d3e-2b7c1a0e4d5f".to_string(),
+        ])
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert!(reached, "a gateway declaring a configured purpose must be reached");
+
+        let (status, reached) = relay_to_gateway_declaring_other_purpose(Vec::new()).await;
+        assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+        assert!(!reached, "without the setting, only BIP77 gateways are reached");
     }
 
     #[tokio::test]

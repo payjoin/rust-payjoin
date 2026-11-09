@@ -32,22 +32,29 @@ nix develop .#release -c contrib/release/bump.sh --no-lock payjoin-ffi X.Y.Z
 ```
 
 It sets the version in `payjoin-ffi/Cargo.toml`, the four package
-manifests, `python/uv.lock` and `javascript/package-lock.json`, renames
-`## Unreleased` in `payjoin-ffi/CHANGELOG.md` to the version with a fresh
-empty `## Unreleased` above it and a first entry naming the wrapped
-`payjoin` release, opens a section in each language changelog with a
-stock entry pointing at it, and fills in the `0.0.0-unreleased`
+manifests, `python/uv.lock` and `javascript/package-lock.json`, moves
+the fragments in `payjoin-ffi/changelog.d/` into a new section of
+`payjoin-ffi/CHANGELOG.md` whose first entry names the wrapped `payjoin`
+release, opens a section in the Python, JavaScript and Dart changelogs with a stock entry
+pointing at it followed by that language's `changelog.d/` fragments,
+deletes the fragments it moved, and fills in the `0.0.0-unreleased`
 placeholders in `payjoin-ffi/src`, such as `Deprecated since payjoin
-0.0.0-unreleased`, with the version each names. The lock file step calls
+0.0.0-unreleased`, with the version each names. If more fragments land
+before the tag, run it again at the same version to move them into the
+release's sections. The lock file step calls
 `cargo +nightly`, which the release shell lacks, so pass `--no-lock`
 there, then run `contrib/update-lock-files.sh` from a rustup shell and
 `contrib/release/check-invariants.sh payjoin-ffi` again.
 
 `payjoin-ffi/CHANGELOG.md` is the canonical changelog and becomes the
-GitHub release body; pull requests write to its `## Unreleased` section
-as they do for the release crates. The language changelogs record only
-language-specific changes and link to it; pub.dev displays Dart's. Check
-the manifests agree with:
+GitHub release body; pull requests add fragments to
+`payjoin-ffi/changelog.d/` as they do for the release crates. The
+Python, JavaScript and Dart changelogs record only changes specific to
+those languages, from fragments in `payjoin-ffi/python/changelog.d/`,
+`payjoin-ffi/javascript/changelog.d/` and `payjoin-ffi/dart/changelog.d/`,
+respectively, and link to it; pub.dev displays Dart's. C# changes go in
+the shared `payjoin-ffi/changelog.d/` directory. Check the manifests
+agree with:
 
 ```shell
 nix develop .#release -c contrib/release/bindings-version.sh
@@ -83,12 +90,13 @@ environment, and allow `payjoin-ffi-*` in the repository's tag rules.
    environment. Approve the pending deployment once; it covers all four
    jobs. Each registry is published with OIDC from the tested artifacts.
 5. The run attaches the wheels, npm tarball, NuGet package, staged Dart
-   package, and one `SHA256SUMS` covering them all, including the native
-   libraries inside the NuGet package, to the GitHub release. Verify an
-   install from each registry and check provenance with
-   `gh attestation verify FILE -R payjoin/rust-payjoin`. Optionally sign
-   `SHA256SUMS` locally and upload `SHA256SUMS.asc`; no signing key reaches
-   a runner.
+   package, every native library as `payjoin_ffi-<version>-<target>.<ext>`,
+   and one `SHA256SUMS` covering them all to the GitHub release. The
+   wheels, the NuGet package and the Dart package carry those same native
+   libraries, byte for byte. Verify an install from each registry and
+   check provenance with `gh attestation verify FILE -R payjoin/rust-payjoin`.
+   Optionally sign `SHA256SUMS` locally and upload `SHA256SUMS.asc`; no
+   signing key reaches a runner.
 
 ## If a publish job fails
 

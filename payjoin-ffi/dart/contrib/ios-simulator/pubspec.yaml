@@ -1,0 +1,23 @@
+name: payjoin_ios_simulator
+description: >-
+  A Flutter app that runs a payjoin smoke test in the iOS simulator against
+  the library cross-built on Linux.
+publish_to: none
+version: 0.0.0
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # CI swaps in prebuilt_hook.dart as the package's build hook.
+  payjoin:
+    path: ../..
+
+dev_dependencies:
+  convert: ^3.1.0
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter

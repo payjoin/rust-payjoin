@@ -108,12 +108,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "antidote"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34fde25430d87a9388dadbe6e34d7f72a462c8b43ac8d309b42b0a8505d7e2a5"
-
-[[package]]
 name = "anyhow"
 version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2299,6 +2293,7 @@ dependencies = [
  "r2d2_sqlite",
  "reqwest",
  "rusqlite",
+ "scheduled-thread-pool",
  "serde",
  "serde_json",
  "tempfile",
@@ -2335,6 +2330,7 @@ name = "payjoin-fuzz"
 version = "0.0.1"
 dependencies = [
  "arbitrary",
+ "async-trait",
  "bhttp",
  "bitcoin-hpke",
  "bitcoin-ohttp",
@@ -3052,11 +3048,11 @@ dependencies = [
 
 [[package]]
 name = "scheduled-thread-pool"
-version = "0.2.0"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a2ff3fc5223829be817806c6441279c676e454cc7da608faf03b0ccc09d3889"
+checksum = "3cbc66816425a074528352f5789333ecff06ca41b36b0b0efdfbb29edc391a19"
 dependencies = [
- "antidote",
+ "parking_lot",
 ]
 
 [[package]]

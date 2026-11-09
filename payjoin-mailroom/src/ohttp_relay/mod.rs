@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 pub(crate) use gateway_prober::Prober;
+pub use gateway_prober::{AllowedPurposes, InvalidPurpose};
 pub use gateway_uri::GatewayUri;
 use http::uri::Authority;
 use http_body_util::combinators::BoxBody;
@@ -53,8 +54,9 @@ impl RelayConfig {
         default_gateway: GatewayUri,
         sentinel_tag: SentinelTag,
         metrics: MetricsService,
+        purposes: AllowedPurposes,
     ) -> Self {
-        Self::new(default_gateway, HttpClient::default(), sentinel_tag, metrics)
+        Self::new(default_gateway, HttpClient::default(), sentinel_tag, metrics, purposes)
     }
 
     fn new(
@@ -62,9 +64,10 @@ impl RelayConfig {
         into_client: impl Into<HttpClient>,
         sentinel_tag: SentinelTag,
         metrics: MetricsService,
+        purposes: AllowedPurposes,
     ) -> Self {
         let client = into_client.into();
-        let prober = Prober::new_with_client(client.clone());
+        let prober = Prober::new_with_client(client.clone(), purposes);
         RelayConfig {
             default_gateway,
             client,
@@ -83,13 +86,24 @@ pub struct Service {
 }
 
 impl Service {
+    /// A relay that forwards to gateways declaring the BIP77 purpose.
     pub async fn new(sentinel_tag: SentinelTag, metrics: MetricsService) -> Self {
+        Self::new_with_purposes(sentinel_tag, metrics, AllowedPurposes::default()).await
+    }
+
+    /// A relay that forwards to gateways declaring any of `purposes`.
+    pub async fn new_with_purposes(
+        sentinel_tag: SentinelTag,
+        metrics: MetricsService,
+        purposes: AllowedPurposes,
+    ) -> Self {
         // The default gateway is hardcoded because it is obsolete and required only for backwards
         // compatibility.
         // The new mechanism for specifying a custom gateway is via RFC 9540 using
         // `/.well-known/ohttp-gateway` request paths.
         let gateway_origin = GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri");
-        let config = RelayConfig::new_with_default_client(gateway_origin, sentinel_tag, metrics);
+        let config =
+            RelayConfig::new_with_default_client(gateway_origin, sentinel_tag, metrics, purposes);
         config.prober.assert_opt_in(&config.default_gateway).await;
         Self { config: Arc::new(config) }
     }
@@ -100,10 +114,11 @@ impl Service {
         root_store: rustls::RootCertStore,
         default_gateway: Option<GatewayUri>,
         metrics: MetricsService,
+        purposes: AllowedPurposes,
     ) -> Self {
         let gateway_origin = default_gateway
             .unwrap_or_else(|| GatewayUri::from_str(DEFAULT_GATEWAY).expect("valid gateway uri"));
-        let config = RelayConfig::new(gateway_origin, root_store, sentinel_tag, metrics);
+        let config = RelayConfig::new(gateway_origin, root_store, sentinel_tag, metrics, purposes);
         config.prober.assert_opt_in(&config.default_gateway).await;
         Self { config: Arc::new(config) }
     }
@@ -229,7 +244,7 @@ async fn parse_gateway_uri(
         None => Err(Error::Unavailable(config.prober.unavailable_for().await)),
     }?;
 
-    if policy.bip77_allowed {
+    if policy.opted_in {
         Ok(gateway_uri)
     } else {
         // TODO Cache-Control header for error based on policy.expires

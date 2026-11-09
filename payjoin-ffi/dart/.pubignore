@@ -9,10 +9,12 @@ scripts/
 
 .DS_Store
 
-# Native libraries are platform specific and built per consumer
+# Native libraries are platform specific and built per consumer, except
+# the release's own, which prepare-publish.sh copies into prebuilt/
 *.dylib
 *.so
 *.dll
+!/prebuilt/**
 
 # Cargo build output
 native/target/

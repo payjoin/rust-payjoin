@@ -272,6 +272,14 @@ impl From<FfiValidationError> for InputPairError {
     fn from(value: FfiValidationError) -> Self { InputPairError::FfiValidation(value) }
 }
 
+/// Error decoding a consensus-encoded transaction passed across the FFI boundary.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum TransactionParseError {
+    /// The provided bytes are not a valid consensus-encoded transaction.
+    #[error("Invalid transaction: {0}")]
+    InvalidTransaction(String),
+}
+
 /// Error that may occur when a receiver event log is replayed
 #[derive(Debug, thiserror::Error, uniffi::Object)]
 #[uniffi::export(Debug, Display)]

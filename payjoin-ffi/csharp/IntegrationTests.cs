@@ -796,7 +796,8 @@ namespace Payjoin.Tests
                 cancellationToken);
 
             var proposalResponseBuffer = await proposalResponse.Content.ReadAsByteArrayAsync(cancellationToken);
-            payjoinProposal.ProcessResponse(proposalResponseBuffer, proposalRequest.ClientResponse);
+            using var monitorTransition = payjoinProposal.ProcessResponse(proposalResponseBuffer, proposalRequest.ClientResponse);
+            using var monitor = monitorTransition.Save(recvPersister);
 
             // *******************************
             // SENDER SIDE (FINALIZATION)
@@ -854,6 +855,26 @@ namespace Payjoin.Tests
             using var extractionDoc = JsonDocument.Parse(extractionJson);
             var finalHex = extractionDoc.RootElement.GetProperty("hex").GetString()!;
             RpcCall(sender, "sendrawtransaction", JsonSerializer.Serialize(finalHex));
+
+            // *******************************
+            // Inside the Receiver:
+            // Classify the broadcast Payjoin, then close the replayed session with
+            // the resolution, as a wallet that replays its open sessions would.
+            var finalTx = Convert.FromHexString(finalHex);
+            using (var monitorResolution = monitor.ClassifyTx(finalTx))
+            {
+                Assert.NotNull(monitorResolution);
+                Assert.Equal(ResolvedBy.Payjoin, monitorResolution!.ResolvedBy());
+            }
+            var replayed = PayjoinMethods.ReplayReceiverEventLog(recvPersister).State();
+            Assert.IsType<ReceiveSession.Monitor>(replayed);
+            using var resolution = PayjoinMethods.ClassifyReceiverTx(replayed, finalTx);
+            Assert.NotNull(resolution);
+            Assert.Equal(ResolvedBy.Payjoin, resolution!.ResolvedBy());
+            using var closeTransition = PayjoinMethods.CloseReceiverSession(replayed, resolution);
+            closeTransition.Save(recvPersister);
+            Assert.True(recvPersister.Closed);
+            Assert.IsType<ReceiveSession.Closed>(PayjoinMethods.ReplayReceiverEventLog(recvPersister).State());
 
             // *******************************
             // VERIFY RESULTS

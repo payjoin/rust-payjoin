@@ -68,15 +68,20 @@ jobs:
   build-wheel:
     # The wheel bundles a prebuilt native library, so each supported
     # platform packs its own wheel: x86_64 on Linux (retagged manylinux by
-    # auditwheel) and a fat universal2 dylib for macOS. Both wheels build
-    # on a Linux host. The smoke jobs below verify each wheel on real hardware.
+    # auditwheel) and a fat universal2 dylib for macOS. Both libraries come
+    # from the native workflow's checked double build in the same run. The
+    # smoke jobs below verify each wheel on real hardware.
     name: "Build wheel"
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
-        platform: [linux-x64, macos-universal2]
+        include:
+          - platform: linux-x64
+            library: x86_64-unknown-linux-gnu/libpayjoin_ffi.so
+          - platform: macos-universal2
+            library: universal2-apple-darwin/libpayjoin_ffi.dylib
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -88,10 +93,16 @@ jobs:
           lookup-only: ${{ startsWith(github.ref, 'refs/tags/') }}
       - name: Set up nix
         uses: $/.github/actions/setup-nix
+      - name: Download the native libraries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: payjoin-native
+          path: ${{ runner.temp }}/native
       - name: Build the wheel
-        run: nix develop .#python --command bash ./payjoin-ffi/python/contrib/build-wheel.sh
         env:
           PAYJOIN_WHEEL_PLATFORM: ${{ matrix.platform }}
+          LIBRARY: ${{ runner.temp }}/native/${{ matrix.library }}
+        run: nix develop .#python --command bash ./payjoin-ffi/python/contrib/build-wheel.sh "$LIBRARY"
       - name: Upload wheel
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

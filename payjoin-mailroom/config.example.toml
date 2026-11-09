@@ -17,6 +17,16 @@
 # (one JSON object per line, for log collectors).
 # log_format = "text"
 
+# --- OHTTP relay ---
+# The relay forwards only to gateways that opt in by listing a purpose it
+# accepts at `/.well-known/ohttp-gateway?allowed_purposes`. BIP77 is always
+# accepted. To also relay another protocol's traffic, list its purposes here
+# (each 1 to 255 bytes). As an environment variable, separate them with
+# commas: PJ_OHTTP_RELAY__EXTRA_ALLOWED_PURPOSES="...". A purpose that
+# contains a comma can only be set in this file.
+# [ohttp_relay]
+# extra_allowed_purposes = ["Example v0 5f0a2b6e-6c1d-4f8a-9d3e-2b7c1a0e4d5f"]
+
 # --- Telemetry (requires `telemetry` feature) ---
 # Logs are never exported. What leaves this machine is described under
 # "Telemetry" in README.md: four settled-week counts, no attributes.

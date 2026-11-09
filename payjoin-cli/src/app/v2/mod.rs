@@ -718,7 +718,9 @@ impl App {
         };
 
         if no_broadcast {
-            persister.print("Session cancelled. Broadcast the original transaction manually:");
+            persister.print(
+                "Session closed without broadcasting the fallback. If it isn't already on chain and its inputs are unspent, broadcast it yourself:",
+            );
             println!("{}", serialize_hex(pending.fallback_tx()));
         } else {
             if let Err(e) = self.wallet().broadcast_tx(pending.fallback_tx()) {
@@ -813,7 +815,9 @@ impl App {
         };
 
         if no_broadcast {
-            persister.print("Session cancelled. Broadcast the fallback transaction manually:");
+            persister.print(
+                "Session closed without broadcasting the fallback. If it isn't already on chain and its inputs are unspent, broadcast it yourself:",
+            );
             println!("{}", serialize_hex(pending.fallback_tx()));
         } else {
             if let Err(e) = self.wallet().broadcast_tx(pending.fallback_tx()) {

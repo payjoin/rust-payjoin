@@ -221,6 +221,12 @@ impl ReceiveSession {
     /// Call this with the [`Resolution`] returned by [`classify_tx`](Self::classify_tx) once its
     /// transaction has enough confirmations.
     ///
+    /// The recorded [`SessionOutcome`] says whether the receiver completed its side of the Payjoin
+    /// protocol and sent the Payjoin proposal, not which transaction resolved the session. It is
+    /// [`SessionOutcome::PayjoinProposalSent`] if the proposal was posted or the Payjoin resolved
+    /// the session, and [`SessionOutcome::Aborted`] otherwise. The session does not persist the
+    /// [`ResolvedBy`] classification.
+    ///
     /// Returns a [`MaybeTerminalSuccessTransition`] that, once successfully persisted, closes the
     /// receiver session.
     pub fn close(
@@ -684,6 +690,12 @@ impl<S: HasFallbackTx> Receiver<S> {
     ///
     /// Call this with the [`Resolution`] returned by [`classify_tx`](Self::classify_tx) once its
     /// transaction has enough confirmations.
+    ///
+    /// The recorded [`SessionOutcome`] says whether the receiver completed its side of the Payjoin
+    /// protocol and sent the Payjoin proposal, not which transaction resolved the session. It is
+    /// [`SessionOutcome::PayjoinProposalSent`] if the proposal was posted or the Payjoin resolved
+    /// the session, and [`SessionOutcome::Aborted`] otherwise. The session does not persist the
+    /// [`ResolvedBy`] classification.
     ///
     /// Returns a [`MaybeTerminalSuccessTransition`] that, once successfully persisted, closes the
     /// receiver session.

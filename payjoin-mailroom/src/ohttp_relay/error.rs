@@ -18,6 +18,7 @@ pub(crate) enum Error {
     MethodNotAllowed,
     UnsupportedMediaType,
     BadRequest(String),
+    PayloadTooLarge,
     NotFound,
     InternalServerError(BoxError),
     Unavailable(Duration),
@@ -35,6 +36,7 @@ impl Error {
                 *res.body_mut() = full(e.to_string()).boxed();
             }
             Self::NotFound => *res.status_mut() = StatusCode::NOT_FOUND,
+            Self::PayloadTooLarge => *res.status_mut() = StatusCode::PAYLOAD_TOO_LARGE,
             Self::InternalServerError(internal_error) => {
                 error!("Internal server error: {}", internal_error);
                 *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
@@ -60,6 +62,7 @@ impl std::fmt::Display for Error {
             Self::MethodNotAllowed => write!(f, "Method not allowed"),
             Self::BadRequest(e) => write!(f, "Bad request: {}", e),
             Self::NotFound => write!(f, "Not found"),
+            Self::PayloadTooLarge => write!(f, "Payload too large"),
             Self::InternalServerError(e) => write!(f, "Internal server error: {}", e),
             Self::Unavailable(_) => write!(f, "Service unavailable"),
         }

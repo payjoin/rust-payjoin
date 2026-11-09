@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Let relay operators accept gateway purposes besides BIP77 with `[ohttp_relay] extra_allowed_purposes` (#2024)
+- Reject request bodies larger than a route accepts before buffering them, closing an unbounded-memory read on the OHTTP gateway and the V1 routes (#2031)
 - Reject mailbox payloads too large to return through the OHTTP gateway with 413, and V1 requests too large to relay with `original-psbt-rejected`, instead of truncating the response (#1983)
 
 ## 0.1.3

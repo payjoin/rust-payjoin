@@ -740,7 +740,7 @@ impl<S: HasFallbackTx> Receiver<S> {
     /// Only sender inputs are checked. A legacy or P2SH-wrapped receiver input still changes the
     /// txid of the unsigned proposal.
     #[deprecated(
-        since = "0.0.0-unreleased",
+        since = "1.3.0",
         note = "checks only the sender's inputs; use `Receiver::classify_tx`"
     )]
     pub fn proposal_txid_is_stable(&self) -> bool { self.sender_script_sigs_are_empty() }
@@ -1167,7 +1167,7 @@ impl Receiver<MaybeInputsOwned> {
     ///
     /// Returns the extracted [`bitcoin::Transaction`].
     #[deprecated(
-        since = "0.0.0-unreleased",
+        since = "1.3.0",
         note = "cancel the session when the payjoin fails and broadcast `Receiver<PendingFallback>::fallback_tx` instead"
     )]
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
@@ -2080,7 +2080,7 @@ impl Receiver<Monitor> {
     /// Returns a [`MaybeFatalOrSuccessTransition`] that, once successfully persisted, either
     /// concludes the session if a transaction is found, or yields a [`Receiver<Monitor>`] to
     /// remain in stasis if no transaction is found yet.
-    #[deprecated(since = "0.0.0-unreleased", note = "use `classify_tx` and `close`")]
+    #[deprecated(since = "1.3.0", note = "use `classify_tx` and `close`")]
     pub fn check_for_transaction(
         self,
         find_transaction: impl Fn(Txid) -> Result<Option<bitcoin::Transaction>, ImplementationError>,

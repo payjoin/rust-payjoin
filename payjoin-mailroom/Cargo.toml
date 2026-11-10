@@ -69,6 +69,7 @@ opentelemetry_sdk = "0.32"
 payjoin = { version = "1.2.0", features = [
   "directory",
 ], default-features = false }
+psm = "=0.1.24"
 rand = "0.8"
 reqwest = { version = "0.12.23", default-features = false, features = [
   "rustls-tls",
@@ -86,6 +87,10 @@ tower = "0.5.2"
 tower-http = { version = "0.6.11", features = ["trace"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
+
+# Pinned transitive dependencies that appear unused to cargo-machete
+[package.metadata.cargo-machete]
+ignored = ["psm"]
 
 [dev-dependencies]
 mockito = "1.7.0"

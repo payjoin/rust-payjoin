@@ -2289,6 +2289,7 @@ dependencies = [
  "payjoin",
  "payjoin-test-utils",
  "pest_derive",
+ "psm",
  "r2d2",
  "r2d2_sqlite",
  "reqwest",
@@ -2372,6 +2373,7 @@ dependencies = [
  "opentelemetry_sdk",
  "payjoin",
  "payjoin-test-utils",
+ "psm",
  "rand 0.8.0",
  "rcgen 0.12.0",
  "reqwest",
@@ -2604,6 +2606,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.87",
+]
+
+[[package]]
+name = "psm"
+version = "0.1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "200b9ff220857e53e184257720a14553b2f4aa02577d2ed9842d45d4b9654810"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

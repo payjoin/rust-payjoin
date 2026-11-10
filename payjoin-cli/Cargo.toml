@@ -36,6 +36,7 @@ hyper = { version = "1.8.0", features = ["http1", "server"], optional = true }
 hyper-util = { version = "0.1.18", optional = true }
 payjoin = { version = "1.2.0", default-features = false }
 pest_derive = "2.7.0"
+psm = "=0.1.24"
 r2d2 = "0.8.10"
 r2d2_sqlite = "0.22.0"
 reqwest = { version = "0.12.23", default-features = false, features = [
@@ -56,7 +57,7 @@ uuid = { version = "1.18.0", features = ["v7"] }
 
 # Pinned transitive dependencies that appear unused to cargo-machete
 [package.metadata.cargo-machete]
-ignored = ["ahash", "scheduled-thread-pool", "pest_derive"]
+ignored = ["ahash", "scheduled-thread-pool", "pest_derive", "psm"]
 
 [dev-dependencies]
 nix = { version = "0.30.1", features = ["aio", "process", "signal"] }

@@ -1,3 +1,7 @@
+## [0.26.0]
+
+- Wraps payjoin-ffi 0.26.0; see its [changelog](https://github.com/payjoin/rust-payjoin/blob/payjoin-ffi-0.26.0/payjoin-ffi/CHANGELOG.md).
+
 ## [0.25.1]
 
 - Wraps payjoin-ffi 0.25.1; see its [changelog](https://github.com/payjoin/rust-payjoin/blob/payjoin-ffi-0.25.1/payjoin-ffi/CHANGELOG.md).

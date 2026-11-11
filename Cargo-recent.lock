@@ -2513,7 +2513,7 @@ dependencies = [
 
 [[package]]
 name = "payjoin-ffi"
-version = "0.25.1"
+version = "0.26.0"
 dependencies = [
  "async-trait",
  "bdk_wallet",

@@ -1,3 +1,65 @@
+## [0.26.0]
+
+- Wraps payjoin 1.3.0
+- Add `classify_tx` to every receiver state that holds a fallback transaction
+  and is advancing the Payjoin protocol, from `MaybeInputsOwned` through
+  `Monitor`. Pass every consensus-encoded transaction the wallet receives to
+  `classify_tx` on each open session, or to `classify_receiver_tx` with a
+  session in any state. It returns a `Resolution` whose `resolved_by` is a
+  `ResolvedBy` of `Payjoin`, `Fallback` or `Unrecognized`, or none for a
+  transaction that spends none of the sender's original inputs, and never
+  reports `Payjoin` before `PayjoinProposal`.
+- Add `close_session` to the same states, and `close_receiver_session` for a
+  session in any state. Each takes a `Resolution` and returns a
+  `CloseTransition` that ends the session once the wallet decides the
+  transaction has enough confirmations. Saving it fails with a transient
+  error, without persisting, if the resolution was classified from another
+  session, or, for `close_receiver_session`, if the session state cannot be
+  closed via resolution. Closing classifies the transaction again against
+  the session's current state.
+- Remove `Monitor.check_for_transaction`, with its `TransactionFinder`
+  callback and `MonitorTransition`. It closed the session on first sight of
+  a predicted txid and never saw a spend that is neither the proposal nor
+  the fallback. Use `classify_tx` and `close_session` instead.
+- Remove `proposal_txid_is_stable` from every receiver state. It checked
+  only the sender's inputs, so a legacy or P2SH-wrapped receiver input could
+  change the txid even when it returned true. Use `classify_tx` instead.
+- To migrate from `Monitor.check_for_transaction`:
+  - `close_session` on a `Monitor` records `PayjoinProposalSent` whichever
+    transaction resolved the session, where `check_for_transaction` recorded
+    `Success(txid)` or `FallbackBroadcasted`. Store `resolved_by` and the
+    txid yourself if the app needs them.
+  - `classify_tx` also classifies unconfirmed transactions. Call
+    `close_session` only once the transaction reaches the wallet's
+    confirmation depth.
+  - Non-SegWit senders no longer need special handling.
+  - A `Resolution` can't be persisted, so classify the transaction again
+    after a restart.
+  - `classify_tx` raises `TransactionParseError` for bytes that don't decode
+    as a transaction.
+- Deprecate `MaybeInputsOwned.extract_tx_to_schedule_broadcast`. Cancel the
+  session when the payjoin fails and broadcast the `fallback_tx` of the
+  resulting `ReceiverPendingFallback` instead.
+- Replace `InputPairError::InvalidTransaction(String)` with
+  `InputPairError::TransactionDecode(TransactionParseError)`, the same error
+  `classify_tx` returns for bytes that do not decode. Bindings that match on
+  the old variant need to match the new one and read the nested
+  `TransactionParseError`.
+- Dart: the package now ships the release's prebuilt native libraries,
+  and the build hook uses them instead of compiling Rust, so apps no
+  longer need a Rust toolchain or network access at build time. Set
+  `build: source` under `hooks: user_defines: payjoin:` in your app's
+  `pubspec.yaml` to keep compiling it.
+- Python: require Python 3.11+ and replace httpx with httpx2. Callers catching
+  HTTP errors from `fetch_ohttp_keys` should use `httpx2.HTTPError` instead of
+  `httpx.HTTPError`.
+- Python: the Linux wheel's library now needs at most glibc 2.17, and
+  the wheel is tagged `manylinux_2_17`. The macOS wheel now supports
+  macOS 10.15 and later, down from 13.
+- The GitHub release now attaches every native library as
+  `payjoin_ffi-<version>-<target>.<ext>`, listed in `SHA256SUMS` and
+  attested. `VERIFYING.md` explains how to check one or rebuild it.
+
 ## [0.25.1]
 
 - Wraps payjoin 1.2.0

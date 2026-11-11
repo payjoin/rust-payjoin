@@ -1068,7 +1068,7 @@ pub trait IsInputOwned: Send + Sync {
 
 #[uniffi::export]
 impl MaybeInputsOwned {
-    /// Deprecated since payjoin 0.0.0-unreleased: cancel the session when the payjoin
+    /// Deprecated since payjoin 1.3.0: cancel the session when the payjoin
     /// fails and broadcast the `fallback_tx` of the resulting `ReceiverPendingFallback`
     /// instead.
     ///

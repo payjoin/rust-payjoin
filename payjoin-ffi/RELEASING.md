@@ -88,7 +88,8 @@ environment, and allow `payjoin-ffi-*` in the repository's tag rules.
 4. The `Release language bindings` run verifies the tag, builds and smoke
    tests every language, then pauses four publish jobs on the `release`
    environment. Approve the pending deployment once; it covers all four
-   jobs. Each registry is published with OIDC from the tested artifacts.
+   jobs. Each registry except PyPI is published with OIDC from the
+   tested artifacts.
 5. Once the builds pass, without waiting for the approval or the
    registries, the run creates the GitHub release from the tested
    artifacts. It attaches the wheels, npm tarball, NuGet package, staged
@@ -96,18 +97,17 @@ environment, and allow `payjoin-ffi-*` in the repository's tag rules.
    `payjoin_ffi-<version>-<target>.<ext>`, and one `SHA256SUMS` covering
    them all. The wheels, the NuGet package and the Dart package carry
    those same native libraries, byte for byte. Verify an install from
-   each registry and
-   check provenance with `gh attestation verify FILE -R payjoin/rust-payjoin`.
-   Optionally sign `SHA256SUMS` locally and upload `SHA256SUMS.asc`; no
-   signing key reaches a runner.
+   npm, NuGet and pub.dev and check provenance with
+   `gh attestation verify FILE -R payjoin/rust-payjoin`. Optionally sign
+   `SHA256SUMS` locally and upload `SHA256SUMS.asc`; no signing key
+   reaches a runner.
 
 ## If a publish job fails
 
 Each registry has its own job, so use **Re-run failed jobs** on the same
 run and approve the environment again. The re-run publishes from the same
 tested artifacts and leaves the GitHub release and the registries that
-already succeeded alone.
-Never move a published tag or replace a published package; fix forward
-with a new version.
+already succeeded alone. Never move a published tag or replace a
+published package; fix forward with a new version.
 
 [automated publishing]: https://dart.dev/tools/pub/automated-publishing

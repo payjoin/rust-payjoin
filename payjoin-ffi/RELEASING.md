@@ -89,11 +89,14 @@ environment, and allow `payjoin-ffi-*` in the repository's tag rules.
    tests every language, then pauses four publish jobs on the `release`
    environment. Approve the pending deployment once; it covers all four
    jobs. Each registry is published with OIDC from the tested artifacts.
-5. The run attaches the wheels, npm tarball, NuGet package, staged Dart
-   package, every native library as `payjoin_ffi-<version>-<target>.<ext>`,
-   and one `SHA256SUMS` covering them all to the GitHub release. The
-   wheels, the NuGet package and the Dart package carry those same native
-   libraries, byte for byte. Verify an install from each registry and
+5. Once the builds pass, without waiting for the approval or the
+   registries, the run creates the GitHub release from the tested
+   artifacts. It attaches the wheels, npm tarball, NuGet package, staged
+   Dart package, every native library as
+   `payjoin_ffi-<version>-<target>.<ext>`, and one `SHA256SUMS` covering
+   them all. The wheels, the NuGet package and the Dart package carry
+   those same native libraries, byte for byte. Verify an install from
+   each registry and
    check provenance with `gh attestation verify FILE -R payjoin/rust-payjoin`.
    Optionally sign `SHA256SUMS` locally and upload `SHA256SUMS.asc`; no
    signing key reaches a runner.
@@ -102,7 +105,8 @@ environment, and allow `payjoin-ffi-*` in the repository's tag rules.
 
 Each registry has its own job, so use **Re-run failed jobs** on the same
 run and approve the environment again. The re-run publishes from the same
-tested artifacts and leaves the registries that already succeeded alone.
+tested artifacts and leaves the GitHub release and the registries that
+already succeeded alone.
 Never move a published tag or replace a published package; fix forward
 with a new version.
 

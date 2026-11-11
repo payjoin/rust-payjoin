@@ -3,14 +3,17 @@ name: Release language bindings
 # Pushing a signed `payjoin-ffi-<version>` tag verifies the tag and the
 # shared binding version, builds the native libraries once, runs every
 # language's build, package and smoke checks at that commit, then
-# publishes Python, JavaScript, C#, and Dart through the `release`
-# environment (required reviewer) with keyless OIDC and cuts one GitHub
-# release holding every package and native library.
+# attests the Python wheels and publishes JavaScript, C#, and Dart
+# through the `release` environment (required reviewer) with keyless
+# OIDC. Alongside the publishes, it cuts one GitHub release holding
+# every package and native library from the same tested build,
+# independent of the registries' outcome.
 #
 # Each registry has its own publish job. All four wait on every language
 # build, so they reach the environment gate together and one approval
 # releases them all; a registry failure is retried with "Re-run failed
-# jobs" on the same run, reusing the tested artifacts.
+# jobs" on the same run, reusing the tested artifacts and leaving the
+# GitHub release alone.
 
 on:
   push:
@@ -119,6 +122,7 @@ jobs:
         with:
           subject-path: dist/*.whl
       - name: Publish to PyPI
+        if: false
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist
@@ -253,14 +257,7 @@ jobs:
 
   github-release:
     name: Create GitHub release
-    needs:
-      [
-        verify-tag,
-        publish-python,
-        publish-javascript,
-        publish-csharp,
-        publish-dart,
-      ]
+    needs: [verify-tag, python, javascript, csharp, dart, kotlin, native]
     runs-on: ubuntu-26.04
     permissions:
       contents: write # create the Release for this tag and upload assets

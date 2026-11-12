@@ -150,6 +150,15 @@ impl WantsOutputs {
         let mut payjoin_psbt = self.original.original_psbt.clone();
         let mut outputs = vec![];
         let mut replacement_outputs: Vec<TxOut> = replacement_outputs.into_iter().collect();
+        // Sender outputs are kept as is, so once the drain script is not a sender
+        // script, only a receiver output can carry it.
+        let drain_pays_sender =
+            self.original.original_psbt.unsigned_tx.output.iter().enumerate().any(|(i, txo)| {
+                !self.owned_vouts.contains(&i) && txo.script_pubkey == *drain_script
+            });
+        if drain_pays_sender {
+            return Err(InternalOutputSubstitutionError::DrainScriptPaysSender.into());
+        }
         // Substitute the existing receiver outputs, keeping the sender/receiver output ordering
         for (i, original_output) in
             self.original.original_psbt.unsigned_tx.output.iter().enumerate()
@@ -390,10 +399,14 @@ impl WantsInputs {
         for input_pair in inputs.clone() {
             let index = rng.gen_range(0..=self.proposal.payjoin_psbt.unsigned_tx.input.len());
             payjoin_psbt.inputs.insert(index, input_pair.psbtin);
-            payjoin_psbt
-                .unsigned_tx
-                .input
-                .insert(index, TxIn { sequence: original_sequence, ..input_pair.txin });
+            // A scriptSig or witness on the TxIn only informs the weight estimate.
+            // An unsigned transaction carries neither, or the PSBT stops parsing.
+            let txin = TxIn {
+                previous_output: input_pair.txin.previous_output,
+                sequence: original_sequence,
+                ..Default::default()
+            };
+            payjoin_psbt.unsigned_tx.input.insert(index, txin);
         }
 
         // Add the receiver change amount to the receiver change output, if applicable
@@ -425,13 +438,21 @@ impl WantsInputs {
 
     // Compute the minimum amount that the receiver must contribute to the transaction as input.
     //
-    // Output values are sender-supplied, so either sum can overflow.
+    // Output values are sender-supplied, so either sum can overflow. Earlier
+    // contributions were already credited to the change output, so they count
+    // toward the minimum rather than raising it.
     fn receiver_min_input_amount(&self) -> Result<Amount, InputContributionError> {
         let output_amount =
             checked_sum(self.proposal.payjoin_psbt.unsigned_tx.output.iter().map(|o| o.value))?;
         let original_output_amount =
             checked_sum(self.original.original_psbt.unsigned_tx.output.iter().map(|o| o.value))?;
-        Ok(output_amount.checked_sub(original_output_amount).unwrap_or(Amount::ZERO))
+        let contributed_amount = checked_sum(
+            self.proposal.receiver_inputs.iter().map(|input| input.previous_txout().value),
+        )?;
+        Ok(output_amount
+            .checked_sub(original_output_amount)
+            .and_then(|deficit| deficit.checked_sub(contributed_amount))
+            .unwrap_or(Amount::ZERO))
     }
 
     /// Commits the inputs as final, and moves on to the next typestate.
@@ -605,7 +626,7 @@ mod tests {
     use bitcoin::taproot::LeafVersion;
     use bitcoin::{
         Amount, Network, OutPoint, PubkeyHash, ScriptBuf, Sequence, TapLeafHash, TapNodeHash,
-        Transaction, TxIn, TxOut, Weight, Witness,
+        Transaction, TxIn, TxOut, Txid, Weight, Witness,
     };
     use payjoin_test_utils::{DUMMY20, RECEIVER_INPUT_CONTRIBUTION};
 
@@ -844,6 +865,103 @@ mod tests {
         assert_eq!(wants_inputs.proposal.receiver_inputs.len(), 2);
         assert_eq!(wants_inputs.proposal.receiver_inputs[0], input_pair_1);
         assert_eq!(wants_inputs.proposal.receiver_inputs[1], input_pair_2);
+    }
+
+    fn p2wpkh_input(vout: u32, value: Amount) -> InputPair {
+        let txout = TxOut {
+            value,
+            script_pubkey: ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array(DUMMY20)),
+        };
+        let outpoint = OutPoint { txid: Txid::from_byte_array([1; 32]), vout };
+        InputPair::new_p2wpkh(txout, outpoint).expect("valid p2wpkh input")
+    }
+
+    fn output_sum(psbt: &Psbt) -> Amount { psbt.unsigned_tx.output.iter().map(|o| o.value).sum() }
+
+    #[test]
+    fn every_contribution_is_credited_to_change() {
+        let original = original_from_test_vector();
+        let original_sum = output_sum(&original.psbt);
+        let wants_inputs = WantsOutputs::new(original, vec![1]).commit_outputs();
+        let value = Amount::from_sat(100_000);
+
+        let one_call = wants_inputs
+            .clone()
+            .contribute_inputs([p2wpkh_input(0, value), p2wpkh_input(1, value)])
+            .expect("contribution should succeed");
+        let two_calls = wants_inputs
+            .contribute_inputs([p2wpkh_input(0, value)])
+            .expect("first contribution should succeed")
+            .contribute_inputs([p2wpkh_input(1, value)])
+            .expect("second contribution should succeed");
+
+        for proposal in [one_call.proposal, two_calls.proposal] {
+            assert_eq!(
+                output_sum(&proposal.payjoin_psbt),
+                original_sum + value + value,
+                "every contributed sat must reach the change output, not the miner"
+            );
+        }
+    }
+
+    #[test]
+    fn drain_script_must_not_be_a_sender_script() {
+        let original = original_from_test_vector();
+        let sender_output = original.psbt.unsigned_tx.output[0].clone();
+        let wants_outputs = WantsOutputs::new(original, vec![1]);
+        let receiver_output = wants_outputs.payjoin_psbt.unsigned_tx.output[1].clone();
+
+        // Draining to the sender's script would credit the receiver's change to
+        // the sender, even when a receiver output also carries that script.
+        let err = wants_outputs
+            .clone()
+            .substitute_receiver_script(&sender_output.script_pubkey)
+            .expect_err("a sender script cannot be the drain");
+        assert_eq!(err, InternalOutputSubstitutionError::DrainScriptPaysSender.into());
+        let err = wants_outputs
+            .clone()
+            .replace_receiver_outputs([receiver_output.clone()], &sender_output.script_pubkey)
+            .expect_err("a sender output cannot be the drain");
+        assert_eq!(err, InternalOutputSubstitutionError::DrainScriptPaysSender.into());
+
+        // A drain script no output carries names no receiver output either.
+        let unknown_script = ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array(DUMMY20));
+        let err = wants_outputs
+            .replace_receiver_outputs([receiver_output], &unknown_script)
+            .expect_err("the drain must be a replacement output");
+        assert_eq!(err, InternalOutputSubstitutionError::InvalidDrainScript.into());
+    }
+
+    #[test]
+    fn contributed_inputs_leave_the_transaction_unsigned() {
+        let original = original_from_test_vector();
+        let wants_inputs = WantsOutputs::new(original, vec![1]).commit_outputs();
+        let txout = TxOut {
+            value: Amount::from_sat(100_000),
+            script_pubkey: ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array(DUMMY20)),
+        };
+        let txin = TxIn {
+            previous_output: OutPoint { txid: Txid::from_byte_array([1; 32]), vout: 0 },
+            script_sig: ScriptBuf::from_bytes(vec![0x51]),
+            witness: Witness::from_slice(&[vec![0x30; 72], vec![0x02; 33]]),
+            ..Default::default()
+        };
+        let input = InputPair::new(
+            txin,
+            bitcoin::psbt::Input { witness_utxo: Some(txout), ..Default::default() },
+            None,
+        )
+        .expect("the witness gives the input's weight");
+
+        let psbt = wants_inputs
+            .contribute_inputs([input])
+            .expect("contribution should succeed")
+            .proposal
+            .payjoin_psbt;
+        for txin in &psbt.unsigned_tx.input {
+            assert!(txin.script_sig.is_empty() && txin.witness.is_empty(), "{txin:?} is signed");
+        }
+        assert_eq!(Psbt::from_str(&psbt.to_string()).expect("the proposal parses"), psbt);
     }
 
     #[test]

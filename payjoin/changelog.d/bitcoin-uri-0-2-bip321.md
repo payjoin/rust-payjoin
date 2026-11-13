@@ -12,6 +12,10 @@
 - Match URI keys case-insensitively, as BIP 321 requires. Upper-case keys used
   to be ignored, so a URI with `PJ=` did not request payjoin and one with
   `AMOUNT=` parsed without an amount. Both are read now.
+- A `PjUri` parsed from a string prints that string unchanged. It used to be
+  rebuilt from the parameters payjoin reads, which dropped any other parameter
+  such as `lightning` or `sp`. `PjUri::set_amount` still rebuilds the URI and
+  drops them.
 
 ### Stricter URI Parsing
 
@@ -26,5 +30,5 @@
   - An address parameter (`bc`, `tb` or `bcrt`) whose value is not a segwit
     address of the network its key names, such as `bc=tb1...`, is an error.
     These parameters used to be ignored.
-- A `PjUri` now leaves out a `label` or `message` that is not valid UTF-8 when
-  it prints, where it used to print the raw value.
+- `PjUri::set_amount` now leaves out a `label` or `message` that is not valid
+  UTF-8, where it used to keep the raw value.

@@ -59,6 +59,10 @@ impl PjUri {
     pub fn amount_sats(&self) -> Option<u64> { self.0.amount().map(|e| e.to_sat()) }
 
     /// Sets the amount in sats and returns a new PjUri
+    ///
+    /// The URI is rebuilt from its address, amount, label, message and payjoin
+    /// parameters, so on a parsed URI any other parameter (`lightning`, `sp`,
+    /// ...) is dropped.
     pub fn set_amount_sats(&self, amount_sats: u64) -> Result<Self, FfiValidationError> {
         let mut uri = self.0.clone();
         let amount = validate_amount_sat(amount_sats)?;

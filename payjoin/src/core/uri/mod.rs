@@ -200,26 +200,16 @@ impl Uri<NetworkUnchecked> {
 impl Uri<NetworkChecked> {
     /// Converts this URI into a [`PjUri`] if it supports payjoin.
     ///
+    /// The parsed URI is kept as is, so the [`PjUri`] prints exactly the
+    /// string it was parsed from, including parameters this crate does not
+    /// interpret (`lightning`, `sp`, ...).
+    ///
     /// If payjoin is unsupported the URI is handed back unchanged in the error
     /// variant. It is boxed to reduce the size of the `Result` (see
     /// <https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err>).
     pub fn check_pj_supported(self) -> Result<PjUri, Box<Self>> {
         match self.extras {
-            MaybePayjoinExtras::Supported(extras) => {
-                // Rebuild the inner URI so its parameters are emitted in this
-                // crate's canonical order (standard BIP21 params, then `pjos`,
-                // then `pj`) regardless of the order they were parsed in.
-                let address = self
-                    .inner
-                    .body()
-                    .expect("a payjoin BIP21 URI always carries an address")
-                    .clone();
-                let amount = self.inner.amount();
-                let label = self.inner.label().and_then(Result::ok);
-                let message = self.inner.message().and_then(Result::ok);
-                let inner = build_pj_uri(address, amount, label, message, &extras);
-                Ok(PjUri { inner, extras })
-            }
+            MaybePayjoinExtras::Supported(extras) => Ok(PjUri { inner: self.inner, extras }),
             MaybePayjoinExtras::Unsupported => Err(Box::new(self)),
         }
     }
@@ -316,7 +306,7 @@ pub struct PjUri {
 impl PjUri {
     /// Builds a payjoin URI from a checked address and validated payjoin parameters.
     pub(crate) fn from_extras(address: Address<NetworkChecked>, extras: PayjoinExtras) -> Self {
-        let inner = build_pj_uri(address, None, None, None, &extras);
+        let inner = build_pj_uri(address, None, None, None, &extras, &[]);
         PjUri { inner, extras }
     }
 
@@ -329,13 +319,24 @@ impl PjUri {
     pub fn amount(&self) -> Option<Amount> { self.inner.amount() }
 
     /// Sets the amount the URI requests.
+    ///
+    /// This rebuilds the URI from its address, amount, label, message and
+    /// payjoin parameters, so on a parsed URI any other parameter
+    /// (`lightning`, `sp`, ...) is dropped. A `req-` prefix on `amount`, `pj`
+    /// or `pjos` is kept.
     pub fn set_amount(&mut self, amount: Amount) {
+        let required: Vec<&str> = UNDERSTOOD_PARAMS
+            .iter()
+            .copied()
+            .filter(|key| self.inner.get(key).is_some_and(|entry| entry.is_required()))
+            .collect();
         self.inner = build_pj_uri(
             self.address().clone(),
             Some(amount),
             self.label(),
             self.message(),
             &self.extras,
+            &required,
         );
     }
 
@@ -433,10 +434,19 @@ fn build_pj_uri(
     label: Option<String>,
     message: Option<String>,
     extras: &PayjoinExtras,
+    required: &[&str],
 ) -> bitcoin_uri::Uri<NetworkChecked> {
+    let key = |base: &str| {
+        if required.contains(&base) {
+            format!("req-{base}")
+        } else {
+            base.to_owned()
+        }
+    };
     let mut builder = bitcoin_uri::UriBuilder::new().address(address);
     if let Some(amount) = amount {
-        builder = builder.amount(amount);
+        let value = amount.to_string_in(bitcoin::amount::Denomination::Bitcoin);
+        builder = builder.raw_param(&key("amount"), &value);
     }
     if let Some(label) = &label {
         builder = builder.label(label);
@@ -444,8 +454,8 @@ fn build_pj_uri(
     if let Some(message) = &message {
         builder = builder.message(message);
     }
-    for (key, value) in serialize_payjoin_params(extras) {
-        builder = builder.param(key, &value);
+    for (base, value) in serialize_payjoin_params(extras) {
+        builder = builder.param(&key(base), &value);
     }
     builder.build().expect("a checked address and valid payjoin params always build")
 }
@@ -603,14 +613,13 @@ mod tests {
             let lower = parse_pj(&uri(&format!("amount=0.01&pjos=0&pj={PJ}")));
             let upper = parse_pj(&format!("BITCOIN:{ADDRESS}?AMOUNT=0.01&PJOS=0&PJ={PJ}"));
             assert_same_payment(&lower, &upper);
-            assert_eq!(lower.to_string(), upper.to_string());
 
             let err = Uri::try_from(uri(&format!("pj={PJ}&PJ={PJ}"))).expect_err("pj repeated");
             assert!(err.to_string().contains("Multiple instances of parameter 'pj'"), "{err}");
         }
 
         #[test]
-        fn output_is_independent_of_param_order() {
+        fn payment_is_independent_of_param_order() {
             let params = [
                 "amount=0.01".to_string(),
                 "label=Coffee%20%26%20cake".to_string(),
@@ -625,12 +634,11 @@ mod tests {
             for ordering in orderings {
                 let pjuri = parse_pj(&uri(&ordering.join("&")));
                 assert_same_payment(&pjuri, &canonical);
-                assert_eq!(pjuri.to_string(), canonical.to_string(), "ordering {ordering:?}");
             }
         }
 
         #[test]
-        fn display_is_a_fixpoint() {
+        fn display_prints_parsed_input() {
             let inputs = [
                 uri(&format!("pj={PJ}")),
                 uri(&format!("pjos=1&pj={PJ}")),
@@ -640,11 +648,21 @@ mod tests {
                 format!("bitcoin:bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4?pj={PJ}"),
             ];
             for input in inputs {
-                let first = parse_pj(&input);
-                let printed = first.to_string();
-                let second = parse_pj(&printed);
-                assert_same_payment(&first, &second);
-                assert_eq!(second.to_string(), printed, "{input} did not settle after one round");
+                assert_eq!(parse_pj(&input).to_string(), input);
+            }
+        }
+
+        #[test]
+        fn display_keeps_unrecognized_params() {
+            let input = uri(&format!(
+                "amount=0.01&lightning=lnbc1pvjluezpp5qqqsyq&sp=sp1qqgste7&lno=lno1qcp4&pj={PJ}"
+            ));
+            let printed = parse_pj(&input).to_string();
+            assert_eq!(printed, input);
+
+            let reparsed = Uri::try_from(printed).unwrap().assume_checked();
+            for key in ["lightning", "sp", "lno"] {
+                assert!(reparsed.inner.get(key).is_some(), "{key} was dropped");
             }
         }
 
@@ -731,6 +749,20 @@ mod tests {
             assert_eq!(reparsed.message().as_deref(), Some("thanks"));
             assert_eq!(reparsed.extras().output_substitution(), OutputSubstitution::Disabled);
             assert_eq!(reparsed.extras().endpoint(), pjuri.extras().endpoint());
+        }
+
+        #[test]
+        fn set_amount_keeps_req_prefixes() {
+            let mut pjuri = parse_pj(&uri(&format!("req-amount=0.01&req-pjos=0&req-pj={PJ}")));
+            pjuri.set_amount(Amount::from_sat(2_100));
+
+            let printed = pjuri.to_string();
+            for key in ["req-amount=", "req-pjos=", "req-pj="] {
+                assert!(printed.contains(key), "{key} lost in {printed}");
+            }
+            let reparsed = parse_pj(&printed);
+            assert_eq!(reparsed.amount(), Some(Amount::from_sat(2_100)));
+            assert_eq!(reparsed.extras().output_substitution(), OutputSubstitution::Disabled);
         }
     }
 }

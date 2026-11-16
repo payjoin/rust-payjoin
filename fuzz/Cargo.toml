@@ -87,3 +87,9 @@ name = "ffi-receiver-checklists"
 path = "fuzz_targets/ffi/receiver_checklists.rs"
 doc = false
 bench = false
+
+[[bin]]
+name = "ffi-roundtrip-v2"
+path = "fuzz_targets/ffi/roundtrip_v2.rs"
+doc = false
+bench = false

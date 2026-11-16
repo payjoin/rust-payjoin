@@ -1,3 +1,5 @@
+# cargo-fuzz working directories: the input corpus, crashing inputs
+# found while fuzzing, and coverage data
 corpus
 artifacts
 coverage

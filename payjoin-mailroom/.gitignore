@@ -1,1 +1,5 @@
+# Random XOR pattern (xor.dat) that payjoin-mailroom uses to obfuscate
+# mailbox contents on disk. This rule only applies when it runs from
+# this directory; a run from the repo root writes ./data, which the
+# root .gitignore covers.
 *.dat

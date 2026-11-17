@@ -1,11 +1,33 @@
+# Cargo build output
 target
+
+# Local payjoin-cli and payjoin-mailroom configs. payjoin-cli's holds
+# bitcoind RPC credentials. The committed example config stays tracked.
 *config.toml
 !example.config.toml
+
+# SQLite databases, e.g. payjoin-cli's default payjoin.sqlite, which it
+# creates in the directory it is run from
 *.sqlite
+
+# CI tests against both Cargo-minimal.lock and Cargo-recent.lock, so a
+# single Cargo.lock is not committed. See contrib/update-lock-files.sh
 Cargo.lock
+
 .vscode
+
+# cargo-mutants output (mutants.out, plus mutants.out.old from reruns)
 mutants.out*
+
+# OHTTP gateway private key material written by payjoin-mailroom to
+# <storage_dir>/ohttp-keys/<key_id>.ikm
 *.ikm
+
 *payjoin.sqlite
+
+# payjoin-mailroom's default storage_dir (./data, relative to where it
+# runs). Holds OHTTP keys, mailboxes and other server state.
 data
+
+# Coverage report from contrib/coverage.sh
 lcov.info

@@ -322,6 +322,8 @@ pub(crate) enum InternalOutputSubstitutionError {
     NotEnoughOutputs,
     /// The provided drain script could not be identified in the provided replacement outputs
     InvalidDrainScript,
+    /// The drain script is the script of one of the sender's outputs
+    DrainScriptPaysSender,
 }
 
 impl fmt::Display for OutputSubstitutionError {
@@ -335,6 +337,8 @@ impl fmt::Display for OutputSubstitutionError {
             ),
             InternalOutputSubstitutionError::InvalidDrainScript =>
                 write!(f, "The provided drain script could not be identified in the provided replacement outputs"),
+            InternalOutputSubstitutionError::DrainScriptPaysSender =>
+                write!(f, "The drain script pays a script that one of the sender's outputs already uses"),
         }
     }
 }
@@ -350,6 +354,7 @@ impl std::error::Error for OutputSubstitutionError {
             InternalOutputSubstitutionError::ScriptPubKeyChangedWhenDisabled => None,
             InternalOutputSubstitutionError::NotEnoughOutputs => None,
             InternalOutputSubstitutionError::InvalidDrainScript => None,
+            InternalOutputSubstitutionError::DrainScriptPaysSender => None,
         }
     }
 }

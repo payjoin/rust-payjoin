@@ -1592,4 +1592,192 @@ mod e2e {
 
         Ok(())
     }
+
+    /// The sender signs only the inputs of its original transaction. A
+    /// proposal that adds another input of the sender's wallet is refused,
+    /// leaving the fallback transaction to broadcast.
+    #[cfg(feature = "v1")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn sender_signs_only_original_inputs_v1() -> Result<(), BoxError> {
+        use std::sync::Arc;
+
+        use http_body_util::{BodyExt, Full};
+        use hyper::body::{Bytes, Incoming};
+        use hyper::server::conn::http1;
+        use hyper::service::service_fn;
+        use hyper::{Request, Response};
+        use hyper_util::rt::TokioIo;
+        use payjoin::bitcoin::psbt::{Input, Psbt};
+        use payjoin::bitcoin::{OutPoint, ScriptBuf, TxIn, TxOut};
+        use payjoin_test_utils::local_cert_key;
+        use serde_json::{json, Value};
+        use tokio::net::TcpListener;
+        use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
+        use tokio_rustls::rustls::ServerConfig;
+        use tokio_rustls::TlsAcceptor;
+
+        let (bitcoind, sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
+        let temp_dir = tempdir()?;
+
+        // Split the sender's funds so that it holds a coin the original
+        // transaction does not spend.
+        let sender_address = sender.new_address()?;
+        sender.call::<Value>("sendtoaddress", &[json!(sender_address.to_string()), json!(1.0)])?;
+        let receiver_address = receiver.new_address()?;
+        bitcoind.client.generate_to_address(1, &receiver_address)?;
+        let sender_coins: Vec<(OutPoint, TxOut)> = sender
+            .call::<Vec<Value>>("listunspent", &[])?
+            .iter()
+            .map(|utxo| {
+                let outpoint = OutPoint {
+                    txid: utxo["txid"].as_str().unwrap().parse().unwrap(),
+                    vout: utxo["vout"].as_u64().unwrap() as u32,
+                };
+                let txout = TxOut {
+                    value: Amount::from_btc(utxo["amount"].as_f64().unwrap()).unwrap(),
+                    script_pubkey: ScriptBuf::from_hex(utxo["scriptPubKey"].as_str().unwrap())
+                        .unwrap(),
+                };
+                (outpoint, txout)
+            })
+            .collect();
+        assert_eq!(sender_coins.len(), 2);
+        let payee_script = ScriptBuf::from_hex(
+            receiver.call::<Value>("getaddressinfo", &[json!(receiver_address.to_string())])?
+                ["scriptPubKey"]
+                .as_str()
+                .unwrap(),
+        )?;
+
+        let sender = Arc::new(sender);
+        let signer = sender.clone();
+        // A v1 receiver whose proposal adds the sender's other coin, finalized.
+        let proposal_for = move |original: Psbt| -> (Psbt, OutPoint) {
+            let mut proposal = original.clone();
+            for input in &mut proposal.inputs {
+                input.final_script_sig = None;
+                input.final_script_witness = None;
+            }
+            let (outpoint, txout) = sender_coins
+                .iter()
+                .find(|(outpoint, _)| {
+                    original.unsigned_tx.input.iter().all(|txin| txin.previous_output != *outpoint)
+                })
+                .cloned()
+                .expect("sender holds a coin outside the original transaction");
+            proposal.unsigned_tx.input.push(TxIn {
+                previous_output: outpoint,
+                sequence: original.unsigned_tx.input[0].sequence,
+                ..Default::default()
+            });
+            proposal.inputs.push(Input { witness_utxo: Some(txout.clone()), ..Default::default() });
+            let payee = proposal
+                .unsigned_tx
+                .output
+                .iter_mut()
+                .find(|txout| txout.script_pubkey == payee_script)
+                .expect("original transaction pays the receiver");
+            payee.value += txout.value - Amount::from_sat(1000);
+            // Give the added input a valid final witness, signed by the
+            // sender's own wallet over the final proposal transaction.
+            let signed: Psbt = signer
+                .call::<Value>(
+                    "walletprocesspsbt",
+                    &[
+                        json!(proposal.to_string()),
+                        json!(true),
+                        json!("ALL"),
+                        json!(true),
+                        json!(true),
+                    ],
+                )
+                .expect("walletprocesspsbt")["psbt"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap();
+            let added = proposal.inputs.len() - 1;
+            let witness = signed.inputs[added].final_script_witness.clone();
+            assert!(witness.as_ref().is_some_and(|w| !w.is_empty()), "added input signed");
+            proposal.inputs[added].final_script_witness = witness;
+            (proposal, outpoint)
+        };
+        let added_outpoint = Arc::new(std::sync::Mutex::new(None));
+
+        let cert = local_cert_key();
+        let cert_path = temp_dir.path().join("localhost.crt");
+        std::fs::write(&cert_path, cert.cert.der())?;
+        let tls_config = ServerConfig::builder().with_no_client_auth().with_single_cert(
+            vec![CertificateDer::from(cert.cert.der().to_vec())],
+            PrivateKeyDer::try_from(cert.signing_key.serialize_der())?,
+        )?;
+        let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        let server_outpoint = added_outpoint.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("sender connects");
+            let stream = tls_acceptor.accept(stream).await.expect("TLS handshake");
+            let service = service_fn(move |req: Request<Incoming>| {
+                let proposal_for = proposal_for.clone();
+                let server_outpoint = server_outpoint.clone();
+                async move {
+                    let body = req.into_body().collect().await?.to_bytes();
+                    let original: Psbt = String::from_utf8(body.to_vec()).unwrap().parse().unwrap();
+                    let (proposal, outpoint) = proposal_for(original);
+                    *server_outpoint.lock().unwrap() = Some(outpoint);
+                    Ok::<_, hyper::Error>(Response::new(Full::new(Bytes::from(
+                        proposal.to_string(),
+                    ))))
+                }
+            });
+            let _ = http1::Builder::new().serve_connection(TokioIo::new(stream), service).await;
+        });
+
+        let bip21 =
+            format!("bitcoin:{receiver_address}?amount=0.0001&pj=https://localhost:{port}/");
+        let cli_sender = Command::new(env!("CARGO_BIN_EXE_payjoin-cli"))
+            .arg("--root-certificate")
+            .arg(&cert_path)
+            .arg("--bip78")
+            .arg("--rpchost")
+            .arg(format!("http://{}/wallet/sender", bitcoind.params.rpc_socket))
+            .arg("--cookie-file")
+            .arg(&bitcoind.params.cookie_file)
+            .arg("--db-path")
+            .arg(temp_dir.path().join("sender_db"))
+            .arg("send")
+            .arg(&bip21)
+            .arg("--fee-rate")
+            .arg("1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let output = tokio::time::timeout(
+            tokio::time::Duration::from_secs(30),
+            cli_sender.wait_with_output(),
+        )
+        .await??;
+        server.abort();
+        let stdout = String::from_utf8(output.stdout)?;
+        println!("{stdout}");
+        let stderr = String::from_utf8(output.stderr)?;
+        eprintln!("{stderr}");
+
+        let added_outpoint = added_outpoint.lock().unwrap().expect("receiver sent a proposal");
+        assert!(!output.status.success(), "sender must refuse the proposal");
+        assert!(stderr.contains("Refusing to sign"), "sender must refuse before signing");
+        assert!(!stdout.contains("Payjoin sent"), "sender must not broadcast the proposal");
+        assert!(
+            stdout.contains("To broadcast the fallback transaction"),
+            "sender must offer the fallback transaction"
+        );
+        let added_coin = sender.call::<Value>(
+            "gettxout",
+            &[json!(added_outpoint.txid.to_string()), json!(added_outpoint.vout)],
+        )?;
+        assert!(!added_coin.is_null(), "the added coin must remain unspent");
+
+        Ok(())
+    }
 }

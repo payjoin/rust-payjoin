@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 #[cfg(feature = "v2")]
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{anyhow, Context, Result};
 use bitcoind_async_client::corepc_types::model::ListUnspentItem;
@@ -21,9 +21,53 @@ struct ReceivedByAddress {
     txids: Vec<String>,
 }
 
+/// Bitcoin Core 32 returns a version 2 PSBT from `walletcreatefundedpsbt`
+/// unless asked otherwise.
+const PSBT_V2_DEFAULT_CORE_VERSION: u64 = 320000;
+
+/// Whether a node of this version, in Bitcoin Core's numeric format, returns
+/// version 2 PSBTs by default.
+fn defaults_to_psbt_v2(core_version: u64) -> bool { core_version >= PSBT_V2_DEFAULT_CORE_VERSION }
+
+/// Builds the walletcreatefundedpsbt arguments that request a version 0 PSBT
+/// and let the wallet choose the inputs.
+///
+/// The first five match what bitcoind-async-client sends. Arguments: inputs,
+/// outputs, locktime, options, bip32derivs, version, psbt_version.
+fn funded_psbt_v0_params(
+    outputs: &[CreateRawTransactionOutput],
+    locktime: u32,
+    options: &WalletCreateFundedPsbtOptions,
+) -> Result<[serde_json::Value; 7]> {
+    Ok([
+        serde_json::json!([]),
+        serde_json::to_value(outputs).context("Failed to serialize outputs")?,
+        serde_json::json!(locktime),
+        serde_json::to_value(options).context("Failed to serialize options")?,
+        serde_json::Value::Null,
+        serde_json::Value::Null,
+        serde_json::json!(0),
+    ])
+}
+
+/// The part of the getnetworkinfo result used to tell Bitcoin Core versions
+/// apart.
+#[derive(Debug, serde::Deserialize)]
+struct NetworkInfo {
+    version: u64,
+}
+
+/// The part of the walletcreatefundedpsbt result used by `create_psbt`.
+#[derive(Debug, serde::Deserialize)]
+struct FundedPsbt {
+    psbt: String,
+}
+
 #[derive(Clone)]
 pub struct BitcoindWallet {
     rpc: Arc<AsyncBitcoinRpc>,
+    /// The node's version as reported by getnetworkinfo, fetched on first use.
+    core_version: Arc<OnceLock<u64>>,
 }
 
 impl BitcoindWallet {
@@ -39,11 +83,27 @@ impl BitcoindWallet {
 
         let rpc = AsyncBitcoinRpc::new(config.rpchost.to_string(), auth, None, None, None)?;
 
-        Ok(Self { rpc: Arc::new(rpc) })
+        Ok(Self { rpc: Arc::new(rpc), core_version: Arc::new(OnceLock::new()) })
     }
 }
 
 impl BitcoindWallet {
+    /// Returns the node's version in Bitcoin Core's numeric format, e.g.
+    /// 320100 for 32.1.0.
+    ///
+    /// The node is asked once and the answer is reused.
+    fn core_version(&self) -> Result<u64> {
+        if let Some(version) = self.core_version.get() {
+            return Ok(*version);
+        }
+        let info: NetworkInfo = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.rpc.call_raw("getnetworkinfo", &[]).await })
+        })
+        .context("Failed to get the node version")?;
+        Ok(*self.core_version.get_or_init(|| info.version))
+    }
+
     /// Create a PSBT with the given outputs and fee rate
     pub fn create_psbt(
         &self,
@@ -63,35 +123,52 @@ impl BitcoindWallet {
         // Set locktime to current block height for anti-fee-sniping
         // This is to follow wallet fingerprinting best practices and set and opinionated
         // default for external wallet integrations to follow along with
-        let locktime = Some(tokio::task::block_in_place(|| {
+        let locktime = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async { self.rpc.get_block_count().await })
-        })? as u32);
+        })? as u32;
+
+        let outputs = outputs
+            .iter()
+            .map(|(k, v)| CreateRawTransactionOutput::AddressAmount {
+                address: k.clone(),
+                amount: v.to_btc(),
+            })
+            .collect::<Vec<_>>();
 
         // Sync wrapper around async call - use tokio handle to avoid deadlock
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                self.rpc
-                    .wallet_create_funded_psbt(
-                        &[], // inputs
-                        &outputs
-                            .iter()
-                            .map(|(k, v)| CreateRawTransactionOutput::AddressAmount {
-                                address: k.clone(),
-                                amount: v.to_btc(),
-                            })
-                            .collect::<Vec<_>>(),
-                        locktime,
-                        Some(options),
-                        None,
-                    )
-                    .await
+        let funded = if defaults_to_psbt_v2(self.core_version()?) {
+            // rust-bitcoin cannot parse the version 2 PSBT this node returns
+            // by default.
+            // TODO: use the typed call once bitcoind-async-client can pass
+            // psbt_version.
+            let params = funded_psbt_v0_params(&outputs, locktime, &options)?;
+            let result: FundedPsbt = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(async { self.rpc.call_raw("walletcreatefundedpsbt", &params).await })
             })
-        })?;
+            .context("Failed to create funded PSBT")?;
+            result.psbt
+        } else {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    self.rpc
+                        .wallet_create_funded_psbt(
+                            &[], // inputs
+                            &outputs,
+                            Some(locktime),
+                            Some(options),
+                            None,
+                        )
+                        .await
+                })
+            })?
+            .psbt
+            .to_string()
+        };
 
         let processed = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                self.rpc.wallet_process_psbt(&result.psbt.to_string(), None, None, None).await
-            })
+            tokio::runtime::Handle::current()
+                .block_on(async { self.rpc.wallet_process_psbt(&funded, None, None, None).await })
         })?
         .psbt;
 
@@ -280,4 +357,46 @@ pub fn input_pair_from_corepc(utxo: ListUnspentItem) -> Result<InputPair> {
     };
     let txin = TxIn { previous_output: outpoint, ..Default::default() };
     InputPair::new(txin, psbtin, None).context("Failed to create input pair")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn psbt_v2_is_the_default_from_core_32() {
+        assert!(!defaults_to_psbt_v2(290000));
+        assert!(!defaults_to_psbt_v2(310100));
+        assert!(defaults_to_psbt_v2(320000));
+        assert!(defaults_to_psbt_v2(320100));
+    }
+
+    #[test]
+    fn funded_psbt_params_request_version_0() -> Result<()> {
+        let outputs = [CreateRawTransactionOutput::AddressAmount {
+            address: "bcrt1q0ql9q6egpxx52vv8fm3xhhgz2cxr874tgfznc5".to_string(),
+            amount: 0.001,
+        }];
+        let options = WalletCreateFundedPsbtOptions {
+            fee_rate: Some(FeeRate::from_sat_per_kwu(375)),
+            lock_unspents: Some(true),
+            replaceable: None,
+            conf_target: None,
+        };
+
+        let params = funded_psbt_v0_params(&outputs, 101, &options)?;
+
+        assert_eq!(params[0], serde_json::json!([]));
+        assert_eq!(
+            params[1],
+            serde_json::json!([{ "bcrt1q0ql9q6egpxx52vv8fm3xhhgz2cxr874tgfznc5": 0.001 }])
+        );
+        assert_eq!(params[2], serde_json::json!(101));
+        // 375 sat/kwu is 1.5 sat/vB, the unit of Bitcoin Core's fee_rate option.
+        assert_eq!(params[3], serde_json::json!({ "fee_rate": 1.5, "lockUnspents": true }));
+        assert_eq!(params[4], serde_json::Value::Null);
+        assert_eq!(params[5], serde_json::Value::Null);
+        assert_eq!(params[6], serde_json::json!(0));
+        Ok(())
+    }
 }

@@ -1,0 +1,1 @@
+- Return a parsing error instead of panicking on short gateway paths such as `/a.io` (#1999)

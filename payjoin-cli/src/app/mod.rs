@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use payjoin::bitcoin::psbt::Psbt;
-use payjoin::bitcoin::{self, Address, Amount, FeeRate};
+use payjoin::bitcoin::{self, Address, Amount, FeeRate, OutPoint};
 use tokio::signal;
 use tokio::sync::watch;
 
@@ -60,15 +60,56 @@ pub trait App: Send + Sync {
         self.wallet().create_psbt(outputs, fee_rate, true)
     }
 
-    fn process_pj_response(&self, psbt: Psbt) -> Result<bitcoin::Txid> {
-        tracing::trace!("Proposed psbt: {psbt:#?}");
+    /// Sign the receiver's proposal and broadcast it.
+    ///
+    /// The proposal is refused before signing if any input that is not in `original_tx` belongs to this wallet, so the
+    /// sender signs only its original inputs, as BIP 78 requires.
+    fn process_pj_response(
+        &self,
+        original_tx: &bitcoin::Transaction,
+        proposal: Psbt,
+    ) -> Result<bitcoin::Txid> {
+        tracing::trace!("Proposed psbt: {proposal:#?}");
 
-        let signed = self.wallet().process_psbt(&psbt)?;
+        ensure_no_added_input_is_ours(&self.wallet(), original_tx, &proposal)?;
+
+        let signed = self.wallet().process_psbt(&proposal)?;
         let tx = signed.extract_tx()?;
 
         let txid = self.wallet().broadcast_tx(&tx)?;
         Ok(txid)
     }
+}
+
+/// Fail if an input that is not in `original_tx` spends a coin of this
+/// wallet, judged both by the wallet's own record of the outpoint and by the
+/// previous output the proposal supplies for it.
+fn ensure_no_added_input_is_ours(
+    wallet: &BitcoindWallet,
+    original_tx: &bitcoin::Transaction,
+    proposal: &Psbt,
+) -> Result<()> {
+    let original_outpoints: HashSet<OutPoint> =
+        original_tx.input.iter().map(|txin| txin.previous_output).collect();
+    for (txin, psbtin) in proposal.unsigned_tx.input.iter().zip(&proposal.inputs) {
+        let outpoint = txin.previous_output;
+        if original_outpoints.contains(&outpoint) {
+            continue;
+        }
+        let supplied_prevouts = psbtin.witness_utxo.iter().chain(
+            psbtin.non_witness_utxo.as_ref().and_then(|tx| tx.output.get(outpoint.vout as usize)),
+        );
+        let mut ours = wallet.is_my_outpoint(&outpoint)?;
+        for prevout in supplied_prevouts {
+            ours |= wallet.is_mine(&prevout.script_pubkey)?;
+        }
+        if ours {
+            bail!(
+                "Refusing to sign the payjoin proposal: input {outpoint} was not in the original transaction but belongs to this wallet"
+            );
+        }
+    }
+    Ok(())
 }
 
 #[cfg(feature = "_manual-tls")]

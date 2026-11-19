@@ -433,10 +433,19 @@ impl PsbtContext {
                         .next()
                         .ok_or(InternalProposalError::NoInputs)?;
                     if ensure_receiver_input_finalized {
-                        // Verify the PSBT input is finalized
+                        // Verify the PSBT input is finalized: it needs a non empty
+                        // final scriptSig or a non empty final witness.
                         ensure(
-                            proposed.psbtin.final_script_sig.is_some()
-                                || proposed.psbtin.final_script_witness.is_some(),
+                            proposed
+                                .psbtin
+                                .final_script_sig
+                                .as_ref()
+                                .is_some_and(|s| !s.is_empty())
+                                || proposed
+                                    .psbtin
+                                    .final_script_witness
+                                    .as_ref()
+                                    .is_some_and(|w| !w.is_empty()),
                             InternalProposalError::ReceiverTxinNotFinalized,
                         )?;
                     }
@@ -1545,6 +1554,38 @@ mod test {
             // Make the receiver's input unfinalized.
             proposal.inputs.get_mut(1).unwrap().final_script_sig = None;
             proposal.inputs.get_mut(1).unwrap().final_script_witness = None;
+
+            assert_eq!(
+                ctx.process_proposal(proposal).unwrap_err().to_string(),
+                InternalProposalError::ReceiverTxinNotFinalized.to_string()
+            );
+
+            Ok(())
+        }
+
+        #[test]
+        fn test_receiver_input_has_empty_final_scripts() -> Result<(), BoxError> {
+            let ctx = create_psbt_context()?;
+            let mut proposal: bitcoin::Psbt = PARSED_PAYJOIN_PROPOSAL.clone();
+
+            // Spend the receiver's P2WPKH program natively, so that the input's
+            // weight is known without a final script.
+            let receiver_input = proposal.inputs.get_mut(1).unwrap();
+            let p2wpkh = receiver_input
+                .final_script_sig
+                .as_ref()
+                .and_then(|script_sig| script_sig.redeem_script())
+                .expect("test vector receiver input is P2SH-P2WPKH")
+                .to_owned();
+            receiver_input.witness_utxo.as_mut().unwrap().script_pubkey = p2wpkh;
+
+            // Present but empty final script fields do not finalize an input.
+            receiver_input.final_script_sig = Some(ScriptBuf::new());
+            receiver_input.final_script_witness = Some(Witness::new());
+
+            // Take no fee contribution from the sender, so that the proposal
+            // passes every other check.
+            proposal.unsigned_tx.output[0].value = ctx.original_psbt.unsigned_tx.output[0].value;
 
             assert_eq!(
                 ctx.process_proposal(proposal).unwrap_err().to_string(),

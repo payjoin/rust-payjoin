@@ -102,7 +102,17 @@ impl AppTrait for App {
             }
         };
 
-        let txid = self.process_pj_response(psbt)?;
+        let txid = match self.process_pj_response(&fallback_tx, psbt) {
+            Ok(txid) => txid,
+            Err(e) => {
+                println!("Payjoin failed. To broadcast the fallback transaction, run:");
+                println!(
+                    "  bitcoin-cli -rpcwallet=<wallet> sendrawtransaction {:#}",
+                    serialize_hex(&fallback_tx)
+                );
+                return Err(e);
+            }
+        };
         println!("Payjoin sent. TXID: {txid}");
         Ok(())
     }

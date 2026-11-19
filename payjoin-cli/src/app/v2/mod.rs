@@ -288,7 +288,17 @@ impl AppTrait for App {
                     }
                 };
 
-                let txid = self.process_pj_response(psbt)?;
+                let txid = match self.process_pj_response(&fallback_tx, psbt) {
+                    Ok(txid) => txid,
+                    Err(e) => {
+                        println!("Payjoin failed. To broadcast the fallback transaction, run:");
+                        println!(
+                            "  bitcoin-cli -rpcwallet=<wallet> sendrawtransaction {:#}",
+                            payjoin::bitcoin::consensus::encode::serialize_hex(&fallback_tx)
+                        );
+                        return Err(e);
+                    }
+                };
                 println!("Payjoin sent. TXID: {txid}");
                 Ok(())
             }
@@ -327,8 +337,18 @@ impl AppTrait for App {
                         match res {
                             Ok(()) => return Ok(()),
                             Err(err) => {
-                                let id = persister.session_id();
-                                persister.print(format_args!("Session failed. Run `payjoin-cli cancel {id}` to cancel and broadcast the original transaction."));
+                                let cancellable = matches!(
+                                    replay_sender_event_log(&persister),
+                                    Ok((
+                                        SendSession::WithReplyKey(_)
+                                            | SendSession::PollingForProposal(_),
+                                        _
+                                    ))
+                                );
+                                if cancellable {
+                                    let id = persister.session_id();
+                                    persister.print(format_args!("Session failed. Run `payjoin-cli cancel {id}` to cancel and broadcast the original transaction."));
+                                }
                                 return Err(err);
                             }
                         }
@@ -897,7 +917,19 @@ impl App {
                 SendSession::PollingForProposal(context) =>
                     self.get_proposed_payjoin_psbt(context, persister).await?,
                 SendSession::Closed(SenderSessionOutcome::Success(proposal)) => {
-                    let txid = self.process_pj_response(proposal)?;
+                    let (_, history) = replay_sender_event_log(persister)
+                        .map_err(|e| anyhow!("Failed to replay sender event log: {:?}", e))?;
+                    let fallback_tx = history.fallback_tx();
+                    let txid = match self.process_pj_response(&fallback_tx, proposal) {
+                        Ok(txid) => txid,
+                        Err(e) => {
+                            persister.print(
+                                "Payjoin failed. Broadcast the fallback transaction manually:",
+                            );
+                            println!("{}", serialize_hex(&fallback_tx));
+                            return Err(e);
+                        }
+                    };
                     persister.print(format_args!("Payjoin sent. TXID: {txid}"));
                     return Ok(());
                 }

@@ -33,6 +33,9 @@ jobs:
         run: |
           set -euo pipefail
           source contrib/release/crates.sh
+          # Compare against where the PR branched, so changes that landed
+          # on the base branch since then are not counted as the PR's.
+          BASE="$(git merge-base "$BASE" "$HEAD")"
           mapfile -d '' -t changed < <(git diff --name-only -z "$BASE" "$HEAD")
           mapfile -d '' -t written < <(git diff --name-only -z --diff-filter=AMR "$BASE" "$HEAD")
           mapfile -d '' -t deleted < <(git diff --name-only -z --diff-filter=D "$BASE" "$HEAD")

@@ -62,8 +62,9 @@ pub trait App: Send + Sync {
 
     /// Sign the receiver's proposal and broadcast it.
     ///
-    /// The proposal is refused before signing if any input that is not in `original_tx` belongs to this wallet, so the
-    /// sender signs only its original inputs, as BIP 78 requires.
+    /// The proposal is refused before signing if any input that is not in
+    /// `original_tx` belongs to this wallet, so the sender signs only its
+    /// original inputs, as BIP 78 requires.
     fn process_pj_response(
         &self,
         original_tx: &bitcoin::Transaction,

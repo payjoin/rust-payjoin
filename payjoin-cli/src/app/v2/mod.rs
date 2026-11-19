@@ -341,7 +341,8 @@ impl AppTrait for App {
                                     replay_sender_event_log(&persister),
                                     Ok((
                                         SendSession::WithReplyKey(_)
-                                            | SendSession::PollingForProposal(_),
+                                            | SendSession::PollingForProposal(_)
+                                            | SendSession::PendingFallback(_),
                                         _
                                     ))
                                 );

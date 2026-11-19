@@ -26,9 +26,17 @@ For example, `./fuzz.sh uri-deserialize-pjuri` runs only the `uri-deserialize-pj
 
 #### Using `cycle.sh`
 
-This command will run over all targets continuously, changing targets every hour.
+This command will run over all targets continuously, changing targets every hour. It fuzzes without a sanitizer for throughput. Pass a fork count and `true` as the second argument to replay each target's corpus under AddressSanitizer after it is fuzzed.
 
-`./cycle.sh`
+`./cycle.sh [forks] [asan]`
+
+Without a sanitizer, libFuzzer warns that it cannot find `__sanitizer_*` functions at startup. These warnings are harmless.
+
+#### Using `asan.sh`
+
+This script replays fuzz corpora once under AddressSanitizer without fuzzing, catching memory errors in inputs found by `cycle.sh`. It accepts an optional target name and replays every target's corpus when it is omitted.
+
+`./asan.sh [target-name]`
 
 ---
 

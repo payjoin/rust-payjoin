@@ -157,6 +157,72 @@ mod integration {
             Ok(())
         }
 
+        /// A payjoin URI the way a wallet actually shows it in a BIP 321 QR code still
+        /// completes a payjoin: upper-case scheme, keys and address, a lightning fallback
+        /// the sender ignores, `pj` marked as required, and parameters in another order.
+        #[test]
+        fn v1_to_v1_bip321_wallet_uri() -> Result<(), BoxError> {
+            init_tracing();
+            let (_bitcoind, sender, receiver) = init_bitcoind_sender_receiver(
+                Some(AddressType::Bech32),
+                Some(AddressType::Bech32),
+            )?;
+
+            // Receiver creates the payjoin URI
+            let pj_receiver_address = receiver.new_address()?;
+            let mut pj_uri =
+                build_v1_pj_uri(&pj_receiver_address, EXAMPLE_URL, OutputSubstitution::Enabled)?;
+            pj_uri.set_amount(Amount::ONE_BTC);
+
+            // The wallet re-renders it for a QR code, keeping the `pj` value exactly as encoded.
+            let printed = pj_uri.to_string();
+            let pj = printed.split("pj=").nth(1).ok_or("receiver URI has no pj")?;
+            let wallet_uri = format!(
+                "BITCOIN:{}?LIGHTNING=LNBC10U1PJEXAMPLE&label=Coffee&REQ-PJ={pj}&AMOUNT=1",
+                pj_receiver_address.to_string().to_uppercase(),
+            );
+
+            // **********************
+            // Inside the Sender:
+            let uri = Uri::from_str(&wallet_uri)
+                .map_err(|e| e.to_string())?
+                .require_network(bitcoin::Network::Regtest)
+                .map_err(|e| e.to_string())?
+                .check_pj_supported()
+                .map_err(|_| "wallet URI should request payjoin")?;
+            assert_eq!(uri.address(), &pj_receiver_address);
+            assert_eq!(uri.amount(), Some(Amount::ONE_BTC));
+            assert_eq!(uri.label().as_deref(), Some("Coffee"));
+            // The printed `pj` upper-cases the host for QR alphanumeric mode and the sender's
+            // `Url` keeps that case, so only the case of the host may differ.
+            assert!(uri.extras().endpoint().eq_ignore_ascii_case(&pj_uri.extras().endpoint()));
+            assert_eq!(uri.extras().output_substitution(), pj_uri.extras().output_substitution());
+
+            let psbt = build_original_psbt(&sender, &uri)?;
+            let (req, ctx) = SenderBuilder::new(psbt, uri)
+                .build_with_additional_fee(Amount::from_sat(10000), None, FeeRate::ZERO, false)?
+                .create_v1_post_request();
+            let headers = HeaderMock::new(&req.body, req.content_type);
+
+            // **********************
+            // Inside the Receiver:
+            let response = handle_v1_pj_request(req, headers, &receiver, None, None, None)?;
+
+            // **********************
+            // Inside the Sender:
+            let checked_payjoin_proposal_psbt = ctx.process_response(response.as_bytes())?;
+            let payjoin_tx = extract_pj_tx(&sender, checked_payjoin_proposal_psbt)?;
+            sender.send_raw_transaction(&payjoin_tx)?;
+
+            assert_eq!(payjoin_tx.input.len(), 2);
+            assert_eq!(payjoin_tx.output.len(), 2);
+            assert_eq!(
+                receiver.get_balances()?.into_model()?.mine.untrusted_pending,
+                Amount::from_btc(51.0)?
+            );
+            Ok(())
+        }
+
         #[test]
         fn allow_mixed_input_scripts() -> Result<(), BoxError> {
             init_tracing();

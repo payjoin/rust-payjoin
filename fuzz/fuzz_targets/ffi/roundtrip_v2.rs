@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::str::FromStr;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 
 use arbitrary::Unstructured;
 use bhttp::{
@@ -74,6 +74,10 @@ static KEY_CONFIG_BYTES: LazyLock<Vec<u8>> =
 
 static OHTTP_SERVER: LazyLock<OhttpServer> =
     LazyLock::new(|| OhttpServer::new(derived_key_config()).expect("valid ohttp server"));
+
+/// Bytes `ServerResponse::encapsulate` adds to a reply. It depends only on
+/// the fixed suite, so `MockDirectory::handle` probes it once per process.
+static RESPONSE_OVERHEAD: OnceLock<usize> = OnceLock::new();
 
 /// Statuses the directory can answer with instead of delivering.
 const FAULT_STATUSES: [u16; 5] = [400, 404, 413, 500, 503];
@@ -264,8 +268,10 @@ struct MockDirectory {
 
 impl MockDirectory {
     fn handle(&mut self, req_body: &[u8], fault: Option<u16>) -> Vec<u8> {
-        let (_, probe) = OHTTP_SERVER.decapsulate(req_body).expect("request decapsulates");
-        let overhead = probe.encapsulate(&[]).expect("probe encapsulates").len();
+        let overhead = *RESPONSE_OVERHEAD.get_or_init(|| {
+            let (_, probe) = OHTTP_SERVER.decapsulate(req_body).expect("request decapsulates");
+            probe.encapsulate(&[]).expect("probe encapsulates").len()
+        });
 
         let (bhttp_req, server_response) =
             OHTTP_SERVER.decapsulate(req_body).expect("request decapsulates");

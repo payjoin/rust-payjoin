@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::str::FromStr;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
 use arbitrary::Unstructured;
 use bhttp::{
@@ -86,6 +86,10 @@ static KEY_CONFIG_BYTES: LazyLock<Vec<u8>> =
 /// Gateway side of the OHTTP key config, built once per process.
 static OHTTP_SERVER: LazyLock<OhttpServer> =
     LazyLock::new(|| OhttpServer::new(derived_key_config()).expect("valid ohttp server"));
+
+/// Bytes `ServerResponse::encapsulate` adds to a reply, probed once per
+/// process by `MockDirectory::handle`.
+static RESPONSE_OVERHEAD: OnceLock<usize> = OnceLock::new();
 
 /// Statuses the directory can answer with instead of delivering.
 const FAULT_STATUSES: [u16; 5] = [400, 404, 413, 500, 503];
@@ -234,12 +238,15 @@ impl MockDirectory {
     /// status and neither stores nor delivers anything.
     fn handle(&mut self, req_body: &[u8], fault: Option<u16>) -> Vec<u8> {
         // `ServerResponse::encapsulate` consumes the response context, and
-        // the response overhead is only measurable by encapsulating, so
-        // decapsulate the request twice: once to probe the overhead, once
-        // to carry the reply. Same technique as `ohttp_response_for` in
-        // payjoin's v2 receiver unit tests.
-        let (_, probe) = OHTTP_SERVER.decapsulate(req_body).expect("request decapsulates");
-        let overhead = probe.encapsulate(&[]).expect("probe encapsulates").len();
+        // the response overhead is only measurable by encapsulating, so the
+        // first request is decapsulated twice: once to probe the overhead,
+        // once to carry the reply. Same technique as `ohttp_response_for` in
+        // payjoin's v2 receiver unit tests. The overhead depends only on the
+        // fixed suite, so the probe is cached for the rest of the process.
+        let overhead = *RESPONSE_OVERHEAD.get_or_init(|| {
+            let (_, probe) = OHTTP_SERVER.decapsulate(req_body).expect("request decapsulates");
+            probe.encapsulate(&[]).expect("probe encapsulates").len()
+        });
 
         let (bhttp_req, server_response) =
             OHTTP_SERVER.decapsulate(req_body).expect("request decapsulates");

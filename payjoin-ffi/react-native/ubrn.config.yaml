@@ -1,0 +1,30 @@
+# Native React Native (iOS + Android) build config for
+# uniffi-bindgen-react-native.
+#
+# Unlike the sibling javascript/ bindings (which target WebAssembly via
+# `ubrn build web`), this builds the payjoin-ffi cdylib/staticlib directly for
+# native targets and wires it into a JSI Turbo Module.
+rust:
+    directory: ..
+    manifestPath: Cargo.toml
+
+bindings:
+    cpp: cpp/generated
+    ts: src/generated
+
+android:
+    targets:
+        - arm64-v8a
+        - armeabi-v7a
+        - x86
+        - x86_64
+
+ios:
+    targets:
+        - aarch64-apple-ios
+        - aarch64-apple-ios-sim
+        - x86_64-apple-ios
+
+turboModule:
+    cpp: cpp
+    ts: src

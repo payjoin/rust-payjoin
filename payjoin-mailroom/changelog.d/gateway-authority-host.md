@@ -1,0 +1,1 @@
+- Return an error instead of panicking on gateway authorities whose host cannot take a default port, such as `/[@j];`

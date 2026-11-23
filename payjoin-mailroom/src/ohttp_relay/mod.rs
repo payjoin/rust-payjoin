@@ -234,7 +234,7 @@ async fn parse_gateway_uri(
     // for POST and GET (websockets), the gateway URI is provided in the path
     // for CONNECT requests, just an authority is provided, and we assume HTTPS
     let gateway_uri = match method {
-        &Method::CONNECT => authority.map(GatewayUri::from),
+        &Method::CONNECT => authority.and_then(|a| GatewayUri::try_from(a).ok()),
         _ => parse_gateway_uri_from_path(path, &config.default_gateway).ok(),
     }
     .ok_or_else(|| Error::BadRequest("Invalid gateway".to_string()))?;
@@ -266,7 +266,7 @@ fn parse_gateway_uri_from_path(path: &str, default: &GatewayUri) -> Result<Gatew
     if path.starts_with("http://") || path.starts_with("https://") {
         GatewayUri::from_str(path)
     } else {
-        Ok(Authority::from_str(path)?.into())
+        GatewayUri::try_from(Authority::from_str(path)?)
     }
 }
 
@@ -363,6 +363,20 @@ pub(crate) fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gateway_path_whose_host_is_not_an_authority_returns_error() {
+        let default = GatewayUri::from_static(DEFAULT_GATEWAY);
+
+        // Userinfo is rejected outright
+        assert!(parse_gateway_uri_from_path("/[@j];", &default).is_err());
+        assert!(parse_gateway_uri_from_path("/https://[@j];", &default).is_err());
+        assert!(parse_gateway_uri_from_path("/user@example.com", &default).is_err());
+
+        // No userinfo, but the host "a[" still cannot take a port
+        assert!(parse_gateway_uri_from_path("/a[:]", &default).is_err());
+        assert!(parse_gateway_uri_from_path("/https://a[:]", &default).is_err());
+    }
 
     #[test]
     fn short_gateway_path_returns_error() {

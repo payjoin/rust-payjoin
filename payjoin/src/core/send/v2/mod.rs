@@ -121,12 +121,15 @@ impl SenderBuilder {
         Self { output_substitution: OutputSubstitution::Disabled, ..self }
     }
 
-    // Calculate the recommended fee contribution for an Original PSBT.
-    //
-    // BIP 78 recommends contributing `originalPSBTFeeRate * vsize(sender_input_type)`.
-    // The minfeerate parameter is set if the contribution is available in change.
-    //
-    // This method fails if no recommendation can be made or if the PSBT is malformed.
+    /// Calculate the recommended fee contribution for an Original PSBT.
+    ///
+    /// BIP 78 recommends contributing `originalPSBTFeeRate * vsize(sender_input_type)`.
+    /// The minfeerate parameter is set if the contribution is available in change.
+    ///
+    /// This method fails if no recommendation can be made or if the PSBT is malformed.
+    ///
+    /// Returns a [`NextStateTransition`] that, once successfully persisted, yields a
+    /// [`Sender<WithReplyKey>`].
     pub fn build_recommended(
         self,
         min_fee_rate: FeeRate,
@@ -149,6 +152,9 @@ impl SenderBuilder {
     /// If this option is true and a transaction with change amount lower than fee
     /// contribution is provided then instead of returning error the fee contribution will
     /// be just lowered in the request to match the change amount.
+    ///
+    /// Returns a [`NextStateTransition`] that, once successfully persisted, yields a
+    /// [`Sender<WithReplyKey>`].
     pub fn build_with_additional_fee(
         self,
         max_fee_contribution: bitcoin::Amount,
@@ -170,6 +176,9 @@ impl SenderBuilder {
     ///
     /// While it's generally better to offer some contribution some users may wish not to.
     /// This function disables contribution.
+    ///
+    /// Returns a [`NextStateTransition`] that, once successfully persisted, yields a
+    /// [`Sender<WithReplyKey>`].
     pub fn build_non_incentivizing(
         self,
         min_fee_rate: FeeRate,
@@ -209,8 +218,22 @@ pub trait State: sealed::State {}
 
 impl<S: sealed::State> State for S {}
 
+/// A higher-level sender construct which will be taken through different states through the
+/// protocol workflow.
+///
+/// A Payjoin sender is responsible for posting the Original PSBT to the Payjoin Directory for the
+/// receiver, polling the directory for the receiver's Payjoin proposal, and validating that
+/// proposal against the Original PSBT before signing and broadcasting the resulting transaction.
+///
+/// From a code/implementation perspective, Payjoin Development Kit uses a typestate pattern to
+/// help senders go through the entire Payjoin protocol flow. Each typestate has various functions
+/// to accomplish the goals of the typestate, and one or more functions which will commit the
+/// changes/checks in the current typestate and move to the next one. For more information on the
+/// typestate pattern, see
+/// [The Typestate Pattern in Rust](https://cliffle.com/blog/rust-typestate/).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender<State> {
+    /// Data associated with the current state of the sender.
     pub(crate) state: State,
     pub(crate) session_context: SessionContext,
 }
@@ -259,9 +282,10 @@ impl<State> Sender<State> {
 }
 
 impl<S: State> Sender<S> {
-    /// Cancel the Payjoin session and once the transition is persisted, return a [`PendingFallback`] state.
-    /// The fallback transaction is the sender's original transaction that
-    /// should be broadcast to complete the payment without Payjoin.
+    /// Cancel the Payjoin session and return pending fallback handling.
+    ///
+    /// Returns a [`NextStateTransition`] that, once successfully persisted, yields a
+    /// [`Sender<PendingFallback>`].
     pub fn cancel(self) -> NextStateTransition<SessionEvent, Sender<PendingFallback>> {
         NextStateTransition::success(
             SessionEvent::Cancelled(),
@@ -342,11 +366,18 @@ impl SendSession {
     }
 }
 
-/// A payjoin V2 sender, allowing the construction of a payjoin V2 request
-/// and the resulting [`OhttpResponse`].
+/// Initial state, ready to post the Original PSBT to the Payjoin Directory.
+///
+/// See [`Sender<WithReplyKey>`] for further documentation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithReplyKey;
 
+/// The initial typestate of a Payjoin v2 sender session.
+///
+/// After building the sender with [`SenderBuilder`], post the Original PSBT to the Payjoin
+/// Directory: build a request with [`Sender<WithReplyKey>::create_v2_post_request`], then pass
+/// the response to [`Sender<WithReplyKey>::process_response`] to advance to
+/// [`Sender<PollingForProposal>`].
 impl Sender<WithReplyKey> {
     fn new(pj_param: PjParam, psbt_ctx: PsbtContext) -> Self {
         Sender {
@@ -391,16 +422,14 @@ impl Sender<WithReplyKey> {
         Ok((request, OhttpResponse::new(ohttp_ctx)))
     }
 
-    /// Processes the response for the initial POST message from the sender
-    /// client in the v2 Payjoin protocol.
+    /// Process the Payjoin directory response to the posted Original PSBT.
     ///
-    /// This function decapsulates the response using the provided OHTTP
-    /// context. If the encapsulated response status is successful, it
-    /// indicates that the the Original PSBT been accepted. Otherwise, it
-    /// returns an error with the encapsulated response status code.
+    /// This function decapsulates the response using the provided OHTTP context. A
+    /// successful encapsulated response status indicates that the Original PSBT has been
+    /// accepted. Otherwise, it returns an error with the encapsulated response status code.
     ///
-    /// After this function is called, the sender can poll for a Proposal PSBT
-    /// from the receiver using the returned [`PollingForProposal`].
+    /// Returns a [`MaybeFatalTransition`] that, once successfully persisted, yields a
+    /// [`Sender<PollingForProposal>`] to poll for the receiver's Payjoin proposal.
     pub fn process_response(
         self,
         response: &[u8],
@@ -476,10 +505,9 @@ pub(crate) fn serialize_v2_body(
     Ok(format!("{base64}\n{query_params}").into_bytes())
 }
 
-/// Data required to validate the GET response.
+/// State polling the Payjoin Directory for the receiver's Payjoin proposal.
 ///
-/// This type is used to make a BIP77 GET request and process the response.
-/// Call [`Sender<PollingForProposal>::process_response`] on it to continue the BIP77 flow.
+/// See [`Sender<PollingForProposal>`] for further documentation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PollingForProposal;
 
@@ -491,6 +519,14 @@ impl ResponseError {
     }
 }
 
+/// Typestate for a sender that has posted the Original PSBT and is polling for the receiver's
+/// Payjoin proposal.
+///
+/// Poll the Payjoin Directory for the receiver's proposal: build a fresh request for each
+/// poll with [`Sender<PollingForProposal>::create_poll_request`], then pass each response to
+/// [`Sender<PollingForProposal>::process_response`] until it yields the Payjoin proposal
+/// PSBT, validated against the Original PSBT, and closes the session. The sender then signs
+/// and finalizes that PSBT and broadcasts the resulting transaction.
 impl Sender<PollingForProposal> {
     /// Construct an OHTTP Encapsulated HTTP GET request for the Proposal PSBT
     pub fn create_poll_request(
@@ -527,16 +563,20 @@ impl Sender<PollingForProposal> {
         ))
     }
 
-    /// Processes the response for the final GET message from the sender client
-    /// in the v2 Payjoin protocol.
+    /// Process the Payjoin directory polling response.
     ///
-    /// This function decapsulates the response using the provided OHTTP
-    /// context. A successful response can either be a Proposal PSBT or an
-    /// ACCEPTED message indicating no Proposal PSBT is available yet.
-    /// Otherwise, it returns an error with the encapsulated status code.
+    /// This function decapsulates the response using the provided OHTTP context. A
+    /// successful response can either be a Proposal PSBT or an ACCEPTED message indicating
+    /// no Proposal PSBT is available yet. Otherwise, it returns an error with the
+    /// encapsulated status code.
     ///
-    /// After this function is called, the sender can sign and finalize the
-    /// PSBT and broadcast the resulting Payjoin transaction to the network.
+    /// Returns a [`MaybeSuccessTransitionWithNoResults`] that, once successfully persisted,
+    /// yields either the Payjoin proposal PSBT, validated against the Original PSBT, if the
+    /// receiver's proposal is available, or a [`Sender<PollingForProposal>`] to remain in
+    /// stasis if no proposal has arrived yet.
+    ///
+    /// Once the proposal is yielded, the sender signs and finalizes that PSBT and broadcasts
+    /// the resulting Payjoin transaction to the network.
     pub fn process_response(
         self,
         response: &[u8],
@@ -609,17 +649,28 @@ impl Sender<PollingForProposal> {
     }
 }
 
+/// The fallback transaction for a cancelled sender session.
+///
+/// See [`Sender<PendingFallback>`] for further documentation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingFallback {
     fallback_tx: bitcoin::Transaction,
 }
 
+/// Typestate holding the fallback transaction after the Payjoin session was cancelled.
+///
+/// The sender may broadcast the fallback transaction returned by
+/// [`Sender<PendingFallback>::fallback_tx`] to complete the payment without Payjoin, then call
+/// [`Sender<PendingFallback>::close`] to close the session.
 impl Sender<PendingFallback> {
     /// Returns the fallback transaction that should be broadcast to complete the payment without Payjoin.
     pub fn fallback_tx(&self) -> &bitcoin::Transaction { &self.fallback_tx }
 
-    /// Mark the session as complete, signaling that the fallback transaction
-    /// has been broadcast or its control has been transferred.
+    /// Close the Payjoin session, signaling that the fallback transaction has been
+    /// broadcast or its control has been transferred.
+    ///
+    /// Returns a [`TerminalTransition`] that, once successfully persisted, closes the
+    /// sender session.
     pub fn close(&self) -> TerminalTransition<SessionEvent, ()> {
         TerminalTransition::new(SessionEvent::Closed(SessionOutcome::Aborted), ())
     }

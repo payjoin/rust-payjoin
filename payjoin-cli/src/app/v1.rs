@@ -3,9 +3,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
+use futures::{Stream, StreamExt};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
-use hyper::body::{Bytes, Incoming};
+use hyper::body::{Body, Bytes, Incoming};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
@@ -15,7 +16,7 @@ use payjoin::bitcoin::{Amount, FeeRate};
 use payjoin::receive::v1::{PayjoinProposal, UncheckedOriginalPayload};
 use payjoin::receive::{mark_checklist, Error};
 use payjoin::send::v1::SenderBuilder;
-use payjoin::{ImplementationError, IntoUrl, Uri};
+use payjoin::{ImplementationError, IntoUrl, Uri, MAX_CONTENT_LENGTH};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -89,7 +90,19 @@ impl AppTrait for App {
                 return Err(anyhow!("HTTP request failed: {e}"));
             }
         };
-        let psbt = match ctx.process_response(&response.bytes().await?) {
+        let body = match read_limited_response(response).await {
+            Ok(body) => body,
+            Err(e) => {
+                tracing::error!("Error reading response: {e}");
+                println!("Payjoin failed. To broadcast the fallback transaction, run:");
+                println!(
+                    "  bitcoin-cli -rpcwallet=<wallet> sendrawtransaction {:#}",
+                    serialize_hex(&fallback_tx)
+                );
+                return Err(e);
+            }
+        };
+        let psbt = match ctx.process_response(&body) {
             Ok(psbt) => psbt,
             Err(e) => {
                 tracing::error!("Error processing response: {e:?}");
@@ -334,11 +347,9 @@ impl App {
         let (parts, body) = req.into_parts();
         let headers = Headers(&parts.headers);
         let query_string = parts.uri.query().unwrap_or("");
-        let body = body
-            .collect()
-            .await
-            .map_err(|e| Error::Implementation(ImplementationError::new(e)))?
-            .to_bytes();
+        let body = read_limited_request(body).await.map_err(|e| {
+            Error::Implementation(ImplementationError::from(e.into_boxed_dyn_error()))
+        })?;
         let proposal = UncheckedOriginalPayload::from_request(&body, query_string, headers)?;
 
         let payjoin_proposal = self.process_v1_proposal(proposal)?;
@@ -452,4 +463,126 @@ fn try_contributing_inputs(
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into()).map_err(|never| match never {}).boxed()
+}
+
+/// Read a request body, refusing more than the sender declared or
+/// `MAX_CONTENT_LENGTH`, whichever is smaller.
+async fn read_limited_request(body: Incoming) -> Result<Vec<u8>> {
+    let expected_len = expected_length(body.size_hint().exact())?;
+    read_limited_body(body.into_data_stream(), expected_len).await
+}
+
+/// Read a response body, refusing more than the receiver declared or
+/// `MAX_CONTENT_LENGTH`, whichever is smaller.
+async fn read_limited_response(response: reqwest::Response) -> Result<Vec<u8>> {
+    let expected_len = expected_length(response.content_length())?;
+    read_limited_body(response.bytes_stream(), expected_len).await
+}
+
+/// The number of bytes to accept for a body, given its declared length.
+/// Bodies without one, such as chunked ones, may use up to the maximum.
+fn expected_length(declared: Option<u64>) -> Result<usize> {
+    match declared {
+        Some(len) if len > MAX_CONTENT_LENGTH as u64 =>
+            Err(anyhow!("Body of {len} bytes exceeds the maximum of {MAX_CONTENT_LENGTH} bytes")),
+        Some(len) => Ok(len as usize),
+        None => Ok(MAX_CONTENT_LENGTH),
+    }
+}
+
+async fn read_limited_body<S, E>(mut stream: S, expected_len: usize) -> Result<Vec<u8>>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let mut body = Vec::with_capacity(expected_len);
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if body.len() + chunk.len() > expected_len {
+            return Err(anyhow!("Body exceeds expected size of {expected_len} bytes"));
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    Ok(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    use hyper::body::Frame;
+
+    use super::*;
+
+    /// Wraps a body so it reports no exact size, the way a `Transfer-Encoding:
+    /// chunked` response does, so the streaming check is the one exercised.
+    struct UnknownLengthBody(reqwest::Body);
+
+    impl Body for UnknownLengthBody {
+        type Data = <reqwest::Body as Body>::Data;
+        type Error = <reqwest::Body as Body>::Error;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+            Pin::new(&mut self.0).poll_frame(cx)
+        }
+    }
+
+    fn response(body: Vec<u8>) -> reqwest::Response { reqwest::Response::from(Response::new(body)) }
+
+    fn chunked_response(body: Vec<u8>) -> reqwest::Response {
+        let body = reqwest::Body::wrap(UnknownLengthBody(reqwest::Body::from(body)));
+        let response = reqwest::Response::from(Response::new(body));
+        assert_eq!(response.content_length(), None);
+        response
+    }
+
+    #[tokio::test]
+    async fn response_at_limit_is_read() {
+        let body = read_limited_response(response(vec![0; MAX_CONTENT_LENGTH])).await.unwrap();
+        assert_eq!(body.len(), MAX_CONTENT_LENGTH);
+
+        let body =
+            read_limited_response(chunked_response(vec![0; MAX_CONTENT_LENGTH])).await.unwrap();
+        assert_eq!(body.len(), MAX_CONTENT_LENGTH);
+    }
+
+    #[tokio::test]
+    async fn response_with_content_length_over_limit_is_rejected_before_reading() {
+        let err =
+            read_limited_response(response(vec![0; MAX_CONTENT_LENGTH + 1])).await.unwrap_err();
+        assert!(err.to_string().contains(&format!("of {} bytes", MAX_CONTENT_LENGTH + 1)));
+    }
+
+    #[tokio::test]
+    async fn chunked_response_over_limit_is_rejected() {
+        assert!(read_limited_response(chunked_response(vec![0; MAX_CONTENT_LENGTH + 1]))
+            .await
+            .is_err());
+    }
+
+    #[test]
+    fn expected_length_is_capped() {
+        assert_eq!(expected_length(None).unwrap(), MAX_CONTENT_LENGTH);
+        assert_eq!(expected_length(Some(10)).unwrap(), 10);
+        assert_eq!(expected_length(Some(MAX_CONTENT_LENGTH as u64)).unwrap(), MAX_CONTENT_LENGTH);
+        assert!(expected_length(Some(MAX_CONTENT_LENGTH as u64 + 1)).is_err());
+    }
+
+    #[tokio::test]
+    async fn body_longer_than_expected_is_rejected() {
+        let chunks = || {
+            futures::stream::iter(vec![
+                Ok::<_, std::io::Error>(Bytes::from_static(b"abc")),
+                Ok(Bytes::from_static(b"def")),
+            ])
+        };
+        assert_eq!(read_limited_body(chunks(), 6).await.unwrap(), b"abcdef");
+        assert!(read_limited_body(chunks(), 5).await.is_err());
+    }
 }

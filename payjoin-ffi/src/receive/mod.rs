@@ -914,6 +914,17 @@ pub struct AssumeInteractiveTransition(
 
 impl_save_for_transition!(AssumeInteractiveTransition, MaybeInputsOwned);
 
+/// Callback that checks whether the Original PSBT's transaction is suitable
+/// for broadcast. It receives the consensus-encoded transaction bytes.
+///
+/// # Privacy
+///
+/// Run the broadcast check against a resource you trust with your privacy, for
+/// example your own node with Bitcoin Core's `testmempoolaccept`. Do not send
+/// the transaction to an untrusted backend such as a public block explorer API.
+/// Because the payjoin spends the same sender inputs, the backend can tell
+/// which inputs are the receiver's and how much was paid, which breaks
+/// payjoin's privacy model.
 #[uniffi::export(with_foreign)]
 pub trait CanBroadcast: Send + Sync {
     fn callback(&self, tx: Vec<u8>) -> Result<bool, ForeignError>;
@@ -926,6 +937,15 @@ impl UncheckedOriginalPayload {
     ///
     /// Returns an [`UncheckedOriginalPayloadTransition`] that, once persisted,
     /// yields a [`MaybeInputsOwned`] to continue validation.
+    ///
+    /// # Privacy
+    ///
+    /// Run the broadcast check against a resource you trust with your privacy, for
+    /// example your own node with Bitcoin Core's `testmempoolaccept`. Do not send
+    /// the transaction to an untrusted backend such as a public block explorer API.
+    /// Because the payjoin spends the same sender inputs, the backend can tell
+    /// which inputs are the receiver's and how much was paid, which breaks
+    /// payjoin's privacy model.
     pub fn check_broadcast_suitability(
         &self,
         min_fee_rate_sat_per_kwu: Option<u64>,
@@ -946,6 +966,15 @@ impl UncheckedOriginalPayload {
     /// Submit the result of the check to [`UncheckedOriginalPayload::apply_broadcast_suitability`].
     ///
     /// Returns the consensus-encoded raw transaction bytes.
+    ///
+    /// # Privacy
+    ///
+    /// Run the broadcast check against a resource you trust with your privacy, for
+    /// example your own node with Bitcoin Core's `testmempoolaccept`. Do not send
+    /// the transaction to an untrusted backend such as a public block explorer API.
+    /// Because the payjoin spends the same sender inputs, the backend can tell
+    /// which inputs are the receiver's and how much was paid, which breaks
+    /// payjoin's privacy model.
     pub fn extract_tx_to_check_broadcast_suitability(&self) -> Vec<u8> {
         payjoin::bitcoin::consensus::encode::serialize(
             &self.0.clone().extract_tx_to_check_broadcast_suitability(),

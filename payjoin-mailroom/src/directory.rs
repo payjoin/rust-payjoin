@@ -271,7 +271,7 @@ impl<D: Db> Service<D> {
         }
         match self.db.post_v2_payload(&id, req.into()).await {
             Ok(_) => Ok(none_response),
-            Err(e) => Err(HandlerError::InternalServerError(e.into())),
+            Err(e) => Err(handle_db_error(e)),
         }
     }
 
@@ -319,7 +319,7 @@ impl<D: Db> Service<D> {
 
         match self.db.post_v1_response(&id, req.into()).await {
             Ok(_) => Ok(ok_response),
-            Err(e) => Err(HandlerError::BadRequest(e.into())),
+            Err(e) => Err(handle_db_error(e)),
         }
     }
 
@@ -413,20 +413,28 @@ fn handle_peek<E: SendableError>(
 ) -> Result<Response<Body>, HandlerError> {
     match result {
         Ok(payload) => Ok(Response::new(full((*payload).clone()))), // TODO Bytes instead of Arc<Vec<u8>>
-        Err(e) => match e {
-            DbError::Operational(err) => {
-                error!("Storage error: {err}");
-                Err(HandlerError::InternalServerError(anyhow::Error::msg("Internal server error")))
-            }
-            DbError::Timeout(_) => Ok(timeout_response),
-            DbError::OverCapacity => Err(HandlerError::ServiceUnavailable(anyhow::Error::msg(
-                "mailbox storage at capacity",
-            ))),
-            DbError::AlreadyRead => Ok(timeout_response),
-            DbError::V1SenderUnavailable => Err(HandlerError::SenderGone(anyhow::Error::msg(
-                "Sender is unavailable try a new request",
-            ))),
-        },
+        Err(DbError::Timeout(_) | DbError::AlreadyRead) => Ok(timeout_response),
+        Err(e) => Err(handle_db_error(e)),
+    }
+}
+
+/// Map a storage error to the response status the client sees.
+///
+/// Operational failures are the server's fault and must not be reported as
+/// a bad request. Reads turn `Timeout` and `AlreadyRead` into a timeout
+/// response before calling this, so here they are unexpected.
+fn handle_db_error<E: SendableError>(e: DbError<E>) -> HandlerError {
+    match e {
+        DbError::Operational(err) => {
+            error!("Storage error: {err}");
+            HandlerError::InternalServerError(anyhow::Error::msg("Internal server error"))
+        }
+        DbError::OverCapacity =>
+            HandlerError::ServiceUnavailable(anyhow::Error::msg("mailbox storage at capacity")),
+        DbError::V1SenderUnavailable =>
+            HandlerError::SenderGone(anyhow::Error::msg("Sender is unavailable try a new request")),
+        DbError::Timeout(_) | DbError::AlreadyRead =>
+            HandlerError::InternalServerError(anyhow::anyhow!("Unexpected storage error: {e}")),
     }
 }
 
@@ -798,6 +806,28 @@ mod tests {
 
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body, V1_UNAVAILABLE_RES_JSON);
+    }
+
+    #[tokio::test]
+    async fn put_v1_response_with_no_waiting_sender_returns_gone() {
+        let mut svc = test_service(Some(V1::new(None))).await;
+        let path = format!("/{}", valid_short_id_path());
+
+        let (status, _) = through_gateway(&mut svc, "PUT", &path, b"base64-psbt").await;
+        assert_eq!(status, StatusCode::GONE);
+    }
+
+    #[test]
+    fn storage_errors_map_to_server_side_statuses() {
+        let status = |e: DbError<std::io::Error>| handle_db_error(e).to_response().status();
+
+        assert_eq!(
+            status(DbError::Operational(std::io::Error::other("disk full"))),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(status(DbError::OverCapacity), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(status(DbError::V1SenderUnavailable), StatusCode::GONE);
+        assert_eq!(status(DbError::AlreadyRead), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     // Address screening

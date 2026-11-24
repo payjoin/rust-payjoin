@@ -18,9 +18,7 @@ name = "payjoin_ffi_wrapper"
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-payjoin-ffi = { git = "https://github.com/payjoin/rust-payjoin.git", rev = "8e072970f74040832342369e6319a4db53cd2b6f", features = [
-  "dart",
-] }
+payjoin-ffi = { path = "../..", features = ["dart"] }
 # Not used directly. yoke-derive 0.8.3 needs Rust 1.87 but declares no rust-version,
 # so consumers' fresh resolution on the toolchain above picks it. Drop once upstream fixes it.
 yoke-derive = "=0.8.2"

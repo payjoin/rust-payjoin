@@ -35,8 +35,8 @@ the root package's `pubspec.yaml` (see the [README](README.md)):
 - `source` builds the `native/` wrapper crate from the shipped
   `native/Cargo.lock` with `--locked`.
 - `workspace`, which this package's own `pubspec.yaml` sets, builds it
-  through the `.cargo/config.local.toml` overlay, which redirects
-  `payjoin-ffi` to the workspace, and enables `_test-utils`.
+  through the `.cargo/config.local.toml` overlay, which redirects the
+  crates.io core crates to the workspace, and enables `_test-utils`.
 
 The mode cannot be an environment variable. `hooks_runner` spawns build
 hooks with an allowlisted environment (`HOME`, `PATH` and a few toolchain
@@ -81,8 +81,8 @@ with a publish dry run
 
 1. The preparation script stages a separate package and pins its Rust
    dependency to the checkout used to generate production bindings. The
-   development pin in `native/Cargo.toml` is replaced only in that staging
-   directory. Cargo overlays are excluded. The staged `native/Cargo.lock`
+   workspace path dependency in `native/Cargo.toml` is replaced only in
+   that staging directory. Cargo overlays are excluded. The staged `native/Cargo.lock`
    is seeded from `Cargo-recent.lock` and resolved against that revision,
    so consumers build the versions CI tested. A dependency fix reaches
    Dart consumers through `Cargo-recent.lock` and a new release. Staging

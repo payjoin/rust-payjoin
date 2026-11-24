@@ -39,7 +39,8 @@ mkdir "$stage"
 # any local prebuilt/, then pin the native crate to the checkout that
 # generated them.
 rsync -a --exclude=.git --exclude=/prebuilt/ --exclude-from=.pubignore ./ "$stage/"
-sed -i "s/rev = \"[0-9a-f]*\"/rev = \"$revision\"/" "$stage/native/Cargo.toml"
+sed -i "s#path = \"\.\./\.\.\"#git = \"https://github.com/payjoin/rust-payjoin.git\", rev = \"$revision\"#" \
+    "$stage/native/Cargo.toml"
 grep -Fq "rev = \"$revision\"" "$stage/native/Cargo.toml" || {
     echo "Could not pin the staged native crate to $revision" >&2
     exit 1

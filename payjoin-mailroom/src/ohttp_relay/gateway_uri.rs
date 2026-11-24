@@ -25,11 +25,19 @@ impl GatewayUri {
             return Err("Unsupported URI scheme".into());
         };
 
-        // If no explicit port is provided, make the default one explicit
+        // Gateways never carry credentials, so reject userinfo, as the
+        // payjoin crate's URL parser does.
+        if authority.as_str().contains('@') {
+            return Err("gateway authority must not contain userinfo".into());
+        }
+
+        // If no explicit port is provided, make the default one explicit.
+        // The host is not always a valid authority on its own (e.g. "a[:]"
+        // has host "a["), so this is an error rather than a panic.
         let mut authority = authority;
         if authority.port().is_none() {
             authority = Authority::from_str(&format!("{}:{}", authority.host(), default_port))
-                .expect("setting default port must succeed");
+                .map_err(|_| BoxError::from("gateway authority has no valid host"))?;
         }
 
         Ok(Self { scheme, authority })
@@ -100,10 +108,11 @@ impl TryFrom<Uri> for GatewayUri {
     }
 }
 
-impl From<Authority> for GatewayUri {
-    fn from(authority: Authority) -> Self {
+impl TryFrom<Authority> for GatewayUri {
+    type Error = BoxError;
+
+    fn try_from(authority: Authority) -> Result<Self, Self::Error> {
         Self::new(Scheme::HTTPS, authority)
-            .expect("constructing GatewayUri with valid authority must succeed")
     }
 }
 

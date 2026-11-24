@@ -1076,6 +1076,15 @@ impl Receiver<UncheckedOriginalPayload> {
 /// To perform the broadcast check without a synchronous callback, use
 /// [`Receiver<UncheckedOriginalPayload>::extract_tx_to_check_broadcast_suitability`]
 /// and [`Receiver<UncheckedOriginalPayload>::apply_broadcast_suitability`].
+///
+/// # Privacy
+///
+/// Run the broadcast check against a resource you trust with your privacy, for
+/// example your own node with Bitcoin Core's `testmempoolaccept`. Do not send
+/// the transaction to an untrusted backend such as a public block explorer API.
+/// Because the payjoin spends the same sender inputs, the backend can tell
+/// which inputs are the receiver's and how much was paid, which breaks
+/// payjoin's privacy model.
 impl Receiver<UncheckedOriginalPayload> {
     /// Check that the sender's Original PSBT is suitable for broadcast, ensuring
     /// it can be used as a fallback if the payjoin does not complete.

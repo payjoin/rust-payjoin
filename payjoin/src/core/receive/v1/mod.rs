@@ -78,6 +78,15 @@ impl UncheckedOriginalPayload {
 /// To perform the broadcast check without a synchronous callback, use
 /// [`Self::extract_tx_to_check_broadcast_suitability`] and
 /// [`Self::apply_broadcast_suitability`].
+///
+/// # Privacy
+///
+/// Run the broadcast check against a resource you trust with your privacy, for
+/// example your own node with Bitcoin Core's `testmempoolaccept`. Do not send
+/// the transaction to an untrusted backend such as a public block explorer API.
+/// Because the payjoin spends the same sender inputs, the backend can tell
+/// which inputs are the receiver's and how much was paid, which breaks
+/// payjoin's privacy model.
 #[derive(Debug, Clone)]
 pub struct UncheckedOriginalPayload {
     original: OriginalPayload,

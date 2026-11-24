@@ -1068,21 +1068,6 @@ pub trait IsInputOwned: Send + Sync {
 
 #[uniffi::export]
 impl MaybeInputsOwned {
-    /// Deprecated since payjoin 1.3.0: cancel the session when the payjoin
-    /// fails and broadcast the `fallback_tx` of the resulting `ReceiverPendingFallback`
-    /// instead.
-    ///
-    /// Extract the transaction from the Original PSBT for scheduling broadcast as a
-    /// fallback in case the payjoin does not complete.
-    ///
-    /// Returns the consensus-encoded raw transaction bytes.
-    #[allow(deprecated)]
-    pub fn extract_tx_to_schedule_broadcast(&self) -> Vec<u8> {
-        payjoin::bitcoin::consensus::encode::serialize(
-            &self.0.clone().extract_tx_to_schedule_broadcast(),
-        )
-    }
-
     /// Check that none of the Original PSBT's inputs belong to the receiver,
     /// preventing an attacker from spending the receiver's own inputs.
     ///

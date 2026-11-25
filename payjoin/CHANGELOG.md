@@ -58,6 +58,11 @@ Selected Improvements:
   from `Receiver<PendingFallback>::fallback_tx` after `cancel`, or from
   `SessionHistory::fallback_tx` (#1994)
 
+### URL Selection
+
+- Add `payjoin::request_handler::RequestHandler`, an immutable set of OHTTP relays shared across every session. No failures are remembered: each operation tries relays in a fresh uniform-random order, so a transient outage never outlives the operation that saw it. `RequestHandler::for_directory` returns a `DirectoryHandle` bound to a session's directory, whose `relays` ordering never includes the directory itself and which need not be known to the handler in advance (a sender reaches whichever directory the receiver chose). With the `io` feature, `DirectoryHandle::fetch_ohttp_keys` fetches OHTTP keys with relay failover, returning `Error::Directory` when the directory itself misbehaves, and `RequestHandler::fetch_ohttp_keys_from` falls back across candidate directories for a new receiver session. Routing all selection through one path leaves room for topology-aware ordering (for example AS-aware relay selection) to be added later without forking the API
+- Add `PjParam::directory`, `Sender::directory` and `Receiver::directory` accessors for the session directory
+
 ## 1.2.0
 
 This release adds a non-blocking interface to the receiver state machine.

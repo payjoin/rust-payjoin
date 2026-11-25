@@ -601,6 +601,11 @@ impl<State> core::ops::DerefMut for Receiver<State> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.state }
 }
 
+impl<State> Receiver<State> {
+    /// The payjoin directory carrying this session.
+    pub fn directory(&self) -> &Url { &self.session_context.directory }
+}
+
 /// The fallback transaction for cancelled or failed receiver session.
 ///
 /// See [`Receiver<PendingFallback>`] for further documentation.

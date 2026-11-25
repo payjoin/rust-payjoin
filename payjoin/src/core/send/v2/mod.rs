@@ -279,6 +279,9 @@ impl<State> core::ops::DerefMut for Sender<State> {
 impl<State> Sender<State> {
     /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> String { self.session_context.pj_param.endpoint().to_string() }
+
+    /// The payjoin directory the receiver chose to carry this session.
+    pub fn directory(&self) -> &Url { self.session_context.pj_param.directory() }
 }
 
 impl<S: State> Sender<S> {

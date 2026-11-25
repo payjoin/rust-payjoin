@@ -562,7 +562,7 @@ mod tests {
         assert!(
             ohttp(&Url::parse(&pjuri.extras().endpoint()).expect("Could not parse url")).is_ok()
         );
-        assert_eq!(format!("{pjuri}"), uri);
+        assert_eq!(format!("{pjuri}"), reordered);
     }
 
     #[test]

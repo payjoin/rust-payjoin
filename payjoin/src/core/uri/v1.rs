@@ -132,10 +132,13 @@ mod tests {
             "Pj uri should preserve disabled output substitution"
         );
 
-        let enabled_uri = pj_uri(
+        // A parsed URI prints its input, so build one to see what this crate emits.
+        let parsed = pj_uri(
             "bitcoin:12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX?pjos=1&pj=HTTPS://EXAMPLE.COM/\
              %23OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC",
         );
+        let enabled_uri =
+            crate::PjUri::from_extras(parsed.address().clone(), parsed.extras().clone());
         assert!(
             !enabled_uri.to_string().contains("pjos=1"),
             "Pj uri should elide enabled output substitution"

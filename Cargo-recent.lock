@@ -626,9 +626,9 @@ dependencies = [
 
 [[package]]
 name = "bitcoin_uri"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e0a228e083d1702f83389b0ac71eb70078dc8d7fcbb6cde864d1cbca145f5cc"
+checksum = "f4cbc30414f96a38793368163a52490cc9e62c2f21958b6b27b403c4dee95402"
 dependencies = [
  "bitcoin",
  "percent-encoding-rfc3986",
